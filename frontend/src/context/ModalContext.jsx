@@ -1,21 +1,34 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 const ModalContext = createContext(null);
 
 export function ModalProvider({ children }) {
   const [isCartOpen, setCartOpen] = useState(false);
   const [isBookingOpen, setBookingOpen] = useState(false);
+  const [bookingContext, setBookingContext] = useState(null);
+
+  const openCart = useCallback(() => setCartOpen(true), []);
+  const closeCart = useCallback(() => setCartOpen(false), []);
+  const openBooking = useCallback((context = null) => {
+    setBookingContext(context);
+    setBookingOpen(true);
+  }, []);
+  const closeBooking = useCallback(() => {
+    setBookingOpen(false);
+    setBookingContext(null);
+  }, []);
 
   const value = useMemo(
     () => ({
       isCartOpen,
-      openCart: () => setCartOpen(true),
-      closeCart: () => setCartOpen(false),
+      openCart,
+      closeCart,
       isBookingOpen,
-      openBooking: () => setBookingOpen(true),
-      closeBooking: () => setBookingOpen(false),
+      openBooking,
+      closeBooking,
+      bookingContext,
     }),
-    [isCartOpen, isBookingOpen],
+    [isCartOpen, isBookingOpen, openCart, closeCart, openBooking, closeBooking, bookingContext],
   );
 
   return <ModalContext.Provider value={value}>{children}</ModalContext.Provider>;

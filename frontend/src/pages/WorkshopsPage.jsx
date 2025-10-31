@@ -1,6 +1,6 @@
+import { Link } from "react-router-dom";
 import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
-import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import heroBackground from "../assets/hero-flowers.svg";
@@ -13,7 +13,6 @@ function WorkshopsPage() {
       "Reserve your seat at a Bethany Blooms pressed flower workshop. Explore dates, pricing, and what’s included.",
   });
 
-  const { openBooking } = useModal();
   const eventFormatter = new Intl.DateTimeFormat("en-ZA", {
     dateStyle: "long",
     timeStyle: "short",
@@ -47,6 +46,8 @@ function WorkshopsPage() {
     };
   });
 
+  const firstWorkshop = normalizedWorkshops[0];
+
   return (
     <>
       <section className="section section--tight">
@@ -58,9 +59,15 @@ function WorkshopsPage() {
               techniques, and share a peaceful table with fellow creatives.
             </p>
             <div className="cta-group">
-              <button className="btn btn--primary" type="button" onClick={openBooking}>
-                Book Your Spot
-              </button>
+              {firstWorkshop ? (
+                <Link className="btn btn--primary" to={`/workshops/${firstWorkshop.id}`}>
+                  View Workshop Details
+                </Link>
+              ) : (
+                <a className="btn btn--primary" href="#workshop-details">
+                  View Workshop Details
+                </a>
+              )}
               <a href="#workshop-details" className="btn btn--secondary">
                 Workshop Details
               </a>
@@ -88,9 +95,9 @@ function WorkshopsPage() {
                 <p className="modal__meta">When: {workshop.formattedDate}</p>
                 <p className="modal__meta">Where: {workshop.location}</p>
                 <div className="card__actions">
-                  <button className="btn btn--primary" type="button" onClick={openBooking}>
-                    Reserve Seat
-                  </button>
+                  <Link className="btn btn--primary" to={`/workshops/${workshop.id}`}>
+                    View Details
+                  </Link>
                 </div>
               </Reveal>
             ))}
@@ -136,13 +143,13 @@ function WorkshopsPage() {
             <Reveal as="article" className="card" delay={360}>
               <h3 className="card__title">Upgrade with Fresh Blooms</h3>
               <p>
-                Pair your workshop with market buckets or bouquet subscriptions so you can keep creating with fresh cut
-                stems after class.
+                Pair your workshop with market buckets, bouquet subscriptions, or a bespoke pressed art commission to
+                keep the story blooming long after class.
               </p>
               <div className="card__actions">
-                <a className="btn btn--secondary" href="/cut-flowers">
-                  View Cut Flowers
-                </a>
+                <Link className="btn btn--secondary" to="/products">
+                  Explore Products
+                </Link>
               </div>
             </Reveal>
           </div>

@@ -5,8 +5,7 @@ function Footer() {
   const navLinks = [
     { to: "/", label: "Home" },
     { to: "/workshops", label: "Workshops" },
-    { to: "/kits", label: "DIY Kits" },
-    { to: "/cut-flowers", label: "Cut Flowers" },
+    { to: "/products", label: "Products" },
     { to: "/gallery", label: "Gallery" },
     { to: "/contact", label: "Contact" },
     { to: "/admin", label: "Admin" },

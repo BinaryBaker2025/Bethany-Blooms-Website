@@ -50,6 +50,20 @@ const WORKSHOP_SEED = [
     scheduledFor: "2025-08-02T10:00:00+02:00",
     price: 650,
     location: "Vereeniging Studio",
+    whatToExpect:
+      "Enjoy a fun, 3-hour session creating your own pressed flower artwork — no experience needed!\n- Flowers: Use as many preserved blooms as will fit in your frame.\n- Frames: Choose from A5, A4, or A3 sizes.\n- Create & Frame: Arrange, glue, and leave with framed art.\n- Supportive Team: We’re here to help as much as you need.",
+    bookingPricing:
+      "- A5 Frame: R350\n- A4 Frame: R550\n- A3 Frame: R650\n(Choose your frame at the venue.)",
+    goodToKnow:
+      "- Cashless studio: Card & EFT only.\n- Children 5+ welcome; must remain seated.\n- Water bottles allowed; no outside food.\n- No pets or toddlers; nursing infants welcome.",
+    cancellations: "- Cancel 48 hours in advance to avoid a R250 no-show fee.",
+    groupsInfo:
+      "We host up to 14 guests per session. Planning a birthday, bridal shower, or team day? Book like a regular class and we’ll make it special!",
+    careInfo:
+      "- Keep art out of direct sunlight.\n- Avoid damp spaces.\n- Frames are sealed and ready to display.",
+    whyPeopleLove:
+      "More than just an art class—it’s a chance to pause, connect, and make something meaningful with your own hands.",
+    ctaNote: "Book today to reserve your seat!",
   },
   {
     id: "workshop-sep-13",
@@ -59,6 +73,18 @@ const WORKSHOP_SEED = [
     scheduledFor: "2025-09-13T10:00:00+02:00",
     price: 550,
     location: "Vereeniging Studio",
+    whatToExpect:
+      "Create a botanical journal spread while reflecting on scripture and seasonal blooms.\n- Guided devotion time.\n- Press, style, and write.\n- Leave with a keepsake journal kit.",
+    bookingPricing: "- Full Workshop: R550 (journal + materials included)",
+    goodToKnow:
+      "- Cashless studio\n- Bring your favourite pen (optional)\n- All blooms supplied",
+    cancellations: "- Cancel 48 hours in advance to avoid a R250 no-show fee.",
+    groupsInfo:
+      "Perfect for Bible studies and creative groups. For private bookings, chat with us and we’ll tailor the experience.",
+    careInfo: "- Store journals flat and away from moisture.\n- Keep pressed blooms out of direct sun.",
+    whyPeopleLove:
+      "A restorative space to blend creativity and faith while crafting keepsakes you’ll revisit often.",
+    ctaNote: "Reserve your journal seat today!",
   },
 ];
 

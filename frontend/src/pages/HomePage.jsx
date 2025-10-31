@@ -7,7 +7,6 @@ import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import heroBackground from "../assets/hero-flowers.svg";
-import kitBlue from "../assets/kit-blue.svg";
 import { testimonials } from "../data/testimonials.js";
 
 function HomePage() {
@@ -31,39 +30,33 @@ function HomePage() {
 
   const products = remoteProducts;
 
-  const kits = products.filter((item) => (item.category ?? "kit") === "kit");
-
-  const normalizedKits = kits.map((kit) => {
-    const priceNumber = typeof kit.price === "number" ? kit.price : Number(kit.price);
+  const normalizedProducts = products.map((product, index) => {
+    const priceNumber = typeof product.price === "number" ? product.price : Number(product.price);
+    const isPurchasable = product.category === "kit" && Number.isFinite(priceNumber);
     return {
-      ...kit,
-      title: kit.title || kit.name || "Bethany Blooms Kit",
-      name: kit.name || kit.title || "Bethany Blooms Kit",
-      price: Number.isFinite(priceNumber) ? priceNumber : 0,
-      displayPrice: Number.isFinite(priceNumber) ? `R${priceNumber}` : kit.price ?? "Price on request",
-      image: kit.image || kitBlue,
+      ...product,
+      id: product.id || `product-${index}`,
+      title: product.title || product.name || "Bethany Blooms Product",
+      name: product.name || product.title || "Bethany Blooms Product",
+      description: product.description || "Details coming soon.",
+      displayPrice: Number.isFinite(priceNumber) ? `R${priceNumber}` : product.price ?? "Price on request",
+      numericPrice: Number.isFinite(priceNumber) ? priceNumber : null,
+      category: product.category || "product",
+      image: product.image || heroBackground,
+      isPurchasable,
     };
   });
 
-  const cutFlowers = products.filter((item) => (item.category ?? "cut-flower") === "cut-flower");
-  const normalizedCutFlowers = cutFlowers.map((item) => {
-    const priceNumber = typeof item.price === "number" ? item.price : Number(item.price);
-    return {
-      ...item,
-      name: item.name || "Bethany Blooms Offering",
-      description: item.description || "Details coming soon.",
-      priceDisplay: Number.isFinite(priceNumber) ? `R${priceNumber}` : item.price ?? "Price on request",
-    };
-  });
+  const featuredProducts = normalizedProducts.slice(0, 4);
 
-  const heroKitImage = normalizedKits[0]?.image || kitBlue;
+  const heroProductImage = featuredProducts[0]?.image || heroBackground;
 
-  const handleAddToCart = (kit) => {
-    if (kit.price <= 0) {
-      alert("This kit does not have a valid price yet. Please check back soon.");
+  const handleAddToCart = (product) => {
+    if (!product.isPurchasable || !product.numericPrice) {
+      alert("This product does not have a valid online price yet. Please enquire for availability.");
       return;
     }
-    addItem({ id: kit.id, name: kit.name, price: kit.price });
+    addItem({ id: product.id, name: product.name, price: product.numericPrice });
     openCart();
   };
 
@@ -74,12 +67,12 @@ function HomePage() {
           <Hero
             variant="home"
             background={heroBackground}
-            media={<img src={heroKitImage} alt="Pressed flower artwork in soft yellow and white tones" />}
+            media={<img src={heroProductImage} alt="Pressed flower artwork from Bethany Blooms" />}
           >
-            <h1>Pressed Flower Art, Made Beautifully Simple 🌸</h1>
+            <h1>Pressed Flower Art & Workshops, Made Simple 🌸</h1>
             <p>
-              Discover the joy of preserving blooms with crafted workshops, ready-to-create DIY kits, bespoke floral
-              keepsakes, and fresh cut stems gathered weekly from the Bethany Blooms garden.
+              Discover the joy of preserving blooms with crafted workshops, ready-to-style floral products, bespoke art
+              pieces, and thoughtful gifting collections from the Bethany Blooms studio.
             </p>
             <div className="cta-group">
               <Reveal as="div">
@@ -88,8 +81,8 @@ function HomePage() {
                 </Link>
               </Reveal>
               <Reveal as="div" delay={120}>
-                <Link to="/kits" className="btn btn--secondary">
-                  Shop DIY Kits
+                <Link to="/products" className="btn btn--secondary">
+                  Explore Products
                 </Link>
               </Reveal>
             </div>
@@ -100,76 +93,45 @@ function HomePage() {
       <section className="section section--tight">
         <div className="section__inner">
           <Reveal as="div">
-            <span className="badge">Fresh Cut Blooms</span>
-            <h2>The Flower Bar</h2>
+            <span className="badge">Featured Collection</span>
+            <h2>Products from the Studio</h2>
             <p>
-              Choose from weekly bouquets, market buckets, or event-ready collections—perfect for gifting or styling
-              your own tablescapes.
+              Curated pieces crafted for gifting, styling, and preserving your favourite floral moments. Browse a blend
+              of ready-to-enjoy arrangements, pressed art keepsakes, and bespoke kits.
             </p>
           </Reveal>
           <div className="cards-grid">
-            {normalizedCutFlowers.slice(0, 3).map((item, index) => (
-              <Reveal as="article" className="card" key={item.id} delay={index * 110}>
-                <h3 className="card__title">{item.name}</h3>
-                <p>{item.description}</p>
-                <p className="card__price">{item.priceDisplay}</p>
+            {featuredProducts.map((product, index) => (
+              <Reveal as="article" className="card" key={product.id} delay={index * 110}>
+                <img src={product.image} alt={`${product.title} product from Bethany Blooms`} />
+                <h3 className="card__title">{product.title}</h3>
+                <p className="card__price">{product.displayPrice}</p>
+                <p>{product.description}</p>
+                <p className="modal__meta">Category: {product.category.replace(/-/g, " ")}</p>
                 <div className="card__actions">
-                  <a className="btn btn--secondary" href="/cut-flowers">
-                    Learn More
-                  </a>
+                  {product.isPurchasable ? (
+                    <button className="btn btn--primary" type="button" onClick={() => handleAddToCart(product)}>
+                      Add to Cart
+                    </button>
+                  ) : (
+                    <Link className="btn btn--secondary" to="/contact">
+                      Enquire
+                    </Link>
+                  )}
                 </div>
               </Reveal>
             ))}
           </div>
-          {normalizedCutFlowers.length === 0 && productsStatus !== "loading" && (
-            <p className="empty-state">No fresh offerings available yet. Check back soon.</p>
+          {normalizedProducts.length === 0 && productsStatus !== "loading" && (
+            <p className="empty-state">No products are available just yet.</p>
           )}
-          {productsStatus === "loading" && <p className="empty-state">Loading fresh selections…</p>}
-          {productsStatus === "empty" && <p className="empty-state">No fresh offerings yet—check back soon.</p>}
+          {productsStatus === "loading" && <p className="empty-state">Loading featured products…</p>}
+          {productsStatus === "empty" && <p className="empty-state">No products are available just yet.</p>}
           {productsStatus === "error" && (
-            <p className="empty-state">We couldn’t load the flower bar offerings. Showing placeholder content.</p>
+            <p className="empty-state">We couldn’t load products from the server. Showing placeholder content for now.</p>
           )}
           {productsFallback && productsStatus !== "loading" && (
-            <p className="empty-state">Showing placeholder offerings while we sync with the studio.</p>
-          )}
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Hand-Curated Kits</span>
-            <h2>Featured DIY Flower Kits</h2>
-            <p>
-              Each kit includes a carefully chosen colour palette, pressed florals, glass frame, backing board, and
-              easy-to-follow instructions.
-            </p>
-          </Reveal>
-          <div className="cards-grid">
-            {normalizedKits.map((kit, index) => (
-              <Reveal as="article" className="card" key={kit.id} delay={index * 90}>
-                <img src={kit.image} alt={`${kit.title} pressed flower kit`} />
-                <h3 className="card__title">{kit.title}</h3>
-                <p className="card__price">{kit.displayPrice}</p>
-                <p>{kit.description}</p>
-                <div className="card__actions">
-                  <button className="btn btn--primary" type="button" onClick={() => handleAddToCart(kit)}>
-                    Add to Cart
-                  </button>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-          {normalizedKits.length === 0 && productsStatus !== "loading" && (
-            <p className="empty-state">No kits are available just yet.</p>
-          )}
-          {productsStatus === "loading" && <p className="empty-state">Loading featured kits…</p>}
-          {productsStatus === "empty" && <p className="empty-state">No kits are available just yet.</p>}
-          {productsStatus === "error" && (
-            <p className="empty-state">We couldn’t load kits from the server. Showing sample data for now.</p>
-          )}
-          {productsFallback && productsStatus !== "loading" && (
-            <p className="empty-state">Showing placeholder kits until live data syncs.</p>
+            <p className="empty-state">Showing placeholder products until live data syncs.</p>
           )}
         </div>
       </section>

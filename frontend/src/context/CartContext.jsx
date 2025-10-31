@@ -33,10 +33,12 @@ export function CartProvider({ children }) {
       const existing = prev.find((entry) => entry.id === item.id);
       if (existing) {
         return prev.map((entry) =>
-          entry.id === item.id ? { ...entry, quantity: entry.quantity + 1 } : entry,
+          entry.id === item.id
+            ? { ...entry, quantity: entry.quantity + (item.quantity ?? 1) }
+            : entry,
         );
       }
-      return [...prev, { ...item, quantity: 1 }];
+      return [...prev, { ...item, quantity: item.quantity ?? 1 }];
     });
   };
 
@@ -44,13 +46,21 @@ export function CartProvider({ children }) {
     setItems((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const clearCart = () => {
+    setItems([]);
+  };
+
   const value = useMemo(() => {
     const totalCount = items.reduce((count, item) => count + item.quantity, 0);
-    const totalPrice = items.reduce((total, item) => total + item.price * item.quantity, 0);
+    const totalPrice = items.reduce((total, item) => {
+      const unitPrice = typeof item.price === "number" ? item.price : Number(item.price);
+      return total + (Number.isFinite(unitPrice) ? unitPrice : 0) * item.quantity;
+    }, 0);
     return {
       items,
       addItem,
       removeItem,
+      clearCart,
       totalCount,
       totalPrice,
     };
