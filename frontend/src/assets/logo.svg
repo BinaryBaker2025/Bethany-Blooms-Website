@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title">
+  <title id="title">Bethany Blooms placeholder logo</title>
+  <defs>
+    <linearGradient id="petalGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a7c7a1" />
+      <stop offset="100%" stop-color="#ebcfc4" />
+    </linearGradient>
+  </defs>
+  <circle cx="60" cy="60" r="54" fill="url(#petalGradient)" stroke="#ffffff" stroke-width="6" />
+  <text x="50%" y="52%" text-anchor="middle" font-family="Georgia, serif" font-size="36" fill="#ffffff" dominant-baseline="middle">
+    BB
+  </text>
+  <text x="50%" y="74%" text-anchor="middle" font-family="Georgia, serif" font-size="12" fill="#ffffff" letter-spacing="2">
+    BLOOMS
+  </text>
+</svg>

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bethany Blooms | Pressed Flower Art, Made Beautifully Simple</title>
+    <meta
+      name="description"
+      content="Bethany Blooms offers artisanal pressed flower workshops, DIY kits, and custom floral art from Vereeniging, South Africa."
+    />
+    <meta
+      name="keywords"
+      content="Bethany Blooms, pressed flowers, workshops, floral art, DIY kits, Vereeniging, South Africa"
+    />
+    <meta property="og:title" content="Bethany Blooms | Pressed Flower Art, Made Beautifully Simple" />
+    <meta
+      property="og:description"
+      content="Join us for calming pressed flower experiences: in-person workshops, curated DIY kits, and bespoke floral art."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bethanyblooms.co.za" />
+    <meta property="og:image" content="https://bethanyblooms.co.za/og-image.jpg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href='data:image/svg+xml,%3Csvg xmlns%3D"http://www.w3.org/2000/svg" viewBox%3D"0 0 64 64"%3E%3Ccircle cx%3D"32" cy%3D"32" r%3D"32" fill%3D"%23a7c7a1"/%3E%3Cpath d%3D"M22 40c4-12 12-18 20-24-4 10-4 22-12 28-4 2-6 0-8-4z" fill%3D"%23fff8f6"/%3E%3C/svg%3E'
+    />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <div class="layout">
+      <header>
+        <nav class="nav">
+          <a href="index.html" class="brand" aria-label="Bethany Blooms home">
+            <span class="brand__icon">BB</span>
+            Bethany Blooms
+          </a>
+          <button class="menu-toggle" data-menu-toggle aria-expanded="false">Menu</button>
+          <div class="nav__links" data-nav-links>
+            <a href="index.html" aria-current="page">Home</a>
+            <a href="workshops.html">Workshops</a>
+            <a href="kits.html">DIY Kits</a>
+            <a href="gallery.html">Gallery</a>
+            <a href="contact.html">Contact</a>
+          </div>
+          <div class="nav__actions">
+            <button class="cart-button" data-toggle-cart aria-label="Open cart">
+              <span>Cart</span>
+              <span class="cart-count" aria-live="polite">0</span>
+            </button>
+          </div>
+        </nav>
+      </header>
+
+      <main>
+        <section class="section section--tight">
+          <div class="section__inner">
+            <div class="hero hero--home fade-in" data-parallax="0.25" data-parallax>
+              <div
+                class="hero__bg"
+                aria-hidden="true"
+                style="background-image: url('assets/hero-flowers.svg');"
+              ></div>
+              <div class="hero__content">
+                <h1>Pressed Flower Art, Made Beautifully Simple 🌸</h1>
+                <p>
+                  Discover the joy of preserving blooms with crafted workshops, ready-to-create DIY kits,
+                  and bespoke floral keepsakes. Handcrafted with love in Vereeniging, South Africa.
+                </p>
+                <div class="cta-group">
+                  <a href="workshops.html" class="btn btn--primary">Book a Workshop</a>
+                  <a href="kits.html" class="btn btn--secondary">Shop DIY Kits</a>
+                </div>
+              </div>
+              <div class="hero__media fade-in">
+                <img src="assets/kit-yellow.svg" alt="Pressed flower artwork in soft yellow and white tones" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section__inner fade-in">
+            <span class="badge">Hand-Curated Kits</span>
+            <h2>Featured DIY Flower Kits</h2>
+            <p>
+              Each kit includes a carefully chosen colour palette, pressed florals, glass frame, backing
+              board, and easy-to-follow instructions.
+            </p>
+            <div class="cards-grid">
+              <article class="card fade-in">
+                <img src="assets/kit-yellow.svg" alt="Yellow and white pressed flower kit" />
+                <h3 class="card__title">Yellow &amp; White</h3>
+                <p class="card__price">R400</p>
+                <p>Sunlit hues mixed with airy neutrals for joyful, uplifting displays.</p>
+                <div class="card__actions">
+                  <button
+                    class="btn btn--primary"
+                    data-add-to-cart
+                    data-product-id="kit-yellow"
+                    data-name="Yellow & White Pressed Flower Kit"
+                    data-price="400"
+                  >
+                    Add to Cart
+                  </button>
+                </div>
+              </article>
+              <article class="card fade-in">
+                <img src="assets/kit-red.svg" alt="Red and white pressed flower kit" />
+                <h3 class="card__title">Red &amp; White</h3>
+                <p class="card__price">R400</p>
+                <p>Romantic tones paired with delicate whites for heartfelt gifting moments.</p>
+                <div class="card__actions">
+                  <button
+                    class="btn btn--primary"
+                    data-add-to-cart
+                    data-product-id="kit-red"
+                    data-name="Red & White Pressed Flower Kit"
+                    data-price="400"
+                  >
+                    Add to Cart
+                  </button>
+                </div>
+              </article>
+              <article class="card fade-in">
+                <img src="assets/kit-purple.svg" alt="Purple and white pressed flower kit" />
+                <h3 class="card__title">Purple &amp; White</h3>
+                <p class="card__price">R400</p>
+                <p>Lavender dreams blended with crisp whites for calm, elegant creativity.</p>
+                <div class="card__actions">
+                  <button
+                    class="btn btn--primary"
+                    data-add-to-cart
+                    data-product-id="kit-purple"
+                    data-name="Purple & White Pressed Flower Kit"
+                    data-price="400"
+                  >
+                    Add to Cart
+                  </button>
+                </div>
+              </article>
+              <article class="card fade-in">
+                <img src="assets/kit-blue.svg" alt="Blue and white pressed flower kit" />
+                <h3 class="card__title">Blue &amp; White</h3>
+                <p class="card__price">R400</p>
+                <p>Sea-glass blues with soft whites for tranquil, coastal-inspired art.</p>
+                <div class="card__actions">
+                  <button
+                    class="btn btn--primary"
+                    data-add-to-cart
+                    data-product-id="kit-blue"
+                    data-name="Blue & White Pressed Flower Kit"
+                    data-price="400"
+                  >
+                    Add to Cart
+                  </button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section section--tight">
+          <div class="section__inner fade-in" data-testimonials>
+            <span class="badge">Kind Words</span>
+            <h2>Testimonials</h2>
+            <div class="testimonials">
+              <figure class="testimonial" data-testimonial-item>
+                <blockquote class="testimonial__quote">
+                  “A peaceful, soul-nourishing experience. I loved how guided yet free the workshop felt.”
+                </blockquote>
+                <figcaption class="testimonial__name">Naledi, Vereeniging</figcaption>
+              </figure>
+              <figure class="testimonial" data-testimonial-item>
+                <blockquote class="testimonial__quote">
+                  “The DIY kit arrived beautifully packaged. Everything was thoughtfully selected and easy to follow.”
+                </blockquote>
+                <figcaption class="testimonial__name">Michelle, Johannesburg</figcaption>
+              </figure>
+              <figure class="testimonial" data-testimonial-item>
+                <blockquote class="testimonial__quote">
+                  “My custom pressed bouquet is now framed in our living room. It’s my favourite keepsake.”
+                </blockquote>
+                <figcaption class="testimonial__name">Thabo, Pretoria</figcaption>
+              </figure>
+            </div>
+            <div class="testimonial__controls">
+              <button class="dot" data-testimonial-dot aria-label="Show testimonial 1"></button>
+              <button class="dot" data-testimonial-dot aria-label="Show testimonial 2"></button>
+              <button class="dot" data-testimonial-dot aria-label="Show testimonial 3"></button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="footer__inner">
+          <div>
+            <div class="brand">
+              <span class="brand__icon">BB</span>
+              Bethany Blooms
+            </div>
+            <p class="footer__scripture">
+              “You will be like a well-watered garden…” – Isaiah 58:11
+            </p>
+          </div>
+          <nav class="footer__nav" aria-label="Footer navigation">
+            <a href="index.html">Home</a>
+            <a href="workshops.html">Workshops</a>
+            <a href="kits.html">DIY Kits</a>
+            <a href="gallery.html">Gallery</a>
+            <a href="contact.html">Contact</a>
+          </nav>
+          <div>
+            <p><strong>Stay in Bloom</strong></p>
+            <form class="newsletter" action="#" method="post">
+              <label class="sr-only" for="newsletter-email">Email address</label>
+              <input class="input" type="email" id="newsletter-email" name="email" placeholder="Email address" required />
+              <button class="btn btn--primary" type="submit">Subscribe</button>
+            </form>
+          </div>
+          <div>
+            <p><strong>Connect</strong></p>
+            <div class="footer__socials">
+              <a href="https://www.facebook.com" aria-label="Bethany Blooms on Facebook">Fb</a>
+              <a href="https://www.instagram.com" aria-label="Bethany Blooms on Instagram">Ig</a>
+            </div>
+          </div>
+        </div>
+        <p class="credits">© <span id="year">2025</span> Bethany Blooms. Crafted with care in South Africa.</p>
+      </footer>
+    </div>
+
+    <div class="modal" id="cart-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="cart-title">
+      <div class="modal__content">
+        <button class="modal__close" data-close-modal aria-label="Close cart">&times;</button>
+        <h2 class="modal__title" id="cart-title">Your Cart</h2>
+        <ul class="modal__list"></ul>
+        <p class="empty-state">Your cart is currently empty. Add a DIY kit to begin crafting.</p>
+        <p><strong>Total:</strong> <span data-cart-total>R0</span></p>
+        <button class="btn btn--primary" type="button">Checkout (Demo)</button>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bethany Blooms Workshops | Pressed Flower Experiences in Vereeniging</title>
+    <meta
+      name="description"
+      content="Reserve your seat at a Bethany Blooms pressed flower workshop. Learn gentle techniques, frame sizes, and pricing for our upcoming events."
+    />
+    <meta
+      name="keywords"
+      content="pressed flower workshop, Bethany Blooms workshops, Vereeniging creative classes"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href='data:image/svg+xml,%3Csvg xmlns%3D"http://www.w3.org/2000/svg" viewBox%3D"0 0 64 64"%3E%3Ccircle cx%3D"32" cy%3D"32" r%3D"32" fill%3D"%23a7c7a1"/%3E%3Cpath d%3D"M22 40c4-12 12-18 20-24-4 10-4 22-12 28-4 2-6 0-8-4z" fill%3D"%23fff8f6"/%3E%3C/svg%3E'
+    />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <div class="layout">
+      <header>
+        <nav class="nav">
+          <a href="index.html" class="brand" aria-label="Bethany Blooms home">
+            <span class="brand__icon">BB</span>
+            Bethany Blooms
+          </a>
+          <button class="menu-toggle" data-menu-toggle aria-expanded="false">Menu</button>
+          <div class="nav__links" data-nav-links>
+            <a href="index.html">Home</a>
+            <a href="workshops.html" aria-current="page">Workshops</a>
+            <a href="kits.html">DIY Kits</a>
+            <a href="gallery.html">Gallery</a>
+            <a href="contact.html">Contact</a>
+          </div>
+          <div class="nav__actions">
+            <button class="cart-button" data-toggle-cart aria-label="Open cart">
+              <span>Cart</span>
+              <span class="cart-count" aria-live="polite">0</span>
+            </button>
+          </div>
+        </nav>
+      </header>
+
+      <main>
+        <section class="section section--tight">
+          <div class="section__inner">
+            <div class="hero hero--workshops fade-in" data-parallax="0.28" data-parallax>
+              <div
+                class="hero__bg"
+                aria-hidden="true"
+                style="background-image: url('assets/hero-flowers.svg');"
+              ></div>
+              <div class="hero__content">
+                <h1>Bespoke Pressed Flower Workshops</h1>
+                <p>
+                  Slow down with a day of making, guided by Bethany Blooms. Craft a framed arrangement,
+                  learn pressing techniques, and share a peaceful table with fellow creatives.
+                </p>
+                <div class="cta-group">
+                  <button class="btn btn--primary" data-modal-target="#booking-modal">Book Your Spot</button>
+                  <a href="#workshop-details" class="btn btn--secondary">Workshop Details</a>
+                </div>
+              </div>
+              <div class="hero__media fade-in">
+                <img src="assets/kit-purple.svg" alt="Workshop table with pressed flower frames" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="workshop-details">
+          <div class="section__inner fade-in">
+            <span class="badge">Upcoming</span>
+            <h2>Next Workshop</h2>
+            <p>
+              We gather at a light-filled studio in Vereeniging, with refreshments, blooms, and framing
+              included.
+            </p>
+            <div class="workshop-details">
+              <article class="detail-card">
+                <h3>When</h3>
+                <p><strong>02 August 2025</strong></p>
+                <p>Arrivals from 09:30. Creative session begins at 10:00 and wraps at 14:00.</p>
+              </article>
+              <article class="detail-card">
+                <h3>Frame Sizes &amp; Pricing</h3>
+                <p>
+                  <strong>A5</strong> – R350<br />
+                  <strong>A4</strong> – R550<br />
+                  <strong>A3</strong> – R650
+                </p>
+                <p>Choose your preferred frame on the day or reserve it now in the booking form.</p>
+              </article>
+              <article class="detail-card">
+                <h3>Where</h3>
+                <p><strong>Vereeniging, South Africa</strong></p>
+                <p>Full address and directions will be emailed upon booking confirmation.</p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section section--tight">
+          <div class="section__inner fade-in">
+            <span class="badge">What to Expect</span>
+            <h2>A Day in Bloom</h2>
+            <div class="cards-grid">
+              <article class="card fade-in">
+                <h3 class="card__title">Guided Creative Flow</h3>
+                <p>
+                  Learn foundational techniques for pressing, arranging, and preserving florals while
+                  crafting a frame that reflects your unique style.
+                </p>
+              </article>
+              <article class="card fade-in">
+                <h3 class="card__title">All Materials Included</h3>
+                <p>
+                  We provide tools, florals, frames, and refreshments. Simply arrive, breathe deeply, and
+                  create.
+                </p>
+              </article>
+              <article class="card fade-in">
+                <h3 class="card__title">Take-Home Keepsakes</h3>
+                <p>
+                  Leave with your completed framed art, a curated mini bloom pack, and a guide to keep
+                  pressing at home.
+                </p>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="footer__inner">
+          <div>
+            <div class="brand">
+              <span class="brand__icon">BB</span>
+              Bethany Blooms
+            </div>
+            <p class="footer__scripture">
+              “You will be like a well-watered garden…” – Isaiah 58:11
+            </p>
+          </div>
+          <nav class="footer__nav" aria-label="Footer navigation">
+            <a href="index.html">Home</a>
+            <a href="workshops.html">Workshops</a>
+            <a href="kits.html">DIY Kits</a>
+            <a href="gallery.html">Gallery</a>
+            <a href="contact.html">Contact</a>
+          </nav>
+          <div>
+            <p><strong>Stay in Bloom</strong></p>
+            <form class="newsletter" action="#" method="post">
+              <label class="sr-only" for="newsletter-email">Email address</label>
+              <input class="input" type="email" id="newsletter-email" name="email" placeholder="Email address" required />
+              <button class="btn btn--primary" type="submit">Subscribe</button>
+            </form>
+          </div>
+          <div>
+            <p><strong>Connect</strong></p>
+            <div class="footer__socials">
+              <a href="https://www.facebook.com" aria-label="Bethany Blooms on Facebook">Fb</a>
+              <a href="https://www.instagram.com" aria-label="Bethany Blooms on Instagram">Ig</a>
+            </div>
+          </div>
+        </div>
+        <p class="credits">© <span id="year">2025</span> Bethany Blooms. Crafted with care in South Africa.</p>
+      </footer>
+    </div>
+
+    <div class="modal" id="booking-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="booking-title">
+      <div class="modal__content booking-modal">
+        <button class="modal__close" data-close-modal aria-label="Close booking form">&times;</button>
+        <h2 class="modal__title" id="booking-title">Reserve Your Workshop Seat</h2>
+        <form class="booking-grid" action="#" method="post">
+          <div>
+            <label for="guest-name">Name</label>
+            <input class="input" type="text" id="guest-name" name="name" placeholder="Full name" required />
+          </div>
+          <div>
+            <label for="guest-email">Email</label>
+            <input class="input" type="email" id="guest-email" name="email" placeholder="Email address" required />
+          </div>
+          <div>
+            <label for="guest-frame">Preferred Frame Size</label>
+            <select class="input" id="guest-frame" name="frame">
+              <option value="A5">A5 – R350</option>
+              <option value="A4">A4 – R550</option>
+              <option value="A3">A3 – R650</option>
+            </select>
+          </div>
+          <div>
+            <label for="guest-notes">Notes</label>
+            <textarea class="input" id="guest-notes" name="notes" placeholder="Dietary needs or special requests"></textarea>
+          </div>
+          <button class="btn btn--primary" type="submit">Submit Booking (Demo)</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" id="cart-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="cart-title">
+      <div class="modal__content">
+        <button class="modal__close" data-close-modal aria-label="Close cart">&times;</button>
+        <h2 class="modal__title" id="cart-title">Your Cart</h2>
+        <ul class="modal__list"></ul>
+        <p class="empty-state">Your cart is currently empty. Add a DIY kit to begin crafting.</p>
+        <p><strong>Total:</strong> <span data-cart-total>R0</span></p>
+        <button class="btn btn--primary" type="button">Checkout (Demo)</button>
+      </div>
+    </div>
+  </body>
+</html>

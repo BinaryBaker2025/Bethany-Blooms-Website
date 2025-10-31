@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bethany Blooms Gallery | Pressed Flower Art Showcase</title>
+    <meta
+      name="description"
+      content="Browse the Bethany Blooms gallery for pressed flower art created by workshop guests and custom commission clients."
+    />
+    <meta
+      name="keywords"
+      content="pressed flower gallery, Bethany Blooms art, floral frames, custom floral art"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href='data:image/svg+xml,%3Csvg xmlns%3D"http://www.w3.org/2000/svg" viewBox%3D"0 0 64 64"%3E%3Ccircle cx%3D"32" cy%3D"32" r%3D"32" fill%3D"%23a7c7a1"/%3E%3Cpath d%3D"M22 40c4-12 12-18 20-24-4 10-4 22-12 28-4 2-6 0-8-4z" fill%3D"%23fff8f6"/%3E%3C/svg%3E'
+    />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <div class="layout">
+      <header>
+        <nav class="nav">
+          <a href="index.html" class="brand" aria-label="Bethany Blooms home">
+            <span class="brand__icon">BB</span>
+            Bethany Blooms
+          </a>
+          <button class="menu-toggle" data-menu-toggle aria-expanded="false">Menu</button>
+          <div class="nav__links" data-nav-links>
+            <a href="index.html">Home</a>
+            <a href="workshops.html">Workshops</a>
+            <a href="kits.html">DIY Kits</a>
+            <a href="gallery.html" aria-current="page">Gallery</a>
+            <a href="contact.html">Contact</a>
+          </div>
+          <div class="nav__actions">
+            <button class="cart-button" data-toggle-cart aria-label="Open cart">
+              <span>Cart</span>
+              <span class="cart-count" aria-live="polite">0</span>
+            </button>
+          </div>
+        </nav>
+      </header>
+
+      <main>
+        <section class="section section--tight">
+          <div class="section__inner">
+            <div class="hero hero--gallery fade-in" data-parallax="0.24" data-parallax>
+              <div
+                class="hero__bg"
+                aria-hidden="true"
+                style="background-image: url('assets/hero-flowers.svg');"
+              ></div>
+              <div class="hero__content">
+                <h1>Gallery of Blooming Stories</h1>
+                <p>
+                  Discover frames crafted by our workshop guests and custom commission clients. From
+                  weddings and birthdays to everyday gratitude, each piece carries a story.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="gallery-grid">
+          <div class="section__inner fade-in">
+            <span class="badge">Community Creations</span>
+            <h2>Pressed Florals by You</h2>
+            <p>Select an artwork to view larger in the lightbox.</p>
+            <div class="gallery">
+              <div class="gallery__item fade-in">
+                <a href="assets/gallery-1.svg" data-lightbox data-alt="Warm pressed floral arrangement with blush tones">
+                  <img src="assets/gallery-1.svg" alt="Blush pressed flower artwork with layered petals" />
+                  <div class="gallery__overlay" aria-hidden="true"></div>
+                </a>
+              </div>
+              <div class="gallery__item fade-in">
+                <a href="assets/gallery-2.svg" data-lightbox data-alt="Green-toned pressed floral arrangement">
+                  <img src="assets/gallery-2.svg" alt="Sage pressed flower frame with balanced greenery" />
+                  <div class="gallery__overlay" aria-hidden="true"></div>
+                </a>
+              </div>
+              <div class="gallery__item fade-in">
+                <a href="assets/gallery-3.svg" data-lightbox data-alt="Lavender pressed floral art in tall frame">
+                  <img src="assets/gallery-3.svg" alt="Lavender-inspired pressed flower artwork" />
+                  <div class="gallery__overlay" aria-hidden="true"></div>
+                </a>
+              </div>
+              <div class="gallery__item fade-in">
+                <a href="assets/gallery-4.svg" data-lightbox data-alt="Cool blue pressed floral artwork with glass frame">
+                  <img src="assets/gallery-4.svg" alt="Blue pressed flower display in glass frame" />
+                  <div class="gallery__overlay" aria-hidden="true"></div>
+                </a>
+              </div>
+              <div class="gallery__item fade-in">
+                <a href="assets/gallery-5.svg" data-lightbox data-alt="Pink pressed bouquet captured in frame">
+                  <img src="assets/gallery-5.svg" alt="Pink pressed bouquet frame" />
+                  <div class="gallery__overlay" aria-hidden="true"></div>
+                </a>
+              </div>
+              <div class="gallery__item fade-in">
+                <a href="assets/gallery-6.svg" data-lightbox data-alt="Neutral pressed florals with gold accents">
+                  <img src="assets/gallery-6.svg" alt="Neutral pressed flower arrangement with gold tones" />
+                  <div class="gallery__overlay" aria-hidden="true"></div>
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="footer__inner">
+          <div>
+            <div class="brand">
+              <span class="brand__icon">BB</span>
+              Bethany Blooms
+            </div>
+            <p class="footer__scripture">
+              “You will be like a well-watered garden…” – Isaiah 58:11
+            </p>
+          </div>
+          <nav class="footer__nav" aria-label="Footer navigation">
+            <a href="index.html">Home</a>
+            <a href="workshops.html">Workshops</a>
+            <a href="kits.html">DIY Kits</a>
+            <a href="gallery.html">Gallery</a>
+            <a href="contact.html">Contact</a>
+          </nav>
+          <div>
+            <p><strong>Stay in Bloom</strong></p>
+            <form class="newsletter" action="#" method="post">
+              <label class="sr-only" for="newsletter-email">Email address</label>
+              <input class="input" type="email" id="newsletter-email" name="email" placeholder="Email address" required />
+              <button class="btn btn--primary" type="submit">Subscribe</button>
+            </form>
+          </div>
+          <div>
+            <p><strong>Connect</strong></p>
+            <div class="footer__socials">
+              <a href="https://www.facebook.com" aria-label="Bethany Blooms on Facebook">Fb</a>
+              <a href="https://www.instagram.com" aria-label="Bethany Blooms on Instagram">Ig</a>
+            </div>
+          </div>
+        </div>
+        <p class="credits">© <span id="year">2025</span> Bethany Blooms. Crafted with care in South Africa.</p>
+      </footer>
+    </div>
+
+    <div class="modal" id="cart-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="cart-title">
+      <div class="modal__content">
+        <button class="modal__close" data-close-modal aria-label="Close cart">&times;</button>
+        <h2 class="modal__title" id="cart-title">Your Cart</h2>
+        <ul class="modal__list"></ul>
+        <p class="empty-state">Your cart is currently empty. Add a DIY kit to begin crafting.</p>
+        <p><strong>Total:</strong> <span data-cart-total>R0</span></p>
+        <button class="btn btn--primary" type="button">Checkout (Demo)</button>
+      </div>
+    </div>
+
+    <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-hidden="true" aria-label="Image preview">
+      <div class="lightbox__content">
+        <button class="lightbox__close" data-close-lightbox aria-label="Close preview">&times;</button>
+        <img class="lightbox__image" src="" alt="" />
+      </div>
+    </div>
+  </body>
+</html>

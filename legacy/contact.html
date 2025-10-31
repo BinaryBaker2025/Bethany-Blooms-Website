@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contact Bethany Blooms | Enquiries &amp; Custom Floral Art</title>
+    <meta
+      name="description"
+      content="Get in touch with Bethany Blooms for workshop enquiries, custom pressed floral art, or DIY kit support."
+    />
+    <meta name="keywords" content="contact Bethany Blooms, pressed flower enquiries, custom floral art contact" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href='data:image/svg+xml,%3Csvg xmlns%3D"http://www.w3.org/2000/svg" viewBox%3D"0 0 64 64"%3E%3Ccircle cx%3D"32" cy%3D"32" r%3D"32" fill%3D"%23a7c7a1"/%3E%3Cpath d%3D"M22 40c4-12 12-18 20-24-4 10-4 22-12 28-4 2-6 0-8-4z" fill%3D"%23fff8f6"/%3E%3C/svg%3E'
+    />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <div class="layout">
+      <header>
+        <nav class="nav">
+          <a href="index.html" class="brand" aria-label="Bethany Blooms home">
+            <span class="brand__icon">BB</span>
+            Bethany Blooms
+          </a>
+          <button class="menu-toggle" data-menu-toggle aria-expanded="false">Menu</button>
+          <div class="nav__links" data-nav-links>
+            <a href="index.html">Home</a>
+            <a href="workshops.html">Workshops</a>
+            <a href="kits.html">DIY Kits</a>
+            <a href="gallery.html">Gallery</a>
+            <a href="contact.html" aria-current="page">Contact</a>
+          </div>
+          <div class="nav__actions">
+            <button class="cart-button" data-toggle-cart aria-label="Open cart">
+              <span>Cart</span>
+              <span class="cart-count" aria-live="polite">0</span>
+            </button>
+          </div>
+        </nav>
+      </header>
+
+      <main>
+        <section class="section section--tight">
+          <div class="section__inner">
+            <div class="hero hero--contact fade-in" data-parallax="0.2" data-parallax>
+              <div
+                class="hero__bg"
+                aria-hidden="true"
+                style="background-image: url('assets/hero-flowers.svg');"
+              ></div>
+              <div class="hero__content">
+                <h1>We’d Love to Hear From You</h1>
+                <p>
+                  Reach out about workshops, bespoke commissions, or simply to say hello. We respond within
+                  two business days with warmth and detail.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section section--tight">
+          <div class="section__inner fade-in">
+            <span class="badge">Get in Touch</span>
+            <h2>Send Us a Note</h2>
+            <p>Share a little about what you’re dreaming up, and we’ll guide the next steps.</p>
+            <form class="contact-form" action="#" method="post">
+              <label class="sr-only" for="contact-name">Name</label>
+              <input class="input" type="text" id="contact-name" name="name" placeholder="Your name" required />
+
+              <label class="sr-only" for="contact-email">Email</label>
+              <input class="input" type="email" id="contact-email" name="email" placeholder="Your email" required />
+
+              <label class="sr-only" for="contact-message">Message</label>
+              <textarea
+                class="input textarea"
+                id="contact-message"
+                name="message"
+                placeholder="Tell us about your project or enquiry"
+                required
+              ></textarea>
+              <button class="btn btn--primary" type="submit">Send Message (Demo)</button>
+            </form>
+            <a class="whatsapp-cta" href="https://wa.me/27744555590" target="_blank" rel="noopener">
+              <span aria-hidden="true">💬</span>
+              Chat via WhatsApp
+            </a>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section__inner fade-in">
+            <span class="badge">Visit Us</span>
+            <h2>Studio Hours</h2>
+            <p>
+              By appointment only in Vereeniging, South Africa. We prepare the studio with refreshments, so
+              please book ahead.
+            </p>
+            <div class="cards-grid">
+              <article class="card fade-in">
+                <h3 class="card__title">Email</h3>
+                <p><a href="mailto:hello@bethanyblooms.co.za">hello@bethanyblooms.co.za</a></p>
+              </article>
+              <article class="card fade-in">
+                <h3 class="card__title">Phone</h3>
+                <p><a href="tel:+27744555590">+27 74 455 5590</a></p>
+              </article>
+              <article class="card fade-in">
+                <h3 class="card__title">Hours</h3>
+                <p>Tuesday – Saturday, 09:00 – 16:00</p>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="footer__inner">
+          <div>
+            <div class="brand">
+              <span class="brand__icon">BB</span>
+              Bethany Blooms
+            </div>
+            <p class="footer__scripture">
+              “You will be like a well-watered garden…” – Isaiah 58:11
+            </p>
+          </div>
+          <nav class="footer__nav" aria-label="Footer navigation">
+            <a href="index.html">Home</a>
+            <a href="workshops.html">Workshops</a>
+            <a href="kits.html">DIY Kits</a>
+            <a href="gallery.html">Gallery</a>
+            <a href="contact.html">Contact</a>
+          </nav>
+          <div>
+            <p><strong>Stay in Bloom</strong></p>
+            <form class="newsletter" action="#" method="post">
+              <label class="sr-only" for="newsletter-email">Email address</label>
+              <input class="input" type="email" id="newsletter-email" name="email" placeholder="Email address" required />
+              <button class="btn btn--primary" type="submit">Subscribe</button>
+            </form>
+          </div>
+          <div>
+            <p><strong>Connect</strong></p>
+            <div class="footer__socials">
+              <a href="https://www.facebook.com" aria-label="Bethany Blooms on Facebook">Fb</a>
+              <a href="https://www.instagram.com" aria-label="Bethany Blooms on Instagram">Ig</a>
+            </div>
+          </div>
+        </div>
+        <p class="credits">© <span id="year">2025</span> Bethany Blooms. Crafted with care in South Africa.</p>
+      </footer>
+    </div>
+
+    <div class="modal" id="cart-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="cart-title">
+      <div class="modal__content">
+        <button class="modal__close" data-close-modal aria-label="Close cart">&times;</button>
+        <h2 class="modal__title" id="cart-title">Your Cart</h2>
+        <ul class="modal__list"></ul>
+        <p class="empty-state">Your cart is currently empty. Add a DIY kit to begin crafting.</p>
+        <p><strong>Total:</strong> <span data-cart-total>R0</span></p>
+        <button class="btn btn--primary" type="button">Checkout (Demo)</button>
+      </div>
+    </div>
+  </body>
+</html>
