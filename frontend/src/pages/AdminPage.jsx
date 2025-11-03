@@ -1391,10 +1391,10 @@ function AdminPage() {
                                         {item.metadata?.type === "workshop" && (
                                           <>
                                             <span className="modal__meta">
-                                              {item.metadata.sessionLabel || item.metadata.scheduledDateLabel || "Date TBC"} · {item.metadata.attendeeCount} attendee(s)
+                                              {item.metadata.sessionDayLabel || item.metadata.sessionLabel || item.metadata.scheduledDateLabel || "Date TBC"} · {item.metadata.attendeeCount} attendee(s)
                                             </span>
-                                            {item.metadata.sessionTime && (
-                                              <span className="modal__meta">Time: {item.metadata.sessionTime}</span>
+                                            {(item.metadata.sessionTimeRange || item.metadata.sessionTime) && (
+                                              <span className="modal__meta">Time: {item.metadata.sessionTimeRange || item.metadata.sessionTime}</span>
                                             )}
                                             {item.metadata.framePreference && (
                                               <span className="modal__meta">

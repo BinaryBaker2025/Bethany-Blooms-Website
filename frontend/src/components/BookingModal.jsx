@@ -28,6 +28,7 @@ function BookingModal() {
   const [formStatus, setFormStatus] = useState("idle");
   const [submitError, setSubmitError] = useState(null);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(null);
 
   const workshop = bookingContext?.workshop ?? null;
   const sessions = useMemo(
@@ -37,6 +38,73 @@ function BookingModal() {
   const hasActiveSession = sessions.some((session) => !session.isPast);
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
+
+  const sessionDays = useMemo(() => {
+    if (!sessions.length) return [];
+    const dayFormatter = new Intl.DateTimeFormat("en-ZA", { dateStyle: "long" });
+    const map = new Map();
+    sessions.forEach((session) => {
+      const dateKey = session.date || (typeof session.start === "string" ? session.start.slice(0, 10) : "");
+      if (!dateKey) return;
+      if (!map.has(dateKey)) {
+        const startDate =
+          session.startDate instanceof Date && !Number.isNaN(session.startDate.getTime())
+            ? session.startDate
+            : typeof session.start === "string"
+              ? new Date(session.start)
+              : null;
+        const label = startDate instanceof Date && !Number.isNaN(startDate.getTime())
+          ? dayFormatter.format(startDate)
+          : dateKey;
+        map.set(dateKey, { date: dateKey, label, sessions: [] });
+      }
+      map.get(dateKey).sessions.push(session);
+    });
+    const grouped = Array.from(map.values()).map((group) => ({
+      ...group,
+      sessions: group.sessions.sort((a, b) => {
+        const aTime = typeof a.start === "string" ? new Date(a.start).getTime() : Number.POSITIVE_INFINITY;
+        const bTime = typeof b.start === "string" ? new Date(b.start).getTime() : Number.POSITIVE_INFINITY;
+        return aTime - bTime;
+      }),
+    }));
+    grouped.sort((a, b) => {
+      const aTime = typeof a.sessions[0]?.start === "string" ? new Date(a.sessions[0].start).getTime() : Number.POSITIVE_INFINITY;
+      const bTime = typeof b.sessions[0]?.start === "string" ? new Date(b.sessions[0].start).getTime() : Number.POSITIVE_INFINITY;
+      return aTime - bTime;
+    });
+    return grouped;
+  }, [sessions]);
+
+  const selectedDayData = sessionDays.find((day) => day.date === selectedDay) ?? sessionDays[0] ?? null;
+  const selectedDaySlots = useMemo(
+    () => selectedDayData?.sessions ?? [],
+    [selectedDayData],
+  );
+  const dayHasActiveSlots = selectedDaySlots.some((slot) => !slot.isPast);
+  const selectedDayLabel = selectedDayData?.label ?? null;
+
+  useEffect(() => {
+    if (!isBookingOpen) return;
+    if (!sessionDays.length) {
+      setSelectedDay(null);
+      setSelectedSessionId(null);
+      return;
+    }
+    if (!selectedDayData) {
+      setSelectedDay(sessionDays[0].date);
+      return;
+    }
+    const slots = selectedDaySlots;
+    if (slots.length === 0) {
+      setSelectedSessionId(null);
+      return;
+    }
+    if (!selectedSession || selectedSession.date !== selectedDayData.date) {
+      const nextSlot = slots.find((slot) => !slot.isPast) ?? slots[0];
+      setSelectedSessionId(nextSlot?.id ?? null);
+    }
+  }, [isBookingOpen, selectedDayData, selectedDaySlots, selectedSession, sessionDays]);
 
   const frameOptions = useMemo(() => {
     if (Array.isArray(workshop?.frameOptions) && workshop.frameOptions.length > 0) {
@@ -93,8 +161,8 @@ function BookingModal() {
     const hasAnyActive = sessions.some((session) => !session.isPast);
     const preferredSession =
       resolvedPreferredId ? sessions.find((session) => session.id === resolvedPreferredId) : null;
-    const normalizedPreferredId =
-      preferredSession && (!preferredSession.isPast || !hasAnyActive) ? preferredSession.id : null;
+    const normalizedPreferred =
+      preferredSession && (!preferredSession.isPast || !hasAnyActive) ? preferredSession : null;
     const fallbackSession = sessions.find((session) => !session.isPast) ?? sessions[0] ?? null;
 
     setFormState({
@@ -106,7 +174,9 @@ function BookingModal() {
       framePreference: defaultFrameValue,
       notes: bookingContext?.notes ?? "",
     });
-    setSelectedSessionId(normalizedPreferredId ?? fallbackSession?.id ?? null);
+    const initialSession = normalizedPreferred ?? fallbackSession ?? null;
+    setSelectedSessionId(initialSession?.id ?? null);
+    setSelectedDay(initialSession?.date ?? sessions[0]?.date ?? null);
     setFormStatus("idle");
     setSubmitError(null);
   }, [isBookingOpen, bookingContext, frameOptions, sessions, workshop]);
@@ -158,22 +228,19 @@ function BookingModal() {
       return;
     }
 
-    if (sessions.length === 0) {
+    if (sessionDays.length === 0) {
       setFormStatus("error");
       setSubmitError("This workshop is not currently accepting bookings. Please check back soon.");
       return;
     }
 
-    const effectiveSession =
-      selectedSession ??
-      (sessions.length === 1 ? sessions[0] : null);
-    if (!effectiveSession) {
+    if (!selectedDay || !selectedSession) {
       setFormStatus("error");
-      setSubmitError("Please choose a session before continuing.");
+      setSubmitError("Please choose a workshop day and time slot before continuing.");
       return;
     }
 
-    if (effectiveSession.isPast) {
+    if (selectedSession.isPast) {
       setFormStatus("error");
       setSubmitError("This session has already passed. Please choose another available date.");
       return;
@@ -205,7 +272,7 @@ function BookingModal() {
       frameOptions[0]?.value ??
       INITIAL_BOOKING_FORM.framePreference;
 
-    const cartItemId = `workshop-${workshop.id}-${effectiveSession.id}-${Date.now()}`;
+    const cartItemId = `workshop-${workshop.id}-${selectedSession.id}-${Date.now()}`;
 
     addItem({
       id: cartItemId,
@@ -216,29 +283,32 @@ function BookingModal() {
         type: "workshop",
         workshopId: workshop.id,
         workshopTitle: workshop.title,
-        scheduledFor: effectiveSession.start ?? workshop.scheduledFor ?? null,
-        scheduledDateLabel: effectiveSession.formatted ?? workshop.scheduledDateLabel ?? null,
+        scheduledFor: selectedSession.start ?? workshop.scheduledFor ?? null,
+        scheduledDateLabel: summaryLabel || selectedSession.formatted || workshop.scheduledDateLabel || null,
         location: workshop.location ?? null,
         attendeeCount: attendeeCountNumber,
         framePreference,
         perAttendeePrice,
         notes: trimmed.notes,
-        sessionId: effectiveSession.id,
-        sessionLabel: effectiveSession.label ?? effectiveSession.formatted,
-        sessionStart: effectiveSession.start ?? null,
-        sessionDate: effectiveSession.date ?? null,
-        sessionTime: effectiveSession.time ?? null,
+        sessionId: selectedSession.id,
+        sessionLabel: selectedSession.label ?? selectedSession.formatted,
+        sessionStart: selectedSession.start ?? null,
+        sessionDate: selectedSession.date ?? null,
+        sessionTime: selectedSession.time ?? null,
+        sessionTimeRange: selectedSession.timeRangeLabel ?? null,
         sessionCapacity:
-          typeof effectiveSession.capacity === "number" ? effectiveSession.capacity : null,
+          typeof selectedSession.capacity === "number" ? selectedSession.capacity : null,
+        sessionDay: selectedDay ?? null,
+        sessionDayLabel: selectedDayLabel ?? null,
         session: {
-          id: effectiveSession.id,
-          label: effectiveSession.label ?? null,
-          formatted: effectiveSession.formatted,
-          start: effectiveSession.start ?? null,
-          date: effectiveSession.date ?? null,
-          time: effectiveSession.time ?? null,
+          id: selectedSession.id,
+          label: selectedSession.label ?? null,
+          formatted: selectedSession.formatted,
+          start: selectedSession.start ?? null,
+          date: selectedSession.date ?? null,
+          time: selectedSession.time ?? null,
           capacity:
-            typeof effectiveSession.capacity === "number" ? effectiveSession.capacity : null,
+            typeof selectedSession.capacity === "number" ? selectedSession.capacity : null,
         },
         customer: {
           fullName: trimmed.fullName,
@@ -255,17 +325,32 @@ function BookingModal() {
     openCart();
   };
 
+  const summaryLabel = (() => {
+    if (!workshop) return "";
+    if (selectedDayLabel && selectedSession) {
+      const timeLabel = selectedSession.timeRangeLabel || selectedSession.formatted;
+      return timeLabel ? `${selectedDayLabel} · ${timeLabel}` : selectedDayLabel;
+    }
+    if (selectedDayLabel) return selectedDayLabel;
+    if (selectedSession) return selectedSession.timeRangeLabel || selectedSession.formatted;
+    return workshop.scheduledDateLabel || "Date to be confirmed";
+  })();
+
   const isSubmitting = formStatus === "submitting";
   const isAddDisabled =
     isSubmitting ||
     !workshop ||
-    sessions.length === 0 ||
-    (selectedSession?.isPast && hasActiveSession);
+    sessionDays.length === 0 ||
+    !selectedDay ||
+    !selectedSession ||
+    (selectedSession.isPast && hasActiveSession);
   const submitLabel = (() => {
     if (isSubmitting) return "Adding to cart…";
     if (!workshop) return "Add to Cart";
-    if (sessions.length === 0) return "No Sessions Available";
-    if (selectedSession?.isPast && hasActiveSession) return "Select Available Session";
+    if (sessionDays.length === 0) return "No Sessions Available";
+    if (!selectedDay) return "Select a Day";
+    if (!selectedSession) return "Select Time Slot";
+    if (selectedSession.isPast && hasActiveSession) return "Select Available Session";
     return "Add to Cart";
   })();
 
@@ -299,7 +384,7 @@ function BookingModal() {
               <strong>{workshop.title}</strong>
             </p>
             <p className="modal__meta">
-              {selectedSession?.formatted || workshop.scheduledDateLabel || "Date to be confirmed"}
+              {summaryLabel || "Date to be confirmed"}
               {workshop.location ? ` · ${workshop.location}` : ""}
             </p>
             {selectedSession?.capacity && (
@@ -307,7 +392,7 @@ function BookingModal() {
                 {selectedSession.capacity} seat{selectedSession.capacity === 1 ? "" : "s"} available
               </p>
             )}
-            {sessions.length === 0 && (
+            {sessionDays.length === 0 && (
               <p className="booking-summary__warning">
                 No upcoming sessions have been scheduled yet. Please contact the studio for availability.
               </p>
@@ -322,42 +407,83 @@ function BookingModal() {
           <p className="empty-state">Workshop details unavailable. Close the dialog and try again.</p>
         )}
         <form className="booking-grid" onSubmit={handleSubmit} noValidate>
-          {sessions.length > 0 && (
-            <div className="booking-grid__full">
-              <label htmlFor="booking-session">Session</label>
-              <select
-                className="input"
-                id="booking-session"
-                value={selectedSessionId ?? ""}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setSelectedSessionId(value || null);
-                }}
-              >
-                {selectedSessionId === null && <option value="" disabled>Select a session</option>}
-                {sessions.map((session) => {
-                  const disabled = session.isPast && hasActiveSession;
+          {sessionDays.length > 0 && (
+            <div className="booking-grid__full booking-day-picker">
+              <span className="booking-picker__label">Workshop Day</span>
+              <div className="booking-day-picker__grid">
+                {sessionDays.map((day) => {
+                  const isActive = day.date === selectedDay;
+                  const allPast = day.sessions.every((slot) => slot.isPast);
+                  const anyFutureDay = sessionDays.some((entry) => entry.sessions.some((slot) => !slot.isPast));
                   return (
-                    <option key={session.id} value={session.id} disabled={disabled}>
-                      {session.formatted}
-                      {session.capacity
-                        ? ` — ${session.capacity} seat${session.capacity === 1 ? "" : "s"}`
-                        : ""}
-                      {session.isPast ? " (Past session)" : ""}
-                    </option>
+                    <button
+                      key={day.date}
+                      type="button"
+                      className={`booking-day-chip ${isActive ? "booking-day-chip--active" : ""} ${
+                        allPast ? "booking-day-chip--disabled" : ""
+                      }`}
+                      onClick={() => setSelectedDay(day.date)}
+                      disabled={allPast && anyFutureDay}
+                      aria-pressed={isActive}
+                    >
+                      <span className="booking-day-chip__label">{day.label}</span>
+                      <span className="booking-day-chip__meta">
+                        {day.sessions.length} slot{day.sessions.length === 1 ? "" : "s"}
+                      </span>
+                      {allPast && (
+                        <span className="booking-day-chip__meta booking-day-chip__meta--warning">Past day</span>
+                      )}
+                    </button>
                   );
                 })}
-              </select>
+              </div>
+            </div>
+          )}
+          {selectedDaySlots.length > 0 && (
+            <div className="booking-grid__full booking-slot-picker">
+              <span className="booking-picker__label">Time Slot</span>
+              <div className="booking-slot-picker__grid">
+                {selectedDaySlots.map((slot) => {
+                  const disabled = slot.isPast && dayHasActiveSlots;
+                  return (
+                    <button
+                      key={slot.id}
+                      type="button"
+                      className={`booking-slot-chip ${
+                        selectedSessionId === slot.id ? "booking-slot-chip--active" : ""
+                      } ${disabled ? "booking-slot-chip--disabled" : ""}`}
+                      onClick={() => setSelectedSessionId(slot.id)}
+                      disabled={disabled}
+                      aria-pressed={selectedSessionId === slot.id}
+                    >
+                      <span className="booking-slot-chip__label">{slot.timeRangeLabel || slot.formatted}</span>
+                      <span className="booking-slot-chip__meta">
+                        {slot.capacity
+                          ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
+                          : "Open booking"}
+                      </span>
+                      {slot.isPast && (
+                        <span className="booking-slot-chip__meta booking-slot-chip__meta--warning">Past session</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
               {selectedSession?.isPast && (
                 <p className="form-feedback__message form-feedback__message--warning">
-                  This session has already passed. Please choose another available date.
+                  This session has already passed. Please choose another available time.
                 </p>
               )}
             </div>
           )}
-          {sessions.length === 0 && (
+          {sessionDays.length === 0 && (
             <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
               Booking isn’t available until new dates are scheduled.
+            </p>
+          )}
+          {sessionDays.length > 0 && selectedDaySlots.length === 0 && (
+            <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
+              No time slots remain for the selected day. Please choose another date.
             </p>
           )}
           <div>

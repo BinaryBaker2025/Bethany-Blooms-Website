@@ -162,12 +162,12 @@ function CartModal() {
                         <strong>Workshop:</strong> {item.metadata.workshopTitle}
                       </p>
                       <p>
-                        <strong>When:</strong>{" "}
-                        {item.metadata.sessionLabel || item.metadata.scheduledDateLabel || "Date to be confirmed"}
+                        <strong>Day:</strong>{" "}
+                        {item.metadata.sessionDayLabel || item.metadata.sessionLabel || item.metadata.scheduledDateLabel || "Date to be confirmed"}
                       </p>
-                      {item.metadata.sessionTime && (
+                      {(item.metadata.sessionTimeRange || item.metadata.sessionTime) && (
                         <p>
-                          <strong>Time:</strong> {item.metadata.sessionTime}
+                          <strong>Time:</strong> {item.metadata.sessionTimeRange || item.metadata.sessionTime}
                         </p>
                       )}
                       <p>

@@ -312,7 +312,10 @@ function WorkshopDetailPage() {
     });
   }, [selectedSessionId, workshop]);
 
-  const sessions = Array.isArray(workshop?.sessions) ? workshop.sessions : [];
+  const sessions = useMemo(
+    () => (Array.isArray(workshop?.sessions) ? workshop.sessions : []),
+    [workshop],
+  );
 
   const sessionDays = useMemo(() => {
     if (!sessions.length) return [];
@@ -348,7 +351,10 @@ function WorkshopDetailPage() {
   }, [sessions]);
 
   const selectedDayData = sessionDays.find((day) => day.date === selectedDay) ?? sessionDays[0] ?? null;
-  const selectedDaySlots = selectedDayData?.sessions ?? [];
+  const selectedDaySlots = useMemo(
+    () => selectedDayData?.sessions ?? [],
+    [selectedDayData],
+  );
   const dayHasActiveSlots = selectedDaySlots.some((slot) => !slot.isPast);
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? selectedDaySlots[0] ?? null;
   const selectedDayLabel = selectedDayData?.label ?? null;
@@ -436,8 +442,6 @@ function WorkshopDetailPage() {
     typeof selectedSession?.capacity === "number"
       ? `${selectedSession.capacity} seat${selectedSession.capacity === 1 ? "" : "s"} available`
       : null;
-  const hasActiveSession = sessions.some((session) => !session.isPast);
-
   const sections = [
     { key: "whatToExpect", title: "What to Expect" },
     { key: "bookingPricing", title: "Booking & Pricing" },
@@ -460,7 +464,7 @@ function WorkshopDetailPage() {
             <h1>{workshop.title}</h1>
             <p>{workshop.description}</p>
             <div className="cta-group">
-              <button className="btn btn--primary" type="button" onClick={handleOpenBooking}>
+              <button className="btn btn--primary" type="button" onClick={handleOpenBooking} disabled={!selectedSession}>
                 Reserve Your Seat
               </button>
               <Link className="btn btn--secondary" to="/workshops">
@@ -601,7 +605,7 @@ function WorkshopDetailPage() {
           {workshop.ctaNote && (
             <Reveal as="div" className="detail-cta">
               <p>{workshop.ctaNote}</p>
-              <button className="btn btn--primary" type="button" onClick={handleOpenBooking}>
+              <button className="btn btn--primary" type="button" onClick={handleOpenBooking} disabled={!selectedSession}>
                 Reserve Your Seat
               </button>
             </Reveal>

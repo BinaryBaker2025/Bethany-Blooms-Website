@@ -1330,6 +1330,10 @@ main {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
+.session-picker__grid--dates {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
 .session-chip {
   position: relative;
   display: grid;
@@ -1377,6 +1381,144 @@ main {
 }
 
 .session-chip__meta--warning {
+  color: #b2453b;
+}
+
+.session-day-chip {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(209, 191, 167, 0.6);
+  background: rgba(233, 220, 208, 0.24);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-base), background var(--transition-base), color var(--transition-base);
+}
+
+.session-day-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.session-day-chip--active {
+  border-color: var(--color-sage);
+  background: rgba(167, 199, 161, 0.18);
+}
+
+.session-day-chip--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.session-day-chip__label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.session-day-chip__meta {
+  font-size: 0.85rem;
+  color: rgba(58, 58, 58, 0.65);
+}
+
+.session-day-chip__meta--warning {
+  color: #b2453b;
+}
+
+.session-slot-picker {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.session-slot-picker__title {
+  margin: 0;
+}
+
+.session-slot-picker__note {
+  margin: 0;
+  color: rgba(58, 58, 58, 0.65);
+  font-size: 0.95rem;
+}
+
+.session-slot-picker__grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.booking-picker__label {
+  display: block;
+  font-weight: 600;
+  color: rgba(58, 58, 58, 0.8);
+  margin-bottom: 0.5rem;
+}
+
+.booking-day-picker,
+.booking-slot-picker {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.booking-day-picker__grid,
+.booking-slot-picker__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.booking-day-chip,
+.booking-slot-chip {
+  flex: 1 1 140px;
+  min-width: 140px;
+  padding: 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(209, 191, 167, 0.55);
+  background: rgba(233, 220, 208, 0.2);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-base), background var(--transition-base), color var(--transition-base);
+}
+
+.booking-day-chip:hover:not(.booking-day-chip--disabled),
+.booking-day-chip:focus-visible,
+.booking-slot-chip:hover:not(.booking-slot-chip--disabled),
+.booking-slot-chip:focus-visible {
+  border-color: var(--color-sage);
+  background: rgba(167, 199, 161, 0.16);
+  outline: none;
+}
+
+.booking-day-chip--active,
+.booking-slot-chip--active {
+  border-color: var(--color-sage);
+  background: rgba(167, 199, 161, 0.18);
+}
+
+.booking-day-chip--disabled,
+.booking-slot-chip--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.booking-day-chip__label,
+.booking-slot-chip__label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.booking-day-chip__meta,
+.booking-slot-chip__meta {
+  display: block;
+  font-size: 0.85rem;
+  color: rgba(58, 58, 58, 0.65);
+}
+
+.booking-day-chip__meta--warning,
+.booking-slot-chip__meta--warning {
   color: #b2453b;
 }
 
