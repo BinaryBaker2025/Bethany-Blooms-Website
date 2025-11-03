@@ -43,6 +43,7 @@ const INITIAL_WORKSHOP_FORM = {
   careInfo: "",
   whyPeopleLove: "",
   ctaNote: "",
+  sessions: [],
 };
 
 const IconPlus = ({ title = "Add", ...props }) => (
@@ -141,6 +142,56 @@ const IconCheck = ({ title = "Success", ...props }) => (
     <path d="M5 12.5l4.2 4.2L19 7" />
   </svg>
 );
+
+const DEFAULT_SLOT_CAPACITY = 10;
+
+const createEmptySession = () => ({
+  id: `session-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+  date: "",
+  time: "",
+  capacity: String(DEFAULT_SLOT_CAPACITY),
+  label: "",
+});
+
+const parseDateValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value?.toDate === "function") {
+    try {
+      const converted = value.toDate();
+      return Number.isNaN(converted.getTime()) ? null : converted;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object" && typeof value.seconds === "number") {
+    const converted = new Date(value.seconds * 1000);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+};
+
+const formatDateInput = (date) => date.toISOString().slice(0, 10);
+const formatTimeInput = (date) => date.toISOString().slice(11, 16);
+
+const combineDateAndTime = (dateInput, timeInput) => {
+  if (!dateInput) return null;
+  const base = new Date(dateInput);
+  if (Number.isNaN(base.getTime())) return null;
+  if (timeInput) {
+    const [hours, minutes] = timeInput.split(":").map(Number);
+    if (Number.isFinite(hours)) base.setHours(hours);
+    if (Number.isFinite(minutes)) base.setMinutes(minutes);
+    base.setSeconds(0, 0);
+  }
+  return base;
+};
 
 function AdminPage() {
   usePageMetadata({
@@ -248,7 +299,10 @@ function AdminPage() {
     setWorkshopStatus(null);
     setWorkshopSaving(false);
     setEditingWorkshopId(null);
-    setWorkshopForm(INITIAL_WORKSHOP_FORM);
+    setWorkshopForm({
+      ...INITIAL_WORKSHOP_FORM,
+      sessions: [createEmptySession()],
+    });
     if (workshopPreviewUrlRef.current) {
       URL.revokeObjectURL(workshopPreviewUrlRef.current);
       workshopPreviewUrlRef.current = null;
@@ -323,6 +377,39 @@ function AdminPage() {
     }
   };
 
+  const handleAddWorkshopSession = () => {
+    setWorkshopForm((prev) => {
+      const current = Array.isArray(prev.sessions) ? prev.sessions : [];
+      return {
+        ...prev,
+        sessions: [...current, createEmptySession()],
+      };
+    });
+  };
+
+  const handleWorkshopSessionChange = (sessionId, field, value) => {
+    setWorkshopForm((prev) => {
+      const current = Array.isArray(prev.sessions) ? prev.sessions : [];
+      return {
+        ...prev,
+        sessions: current.map((session) =>
+          session.id === sessionId ? { ...session, [field]: value } : session,
+        ),
+      };
+    });
+  };
+
+  const handleRemoveWorkshopSession = (sessionId) => {
+    setWorkshopForm((prev) => {
+      const current = Array.isArray(prev.sessions) ? prev.sessions : [];
+      const nextSessions = current.filter((session) => session.id !== sessionId);
+      return {
+        ...prev,
+        sessions: nextSessions.length > 0 ? nextSessions : [createEmptySession()],
+      };
+    });
+  };
+
   const handleEditProduct = (product) => {
     setProductError(null);
     setProductStatus(null);
@@ -380,6 +467,75 @@ function AdminPage() {
       careInfo: workshop.careInfo || "",
       whyPeopleLove: workshop.whyPeopleLove || "",
       ctaNote: workshop.ctaNote || "",
+      sessions: (() => {
+        const rawSessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
+        const mapped = rawSessions
+          .map((entry, index) => {
+            const baseId = entry.id || `session-${index}-${workshop.id}`;
+            const label = entry.label || entry.name || "";
+            const capacityValue =
+              entry.capacity === undefined || entry.capacity === null || entry.capacity === ""
+                ? String(DEFAULT_SLOT_CAPACITY)
+                : String(entry.capacity);
+
+            let date = "";
+            let time = "";
+
+            if (entry.date) {
+              date = entry.date;
+            }
+            if (entry.time) {
+              time = entry.time;
+            }
+
+            const startCandidate = entry.start ?? entry.startTime ?? entry.startDate ?? entry.datetime ?? entry.dateTime;
+            const parsedStart = parseDateValue(startCandidate);
+            if (parsedStart && (!date || !time)) {
+              const parsedIsoDate = formatDateInput(parsedStart);
+              const parsedIsoTime = formatTimeInput(parsedStart);
+              if (!date) date = parsedIsoDate;
+              if (!time) time = parsedIsoTime;
+            }
+
+            if (!date && workshop.scheduledFor) {
+              const fallbackDate = parseDateValue(workshop.scheduledFor);
+              if (fallbackDate) {
+                date = formatDateInput(fallbackDate);
+                time = formatTimeInput(fallbackDate);
+              }
+            }
+
+            const sessionPayload = {
+              id: baseId,
+              date,
+              time,
+              capacity: capacityValue,
+              label,
+            };
+            if (!sessionPayload.capacity) {
+              sessionPayload.capacity = String(DEFAULT_SLOT_CAPACITY);
+            }
+            return sessionPayload;
+          })
+          .filter((entry) => entry);
+
+        if (mapped.length > 0) {
+          return mapped;
+        }
+
+        const fallback = parseDateValue(workshop.scheduledFor);
+        if (fallback) {
+          return [
+            {
+              ...createEmptySession(),
+              date: formatDateInput(fallback),
+              time: formatTimeInput(fallback),
+            },
+          ];
+        }
+
+        return [createEmptySession()];
+      })(),
     });
     if (workshopPreviewUrlRef.current) {
       URL.revokeObjectURL(workshopPreviewUrlRef.current);
@@ -510,10 +666,35 @@ function AdminPage() {
     event.preventDefault();
     setAuthError(null);
     try {
-      await signIn(loginForm.email, loginForm.password);
+      const email = loginForm.email.trim();
+      const password = loginForm.password;
+      if (!email || !password) {
+        setAuthError("Please enter both email and password.");
+        return;
+      }
+      await signIn(email, password);
       setLoginForm({ email: "", password: "" });
     } catch (error) {
-      setAuthError(error.message);
+      const errorMessage = (() => {
+        const code = error.code || error.message || "";
+        if (code.includes("auth/invalid-credential") || code.includes("auth/wrong-password")) {
+          return "The email or password is incorrect. Double-check and try again.";
+        }
+        if (code.includes("auth/user-not-found")) {
+          return "No admin account exists for that email address.";
+        }
+        if (code.includes("auth/user-disabled")) {
+          return "This account has been disabled. Contact the site owner for help.";
+        }
+        if (code.includes("auth/too-many-requests")) {
+          return "Too many login attempts. Please wait a moment and try again.";
+        }
+        if (code.includes("auth/operation-not-allowed")) {
+          return "Email/password sign-in is disabled in Firebase Authentication.";
+        }
+        return error.message || "We couldn’t sign you in. Please try again.";
+      })();
+      setAuthError(errorMessage);
     }
   };
 
@@ -626,24 +807,45 @@ function AdminPage() {
       return;
     }
 
-    const scheduleInput = workshopForm.scheduledFor.trim();
-    if (!scheduleInput) {
-      setWorkshopError("Please provide a workshop date and time.");
-      return;
-    }
-
-    const parsedDate = new Date(scheduleInput);
-    if (Number.isNaN(parsedDate.getTime())) {
-      setWorkshopError("Workshop date must be a valid date/time.");
-      return;
-    }
-
     const priceNumber = Number(workshopForm.price);
     const priceValue = Number.isFinite(priceNumber) ? priceNumber : workshopForm.price.trim();
     if (!workshopImageFile && !workshopForm.image.trim()) {
       setWorkshopError("Please upload a workshop image.");
       return;
     }
+
+    const sanitizedSessions = (workshopForm.sessions || [])
+      .map((session) => {
+        const dateValue = session.date?.trim();
+        const timeValue = session.time?.trim();
+        if (!dateValue || !timeValue) {
+          return null;
+        }
+        const combinedDate = combineDateAndTime(dateValue, timeValue);
+        if (!combinedDate) {
+          return null;
+        }
+        const labelValue = session.label?.trim();
+        const capacityValueRaw = session.capacity?.trim?.() ?? String(DEFAULT_SLOT_CAPACITY);
+        const capacityNumber = Number(capacityValueRaw || DEFAULT_SLOT_CAPACITY);
+        const sessionId = session.id || `session-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+        return {
+          id: sessionId,
+          start: combinedDate.toISOString(),
+          date: dateValue,
+          time: timeValue,
+          label: labelValue || bookingDateFormatter.format(combinedDate),
+          capacity: Number.isFinite(capacityNumber) && capacityNumber > 0 ? capacityNumber : DEFAULT_SLOT_CAPACITY,
+        };
+      })
+      .filter(Boolean);
+
+    if (sanitizedSessions.length === 0) {
+      setWorkshopError("Please add at least one date and time slot for this workshop.");
+      return;
+    }
+
+    const primarySession = sanitizedSessions[0];
 
     try {
       setStatusMessage(editingWorkshopId ? "Updating workshop…" : "Saving workshop…");
@@ -658,7 +860,8 @@ function AdminPage() {
       const basePayload = {
         title,
         description: workshopForm.description.trim(),
-        scheduledFor: parsedDate.toISOString(),
+        scheduledFor: primarySession.start,
+        primarySessionId: primarySession.id,
         price: priceValue,
         location: workshopForm.location.trim(),
         image: imageUrl,
@@ -671,6 +874,7 @@ function AdminPage() {
         careInfo: workshopForm.careInfo.trim(),
         whyPeopleLove: workshopForm.whyPeopleLove.trim(),
         ctaNote: workshopForm.ctaNote.trim(),
+        sessions: sanitizedSessions,
       };
 
       let successMessage;
@@ -1187,8 +1391,11 @@ function AdminPage() {
                                         {item.metadata?.type === "workshop" && (
                                           <>
                                             <span className="modal__meta">
-                                              {item.metadata.scheduledDateLabel || "Date TBC"} · {item.metadata.attendeeCount} attendee(s)
+                                              {item.metadata.sessionLabel || item.metadata.scheduledDateLabel || "Date TBC"} · {item.metadata.attendeeCount} attendee(s)
                                             </span>
+                                            {item.metadata.sessionTime && (
+                                              <span className="modal__meta">Time: {item.metadata.sessionTime}</span>
+                                            )}
                                             {item.metadata.framePreference && (
                                               <span className="modal__meta">
                                                 Frame: {item.metadata.framePreference}
@@ -1198,6 +1405,14 @@ function AdminPage() {
                                               <span className="modal__meta">
                                                 R{item.metadata.perAttendeePrice.toFixed(2)} per attendee
                                               </span>
+                                            )}
+                                            {typeof item.metadata.sessionCapacity === "number" && (
+                                              <span className="modal__meta">
+                                                Session capacity: {item.metadata.sessionCapacity}
+                                              </span>
+                                            )}
+                                            {item.metadata.location && (
+                                              <span className="modal__meta">Location: {item.metadata.location}</span>
                                             )}
                                           </>
                                         )}
@@ -1355,14 +1570,92 @@ function AdminPage() {
                       onChange={(event) => setWorkshopForm((prev) => ({ ...prev, title: event.target.value }))}
                       required
                     />
-                    <input
-                      className="input"
-                      type="datetime-local"
-                      placeholder="Scheduled for"
-                      value={workshopForm.scheduledFor}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, scheduledFor: event.target.value }))}
-                      required
-                    />
+                    <div className="admin-session-panel">
+                      <div className="admin-session-panel__header">
+                        <h4>Workshop Sessions</h4>
+                        <button
+                          className="icon-btn"
+                          type="button"
+                          onClick={handleAddWorkshopSession}
+                          aria-label="Add session"
+                        >
+                          <IconPlus aria-hidden="true" />
+                        </button>
+                      </div>
+                      <p className="admin-panel__note">
+                        Add each date and time slot available for this workshop. These options appear for customers when booking.
+                      </p>
+                      {(workshopForm.sessions || []).map((session, index) => (
+                        <div className="admin-session-row" key={session.id}>
+                          <div className="admin-session-field">
+                            <label className="admin-session-label" htmlFor={`session-date-${session.id}`}>
+                              Date
+                            </label>
+                            <input
+                              className="input"
+                              type="date"
+                              id={`session-date-${session.id}`}
+                              value={session.date || ""}
+                              onChange={(event) =>
+                                handleWorkshopSessionChange(session.id, "date", event.target.value)
+                              }
+                            />
+                          </div>
+                          <div className="admin-session-field">
+                            <label className="admin-session-label" htmlFor={`session-time-${session.id}`}>
+                              Time
+                            </label>
+                            <input
+                              className="input"
+                              type="time"
+                              id={`session-time-${session.id}`}
+                              value={session.time || ""}
+                              onChange={(event) =>
+                                handleWorkshopSessionChange(session.id, "time", event.target.value)
+                              }
+                            />
+                          </div>
+                          <div className="admin-session-field">
+                            <label className="admin-session-label" htmlFor={`session-capacity-${session.id}`}>
+                              Capacity (optional)
+                            </label>
+                            <input
+                              className="input"
+                              type="number"
+                              min="1"
+                              id={`session-capacity-${session.id}`}
+                              value={session.capacity || ""}
+                              onChange={(event) =>
+                                handleWorkshopSessionChange(session.id, "capacity", event.target.value)
+                              }
+                              placeholder="Max guests"
+                            />
+                          </div>
+                          <div className="admin-session-field admin-session-field--label">
+                            <label className="admin-session-label" htmlFor={`session-label-${session.id}`}>
+                              Label (optional)
+                            </label>
+                            <input
+                              className="input"
+                              id={`session-label-${session.id}`}
+                              value={session.label || ""}
+                              onChange={(event) =>
+                                handleWorkshopSessionChange(session.id, "label", event.target.value)
+                              }
+                              placeholder="Evening session, Mother's Day, etc."
+                            />
+                          </div>
+                          <button
+                            className="icon-btn icon-btn--danger admin-session-remove"
+                            type="button"
+                            onClick={() => handleRemoveWorkshopSession(session.id)}
+                            aria-label={`Remove session ${index + 1}`}
+                          >
+                            <IconTrash aria-hidden="true" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                     <input
                       className="input"
                       placeholder="Price (numbers or text)"

@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 
-function Reveal({ as: Component = "div", className = "", children, delay = 0, ...rest }) {
+function Reveal({ as = "div", className = "", children, delay = 0, ...rest }) {
   const ref = useRef(null);
+  const Tag = as;
 
   useEffect(() => {
     const element = ref.current;
@@ -30,9 +31,9 @@ function Reveal({ as: Component = "div", className = "", children, delay = 0, ..
   }, [delay]);
 
   return (
-    <Component ref={ref} className={`fade-in ${className}`.trim()} {...rest}>
+    <Tag ref={ref} className={`fade-in ${className}`.trim()} {...rest}>
       {children}
-    </Component>
+    </Tag>
   );
 }
 

@@ -48,6 +48,7 @@ const WORKSHOP_SEED = [
     description:
       "Craft a framed pressed-flower artwork alongside guided prayer and seasonal refreshments in our Vereeniging studio.",
     scheduledFor: "2025-08-02T10:00:00+02:00",
+    primarySessionId: "session-aug02-morning",
     price: 650,
     location: "Vereeniging Studio",
     whatToExpect:
@@ -64,6 +65,24 @@ const WORKSHOP_SEED = [
     whyPeopleLove:
       "More than just an art class—it’s a chance to pause, connect, and make something meaningful with your own hands.",
     ctaNote: "Book today to reserve your seat!",
+    sessions: [
+      {
+        id: "session-aug02-morning",
+        label: "Saturday 2 August · 10:00",
+        start: "2025-08-02T10:00:00+02:00",
+        date: "2025-08-02",
+        time: "10:00",
+        capacity: 14,
+      },
+      {
+        id: "session-aug02-afternoon",
+        label: "Saturday 2 August · 14:30",
+        start: "2025-08-02T14:30:00+02:00",
+        date: "2025-08-02",
+        time: "14:30",
+        capacity: 14,
+      },
+    ],
   },
   {
     id: "workshop-sep-13",
@@ -71,6 +90,7 @@ const WORKSHOP_SEED = [
     description:
       "Learn to press, preserve, and journal with blooms while creating keepsake spreads for your devotional practice.",
     scheduledFor: "2025-09-13T10:00:00+02:00",
+    primarySessionId: "session-sep13-morning",
     price: 550,
     location: "Vereeniging Studio",
     whatToExpect:
@@ -85,6 +105,24 @@ const WORKSHOP_SEED = [
     whyPeopleLove:
       "A restorative space to blend creativity and faith while crafting keepsakes you’ll revisit often.",
     ctaNote: "Reserve your journal seat today!",
+    sessions: [
+      {
+        id: "session-sep13-morning",
+        label: "Saturday 13 September · 10:00",
+        start: "2025-09-13T10:00:00+02:00",
+        date: "2025-09-13",
+        time: "10:00",
+        capacity: 12,
+      },
+      {
+        id: "session-sep14-evening",
+        label: "Sunday 14 September · 17:00",
+        start: "2025-09-14T17:00:00+02:00",
+        date: "2025-09-14",
+        time: "17:00",
+        capacity: 12,
+      },
+    ],
   },
 ];
 

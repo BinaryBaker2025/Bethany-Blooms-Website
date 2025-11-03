@@ -15,11 +15,7 @@ function ProductsPage() {
 
   const { addItem } = useCart();
   const { openCart } = useModal();
-  const {
-    items: remoteProducts,
-    status,
-    isFallback,
-  } = useFirestoreCollection("products", {
+  const { items: remoteProducts, status } = useFirestoreCollection("products", {
     orderByField: "createdAt",
     orderDirection: "desc",
   });
@@ -117,10 +113,7 @@ function ProductsPage() {
           {status === "loading" && <p className="empty-state">Loading products…</p>}
           {status === "empty" && <p className="empty-state">No products available yet. Check back soon!</p>}
           {status === "error" && (
-            <p className="empty-state">We couldn’t load products from the server. Showing sample data if available.</p>
-          )}
-          {isFallback && normalizedProducts.length > 0 && status !== "loading" && (
-            <p className="empty-state">Showing locally seeded products while we fetch the live collection.</p>
+            <p className="empty-state">We couldn’t load products from the server. Please refresh to try again.</p>
           )}
         </div>
       </section>

@@ -18,11 +18,7 @@ function WorkshopsPage() {
     timeStyle: "short",
   });
 
-  const {
-    items: remoteWorkshops,
-    status,
-    isFallback,
-  } = useFirestoreCollection("workshops", {
+  const { items: remoteWorkshops, status } = useFirestoreCollection("workshops", {
     orderByField: "scheduledFor",
     orderDirection: "asc",
   });
@@ -108,10 +104,7 @@ function WorkshopsPage() {
           {status === "loading" && <p className="empty-state">Loading workshop schedule…</p>}
           {status === "empty" && <p className="empty-state">No workshops scheduled just yet.</p>}
           {status === "error" && (
-            <p className="empty-state">We couldn’t load workshops right now. Showing placeholder details.</p>
-          )}
-          {isFallback && status !== "loading" && (
-            <p className="empty-state">Displaying sample workshops until the live schedule is ready.</p>
+            <p className="empty-state">We couldn’t load workshops right now. Please refresh to try again.</p>
           )}
         </div>
       </section>

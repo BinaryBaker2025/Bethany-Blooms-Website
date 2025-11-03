@@ -27,8 +27,16 @@ function BookingModal() {
   const [formState, setFormState] = useState(INITIAL_BOOKING_FORM);
   const [formStatus, setFormStatus] = useState("idle");
   const [submitError, setSubmitError] = useState(null);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
 
   const workshop = bookingContext?.workshop ?? null;
+  const sessions = useMemo(
+    () => (Array.isArray(workshop?.sessions) ? workshop.sessions : []),
+    [workshop],
+  );
+  const hasActiveSession = sessions.some((session) => !session.isPast);
+  const selectedSession =
+    sessions.find((session) => session.id === selectedSessionId) ?? null;
 
   const frameOptions = useMemo(() => {
     if (Array.isArray(workshop?.frameOptions) && workshop.frameOptions.length > 0) {
@@ -60,6 +68,7 @@ function BookingModal() {
       setFormState(INITIAL_BOOKING_FORM);
       setFormStatus("idle");
       setSubmitError(null);
+      setSelectedSessionId(null);
       return;
     }
 
@@ -74,6 +83,20 @@ function BookingModal() {
       frameOptions[0]?.value ??
       INITIAL_BOOKING_FORM.framePreference;
 
+    const preferredSessionIds = [
+      bookingContext?.sessionId,
+      bookingContext?.session?.id,
+      workshop?.primarySessionId,
+    ].filter((value) => typeof value === "string" && value.length > 0);
+    const resolvedPreferredId =
+      preferredSessionIds.find((sessionId) => sessions.some((session) => session.id === sessionId)) ?? null;
+    const hasAnyActive = sessions.some((session) => !session.isPast);
+    const preferredSession =
+      resolvedPreferredId ? sessions.find((session) => session.id === resolvedPreferredId) : null;
+    const normalizedPreferredId =
+      preferredSession && (!preferredSession.isPast || !hasAnyActive) ? preferredSession.id : null;
+    const fallbackSession = sessions.find((session) => !session.isPast) ?? sessions[0] ?? null;
+
     setFormState({
       fullName: customer.fullName ?? "",
       email: customer.email ?? "",
@@ -83,9 +106,10 @@ function BookingModal() {
       framePreference: defaultFrameValue,
       notes: bookingContext?.notes ?? "",
     });
+    setSelectedSessionId(normalizedPreferredId ?? fallbackSession?.id ?? null);
     setFormStatus("idle");
     setSubmitError(null);
-  }, [isBookingOpen, bookingContext, frameOptions]);
+  }, [isBookingOpen, bookingContext, frameOptions, sessions, workshop]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -129,7 +153,29 @@ function BookingModal() {
     setSubmitError(null);
 
     if (!workshop) {
+      setFormStatus("error");
       setSubmitError("We couldn’t load the workshop details. Please close and try again.");
+      return;
+    }
+
+    if (sessions.length === 0) {
+      setFormStatus("error");
+      setSubmitError("This workshop is not currently accepting bookings. Please check back soon.");
+      return;
+    }
+
+    const effectiveSession =
+      selectedSession ??
+      (sessions.length === 1 ? sessions[0] : null);
+    if (!effectiveSession) {
+      setFormStatus("error");
+      setSubmitError("Please choose a session before continuing.");
+      return;
+    }
+
+    if (effectiveSession.isPast) {
+      setFormStatus("error");
+      setSubmitError("This session has already passed. Please choose another available date.");
       return;
     }
 
@@ -143,6 +189,7 @@ function BookingModal() {
 
     const missing = REQUIRED_FIELDS.filter((field) => !trimmed[field]);
     if (missing.length > 0) {
+      setFormStatus("error");
       setSubmitError("Please complete all contact fields before continuing.");
       return;
     }
@@ -158,7 +205,7 @@ function BookingModal() {
       frameOptions[0]?.value ??
       INITIAL_BOOKING_FORM.framePreference;
 
-    const cartItemId = `workshop-${workshop.id}-${Date.now()}`;
+    const cartItemId = `workshop-${workshop.id}-${effectiveSession.id}-${Date.now()}`;
 
     addItem({
       id: cartItemId,
@@ -169,13 +216,30 @@ function BookingModal() {
         type: "workshop",
         workshopId: workshop.id,
         workshopTitle: workshop.title,
-        scheduledFor: workshop.scheduledFor ?? null,
-        scheduledDateLabel: workshop.scheduledDateLabel ?? null,
+        scheduledFor: effectiveSession.start ?? workshop.scheduledFor ?? null,
+        scheduledDateLabel: effectiveSession.formatted ?? workshop.scheduledDateLabel ?? null,
         location: workshop.location ?? null,
         attendeeCount: attendeeCountNumber,
         framePreference,
         perAttendeePrice,
         notes: trimmed.notes,
+        sessionId: effectiveSession.id,
+        sessionLabel: effectiveSession.label ?? effectiveSession.formatted,
+        sessionStart: effectiveSession.start ?? null,
+        sessionDate: effectiveSession.date ?? null,
+        sessionTime: effectiveSession.time ?? null,
+        sessionCapacity:
+          typeof effectiveSession.capacity === "number" ? effectiveSession.capacity : null,
+        session: {
+          id: effectiveSession.id,
+          label: effectiveSession.label ?? null,
+          formatted: effectiveSession.formatted,
+          start: effectiveSession.start ?? null,
+          date: effectiveSession.date ?? null,
+          time: effectiveSession.time ?? null,
+          capacity:
+            typeof effectiveSession.capacity === "number" ? effectiveSession.capacity : null,
+        },
         customer: {
           fullName: trimmed.fullName,
           email: trimmed.email,
@@ -192,6 +256,18 @@ function BookingModal() {
   };
 
   const isSubmitting = formStatus === "submitting";
+  const isAddDisabled =
+    isSubmitting ||
+    !workshop ||
+    sessions.length === 0 ||
+    (selectedSession?.isPast && hasActiveSession);
+  const submitLabel = (() => {
+    if (isSubmitting) return "Adding to cart…";
+    if (!workshop) return "Add to Cart";
+    if (sessions.length === 0) return "No Sessions Available";
+    if (selectedSession?.isPast && hasActiveSession) return "Select Available Session";
+    return "Add to Cart";
+  })();
 
   return (
     <div
@@ -223,13 +299,67 @@ function BookingModal() {
               <strong>{workshop.title}</strong>
             </p>
             <p className="modal__meta">
-              {workshop.scheduledDateLabel || "Date to be confirmed"} · {workshop.location || "Vereeniging Studio"}
+              {selectedSession?.formatted || workshop.scheduledDateLabel || "Date to be confirmed"}
+              {workshop.location ? ` · ${workshop.location}` : ""}
             </p>
+            {selectedSession?.capacity && (
+              <p className="modal__meta">
+                {selectedSession.capacity} seat{selectedSession.capacity === 1 ? "" : "s"} available
+              </p>
+            )}
+            {sessions.length === 0 && (
+              <p className="booking-summary__warning">
+                No upcoming sessions have been scheduled yet. Please contact the studio for availability.
+              </p>
+            )}
+            {!hasActiveSession && sessions.length > 0 && (
+              <p className="booking-summary__warning">
+                All listed sessions have passed. New dates will be added soon.
+              </p>
+            )}
           </div>
         ) : (
           <p className="empty-state">Workshop details unavailable. Close the dialog and try again.</p>
         )}
         <form className="booking-grid" onSubmit={handleSubmit} noValidate>
+          {sessions.length > 0 && (
+            <div className="booking-grid__full">
+              <label htmlFor="booking-session">Session</label>
+              <select
+                className="input"
+                id="booking-session"
+                value={selectedSessionId ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSelectedSessionId(value || null);
+                }}
+              >
+                {selectedSessionId === null && <option value="" disabled>Select a session</option>}
+                {sessions.map((session) => {
+                  const disabled = session.isPast && hasActiveSession;
+                  return (
+                    <option key={session.id} value={session.id} disabled={disabled}>
+                      {session.formatted}
+                      {session.capacity
+                        ? ` — ${session.capacity} seat${session.capacity === 1 ? "" : "s"}`
+                        : ""}
+                      {session.isPast ? " (Past session)" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              {selectedSession?.isPast && (
+                <p className="form-feedback__message form-feedback__message--warning">
+                  This session has already passed. Please choose another available date.
+                </p>
+              )}
+            </div>
+          )}
+          {sessions.length === 0 && (
+            <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
+              Booking isn’t available until new dates are scheduled.
+            </p>
+          )}
           <div>
             <label htmlFor="guest-fullName">Full Name</label>
             <input
@@ -336,8 +466,8 @@ function BookingModal() {
               <p className="form-feedback__message form-feedback__message--error">{submitError}</p>
             </div>
           )}
-          <button className="btn btn--primary booking-grid__full" type="submit" disabled={isSubmitting || !workshop}>
-            {isSubmitting ? "Adding to cart…" : "Add to Cart"}
+          <button className="btn btn--primary booking-grid__full" type="submit" disabled={isAddDisabled}>
+            {submitLabel}
           </button>
         </form>
       </div>

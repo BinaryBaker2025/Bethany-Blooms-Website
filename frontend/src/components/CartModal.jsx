@@ -162,14 +162,25 @@ function CartModal() {
                         <strong>Workshop:</strong> {item.metadata.workshopTitle}
                       </p>
                       <p>
-                        <strong>Date:</strong> {item.metadata.scheduledDateLabel || "TBC"}
+                        <strong>When:</strong>{" "}
+                        {item.metadata.sessionLabel || item.metadata.scheduledDateLabel || "Date to be confirmed"}
                       </p>
+                      {item.metadata.sessionTime && (
+                        <p>
+                          <strong>Time:</strong> {item.metadata.sessionTime}
+                        </p>
+                      )}
                       <p>
                         <strong>Location:</strong> {item.metadata.location || "Vereeniging Studio"}
                       </p>
                       <p>
                         <strong>Attendees:</strong> {item.metadata.attendeeCount}
                       </p>
+                      {typeof item.metadata.sessionCapacity === "number" && (
+                        <p>
+                          <strong>Session Capacity:</strong> {item.metadata.sessionCapacity}
+                        </p>
+                      )}
                       {typeof item.metadata.perAttendeePrice === "number" && (
                         <p>
                           <strong>Per Attendee:</strong> R{item.metadata.perAttendeePrice.toFixed(2)}
