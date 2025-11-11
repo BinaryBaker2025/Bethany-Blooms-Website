@@ -4,7 +4,7 @@ import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
-import heroBackground from "../assets/hero-flowers.svg";
+import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 
 function ProductsPage() {
   usePageMetadata({

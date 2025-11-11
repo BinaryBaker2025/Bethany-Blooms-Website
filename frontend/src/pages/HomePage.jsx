@@ -6,7 +6,11 @@ import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
-import heroBackground from "../assets/hero-flowers.svg";
+import heroBackground from "../assets/photos/workshop-banner.jpg";
+import homePhotoOne from "../assets/photos/workshop-frame-hand-pink.jpeg";
+import homePhotoTwo from "../assets/photos/workshop-frame-hand-neutral.jpeg";
+import homePhotoThree from "../assets/photos/workshop-flowers-trays.jpg";
+import homePhotoFour from "../assets/photos/workshop-table-long.jpg";
 import { testimonials } from "../data/testimonials.js";
 
 function HomePage() {
@@ -45,7 +49,7 @@ function HomePage() {
 
   const featuredProducts = normalizedProducts.slice(0, 4);
 
-  const heroProductImage = featuredProducts[0]?.image || heroBackground;
+  const heroHeroImage = homePhotoFour;
 
   const handleAddToCart = (product) => {
     if (!product.isPurchasable || !product.numericPrice) {
@@ -63,7 +67,7 @@ function HomePage() {
           <Hero
             variant="home"
             background={heroBackground}
-            media={<img src={heroProductImage} alt="Pressed flower artwork from Bethany Blooms" />}
+            media={<img src={heroHeroImage} alt="Bethany Blooms workshop experience" />}
           >
             <h1>Pressed Flower Art & Workshops, Made Simple 🌸</h1>
             <p>
@@ -83,6 +87,28 @@ function HomePage() {
               </Reveal>
             </div>
           </Hero>
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="section__inner">
+          <Reveal as="div">
+            <span className="badge">Inside the Studio</span>
+            <h2>Where Memories Take Shape</h2>
+            <p>Every workshop blends joyful community with colourful blooms. Here’s a peek at recent sessions.</p>
+          </Reveal>
+          <div className="home-photo-grid">
+            {[
+              { src: homePhotoOne, alt: "Pressed floral frame with pink blooms held outside" },
+              { src: homePhotoTwo, alt: "Pressed floral art in soft neutral tones" },
+              { src: homePhotoThree, alt: "Colourful trays of dried flowers ready for a workshop" },
+              { src: homePhotoFour, alt: "Long Bethany Blooms workshop table styled with blooms" },
+            ].map((item, index) => (
+              <Reveal as="figure" className="home-photo-grid__item" key={item.src} delay={index * 90}>
+                <img src={item.src} alt={item.alt} />
+              </Reveal>
+            ))}
+          </div>
         </div>
       </section>
 

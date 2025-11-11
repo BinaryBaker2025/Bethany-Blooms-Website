@@ -35,15 +35,6 @@ function Header() {
             height="60"
           />
         </NavLink>
-        <button
-          className="menu-toggle"
-          type="button"
-          onClick={() => setMenuOpen((prev) => !prev)}
-          aria-expanded={menuOpen ? "true" : "false"}
-          aria-controls="mobile-navigation"
-        >
-          Menu
-        </button>
         <div
           id="mobile-navigation"
           className={`nav__links ${menuOpen ? "is-open" : ""}`}
@@ -71,6 +62,16 @@ function Header() {
             <span className="cart-count" aria-live="polite">
               {totalCount}
             </span>
+          </button>
+          <button
+            className={`menu-toggle ${menuOpen ? "is-open" : ""}`}
+            type="button"
+            onClick={() => setMenuOpen((prev) => !prev)}
+            aria-expanded={menuOpen ? "true" : "false"}
+            aria-controls="mobile-navigation"
+          >
+            <span className="sr-only">Toggle navigation</span>
+            <span className="menu-toggle__icon" aria-hidden="true"></span>
           </button>
         </div>
       </nav>

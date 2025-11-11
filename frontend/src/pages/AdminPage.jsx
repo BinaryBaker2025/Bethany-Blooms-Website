@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   addDoc,
   collection,
   deleteDoc,
   doc,
-  onSnapshot,
-  orderBy,
-  query,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
+import { useAdminData } from "../context/AdminDataContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { getFirebaseDb, getFirebaseStorage } from "../lib/firebase.js";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { seedSampleData } from "../lib/seedData.js";
-import heroBackground from "../assets/hero-flowers.svg";
 
 const INITIAL_PRODUCT_FORM = {
   name: "",
@@ -25,7 +21,7 @@ const INITIAL_PRODUCT_FORM = {
   description: "",
   price: "",
   image: "",
-  category: "kit",
+  category: "product",
 };
 
 const INITIAL_WORKSHOP_FORM = {
@@ -45,6 +41,24 @@ const INITIAL_WORKSHOP_FORM = {
   ctaNote: "",
   sessions: [],
 };
+
+const DEFAULT_SLOT_CAPACITY = 10;
+const ORDER_STATUSES = [
+  "pending",
+  "processing",
+  "ready",
+  "fulfilled",
+  "cancelled",
+];
+const bookingDateFormatter = new Intl.DateTimeFormat("en-ZA", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+const moneyFormatter = new Intl.NumberFormat("en-ZA", {
+  style: "currency",
+  currency: "ZAR",
+  maximumFractionDigits: 2,
+});
 
 const IconPlus = ({ title = "Add", ...props }) => (
   <svg
@@ -143,8 +157,6 @@ const IconCheck = ({ title = "Success", ...props }) => (
   </svg>
 );
 
-const DEFAULT_SLOT_CAPACITY = 10;
-
 const createEmptySession = () => ({
   id: `session-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
   date: "",
@@ -193,138 +205,344 @@ const combineDateAndTime = (dateInput, timeInput) => {
   return base;
 };
 
-function AdminPage() {
-  usePageMetadata({
-    title: "Bethany Blooms Admin",
-    description: "Manage shop products, workshop listings, and bookings with Firebase-backed tools.",
-  });
+const formatPriceLabel = (value) => {
+  if (value === undefined || value === null) return "—";
+  if (typeof value === "number") return moneyFormatter.format(value);
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return moneyFormatter.format(numeric);
+  return value;
+};
 
-  const { user, loading, initError, signIn, signOut, isAdmin, role, roleLoading } = useAuth();
-  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
-  const [authError, setAuthError] = useState(null);
-  const [statusMessage, setStatusMessage] = useState(null);
-  const [products, setProducts] = useState([]);
-  const [workshopsList, setWorkshopsList] = useState([]);
-  const [bookings, setBookings] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [inventoryError, setInventoryError] = useState(null);
-  const [inventoryLoading, setInventoryLoading] = useState(false);
-  const [productForm, setProductForm] = useState(INITIAL_PRODUCT_FORM);
-  const [workshopForm, setWorkshopForm] = useState(INITIAL_WORKSHOP_FORM);
+const getPrimarySession = (workshop) => {
+  if (!Array.isArray(workshop.sessions)) return null;
+  if (workshop.primarySessionId) {
+    return (
+      workshop.sessions.find(
+        (session) => session.id === workshop.primarySessionId
+      ) || null
+    );
+  }
+  return workshop.sessions[0] || null;
+};
+
+const getSessionLabel = (session) => {
+  if (!session) return "No session";
+  if (session.label) return session.label;
+  const dateTime = combineDateAndTime(session.date, session.time);
+  if (!dateTime) return session.time || "Session";
+  return bookingDateFormatter.format(dateTime);
+};
+
+function useUploadAsset(storage) {
+  return async function uploadAsset(file, folder) {
+    if (!storage) throw new Error("Firebase Storage is not configured.");
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "-");
+    const objectPath = `${folder}/${Date.now()}-${sanitizedName}`;
+    const storageRef = ref(storage, objectPath);
+    await uploadBytes(storageRef, file, { contentType: file.type });
+    return getDownloadURL(storageRef);
+  };
+}
+
+export function AdminDashboardView() {
+  usePageMetadata({
+    title: "Admin · Dashboard",
+    description:
+      "Quick stats for Bethany Blooms inventory, workshops, and orders.",
+  });
+  const { user } = useAuth();
+  const {
+    db,
+    products,
+    workshops,
+    bookings,
+    orders,
+    inventoryLoading,
+    inventoryError,
+  } = useAdminData();
   const [seedLoading, setSeedLoading] = useState(false);
-  const [seedError, setSeedError] = useState(null);
   const [seedStatus, setSeedStatus] = useState(null);
-  const [productStatus, setProductStatus] = useState(null);
-  const [workshopStatus, setWorkshopStatus] = useState(null);
-  const [productSaving, setProductSaving] = useState(false);
-  const [workshopSaving, setWorkshopSaving] = useState(false);
-  const [productError, setProductError] = useState(null);
-  const [workshopError, setWorkshopError] = useState(null);
-  const [isProductModalOpen, setProductModalOpen] = useState(false);
-  const [isWorkshopModalOpen, setWorkshopModalOpen] = useState(false);
+  const [seedError, setSeedError] = useState(null);
+
+  const stats = useMemo(() => {
+    const upcomingWorkshops = workshops.filter((workshop) => {
+      const primary = getPrimarySession(workshop);
+      if (!primary) return false;
+      const parsed =
+        combineDateAndTime(primary.date, primary.time) ||
+        parseDateValue(primary.start);
+      return parsed ? parsed >= new Date() : false;
+    }).length;
+
+    const confirmedBookings = bookings.length;
+    const openOrders = orders.filter(
+      (order) => order.status !== "fulfilled" && order.status !== "cancelled"
+    ).length;
+    const totalProducts = products.length;
+
+    return [
+      {
+        id: "products",
+        label: "Products",
+        value: totalProducts,
+        hint: "Live items",
+      },
+      {
+        id: "workshops",
+        label: "Workshops",
+        value: upcomingWorkshops,
+        hint: "Upcoming",
+      },
+      {
+        id: "bookings",
+        label: "Bookings",
+        value: confirmedBookings,
+        hint: "Latest 30 days",
+      },
+      {
+        id: "orders",
+        label: "Open Orders",
+        value: openOrders,
+        hint: "Needs attention",
+      },
+    ];
+  }, [bookings.length, orders, products.length, workshops]);
+
+  const quickLinks = [
+    {
+      to: "/admin/products",
+      title: "Products",
+      body: "Upload imagery & pricing",
+    },
+    {
+      to: "/admin/workshops",
+      title: "Workshops",
+      body: "Session slots & bookings",
+    },
+    { to: "/admin/orders", title: "Orders", body: "Manage payments" },
+    { to: "/admin/profile", title: "Profile", body: "Account & sign out" },
+  ];
+
+  const upcomingSessions = useMemo(() => {
+    const sessions = [];
+    workshops.forEach((workshop) => {
+      (workshop.sessions || []).forEach((session) => {
+        const parsed =
+          combineDateAndTime(session.date, session.time) ||
+          parseDateValue(session.start);
+        if (!parsed) return;
+        sessions.push({
+          id: `${workshop.id}-${session.id}`,
+          workshop,
+          session,
+          date: parsed,
+        });
+      });
+    });
+    return sessions
+      .filter((entry) => entry.date >= new Date())
+      .sort((a, b) => a.date - b.date)
+      .slice(0, 4);
+  }, [workshops]);
+
+  const recentOrders = useMemo(() => orders.slice(0, 4), [orders]);
+
+  const handleSeedData = async () => {
+    if (!db) {
+      setSeedError("Firebase is not configured. Add credentials in .env.");
+      return;
+    }
+    setSeedLoading(true);
+    setSeedStatus("Loading sample data…");
+    setSeedError(null);
+    try {
+      const { seededProducts, seededWorkshops } = await seedSampleData(db);
+      if (!seededProducts && !seededWorkshops) {
+        setSeedStatus("Sample data already present.");
+      } else {
+        setSeedStatus("Sample products & workshops added.");
+      }
+    } catch (error) {
+      setSeedError(error.message);
+      setSeedStatus(null);
+    } finally {
+      setSeedLoading(false);
+    }
+  };
+
+  return (
+    <div className="admin-dashboard">
+      <Reveal as="section" className="admin-panel">
+        <div className="admin-panel__header">
+          <div>
+            <h2>Hi {user?.email || "admin"}</h2>
+            <p className="admin-panel__note">
+              Monitor what is live before jumping into edits.
+            </p>
+          </div>
+          <div className="admin-panel__header-actions">
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={handleSeedData}
+              disabled={seedLoading}
+            >
+              <IconPlus className="btn__icon" aria-hidden="true" />
+              {seedLoading ? "Seeding…" : "Load Demo Data"}
+            </button>
+          </div>
+        </div>
+        <div className="admin-stats-grid">
+          {stats.map((stat) => (
+            <div key={stat.id} className="admin-stat-card">
+              <p className="admin-stat-card__label">{stat.label}</p>
+              <p className="admin-stat-card__value">{stat.value}</p>
+              <p className="admin-stat-card__hint">{stat.hint}</p>
+            </div>
+          ))}
+        </div>
+        {seedStatus && <p className="admin-panel__status">{seedStatus}</p>}
+        {seedError && <p className="admin-panel__error">{seedError}</p>}
+      </Reveal>
+
+      <Reveal as="section" className="admin-panel" delay={60}>
+        <h3>Quick Links</h3>
+        <div className="admin-quick-links">
+          {quickLinks.map((link) => (
+            <Link key={link.to} className="admin-quick-card" to={link.to}>
+              <span>{link.title}</span>
+              <p>{link.body}</p>
+            </Link>
+          ))}
+        </div>
+      </Reveal>
+
+      <div className="admin-panel__content admin-panel__content--split">
+        <Reveal as="section" className="admin-panel" delay={90}>
+          <div className="admin-panel__header">
+            <h3>Upcoming sessions</h3>
+            {inventoryLoading && (
+              <span className="badge badge--muted">Syncing…</span>
+            )}
+          </div>
+          {upcomingSessions.length > 0 ? (
+            <ul className="admin-panel__list">
+              {upcomingSessions.map((entry) => (
+                <li key={entry.id} className="admin-session-card">
+                  <p>
+                    <strong>{entry.workshop.title}</strong>
+                    <span className="modal__meta">
+                      {bookingDateFormatter.format(entry.date)}
+                    </span>
+                  </p>
+                  <p className="modal__meta">
+                    Capacity {entry.session.capacity || DEFAULT_SLOT_CAPACITY} ·{" "}
+                    {entry.workshop.location || "Studio"}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="admin-panel__notice">No sessions scheduled yet.</p>
+          )}
+        </Reveal>
+
+        <Reveal as="section" className="admin-panel" delay={120}>
+          <div className="admin-panel__header">
+            <h3>Recent orders</h3>
+            {inventoryLoading && (
+              <span className="badge badge--muted">Syncing…</span>
+            )}
+          </div>
+          {recentOrders.length > 0 ? (
+            <ul className="admin-panel__list">
+              {recentOrders.map((order) => (
+                <li key={order.id} className="admin-order-card">
+                  <div>
+                    <p>
+                      <strong>{order.customer?.fullName || "Guest"}</strong>
+                    </p>
+                    <p className="modal__meta">
+                      {order.customer?.email || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="modal__meta">
+                      {order.items?.length || 0} item(s)
+                    </p>
+                    <p className="modal__meta">
+                      {formatPriceLabel(order.totalPrice)}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="admin-panel__notice">No orders just yet.</p>
+          )}
+        </Reveal>
+      </div>
+
+      {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+    </div>
+  );
+}
+
+export function AdminProductsView() {
+  usePageMetadata({
+    title: "Admin · Products",
+    description: "Manage Bethany Blooms product listings stored in Firebase.",
+  });
+  const {
+    db,
+    storage,
+    products,
+    inventoryEnabled,
+    inventoryLoading,
+    inventoryError,
+  } = useAdminData();
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [productForm, setProductForm] = useState(INITIAL_PRODUCT_FORM);
   const [editingProductId, setEditingProductId] = useState(null);
-  const [editingWorkshopId, setEditingWorkshopId] = useState(null);
+  const [isProductModalOpen, setProductModalOpen] = useState(false);
   const [productImageFile, setProductImageFile] = useState(null);
   const [productImagePreview, setProductImagePreview] = useState("");
-  const [workshopImageFile, setWorkshopImageFile] = useState(null);
-  const [workshopImagePreview, setWorkshopImagePreview] = useState("");
+  const [productError, setProductError] = useState(null);
+  const [productSaving, setProductSaving] = useState(false);
   const productPreviewUrlRef = useRef(null);
-  const workshopPreviewUrlRef = useRef(null);
+  const uploadAsset = useUploadAsset(storage);
 
   useEffect(() => {
-    if (!productStatus) return undefined;
-    const timeout = setTimeout(() => setProductStatus(null), 4000);
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 3500);
     return () => clearTimeout(timeout);
-  }, [productStatus]);
+  }, [statusMessage]);
 
-  useEffect(() => {
-    if (!workshopStatus) return undefined;
-    const timeout = setTimeout(() => setWorkshopStatus(null), 4000);
-    return () => clearTimeout(timeout);
-  }, [workshopStatus]);
-
-  useEffect(() => () => {
-    if (productPreviewUrlRef.current) {
-      URL.revokeObjectURL(productPreviewUrlRef.current);
-    }
-  }, []);
-
-  useEffect(() => () => {
-    if (workshopPreviewUrlRef.current) {
-      URL.revokeObjectURL(workshopPreviewUrlRef.current);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (productImageFile) return;
-    setProductImagePreview(productForm.image ? productForm.image : "");
-  }, [productForm.image, productImageFile]);
-
-  useEffect(() => {
-    if (workshopImageFile) return;
-    setWorkshopImagePreview(workshopForm.image ? workshopForm.image : "");
-  }, [workshopForm.image, workshopImageFile]);
+  useEffect(
+    () => () => {
+      if (productPreviewUrlRef.current) {
+        URL.revokeObjectURL(productPreviewUrlRef.current);
+      }
+    },
+    []
+  );
 
   const openProductModal = () => {
-    setProductError(null);
-    setProductStatus(null);
-    setEditingProductId(null);
     setProductForm(INITIAL_PRODUCT_FORM);
-    if (productPreviewUrlRef.current) {
-      URL.revokeObjectURL(productPreviewUrlRef.current);
-      productPreviewUrlRef.current = null;
-    }
     setProductImageFile(null);
     setProductImagePreview("");
+    setEditingProductId(null);
+    setProductError(null);
     setProductModalOpen(true);
   };
 
   const closeProductModal = () => {
     setProductModalOpen(false);
-    setProductError(null);
-    setProductStatus(null);
-    setProductSaving(false);
-    setEditingProductId(null);
-    if (productPreviewUrlRef.current) {
-      URL.revokeObjectURL(productPreviewUrlRef.current);
-      productPreviewUrlRef.current = null;
-    }
     setProductImageFile(null);
     setProductImagePreview("");
-    setProductForm(INITIAL_PRODUCT_FORM);
-  };
-
-  const openWorkshopModal = () => {
-    setWorkshopError(null);
-    setWorkshopStatus(null);
-    setWorkshopSaving(false);
-    setEditingWorkshopId(null);
-    setWorkshopForm({
-      ...INITIAL_WORKSHOP_FORM,
-      sessions: [createEmptySession()],
-    });
-    if (workshopPreviewUrlRef.current) {
-      URL.revokeObjectURL(workshopPreviewUrlRef.current);
-      workshopPreviewUrlRef.current = null;
-    }
-    setWorkshopImageFile(null);
-    setWorkshopImagePreview("");
-    setWorkshopModalOpen(true);
-  };
-
-  const closeWorkshopModal = () => {
-    setWorkshopModalOpen(false);
-    setWorkshopError(null);
-    setWorkshopStatus(null);
-    setWorkshopSaving(false);
-    setEditingWorkshopId(null);
-    if (workshopPreviewUrlRef.current) {
-      URL.revokeObjectURL(workshopPreviewUrlRef.current);
-      workshopPreviewUrlRef.current = null;
-    }
-    setWorkshopImageFile(null);
-    setWorkshopImagePreview("");
-    setWorkshopForm(INITIAL_WORKSHOP_FORM);
+    setEditingProductId(null);
+    setProductError(null);
+    setProductSaving(false);
   };
 
   const handleProductImageChange = (event) => {
@@ -334,12 +552,9 @@ function AdminPage() {
       productPreviewUrlRef.current = null;
     }
     if (file) {
-      setProductError(null);
       if (file.size > 3 * 1024 * 1024) {
         setProductError("Please choose an image smaller than 3MB.");
         event.target.value = "";
-        setProductImageFile(null);
-        setProductImagePreview(productForm.image || "");
         return;
       }
       const preview = URL.createObjectURL(file);
@@ -352,6 +567,397 @@ function AdminPage() {
     }
   };
 
+  const handleEditProduct = (product) => {
+    setProductForm({
+      name: product.name || product.title || "",
+      title: product.title || "",
+      description: product.description || "",
+      price:
+        product.price === undefined || product.price === null
+          ? ""
+          : String(product.price),
+      image: product.image || "",
+      category: product.category || "product",
+    });
+    setProductImagePreview(product.image || "");
+    setProductImageFile(null);
+    setEditingProductId(product.id);
+    setProductError(null);
+    setProductModalOpen(true);
+  };
+
+  const handleDeleteProduct = async (productId) => {
+    if (!db || !inventoryEnabled) return;
+    await deleteDoc(doc(db, "products", productId));
+    setStatusMessage("Product removed");
+  };
+
+  const handleCreateProduct = async (event) => {
+    event.preventDefault();
+    if (!inventoryEnabled || !db) {
+      setProductError("You do not have permission to update products.");
+      return;
+    }
+
+    const name = productForm.name.trim();
+    const title = productForm.title.trim() || name;
+    const priceNumber = Number(productForm.price);
+    const priceValue = Number.isFinite(priceNumber)
+      ? priceNumber
+      : productForm.price.trim();
+
+    if (!name) {
+      setProductError("Product name is required.");
+      return;
+    }
+
+    if (!productImageFile && !productForm.image.trim()) {
+      setProductError("Please upload a product image.");
+      return;
+    }
+
+    try {
+      setProductSaving(true);
+      setStatusMessage(
+        editingProductId ? "Updating product…" : "Saving product…"
+      );
+      let imageUrl = productForm.image.trim();
+      if (productImageFile) {
+        imageUrl = await uploadAsset(productImageFile, "products");
+      }
+
+      const payload = {
+        name,
+        title,
+        description: productForm.description.trim(),
+        price: priceValue,
+        image: imageUrl,
+        category: productForm.category.trim() || "product",
+        updatedAt: serverTimestamp(),
+      };
+
+      if (editingProductId) {
+        await updateDoc(doc(db, "products", editingProductId), payload);
+        setStatusMessage("Product updated");
+      } else {
+        await addDoc(collection(db, "products"), {
+          ...payload,
+          createdAt: serverTimestamp(),
+        });
+        setStatusMessage("Product saved");
+      }
+
+      closeProductModal();
+    } catch (error) {
+      setProductError(error.message);
+    } finally {
+      setProductSaving(false);
+    }
+  };
+
+  return (
+    <div className="admin-panel admin-panel--full">
+      <Reveal as="div" className="admin-panel__header">
+        <div>
+          <h2>Products</h2>
+          <p className="admin-panel__note">
+            Build your storefront inventory directly from Firestore.
+          </p>
+        </div>
+        <div className="admin-panel__header-actions">
+          <button
+            className="btn btn--primary"
+            type="button"
+            onClick={openProductModal}
+            disabled={!inventoryEnabled}
+          >
+            <IconPlus className="btn__icon" aria-hidden="true" />
+            Add Product
+          </button>
+        </div>
+      </Reveal>
+
+      <Reveal as="div" className="admin-table__wrapper" delay={60}>
+        {products.length > 0 ? (
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th scope="col">Item</th>
+                <th scope="col">Category</th>
+                <th scope="col">Price</th>
+                <th scope="col">Updated</th>
+                <th scope="col" className="admin-table__actions">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((product) => {
+                const updatedAt = product.updatedAt?.toDate?.()
+                  ? bookingDateFormatter.format(product.updatedAt.toDate())
+                  : "—";
+                return (
+                  <tr key={product.id}>
+                    <td>
+                      <div className="admin-table__product">
+                        {product.image ? (
+                          <img
+                            src={product.image}
+                            alt={product.title || product.name}
+                            className="admin-table__thumb"
+                          />
+                        ) : (
+                          <span className="admin-table__thumb admin-table__thumb--placeholder">
+                            <IconImage aria-hidden="true" />
+                          </span>
+                        )}
+                        <div>
+                          <strong>{product.title || product.name}</strong>
+                          {product.description && (
+                            <p className="modal__meta">{product.description}</p>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td>{product.category || "product"}</td>
+                    <td>{formatPriceLabel(product.price)}</td>
+                    <td>{updatedAt}</td>
+                    <td className="admin-table__actions">
+                      <button
+                        className="icon-btn"
+                        type="button"
+                        onClick={() => handleEditProduct(product)}
+                      >
+                        <IconEdit aria-hidden="true" />
+                      </button>
+                      <button
+                        className="icon-btn icon-btn--danger"
+                        type="button"
+                        onClick={() => handleDeleteProduct(product.id)}
+                      >
+                        <IconTrash aria-hidden="true" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <p className="admin-panel__notice">
+            No products found. Add your first item.
+          </p>
+        )}
+        {inventoryLoading && (
+          <p className="modal__meta">Syncing latest products…</p>
+        )}
+        {inventoryError && (
+          <p className="admin-panel__error">{inventoryError}</p>
+        )}
+        {statusMessage && (
+          <p className="admin-panel__status">{statusMessage}</p>
+        )}
+      </Reveal>
+
+      <div
+        className={`modal admin-modal ${isProductModalOpen ? "is-active" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={isProductModalOpen ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closeProductModal();
+        }}
+      >
+        <div className="modal__content admin-modal__content">
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close"
+            onClick={closeProductModal}
+          >
+            &times;
+          </button>
+          <h3 className="modal__title">
+            {editingProductId ? "Edit Product" : "Add Product"}
+          </h3>
+          <form className="admin-form" onSubmit={handleCreateProduct}>
+            <div className="admin-file-input admin-form__full">
+              <label htmlFor="product-image-upload" className="sr-only">
+                Product image
+              </label>
+              <input
+                key={editingProductId ?? "new-product"}
+                className="input input--file"
+                id="product-image-upload"
+                type="file"
+                accept="image/*"
+                onChange={handleProductImageChange}
+              />
+              <p className="admin-panel__note">
+                Upload JPG or PNG (max 3MB). A preview appears below.
+              </p>
+              {productImagePreview && (
+                <img
+                  src={productImagePreview}
+                  alt="Product preview"
+                  className="admin-preview"
+                />
+              )}
+            </div>
+            <input
+              className="input"
+              placeholder="Product name"
+              value={productForm.name}
+              onChange={(event) =>
+                setProductForm((prev) => ({
+                  ...prev,
+                  name: event.target.value,
+                }))
+              }
+              required
+            />
+            <input
+              className="input"
+              placeholder="Display title (optional)"
+              value={productForm.title}
+              onChange={(event) =>
+                setProductForm((prev) => ({
+                  ...prev,
+                  title: event.target.value,
+                }))
+              }
+            />
+            <select
+              className="input"
+              value={productForm.category}
+              onChange={(event) =>
+                setProductForm((prev) => ({
+                  ...prev,
+                  category: event.target.value,
+                }))
+              }
+            >
+              <option value="product">Product</option>
+              <option value="kit">Kit</option>
+              <option value="accessory">Accessory</option>
+            </select>
+            <input
+              className="input"
+              placeholder="Price (numbers or text)"
+              value={productForm.price}
+              onChange={(event) =>
+                setProductForm((prev) => ({
+                  ...prev,
+                  price: event.target.value,
+                }))
+              }
+              required
+            />
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Description"
+              value={productForm.description}
+              onChange={(event) =>
+                setProductForm((prev) => ({
+                  ...prev,
+                  description: event.target.value,
+                }))
+              }
+            />
+            <div className="admin-modal__actions admin-form__actions">
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={closeProductModal}
+                disabled={productSaving}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                type="submit"
+                disabled={productSaving || !inventoryEnabled}
+              >
+                {productSaving
+                  ? "Saving…"
+                  : editingProductId
+                  ? "Update Product"
+                  : "Save Product"}
+              </button>
+            </div>
+            {productError && (
+              <p className="admin-panel__error">{productError}</p>
+            )}
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AdminWorkshopsView() {
+  usePageMetadata({
+    title: "Admin · Workshops",
+    description: "Manage Bethany Blooms workshops, sessions, and bookings.",
+  });
+  const {
+    db,
+    storage,
+    workshops,
+    bookings,
+    inventoryEnabled,
+    inventoryLoading,
+    inventoryError,
+  } = useAdminData();
+  const uploadAsset = useUploadAsset(storage);
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [isWorkshopModalOpen, setWorkshopModalOpen] = useState(false);
+  const [workshopForm, setWorkshopForm] = useState({
+    ...INITIAL_WORKSHOP_FORM,
+    sessions: [createEmptySession()],
+  });
+  const [editingWorkshopId, setEditingWorkshopId] = useState(null);
+  const [workshopImageFile, setWorkshopImageFile] = useState(null);
+  const [workshopImagePreview, setWorkshopImagePreview] = useState("");
+  const [workshopSaving, setWorkshopSaving] = useState(false);
+  const [workshopError, setWorkshopError] = useState(null);
+  const workshopPreviewUrlRef = useRef(null);
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 3500);
+    return () => clearTimeout(timeout);
+  }, [statusMessage]);
+
+  useEffect(
+    () => () => {
+      if (workshopPreviewUrlRef.current) {
+        URL.revokeObjectURL(workshopPreviewUrlRef.current);
+      }
+    },
+    []
+  );
+
+  const openWorkshopModal = () => {
+    setWorkshopForm({
+      ...INITIAL_WORKSHOP_FORM,
+      sessions: [createEmptySession()],
+    });
+    setEditingWorkshopId(null);
+    setWorkshopImageFile(null);
+    setWorkshopImagePreview("");
+    setWorkshopError(null);
+    setWorkshopModalOpen(true);
+  };
+
+  const closeWorkshopModal = () => {
+    setWorkshopModalOpen(false);
+    setWorkshopImageFile(null);
+    setWorkshopImagePreview("");
+    setWorkshopError(null);
+    setWorkshopSaving(false);
+  };
+
   const handleWorkshopImageChange = (event) => {
     const file = event.target.files?.[0] ?? null;
     if (workshopPreviewUrlRef.current) {
@@ -359,12 +965,9 @@ function AdminPage() {
       workshopPreviewUrlRef.current = null;
     }
     if (file) {
-      setWorkshopError(null);
       if (file.size > 3 * 1024 * 1024) {
         setWorkshopError("Please choose an image smaller than 3MB.");
         event.target.value = "";
-        setWorkshopImageFile(null);
-        setWorkshopImagePreview(workshopForm.image || "");
         return;
       }
       const preview = URL.createObjectURL(file);
@@ -377,82 +980,41 @@ function AdminPage() {
     }
   };
 
-  const handleAddWorkshopSession = () => {
-    setWorkshopForm((prev) => {
-      const current = Array.isArray(prev.sessions) ? prev.sessions : [];
-      return {
-        ...prev,
-        sessions: [...current, createEmptySession()],
-      };
-    });
+  const handleWorkshopSessionChange = (sessionId, field, value) => {
+    setWorkshopForm((prev) => ({
+      ...prev,
+      sessions: prev.sessions.map((session) =>
+        session.id === sessionId ? { ...session, [field]: value } : session
+      ),
+    }));
   };
 
-  const handleWorkshopSessionChange = (sessionId, field, value) => {
-    setWorkshopForm((prev) => {
-      const current = Array.isArray(prev.sessions) ? prev.sessions : [];
-      return {
-        ...prev,
-        sessions: current.map((session) =>
-          session.id === sessionId ? { ...session, [field]: value } : session,
-        ),
-      };
-    });
+  const handleAddWorkshopSession = () => {
+    setWorkshopForm((prev) => ({
+      ...prev,
+      sessions: [...prev.sessions, createEmptySession()],
+    }));
   };
 
   const handleRemoveWorkshopSession = (sessionId) => {
     setWorkshopForm((prev) => {
-      const current = Array.isArray(prev.sessions) ? prev.sessions : [];
-      const nextSessions = current.filter((session) => session.id !== sessionId);
+      const nextSessions = prev.sessions.filter(
+        (session) => session.id !== sessionId
+      );
       return {
         ...prev,
-        sessions: nextSessions.length > 0 ? nextSessions : [createEmptySession()],
+        sessions:
+          nextSessions.length > 0 ? nextSessions : [createEmptySession()],
       };
     });
   };
 
-  const handleEditProduct = (product) => {
-    setProductError(null);
-    setProductStatus(null);
-    setEditingProductId(product.id);
-    setProductForm({
-      name: product.name || product.title || "",
-      title: product.title || "",
-      description: product.description || "",
-      price:
-        product.price === undefined || product.price === null
-          ? ""
-          : String(product.price),
-      image: product.image || "",
-      category: product.category || "kit",
-    });
-    if (productPreviewUrlRef.current) {
-      URL.revokeObjectURL(productPreviewUrlRef.current);
-      productPreviewUrlRef.current = null;
-    }
-    setProductImageFile(null);
-    setProductImagePreview(product.image || "");
-    setProductModalOpen(true);
-  };
-
   const handleEditWorkshop = (workshop) => {
-    setWorkshopError(null);
-    setWorkshopStatus(null);
     setEditingWorkshopId(workshop.id);
-    const scheduledValue = (() => {
-      if (!workshop.scheduledFor) return "";
-      if (typeof workshop.scheduledFor === "string") {
-        return workshop.scheduledFor.slice(0, 16);
-      }
-      if (workshop.scheduledFor?.toDate?.()) {
-        return workshop.scheduledFor.toDate().toISOString().slice(0, 16);
-      }
-      return "";
-    })();
-
     setWorkshopForm({
       title: workshop.title || workshop.name || "",
       description: workshop.description || "",
-      scheduledFor: scheduledValue,
+      scheduledFor: workshop.scheduledFor || "",
       price:
         workshop.price === undefined || workshop.price === null
           ? ""
@@ -468,353 +1030,57 @@ function AdminPage() {
       whyPeopleLove: workshop.whyPeopleLove || "",
       ctaNote: workshop.ctaNote || "",
       sessions: (() => {
-        const rawSessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
-        const mapped = rawSessions
-          .map((entry, index) => {
-            const baseId = entry.id || `session-${index}-${workshop.id}`;
-            const label = entry.label || entry.name || "";
-            const capacityValue =
-              entry.capacity === undefined || entry.capacity === null || entry.capacity === ""
+        const rawSessions = Array.isArray(workshop.sessions)
+          ? workshop.sessions
+          : [];
+        if (rawSessions.length === 0) return [createEmptySession()];
+        return rawSessions.map((session, index) => {
+          const startDate = parseDateValue(
+            session.start || workshop.scheduledFor
+          );
+          return {
+            id: session.id || `session-${index}-${workshop.id}`,
+            date: session.date || (startDate ? formatDateInput(startDate) : ""),
+            time: session.time || (startDate ? formatTimeInput(startDate) : ""),
+            capacity:
+              session.capacity === undefined || session.capacity === null
                 ? String(DEFAULT_SLOT_CAPACITY)
-                : String(entry.capacity);
-
-            let date = "";
-            let time = "";
-
-            if (entry.date) {
-              date = entry.date;
-            }
-            if (entry.time) {
-              time = entry.time;
-            }
-
-            const startCandidate = entry.start ?? entry.startTime ?? entry.startDate ?? entry.datetime ?? entry.dateTime;
-            const parsedStart = parseDateValue(startCandidate);
-            if (parsedStart && (!date || !time)) {
-              const parsedIsoDate = formatDateInput(parsedStart);
-              const parsedIsoTime = formatTimeInput(parsedStart);
-              if (!date) date = parsedIsoDate;
-              if (!time) time = parsedIsoTime;
-            }
-
-            if (!date && workshop.scheduledFor) {
-              const fallbackDate = parseDateValue(workshop.scheduledFor);
-              if (fallbackDate) {
-                date = formatDateInput(fallbackDate);
-                time = formatTimeInput(fallbackDate);
-              }
-            }
-
-            const sessionPayload = {
-              id: baseId,
-              date,
-              time,
-              capacity: capacityValue,
-              label,
-            };
-            if (!sessionPayload.capacity) {
-              sessionPayload.capacity = String(DEFAULT_SLOT_CAPACITY);
-            }
-            return sessionPayload;
-          })
-          .filter((entry) => entry);
-
-        if (mapped.length > 0) {
-          return mapped;
-        }
-
-        const fallback = parseDateValue(workshop.scheduledFor);
-        if (fallback) {
-          return [
-            {
-              ...createEmptySession(),
-              date: formatDateInput(fallback),
-              time: formatTimeInput(fallback),
-            },
-          ];
-        }
-
-        return [createEmptySession()];
+                : String(session.capacity),
+            label: session.label || session.name || "",
+          };
+        });
       })(),
     });
-    if (workshopPreviewUrlRef.current) {
-      URL.revokeObjectURL(workshopPreviewUrlRef.current);
-      workshopPreviewUrlRef.current = null;
-    }
-    setWorkshopImageFile(null);
     setWorkshopImagePreview(workshop.image || "");
+    setWorkshopImageFile(null);
+    setWorkshopError(null);
     setWorkshopModalOpen(true);
   };
 
-  const db = useMemo(() => {
-    try {
-      return getFirebaseDb();
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const storage = useMemo(() => {
-    try {
-      return getFirebaseStorage();
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const inventoryEnabled = Boolean(db && user && isAdmin);
-
-  const uploadAsset = async (file, folder) => {
-    if (!storage) {
-      throw new Error("Firebase storage is not configured.");
-    }
-    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "-");
-    const objectPath = `${folder}/${Date.now()}-${sanitizedName}`;
-    const storageRef = ref(storage, objectPath);
-    await uploadBytes(storageRef, file, { contentType: file.type });
-    return getDownloadURL(storageRef);
-  };
-
-  const bookingDateFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat("en-ZA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }),
-    [],
-  );
-
-  useEffect(() => {
-    if (!db || !user || !isAdmin) {
-      setProducts([]);
-      setWorkshopsList([]);
-      setBookings([]);
-      setOrders([]);
-      setInventoryLoading(false);
-      return undefined;
-    }
-
-    setInventoryLoading(true);
-    setInventoryError(null);
-
-    const productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
-    const workshopsQuery = query(collection(db, "workshops"), orderBy("scheduledFor", "asc"));
-    const bookingsQuery = query(collection(db, "bookings"), orderBy("createdAt", "desc"));
-    const ordersQuery = query(collection(db, "orders"), orderBy("createdAt", "desc"));
-
-    const unsubscribeProducts = onSnapshot(
-      productsQuery,
-      (snapshot) => {
-        setProducts(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
-        setInventoryError(null);
-        setInventoryLoading(false);
-      },
-      (error) => {
-        setInventoryError(error.message);
-        setInventoryLoading(false);
-      },
-    );
-
-    const unsubscribeWorkshops = onSnapshot(
-      workshopsQuery,
-      (snapshot) => {
-        setWorkshopsList(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
-        setInventoryError(null);
-        setInventoryLoading(false);
-      },
-      (error) => {
-        setInventoryError(error.message);
-        setInventoryLoading(false);
-      },
-    );
-
-    const unsubscribeBookings = onSnapshot(
-      bookingsQuery,
-      (snapshot) => {
-        setBookings(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
-        setInventoryError(null);
-        setInventoryLoading(false);
-      },
-      (error) => {
-        setInventoryError(error.message);
-        setInventoryLoading(false);
-      },
-    );
-
-    const unsubscribeOrders = onSnapshot(
-      ordersQuery,
-      (snapshot) => {
-        setOrders(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
-        setInventoryError(null);
-        setInventoryLoading(false);
-      },
-      (error) => {
-        setInventoryError(error.message);
-        setInventoryLoading(false);
-      },
-    );
-
-    return () => {
-      unsubscribeProducts();
-      unsubscribeWorkshops();
-      unsubscribeBookings();
-      unsubscribeOrders();
-    };
-  }, [db, isAdmin, user]);
-
-  const handleSignIn = async (event) => {
-    event.preventDefault();
-    setAuthError(null);
-    try {
-      const email = loginForm.email.trim();
-      const password = loginForm.password;
-      if (!email || !password) {
-        setAuthError("Please enter both email and password.");
-        return;
-      }
-      await signIn(email, password);
-      setLoginForm({ email: "", password: "" });
-    } catch (error) {
-      const errorMessage = (() => {
-        const code = error.code || error.message || "";
-        if (code.includes("auth/invalid-credential") || code.includes("auth/wrong-password")) {
-          return "The email or password is incorrect. Double-check and try again.";
-        }
-        if (code.includes("auth/user-not-found")) {
-          return "No admin account exists for that email address.";
-        }
-        if (code.includes("auth/user-disabled")) {
-          return "This account has been disabled. Contact the site owner for help.";
-        }
-        if (code.includes("auth/too-many-requests")) {
-          return "Too many login attempts. Please wait a moment and try again.";
-        }
-        if (code.includes("auth/operation-not-allowed")) {
-          return "Email/password sign-in is disabled in Firebase Authentication.";
-        }
-        return error.message || "We couldn’t sign you in. Please try again.";
-      })();
-      setAuthError(errorMessage);
-    }
-  };
-
-  const handleCreateProduct = async (event) => {
-    event.preventDefault();
-    if (!isAdmin) {
-      setProductError("You do not have permission to manage products.");
-      return;
-    }
-    if (!db) {
-      setProductError("Firebase is not configured. Add credentials to .env.");
-      return;
-    }
-
-    setInventoryError(null);
-    setProductError(null);
-    setProductStatus(null);
-
-    const name = productForm.name.trim();
-    const title = productForm.title.trim() || name;
-    const priceNumber = Number(productForm.price);
-    const category = productForm.category.trim() || "kit";
-
-    if (!name) {
-      setProductError("Product name is required.");
-      return;
-    }
-
-    const hasNumericPrice = Number.isFinite(priceNumber);
-    const priceInput = productForm.price.trim();
-    if (!hasNumericPrice && !priceInput) {
-      setProductError("Please provide a price or price range.");
-      return;
-    }
-    if (!productImageFile && !productForm.image.trim()) {
-      setProductError("Please upload a product image.");
-      return;
-    }
-
-    try {
-      setStatusMessage(editingProductId ? "Updating product…" : "Saving product…");
-      setProductStatus(editingProductId ? "Updating product…" : "Saving product…");
-      setProductSaving(true);
-
-      let imageUrl = productForm.image.trim();
-      if (productImageFile) {
-        imageUrl = await uploadAsset(productImageFile, "products");
-      }
-
-      const basePayload = {
-        name,
-        title,
-        description: productForm.description.trim(),
-        price: hasNumericPrice ? priceNumber : priceInput,
-        image: imageUrl,
-        category,
-        updatedAt: serverTimestamp(),
-      };
-
-      let successMessage;
-      if (editingProductId) {
-        await updateDoc(doc(db, "products", editingProductId), basePayload);
-        successMessage = "Product updated successfully.";
-      } else {
-        await addDoc(collection(db, "products"), {
-          ...basePayload,
-          createdAt: serverTimestamp(),
-        });
-        successMessage = "Product saved successfully.";
-      }
-
-      setProductForm(INITIAL_PRODUCT_FORM);
-      setEditingProductId(null);
-      if (productPreviewUrlRef.current) {
-        URL.revokeObjectURL(productPreviewUrlRef.current);
-        productPreviewUrlRef.current = null;
-      }
-      setProductImageFile(null);
-      setProductImagePreview("");
-      closeProductModal();
-      setStatusMessage(successMessage);
-      setProductStatus(successMessage);
-    } catch (error) {
-      setInventoryError(error.message);
-      setProductError(error.message);
-      setProductStatus(null);
-    } finally {
-      setProductSaving(false);
-    }
+  const handleDeleteWorkshop = async (workshopId) => {
+    if (!db || !inventoryEnabled) return;
+    await deleteDoc(doc(db, "workshops", workshopId));
+    setStatusMessage("Workshop removed");
   };
 
   const handleCreateWorkshop = async (event) => {
     event.preventDefault();
-    if (!isAdmin) {
+    if (!inventoryEnabled || !db) {
       setWorkshopError("You do not have permission to manage workshops.");
       return;
     }
-    if (!db) {
-      setWorkshopError("Firebase is not configured. Add credentials to .env.");
-      return;
-    }
 
-    setInventoryError(null);
-    setWorkshopError(null);
-    setWorkshopStatus(null);
-
-    const title = workshopForm.title.trim();
-    if (!title) {
+    if (!workshopForm.title.trim()) {
       setWorkshopError("Workshop title is required.");
       return;
     }
 
-    const priceNumber = Number(workshopForm.price);
-    const priceValue = Number.isFinite(priceNumber) ? priceNumber : workshopForm.price.trim();
     if (!workshopImageFile && !workshopForm.image.trim()) {
       setWorkshopError("Please upload a workshop image.");
       return;
     }
 
-    const sanitizedSessions = (workshopForm.sessions || [])
+    const sanitizedSessions = workshopForm.sessions
       .map((session) => {
         const dateValue = session.date?.trim();
         const timeValue = session.time?.trim();
@@ -822,43 +1088,48 @@ function AdminPage() {
           return null;
         }
         const combinedDate = combineDateAndTime(dateValue, timeValue);
-        if (!combinedDate) {
-          return null;
-        }
-        const labelValue = session.label?.trim();
-        const capacityValueRaw = session.capacity?.trim?.() ?? String(DEFAULT_SLOT_CAPACITY);
-        const capacityNumber = Number(capacityValueRaw || DEFAULT_SLOT_CAPACITY);
-        const sessionId = session.id || `session-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+        if (!combinedDate) return null;
+        const capacityNumber = Number(
+          session.capacity || DEFAULT_SLOT_CAPACITY
+        );
         return {
-          id: sessionId,
+          id: session.id || createEmptySession().id,
           start: combinedDate.toISOString(),
           date: dateValue,
           time: timeValue,
-          label: labelValue || bookingDateFormatter.format(combinedDate),
-          capacity: Number.isFinite(capacityNumber) && capacityNumber > 0 ? capacityNumber : DEFAULT_SLOT_CAPACITY,
+          label:
+            session.label?.trim() || bookingDateFormatter.format(combinedDate),
+          capacity:
+            Number.isFinite(capacityNumber) && capacityNumber > 0
+              ? capacityNumber
+              : DEFAULT_SLOT_CAPACITY,
         };
       })
       .filter(Boolean);
 
     if (sanitizedSessions.length === 0) {
-      setWorkshopError("Please add at least one date and time slot for this workshop.");
+      setWorkshopError("Please add at least one session (date & time).");
       return;
     }
 
     const primarySession = sanitizedSessions[0];
+    const priceNumber = Number(workshopForm.price);
+    const priceValue = Number.isFinite(priceNumber)
+      ? priceNumber
+      : workshopForm.price.trim();
 
     try {
-      setStatusMessage(editingWorkshopId ? "Updating workshop…" : "Saving workshop…");
-      setWorkshopStatus(editingWorkshopId ? "Updating workshop…" : "Saving workshop…");
       setWorkshopSaving(true);
-
+      setStatusMessage(
+        editingWorkshopId ? "Updating workshop…" : "Saving workshop…"
+      );
       let imageUrl = workshopForm.image.trim();
       if (workshopImageFile) {
         imageUrl = await uploadAsset(workshopImageFile, "workshops");
       }
 
-      const basePayload = {
-        title,
+      const payload = {
+        title: workshopForm.title.trim(),
         description: workshopForm.description.trim(),
         scheduledFor: primarySession.start,
         primarySessionId: primarySession.id,
@@ -877,883 +1148,718 @@ function AdminPage() {
         sessions: sanitizedSessions,
       };
 
-      let successMessage;
       if (editingWorkshopId) {
-        await updateDoc(doc(db, "workshops", editingWorkshopId), basePayload);
-        successMessage = "Workshop updated.";
+        await updateDoc(doc(db, "workshops", editingWorkshopId), payload);
+        setStatusMessage("Workshop updated");
       } else {
         await addDoc(collection(db, "workshops"), {
-          ...basePayload,
+          ...payload,
           createdAt: serverTimestamp(),
         });
-        successMessage = "Workshop saved.";
+        setStatusMessage("Workshop saved");
       }
 
-      setWorkshopForm(INITIAL_WORKSHOP_FORM);
-      setEditingWorkshopId(null);
-      if (workshopPreviewUrlRef.current) {
-        URL.revokeObjectURL(workshopPreviewUrlRef.current);
-        workshopPreviewUrlRef.current = null;
-      }
-      setWorkshopImageFile(null);
-      setWorkshopImagePreview("");
       closeWorkshopModal();
-      setStatusMessage(successMessage);
-      setWorkshopStatus(successMessage);
     } catch (error) {
-      setInventoryError(error.message);
       setWorkshopError(error.message);
-      setWorkshopStatus(null);
     } finally {
       setWorkshopSaving(false);
     }
   };
 
-  const handleDeleteDocument = async (collectionName, id) => {
-    if (!db) return;
-    if (!isAdmin) {
-      setInventoryError("You do not have permission to update inventory.");
-      return;
-    }
-    try {
-      setStatusMessage("Deleting...");
-      await deleteDoc(doc(db, collectionName, id));
-      setStatusMessage("Removed.");
-    } catch (error) {
-      setInventoryError(error.message);
-    }
-  };
-
-  const handleSeedData = async () => {
-    if (!db) {
-      setInventoryError("Firebase is not configured. Add credentials to .env.");
-      return;
-    }
-    setSeedLoading(true);
-    setSeedError(null);
-    setSeedStatus("Loading sample data…");
-    let seeded = false;
-    try {
-      const { seededProducts, seededWorkshops } = await seedSampleData(db);
-      if (!seededProducts && !seededWorkshops) {
-        setStatusMessage("Sample data already present.");
-        setSeedStatus("Sample data already present.");
-      } else {
-        setStatusMessage("Sample data loaded successfully.");
-        setSeedStatus("Sample data loaded successfully.");
-        seeded = true;
-      }
-    } catch (error) {
-      console.warn("Seed data failed", error);
-      setSeedError(error.message);
-      setSeedStatus(null);
-    } finally {
-      setSeedLoading(false);
-      if (seeded) {
-        setTimeout(() => setSeedStatus(null), 4000);
-      }
-    }
-  };
-
-  const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "Customer";
-
   return (
-    <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Hero variant="contact" background={heroBackground}>
-            <h1>Studio Admin</h1>
-            <p>
-              Manage products, workshop listings, and customer bookings in one place. Authentication is powered by
-              Firebase—configure your project to enable secure access.
-            </p>
-          </Hero>
+    <div className="admin-panel admin-panel--full">
+      <Reveal as="div" className="admin-panel__header">
+        <div>
+          <h2>Workshops & Bookings</h2>
+          <p className="admin-panel__note">
+            Create immersive experiences with custom slots and booking rules.
+          </p>
         </div>
-      </section>
+        <div className="admin-panel__header-actions">
+          <button
+            className="btn btn--primary"
+            type="button"
+            onClick={openWorkshopModal}
+            disabled={!inventoryEnabled}
+          >
+            <IconPlus className="btn__icon" aria-hidden="true" />
+            Add Workshop
+          </button>
+        </div>
+      </Reveal>
 
-      <section className="section section--tight">
-        <div className="section__inner">
-          {!user ? (
-            <Reveal as="div">
-              <h2>Admin Sign In</h2>
-              {initError && (
-                <p className="empty-state">
-                  Firebase credentials missing. Add them to <code>.env</code> to activate admin login.
-                </p>
-              )}
-              <form className="contact-form" onSubmit={handleSignIn}>
-                <label className="sr-only" htmlFor="admin-email">
-                  Email
-                </label>
-                <input
-                  className="input"
-                  id="admin-email"
-                  type="email"
-                  value={loginForm.email}
-                  onChange={(event) => setLoginForm((prev) => ({ ...prev, email: event.target.value }))}
-                  placeholder="Admin email"
-                  required
-                />
-                <label className="sr-only" htmlFor="admin-password">
-                  Password
-                </label>
-                <input
-                  className="input"
-                  id="admin-password"
-                  type="password"
-                  value={loginForm.password}
-                  onChange={(event) => setLoginForm((prev) => ({ ...prev, password: event.target.value }))}
-                  placeholder="Password"
-                  required
-                />
-                <button className="btn btn--primary" type="submit" disabled={loading}>
-                  {loading ? "Checking..." : "Sign In"}
-                </button>
-                {authError && <p className="empty-state">{authError}</p>}
-              </form>
-            </Reveal>
-          ) : roleLoading ? (
-            <Reveal as="article" className="card">
-              <h3 className="card__title">Checking Permissions</h3>
-              <p className="empty-state">Hold on a moment while we confirm your access level.</p>
-            </Reveal>
-          ) : !isAdmin ? (
-            <div className="cards-grid">
-              <Reveal as="article" className="card">
-                <h3 className="card__title">Account</h3>
-                <p>Signed in as {user.email}</p>
-                <p>
-                  <strong>Role:</strong> {roleLabel}
-                </p>
-                <button className="btn btn--secondary" type="button" onClick={signOut}>
-                  Sign Out
-                </button>
-              </Reveal>
-              <Reveal as="article" className="card" delay={120}>
-                <h3 className="card__title">Limited Access</h3>
-                <p className="empty-state">
-                  Thanks for signing in. This area is reserved for admin accounts. Contact the site owner if you need
-                  elevated access.
-                </p>
-              </Reveal>
-            </div>
-          ) : (
-            <div className="admin-dashboard">
-              <Reveal as="section" className="card admin-panel">
-                <div className="admin-panel__header">
-                  <div>
-                    <h3 className="card__title">Account</h3>
-                    <p className="modal__meta">{user.email}</p>
-                  </div>
-                  <button className="btn btn--secondary" type="button" onClick={signOut}>
-                    Sign Out
-                  </button>
-                </div>
-                <p className="modal__meta">
-                  <strong>Role:</strong> {roleLabel}
-                </p>
-                {statusMessage && <p className="modal__meta">{statusMessage}</p>}
-              </Reveal>
-
-              <Reveal as="section" className="card admin-panel" delay={60}>
-                <div className="admin-panel__header">
-                  <h3 className="card__title">Sample Data</h3>
-                </div>
-                <p className="modal__meta">
-                  Need demo products or workshops? Load a starter set into Firestore with one click. Safe to rerun—existing
-                  data stays untouched.
-                </p>
-                <button
-                  className="btn btn--secondary"
-                  type="button"
-                  onClick={handleSeedData}
-                  disabled={seedLoading}
-                >
-                  <IconPlus className="btn__icon" aria-hidden="true" />
-                  <span>{seedLoading ? "Seeding…" : "Load Sample Products & Workshops"}</span>
-                </button>
-                {seedStatus && !seedError && <p className="modal__meta admin-panel__status">{seedStatus}</p>}
-                {seedError && <p className="modal__meta admin-panel__error">{seedError}</p>}
-              </Reveal>
-
-              <Reveal as="section" className="card admin-panel" delay={120}>
-                <div className="admin-panel__header">
-                  <h3 className="card__title">Products</h3>
-                  <div className="admin-panel__header-actions">
-                    {inventoryLoading && <span className="badge badge--muted">Syncing…</span>}
-                    <button
-                      className="btn btn--primary"
-                      type="button"
-                      onClick={openProductModal}
-                      disabled={!inventoryEnabled}
-                    >
-                      <IconPlus className="btn__icon" aria-hidden="true" />
-                      <span>Add Product</span>
-                    </button>
-                  </div>
-                </div>
-                {!inventoryEnabled && (
-                  <p className="modal__meta admin-panel__notice">
-                    Add Firebase credentials and refresh to enable inventory management.
-                  </p>
-                )}
-                {productSaving ? (
-                  <div className="admin-save-indicator admin-save-indicator--working" role="status">
-                    <span className="admin-spinner" aria-hidden="true"></span>
-                    <span>{editingProductId ? "Updating product…" : "Saving product…"}</span>
-                  </div>
-                ) : (
-                  productStatus && (
-                    <div className="admin-save-indicator" role="status">
-                      <IconCheck className="btn__icon" aria-hidden="true" />
-                      <span>{productStatus}</span>
-                    </div>
-                  )
-                )}
-                {productError && <p className="admin-panel__error">{productError}</p>}
-                <div className="admin-table__wrapper">
-                  {products.length > 0 ? (
-                    <table className="admin-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Image</th>
-                          <th scope="col">Name</th>
-                          <th scope="col">Category</th>
-                          <th scope="col">Price</th>
-                          <th scope="col">Description</th>
-                          <th scope="col" className="admin-table__actions">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {products.map((entry) => (
-                          <tr key={entry.id}>
-                            <td>
-                              {entry.image ? (
-                                <img
-                                  src={entry.image}
-                                  alt={`${entry.title || entry.name || "Product"} preview`}
-                                  className="admin-table__thumb"
-                                />
-                              ) : (
-                                <span className="admin-table__thumb admin-table__thumb--placeholder">
-                                  <IconImage aria-hidden="true" />
-                                </span>
+      <div className="admin-panel__content admin-panel__content--split">
+        <Reveal as="section" className="admin-panel" delay={60}>
+          <div className="admin-panel__header">
+            <h3>Workshops</h3>
+            {inventoryLoading && (
+              <span className="badge badge--muted">Syncing…</span>
+            )}
+          </div>
+          {workshops.length > 0 ? (
+            <div className="admin-table__wrapper">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Listing</th>
+                    <th scope="col">Next Session</th>
+                    <th scope="col">Price</th>
+                    <th scope="col" className="admin-table__actions">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {workshops.map((workshop) => {
+                    const primarySession = getPrimarySession(workshop);
+                    const sessionLabel = getSessionLabel(primarySession);
+                    return (
+                      <tr key={workshop.id}>
+                        <td>
+                          <div className="admin-table__product">
+                            {workshop.image ? (
+                              <img
+                                src={workshop.image}
+                                alt={workshop.title}
+                                className="admin-table__thumb"
+                              />
+                            ) : (
+                              <span className="admin-table__thumb admin-table__thumb--placeholder">
+                                <IconImage aria-hidden="true" />
+                              </span>
+                            )}
+                            <div>
+                              <strong>{workshop.title}</strong>
+                              {workshop.location && (
+                                <p className="modal__meta">
+                                  {workshop.location}
+                                </p>
                               )}
-                            </td>
-                            <td>{entry.title || entry.name}</td>
-                            <td>{entry.category || "—"}</td>
-                            <td>
-                              {Number.isFinite(entry.price) ? `R${entry.price}` : entry.price || "—"}
-                            </td>
-                            <td>{entry.description || "—"}</td>
-                            <td className="admin-table__actions">
-                              <button
-                                className="icon-btn"
-                                type="button"
-                                onClick={() => handleEditProduct(entry)}
-                                aria-label={`Edit ${entry.title || entry.name}`}
-                              >
-                                <IconEdit aria-hidden="true" />
-                              </button>
-                              <button
-                                className="icon-btn icon-btn--danger"
-                                type="button"
-                                onClick={() => handleDeleteDocument("products", entry.id)}
-                                aria-label={`Delete ${entry.title || entry.name}`}
-                              >
-                                <IconTrash aria-hidden="true" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p className="modal__meta admin-panel__notice">No products in Firestore yet.</p>
-                  )}
-                </div>
-              </Reveal>
-
-              <Reveal as="section" className="card admin-panel" delay={240}>
-                <div className="admin-panel__header">
-                  <h3 className="card__title">Workshops</h3>
-                  <div className="admin-panel__header-actions">
-                    {inventoryLoading && <span className="badge badge--muted">Syncing…</span>}
-                    <button
-                      className="btn btn--primary"
-                      type="button"
-                      onClick={openWorkshopModal}
-                      disabled={!inventoryEnabled}
-                    >
-                      <IconPlus className="btn__icon" aria-hidden="true" />
-                      <span>Add Workshop</span>
-                    </button>
-                  </div>
-                </div>
-                {workshopSaving ? (
-                  <div className="admin-save-indicator admin-save-indicator--working" role="status">
-                    <span className="admin-spinner" aria-hidden="true"></span>
-                    <span>{editingWorkshopId ? "Updating workshop…" : "Saving workshop…"}</span>
-                  </div>
-                ) : (
-                  workshopStatus && (
-                    <div className="admin-save-indicator" role="status">
-                      <IconCheck className="btn__icon" aria-hidden="true" />
-                      <span>{workshopStatus}</span>
-                    </div>
-                  )
-                )}
-                {workshopError && <p className="admin-panel__error">{workshopError}</p>}
-                <div className="admin-table__wrapper">
-                  {workshopsList.length > 0 ? (
-                    <table className="admin-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Image</th>
-                          <th scope="col">Title</th>
-                          <th scope="col">Scheduled</th>
-                          <th scope="col">Price</th>
-                          <th scope="col">Location</th>
-                          <th scope="col">Description</th>
-                          <th scope="col" className="admin-table__actions">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {workshopsList.map((entry) => {
-                          const scheduledDate =
-                            typeof entry.scheduledFor === "string"
-                              ? new Date(entry.scheduledFor)
-                              : entry.scheduledFor?.toDate?.()
-                                ? entry.scheduledFor.toDate()
-                                : null;
-                          const hasValidSchedule =
-                            scheduledDate instanceof Date && !Number.isNaN(scheduledDate.getTime());
-                          const dateLabel = hasValidSchedule
-                            ? bookingDateFormatter.format(scheduledDate)
-                            : "Date to be confirmed";
-                          return (
-                            <tr key={entry.id}>
-                              <td>
-                                {entry.image ? (
-                                  <img
-                                    src={entry.image}
-                                    alt={`${entry.title || entry.name || "Workshop"} preview`}
-                                    className="admin-table__thumb"
-                                  />
-                                ) : (
-                                  <span className="admin-table__thumb admin-table__thumb--placeholder">
-                                    <IconImage aria-hidden="true" />
-                                  </span>
-                                )}
-                              </td>
-                              <td>{entry.title || entry.name}</td>
-                              <td>{dateLabel}</td>
-                              <td>
-                                {entry.price
-                                  ? Number.isFinite(entry.price)
-                                    ? `R${entry.price}`
-                                    : entry.price
-                                  : "—"}
-                              </td>
-                              <td>{entry.location || "—"}</td>
-                              <td>{entry.description || "—"}</td>
-                              <td className="admin-table__actions">
-                                <button
-                                  className="icon-btn"
-                                  type="button"
-                                  onClick={() => handleEditWorkshop(entry)}
-                                  aria-label={`Edit ${entry.title || entry.name}`}
-                                >
-                                  <IconEdit aria-hidden="true" />
-                                </button>
-                                <button
-                                  className="icon-btn icon-btn--danger"
-                                  type="button"
-                                  onClick={() => handleDeleteDocument("workshops", entry.id)}
-                                  aria-label={`Delete ${entry.title || entry.name}`}
-                                >
-                                  <IconTrash aria-hidden="true" />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p className="modal__meta admin-panel__notice">No workshops in Firestore yet.</p>
-                  )}
-                </div>
-              </Reveal>
-
-              <Reveal as="section" className="card admin-panel" delay={360}>
-                <div className="admin-panel__header">
-                  <h3 className="card__title">Workshop Bookings</h3>
-                  {inventoryLoading && <span className="badge badge--muted">Syncing…</span>}
-                </div>
-                {bookings.length > 0 ? (
-                  <div className="admin-table__wrapper">
-                    <table className="admin-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Guest</th>
-                          <th scope="col">Email</th>
-                          <th scope="col">Frame</th>
-                          <th scope="col">Notes</th>
-                          <th scope="col">Received</th>
-                          <th scope="col" className="admin-table__actions">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bookings.map((entry) => {
-                          const submittedAt =
-                            entry.createdAt && typeof entry.createdAt.toDate === "function"
-                              ? bookingDateFormatter.format(entry.createdAt.toDate())
-                              : "Pending";
-                          return (
-                            <tr key={entry.id}>
-                              <td>{entry.name || "—"}</td>
-                              <td>
-                                {entry.email ? (
-                                  <a href={`mailto:${entry.email}`}>{entry.email}</a>
-                                ) : (
-                                  "—"
-                                )}
-                              </td>
-                              <td>{entry.frame || "—"}</td>
-                              <td>{entry.notes || "—"}</td>
-                              <td>{submittedAt}</td>
-                              <td className="admin-table__actions">
-                                <button
-                                  className="icon-btn icon-btn--danger"
-                                  type="button"
-                                  onClick={() => handleDeleteDocument("bookings", entry.id)}
-                                  aria-label={`Archive booking for ${entry.name || "guest"}`}
-                                >
-                                  <IconTrash aria-hidden="true" />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <p className="modal__meta admin-panel__notice">No workshop bookings recorded yet.</p>
-                )}
-              </Reveal>
-
-              <Reveal as="section" className="card admin-panel" delay={480}>
-                <div className="admin-panel__header">
-                  <h3 className="card__title">Orders</h3>
-                  {inventoryLoading && <span className="badge badge--muted">Syncing…</span>}
-                </div>
-                <div className="admin-table__wrapper">
-                  {orders.length > 0 ? (
-                    <table className="admin-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Order</th>
-                          <th scope="col">Customer</th>
-                          <th scope="col">Items</th>
-                          <th scope="col">Total</th>
-                          <th scope="col">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {orders.map((order) => {
-                          const createdAtLabel = order.createdAt?.toDate
-                            ? bookingDateFormatter.format(order.createdAt.toDate())
-                            : "Pending";
-                          const orderTotal = typeof order.totalPrice === "number" ? order.totalPrice : 0;
-                          return (
-                            <tr key={order.id}>
-                              <td>
-                                <strong>{order.id}</strong>
-                                <p className="modal__meta">{createdAtLabel}</p>
-                              </td>
-                              <td>
-                                <p>{order.customer?.fullName || "—"}</p>
-                                <p className="modal__meta">{order.customer?.email || "—"}</p>
-                                <p className="modal__meta">{order.customer?.phone || "—"}</p>
-                                {order.customer?.address && <p className="modal__meta">{order.customer.address}</p>}
-                              </td>
-                              <td>
-                                <ul className="order-items">
-                                  {order.items?.map((item) => {
-                                    const unitPrice = typeof item.price === "number" ? item.price : Number(item.price) || 0;
-                                    const itemTotal = unitPrice * (item.quantity ?? 1);
-                                    return (
-                                      <li key={item.id}>
-                                        <strong>{item.name}</strong> ×{item.quantity}
-                                        <span className="modal__meta">R{itemTotal.toFixed(2)}</span>
-                                        {item.metadata?.type === "workshop" && (
-                                          <>
-                                            <span className="modal__meta">
-                                              {item.metadata.sessionDayLabel || item.metadata.sessionLabel || item.metadata.scheduledDateLabel || "Date TBC"} · {item.metadata.attendeeCount} attendee(s)
-                                            </span>
-                                            {(item.metadata.sessionTimeRange || item.metadata.sessionTime) && (
-                                              <span className="modal__meta">Time: {item.metadata.sessionTimeRange || item.metadata.sessionTime}</span>
-                                            )}
-                                            {item.metadata.framePreference && (
-                                              <span className="modal__meta">
-                                                Frame: {item.metadata.framePreference}
-                                              </span>
-                                            )}
-                                            {typeof item.metadata.perAttendeePrice === "number" && (
-                                              <span className="modal__meta">
-                                                R{item.metadata.perAttendeePrice.toFixed(2)} per attendee
-                                              </span>
-                                            )}
-                                            {typeof item.metadata.sessionCapacity === "number" && (
-                                              <span className="modal__meta">
-                                                Session capacity: {item.metadata.sessionCapacity}
-                                              </span>
-                                            )}
-                                            {item.metadata.location && (
-                                              <span className="modal__meta">Location: {item.metadata.location}</span>
-                                            )}
-                                          </>
-                                        )}
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                              </td>
-                              <td>R{orderTotal.toFixed(2)}</td>
-                              <td>{order.status || "pending"}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p className="modal__meta admin-panel__notice">No orders have been placed yet.</p>
-                  )}
-                </div>
-              </Reveal>
-
-              <div
-                className={`modal admin-modal ${isProductModalOpen ? "is-active" : ""}`}
-                role="dialog"
-                aria-modal="true"
-                aria-hidden={isProductModalOpen ? "false" : "true"}
-                onClick={(event) => {
-                  if (event.target === event.currentTarget) closeProductModal();
-                }}
-              >
-                <div className="modal__content">
-                  <button className="modal__close" type="button" onClick={closeProductModal} aria-label="Close">
-                    &times;
-                  </button>
-                  <h3 className="modal__title">{editingProductId ? "Edit Product" : "Add Product"}</h3>
-                  <form className="admin-form" onSubmit={handleCreateProduct}>
-                    <div className="admin-file-input">
-                      <label htmlFor="product-image-upload" className="sr-only">
-                        Product image
-                      </label>
-                      <input
-                        key={editingProductId ?? "new-product"}
-                        className="input input--file"
-                        id="product-image-upload"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleProductImageChange}
-                      />
-                      <p className="admin-panel__note">Upload JPG or PNG (max 3MB). A preview appears below.</p>
-                      {productImagePreview && (
-                        <img src={productImagePreview} alt="Product preview" className="admin-preview" />
-                      )}
-                    </div>
-                    <input
-                      className="input"
-                      placeholder="Product name"
-                      value={productForm.name}
-                      onChange={(event) => setProductForm((prev) => ({ ...prev, name: event.target.value }))}
-                      required
-                    />
-                    <input
-                      className="input"
-                      placeholder="Display title (optional)"
-                      value={productForm.title}
-                      onChange={(event) => setProductForm((prev) => ({ ...prev, title: event.target.value }))}
-                    />
-                    <label className="sr-only" htmlFor="product-category-modal">
-                      Category
-                    </label>
-                    <select
-                      className="input"
-                      id="product-category-modal"
-                      value={productForm.category}
-                      onChange={(event) => setProductForm((prev) => ({ ...prev, category: event.target.value }))}
-                    >
-                      <option value="kit">DIY Kit</option>
-                      <option value="cut-flower">Cut Flower Offering</option>
-                      <option value="accessory">Accessory</option>
-                    </select>
-                    <input
-                      className="input"
-                      placeholder="Price (numbers or text)"
-                      value={productForm.price}
-                      onChange={(event) => setProductForm((prev) => ({ ...prev, price: event.target.value }))}
-                      required
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="Description"
-                      value={productForm.description}
-                      onChange={(event) => setProductForm((prev) => ({ ...prev, description: event.target.value }))}
-                    />
-                    <div className="admin-modal__actions">
-                      <button className="btn btn--secondary" type="button" onClick={closeProductModal} disabled={productSaving}>
-                        Cancel
-                      </button>
-                      <button className="btn btn--primary" type="submit" disabled={!inventoryEnabled || productSaving}>
-                        {productSaving ? "Saving…" : editingProductId ? "Update Product" : "Save Product"}
-                      </button>
-                    </div>
-                    {(productSaving || productStatus) && (
-                      <div
-                        className={`admin-save-indicator ${productSaving ? "admin-save-indicator--working" : ""}`}
-                        role="status"
-                      >
-                        {productSaving ? (
-                          <span className="admin-spinner" aria-hidden="true"></span>
-                        ) : (
-                          <IconCheck className="btn__icon" aria-hidden="true" />
-                        )}
-                        <span>{productSaving ? "Uploading product…" : productStatus}</span>
-                      </div>
-                    )}
-                    {productError && <p className="admin-panel__error">{productError}</p>}
-                  </form>
-                </div>
-              </div>
-
-              <div
-                className={`modal admin-modal ${isWorkshopModalOpen ? "is-active" : ""}`}
-                role="dialog"
-                aria-modal="true"
-                aria-hidden={isWorkshopModalOpen ? "false" : "true"}
-                onClick={(event) => {
-                  if (event.target === event.currentTarget) closeWorkshopModal();
-                }}
-              >
-                <div className="modal__content">
-                  <button className="modal__close" type="button" onClick={closeWorkshopModal} aria-label="Close">
-                    &times;
-                  </button>
-                  <h3 className="modal__title">{editingWorkshopId ? "Edit Workshop" : "Add Workshop"}</h3>
-                  <form className="admin-form" onSubmit={handleCreateWorkshop}>
-                    <div className="admin-file-input">
-                      <label htmlFor="workshop-image-upload" className="sr-only">
-                        Workshop image
-                      </label>
-                      <input
-                        key={editingWorkshopId ?? "new-workshop"}
-                        className="input input--file"
-                        id="workshop-image-upload"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleWorkshopImageChange}
-                      />
-                      <p className="admin-panel__note">Upload JPG or PNG (max 3MB). A preview appears below.</p>
-                      {workshopImagePreview && (
-                        <img src={workshopImagePreview} alt="Workshop preview" className="admin-preview" />
-                      )}
-                    </div>
-                    <input
-                      className="input"
-                      placeholder="Workshop title"
-                      value={workshopForm.title}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, title: event.target.value }))}
-                      required
-                    />
-                    <div className="admin-session-panel">
-                      <div className="admin-session-panel__header">
-                        <h4>Workshop Sessions</h4>
-                        <button
-                          className="icon-btn"
-                          type="button"
-                          onClick={handleAddWorkshopSession}
-                          aria-label="Add session"
-                        >
-                          <IconPlus aria-hidden="true" />
-                        </button>
-                      </div>
-                      <p className="admin-panel__note">
-                        Add each date and time slot available for this workshop. These options appear for customers when booking.
-                      </p>
-                      {(workshopForm.sessions || []).map((session, index) => (
-                        <div className="admin-session-row" key={session.id}>
-                          <div className="admin-session-field">
-                            <label className="admin-session-label" htmlFor={`session-date-${session.id}`}>
-                              Date
-                            </label>
-                            <input
-                              className="input"
-                              type="date"
-                              id={`session-date-${session.id}`}
-                              value={session.date || ""}
-                              onChange={(event) =>
-                                handleWorkshopSessionChange(session.id, "date", event.target.value)
-                              }
-                            />
+                            </div>
                           </div>
-                          <div className="admin-session-field">
-                            <label className="admin-session-label" htmlFor={`session-time-${session.id}`}>
-                              Time
-                            </label>
-                            <input
-                              className="input"
-                              type="time"
-                              id={`session-time-${session.id}`}
-                              value={session.time || ""}
-                              onChange={(event) =>
-                                handleWorkshopSessionChange(session.id, "time", event.target.value)
-                              }
-                            />
-                          </div>
-                          <div className="admin-session-field">
-                            <label className="admin-session-label" htmlFor={`session-capacity-${session.id}`}>
-                              Capacity (optional)
-                            </label>
-                            <input
-                              className="input"
-                              type="number"
-                              min="1"
-                              id={`session-capacity-${session.id}`}
-                              value={session.capacity || ""}
-                              onChange={(event) =>
-                                handleWorkshopSessionChange(session.id, "capacity", event.target.value)
-                              }
-                              placeholder="Max guests"
-                            />
-                          </div>
-                          <div className="admin-session-field admin-session-field--label">
-                            <label className="admin-session-label" htmlFor={`session-label-${session.id}`}>
-                              Label (optional)
-                            </label>
-                            <input
-                              className="input"
-                              id={`session-label-${session.id}`}
-                              value={session.label || ""}
-                              onChange={(event) =>
-                                handleWorkshopSessionChange(session.id, "label", event.target.value)
-                              }
-                              placeholder="Evening session, Mother's Day, etc."
-                            />
-                          </div>
+                        </td>
+                        <td>
+                          <p>{sessionLabel}</p>
+                          {primarySession?.time && (
+                            <p className="modal__meta">{primarySession.time}</p>
+                          )}
+                        </td>
+                        <td>{formatPriceLabel(workshop.price)}</td>
+                        <td className="admin-table__actions">
                           <button
-                            className="icon-btn icon-btn--danger admin-session-remove"
+                            className="icon-btn"
                             type="button"
-                            onClick={() => handleRemoveWorkshopSession(session.id)}
-                            aria-label={`Remove session ${index + 1}`}
+                            onClick={() => handleEditWorkshop(workshop)}
+                          >
+                            <IconEdit aria-hidden="true" />
+                          </button>
+                          <button
+                            className="icon-btn icon-btn--danger"
+                            type="button"
+                            onClick={() => handleDeleteWorkshop(workshop.id)}
                           >
                             <IconTrash aria-hidden="true" />
                           </button>
-                        </div>
-                      ))}
-                    </div>
-                    <input
-                      className="input"
-                      placeholder="Price (numbers or text)"
-                      value={workshopForm.price}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, price: event.target.value }))}
-                    />
-                    <input
-                      className="input"
-                      placeholder="Location"
-                      value={workshopForm.location}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, location: event.target.value }))}
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="Description"
-                      value={workshopForm.description}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, description: event.target.value }))}
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="What to Expect (each line shows as text; use '-' for bullet points)"
-                      value={workshopForm.whatToExpect}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, whatToExpect: event.target.value }))}
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="Booking & Pricing details"
-                      value={workshopForm.bookingPricing}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, bookingPricing: event.target.value }))}
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="Good to Know information"
-                      value={workshopForm.goodToKnow}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, goodToKnow: event.target.value }))}
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="Cancellations & Policies"
-                      value={workshopForm.cancellations}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, cancellations: event.target.value }))}
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="Groups & Private Events"
-                      value={workshopForm.groupsInfo}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, groupsInfo: event.target.value }))}
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="Caring for Your Art"
-                      value={workshopForm.careInfo}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, careInfo: event.target.value }))}
-                    />
-                    <textarea
-                      className="input textarea"
-                      placeholder="Why People Love Our Workshops"
-                      value={workshopForm.whyPeopleLove}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, whyPeopleLove: event.target.value }))}
-                    />
-                    <input
-                      className="input"
-                      placeholder="Call-to-action note (e.g. 'Book today to reserve your seat!')"
-                      value={workshopForm.ctaNote}
-                      onChange={(event) => setWorkshopForm((prev) => ({ ...prev, ctaNote: event.target.value }))}
-                    />
-                    <div className="admin-modal__actions">
-                      <button className="btn btn--secondary" type="button" onClick={closeWorkshopModal} disabled={workshopSaving}>
-                        Cancel
-                      </button>
-                      <button className="btn btn--primary" type="submit" disabled={!inventoryEnabled || workshopSaving}>
-                        {workshopSaving ? "Saving…" : editingWorkshopId ? "Update Workshop" : "Save Workshop"}
-                      </button>
-                    </div>
-                    {(workshopSaving || workshopStatus) && (
-                      <div
-                        className={`admin-save-indicator ${workshopSaving ? "admin-save-indicator--working" : ""}`}
-                        role="status"
-                      >
-                        {workshopSaving ? (
-                          <span className="admin-spinner" aria-hidden="true"></span>
-                        ) : (
-                          <IconCheck className="btn__icon" aria-hidden="true" />
-                        )}
-                        <span>{workshopSaving ? "Uploading workshop…" : workshopStatus}</span>
-                      </div>
-                    )}
-                    {workshopError && <p className="admin-panel__error">{workshopError}</p>}
-                  </form>
-                </div>
-              </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+          ) : (
+            <p className="admin-panel__notice">
+              No workshops yet. Create one to start selling seats.
+            </p>
           )}
-          {inventoryError && isAdmin && <p className="empty-state">{inventoryError}</p>}
+          {statusMessage && (
+            <p className="admin-panel__status">{statusMessage}</p>
+          )}
+        </Reveal>
+
+        <Reveal as="section" className="admin-panel" delay={90}>
+          <div className="admin-panel__header">
+            <h3>Bookings</h3>
+            {inventoryLoading && (
+              <span className="badge badge--muted">Syncing…</span>
+            )}
+          </div>
+          {bookings.length > 0 ? (
+            <div className="admin-table__wrapper">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Guest</th>
+                    <th scope="col">Contact</th>
+                    <th scope="col">Details</th>
+                    <th scope="col">Received</th>
+                    <th scope="col" className="admin-table__actions">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bookings.map((bookingEntry) => {
+                    const submittedAt = bookingEntry.createdAt?.toDate?.()
+                      ? bookingDateFormatter.format(
+                          bookingEntry.createdAt.toDate()
+                        )
+                      : "Pending";
+                    return (
+                      <tr key={bookingEntry.id}>
+                        <td>{bookingEntry.name || "—"}</td>
+                        <td>
+                          {bookingEntry.email ? (
+                            <a href={`mailto:${bookingEntry.email}`}>
+                              {bookingEntry.email}
+                            </a>
+                          ) : (
+                            "—"
+                          )}
+                          {bookingEntry.phone && (
+                            <p className="modal__meta">{bookingEntry.phone}</p>
+                          )}
+                        </td>
+                        <td>
+                          {bookingEntry.frame && (
+                            <p className="modal__meta">
+                              Frame: {bookingEntry.frame}
+                            </p>
+                          )}
+                          {bookingEntry.notes && (
+                            <p className="modal__meta">
+                              Notes: {bookingEntry.notes}
+                            </p>
+                          )}
+                        </td>
+                        <td>{submittedAt}</td>
+                        <td className="admin-table__actions">
+                          <button
+                            className="icon-btn icon-btn--danger"
+                            type="button"
+                            onClick={() => {
+                              if (!db) return;
+                              deleteDoc(doc(db, "bookings", bookingEntry.id));
+                            }}
+                          >
+                            <IconTrash aria-hidden="true" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="admin-panel__notice">
+              Bookings will appear here once submitted.
+            </p>
+          )}
+        </Reveal>
+      </div>
+
+      {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+
+      <div
+        className={`modal admin-modal ${
+          isWorkshopModalOpen ? "is-active" : ""
+        }`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={isWorkshopModalOpen ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closeWorkshopModal();
+        }}
+      >
+        <div className="modal__content admin-modal__content">
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close"
+            onClick={closeWorkshopModal}
+          >
+            &times;
+          </button>
+          <h3 className="modal__title">
+            {editingWorkshopId ? "Edit Workshop" : "Add Workshop"}
+          </h3>
+          <form className="admin-form" onSubmit={handleCreateWorkshop}>
+            <div className="admin-file-input admin-form__full">
+              <label htmlFor="workshop-image-upload" className="sr-only">
+                Workshop image
+              </label>
+              <input
+                key={editingWorkshopId ?? "new-workshop"}
+                className="input input--file"
+                id="workshop-image-upload"
+                type="file"
+                accept="image/*"
+                onChange={handleWorkshopImageChange}
+              />
+              <p className="admin-panel__note">
+                Upload JPG or PNG (max 3MB). A preview appears below.
+              </p>
+              {workshopImagePreview && (
+                <img
+                  src={workshopImagePreview}
+                  alt="Workshop preview"
+                  className="admin-preview"
+                />
+              )}
+            </div>
+            <input
+              className="input"
+              placeholder="Workshop title"
+              value={workshopForm.title}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  title: event.target.value,
+                }))
+              }
+              required
+            />
+            <input
+              className="input"
+              placeholder="Price (numbers or text)"
+              value={workshopForm.price}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  price: event.target.value,
+                }))
+              }
+            />
+            <input
+              className="input"
+              placeholder="Location"
+              value={workshopForm.location}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  location: event.target.value,
+                }))
+              }
+            />
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Description"
+              value={workshopForm.description}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  description: event.target.value,
+                }))
+              }
+            />
+
+            <div className="admin-session-panel admin-form__full">
+              <div className="admin-session-panel__header">
+                <h4>Workshop sessions</h4>
+                <button
+                  className="icon-btn"
+                  type="button"
+                  onClick={handleAddWorkshopSession}
+                >
+                  <IconPlus aria-hidden="true" />
+                </button>
+              </div>
+              {(workshopForm.sessions || []).map((session) => (
+                <div className="admin-session-row" key={session.id}>
+                  <div className="admin-session-field">
+                    <label
+                      className="admin-session-label"
+                      htmlFor={`session-date-${session.id}`}
+                    >
+                      Date
+                    </label>
+                    <input
+                      className="input"
+                      type="date"
+                      id={`session-date-${session.id}`}
+                      value={session.date}
+                      onChange={(event) =>
+                        handleWorkshopSessionChange(
+                          session.id,
+                          "date",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="admin-session-field">
+                    <label
+                      className="admin-session-label"
+                      htmlFor={`session-time-${session.id}`}
+                    >
+                      Time
+                    </label>
+                    <input
+                      className="input"
+                      type="time"
+                      id={`session-time-${session.id}`}
+                      value={session.time}
+                      onChange={(event) =>
+                        handleWorkshopSessionChange(
+                          session.id,
+                          "time",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="admin-session-field">
+                    <label
+                      className="admin-session-label"
+                      htmlFor={`session-capacity-${session.id}`}
+                    >
+                      Capacity
+                    </label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="1"
+                      id={`session-capacity-${session.id}`}
+                      value={session.capacity}
+                      onChange={(event) =>
+                        handleWorkshopSessionChange(
+                          session.id,
+                          "capacity",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="admin-session-field">
+                    <label
+                      className="admin-session-label"
+                      htmlFor={`session-label-${session.id}`}
+                    >
+                      Label
+                    </label>
+                    <input
+                      className="input"
+                      id={`session-label-${session.id}`}
+                      value={session.label}
+                      onChange={(event) =>
+                        handleWorkshopSessionChange(
+                          session.id,
+                          "label",
+                          event.target.value
+                        )
+                      }
+                      placeholder="Morning session, Mother's Day, etc."
+                    />
+                  </div>
+                  <button
+                    className="icon-btn icon-btn--danger admin-session-remove"
+                    type="button"
+                    onClick={() => handleRemoveWorkshopSession(session.id)}
+                  >
+                    <IconTrash aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="What to Expect"
+              value={workshopForm.whatToExpect}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  whatToExpect: event.target.value,
+                }))
+              }
+            />
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Booking & Pricing details"
+              value={workshopForm.bookingPricing}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  bookingPricing: event.target.value,
+                }))
+              }
+            />
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Good to Know"
+              value={workshopForm.goodToKnow}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  goodToKnow: event.target.value,
+                }))
+              }
+            />
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Cancellations & Policies"
+              value={workshopForm.cancellations}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  cancellations: event.target.value,
+                }))
+              }
+            />
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Groups & Private Events"
+              value={workshopForm.groupsInfo}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  groupsInfo: event.target.value,
+                }))
+              }
+            />
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Caring for Your Art"
+              value={workshopForm.careInfo}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  careInfo: event.target.value,
+                }))
+              }
+            />
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Why people love our workshops"
+              value={workshopForm.whyPeopleLove}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  whyPeopleLove: event.target.value,
+                }))
+              }
+            />
+            <input
+              className="input admin-form__full"
+              placeholder="CTA note (e.g. 'Book today to reserve your seat!')"
+              value={workshopForm.ctaNote}
+              onChange={(event) =>
+                setWorkshopForm((prev) => ({
+                  ...prev,
+                  ctaNote: event.target.value,
+                }))
+              }
+            />
+            <div className="admin-modal__actions admin-form__actions">
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={closeWorkshopModal}
+                disabled={workshopSaving}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                type="submit"
+                disabled={!inventoryEnabled || workshopSaving}
+              >
+                {workshopSaving
+                  ? "Saving…"
+                  : editingWorkshopId
+                  ? "Update Workshop"
+                  : "Save Workshop"}
+              </button>
+            </div>
+            {workshopError && (
+              <p className="admin-panel__error">{workshopError}</p>
+            )}
+          </form>
         </div>
-      </section>
-    </>
+      </div>
+    </div>
   );
 }
 
-export default AdminPage;
+export function AdminOrdersView() {
+  usePageMetadata({
+    title: "Admin · Orders",
+    description: "Review cart checkouts and fulfilment status.",
+  });
+  const { db, orders, inventoryLoading, inventoryError } = useAdminData();
+  const [statusMessage, setStatusMessage] = useState(null);
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 3000);
+    return () => clearTimeout(timeout);
+  }, [statusMessage]);
+
+  const handleUpdateOrderStatus = async (orderId, nextStatus) => {
+    if (!db) return;
+    await updateDoc(doc(db, "orders", orderId), {
+      status: nextStatus,
+      updatedAt: serverTimestamp(),
+    });
+    setStatusMessage("Order updated");
+  };
+
+  return (
+    <div className="admin-panel admin-panel--full">
+      <Reveal as="div" className="admin-panel__header">
+        <div>
+          <h2>Orders</h2>
+          <p className="admin-panel__note">
+            Track everything added to cart, including workshop metadata.
+          </p>
+        </div>
+      </Reveal>
+
+      <Reveal as="div" className="admin-table__wrapper" delay={60}>
+        {orders.length > 0 ? (
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th scope="col">Order</th>
+                <th scope="col">Customer</th>
+                <th scope="col">Items</th>
+                <th scope="col">Total</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((order) => {
+                const createdAtLabel = order.createdAt?.toDate?.()
+                  ? bookingDateFormatter.format(order.createdAt.toDate())
+                  : "Pending";
+                const total =
+                  typeof order.totalPrice === "number"
+                    ? order.totalPrice
+                    : Number(order.totalPrice) || 0;
+                return (
+                  <tr key={order.id}>
+                    <td>
+                      <strong>{order.id}</strong>
+                      <p className="modal__meta">{createdAtLabel}</p>
+                    </td>
+                    <td>
+                      <p>{order.customer?.fullName || "—"}</p>
+                      <p className="modal__meta">
+                        {order.customer?.email || "—"}
+                      </p>
+                      {order.customer?.phone && (
+                        <p className="modal__meta">{order.customer.phone}</p>
+                      )}
+                    </td>
+                    <td>
+                      <ul className="order-items">
+                        {order.items?.map((item) => (
+                          <li key={`${order.id}-${item.id}`}>
+                            <strong>{item.name}</strong> ×{item.quantity || 1}
+                            {item.metadata?.type === "workshop" && (
+                              <span className="modal__meta">
+                                {item.metadata.sessionDayLabel ||
+                                  item.metadata.sessionLabel ||
+                                  "Session"}{" "}
+                                · {item.metadata.attendeeCount || 1} attendee(s)
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </td>
+                    <td>{formatPriceLabel(total)}</td>
+                    <td>
+                      <select
+                        className="input"
+                        value={order.status || "pending"}
+                        onChange={(event) =>
+                          handleUpdateOrderStatus(order.id, event.target.value)
+                        }
+                      >
+                        {ORDER_STATUSES.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <p className="admin-panel__notice">No orders yet.</p>
+        )}
+        {inventoryLoading && <p className="modal__meta">Syncing orders…</p>}
+        {inventoryError && (
+          <p className="admin-panel__error">{inventoryError}</p>
+        )}
+        {statusMessage && (
+          <p className="admin-panel__status">{statusMessage}</p>
+        )}
+      </Reveal>
+    </div>
+  );
+}
+
+export function AdminProfileView() {
+  usePageMetadata({
+    title: "Admin · Profile",
+    description: "Manage your admin authentication info.",
+  });
+  const { user, role, signOut, refreshRole } = useAuth();
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [roleLoading, setRoleLoading] = useState(false);
+
+  const handleRefreshRole = async () => {
+    setRoleLoading(true);
+    try {
+      await refreshRole();
+      setStatusMessage("Role refreshed");
+    } catch (error) {
+      setStatusMessage(error.message);
+    } finally {
+      setRoleLoading(false);
+    }
+  };
+
+  return (
+    <div className="admin-panel admin-panel--narrow">
+      <Reveal as="section" className="admin-panel" delay={30}>
+        <h2>Profile</h2>
+        <p className="modal__meta">Signed in as {user?.email}</p>
+        <p className="modal__meta">
+          <strong>Role:</strong> {role}
+        </p>
+        <p className="modal__meta">UID: {user?.uid}</p>
+        {user?.metadata?.lastSignInTime && (
+          <p className="modal__meta">
+            Last sign-in: {user.metadata.lastSignInTime}
+          </p>
+        )}
+        <div className="admin-profile__actions">
+          <button
+            className="btn btn--secondary"
+            type="button"
+            onClick={handleRefreshRole}
+            disabled={roleLoading}
+          >
+            {roleLoading ? "Refreshing…" : "Refresh Role"}
+          </button>
+          <button className="btn btn--primary" type="button" onClick={signOut}>
+            Sign Out
+          </button>
+        </div>
+        {statusMessage && (
+          <p className="admin-panel__status">{statusMessage}</p>
+        )}
+      </Reveal>
+    </div>
+  );
+}
+
+export default AdminDashboardView;

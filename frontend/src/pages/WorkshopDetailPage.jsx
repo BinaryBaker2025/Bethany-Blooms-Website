@@ -7,7 +7,7 @@ import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { getFirebaseDb } from "../lib/firebase.js";
-import heroBackground from "../assets/hero-flowers.svg";
+import heroBackground from "../assets/photos/workshop-outdoor-venue.jpg";
 
 function renderRichText(content) {
   if (!content) return null;

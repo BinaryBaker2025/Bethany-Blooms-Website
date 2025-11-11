@@ -3,8 +3,8 @@ import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
-import heroBackground from "../assets/hero-flowers.svg";
-import kitPurple from "../assets/kit-purple.svg";
+import heroBackground from "../assets/photos/workshop-table-long.jpg";
+import workshopDetailImage from "../assets/photos/workshop-table-details-1.png";
 
 function WorkshopsPage() {
   usePageMetadata({
@@ -48,7 +48,11 @@ function WorkshopsPage() {
     <>
       <section className="section section--tight">
         <div className="section__inner">
-          <Hero variant="workshops" background={heroBackground} media={<img src={kitPurple} alt="Workshop table with pressed flower frames" />}>
+          <Hero
+            variant="workshops"
+            background={heroBackground}
+            media={<img src={workshopDetailImage} alt="Bethany Blooms workshop table set with flowers and tools" />}
+          >
             <h1>Bespoke Pressed Flower Workshops</h1>
             <p>
               Slow down with a day of making, guided by Bethany Blooms. Craft a framed arrangement, learn pressing

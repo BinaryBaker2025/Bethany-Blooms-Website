@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
-import heroBackground from "../assets/hero-flowers.svg";
+import heroBackground from "../assets/photos/workshop-flowers-trays.jpg";
 import { galleryItems } from "../data/gallery.js";
 
 function GalleryPage() {
