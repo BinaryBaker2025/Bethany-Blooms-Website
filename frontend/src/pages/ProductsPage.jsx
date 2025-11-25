@@ -20,7 +20,9 @@ function ProductsPage() {
     orderDirection: "desc",
   });
 
-  const normalizedProducts = remoteProducts.map((product, index) => {
+  const liveProducts = remoteProducts.filter((product) => (product.status ?? "live") === "live");
+
+  const normalizedProducts = liveProducts.map((product, index) => {
     const priceNumber = typeof product.price === "number" ? product.price : Number(product.price);
     const isPurchasable = product.category === "kit" && Number.isFinite(priceNumber);
     return {
@@ -44,7 +46,12 @@ function ProductsPage() {
       alert("This product is not available for direct purchase online yet. Please enquire for pricing.");
       return;
     }
-    addItem({ id: product.id, name: product.name, price: product.numericPrice });
+    addItem({
+      id: product.id,
+      name: product.name,
+      price: product.numericPrice,
+      itemType: "product",
+    });
     openCart();
   };
 

@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
-import Hero from "../components/Hero.jsx";
+import { useMemo } from "react";
 import Reveal from "../components/Reveal.jsx";
 import TestimonialCarousel from "../components/TestimonialCarousel.jsx";
+import HeroCarousel from "../components/HeroCarousel.jsx";
 import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
@@ -11,6 +12,10 @@ import homePhotoOne from "../assets/photos/workshop-frame-hand-pink.jpeg";
 import homePhotoTwo from "../assets/photos/workshop-frame-hand-neutral.jpeg";
 import homePhotoThree from "../assets/photos/workshop-flowers-trays.jpg";
 import homePhotoFour from "../assets/photos/workshop-table-long.jpg";
+import workshopOutdoorVenue from "../assets/photos/workshop-outdoor-venue.jpg";
+import workshopGuestsSmiling from "../assets/photos/workshop-guests-smiling.jpg";
+import workshopTableLongClose from "../assets/photos/workshop-table-long-close.jpg";
+import workshopTableDetailsOne from "../assets/photos/workshop-table-details-1.png";
 import { testimonials } from "../data/testimonials.js";
 
 function HomePage() {
@@ -28,9 +33,9 @@ function HomePage() {
     orderDirection: "desc",
   });
 
-  const products = remoteProducts;
+  const liveProducts = remoteProducts.filter((product) => (product.status ?? "live") === "live");
 
-  const normalizedProducts = products.map((product, index) => {
+  const normalizedProducts = liveProducts.map((product, index) => {
     const priceNumber = typeof product.price === "number" ? product.price : Number(product.price);
     const isPurchasable = product.category === "kit" && Number.isFinite(priceNumber);
     return {
@@ -47,16 +52,66 @@ function HomePage() {
     };
   });
 
-  const featuredProducts = normalizedProducts.slice(0, 4);
+  const featuredProducts = normalizedProducts.filter((product) => product.featured).slice(0, 4);
+  const displayProducts =
+    featuredProducts.length > 0 ? featuredProducts : normalizedProducts.slice(0, 4);
 
-  const heroHeroImage = homePhotoFour;
+  const heroSlides = useMemo(
+    () => [
+      {
+        id: "hero-pressed-flowers",
+        variant: "pressed",
+        badge: "Pressed Flowers",
+        title: "Pressed Flower Art & Workshops, Made Simple 🌸",
+        description:
+          "Discover the joy of preserving blooms with crafted workshops, ready-to-style floral products, bespoke art pieces, and thoughtful gifting collections from the Bethany Blooms studio.",
+        background: heroBackground,
+        mediaImage: homePhotoFour,
+        mediaAlt: "Bethany Blooms workshop experience",
+        primaryCta: { label: "Book a Workshop", href: "/workshops", variant: "primary" },
+        secondaryCta: { label: "Explore Products", href: "/products", variant: "secondary" },
+      },
+      {
+        id: "hero-cut-flowers",
+        variant: "cut",
+        badge: "Cut Flowers",
+        title: "Cut Flowers Styled For Celebrations",
+        description:
+          "Order lush seasonal arrangements, event styling, and on-site florals designed to suit intimate gatherings, editorials, or heartfelt gifting moments.",
+        background: workshopOutdoorVenue,
+        mediaImage: workshopTableLongClose,
+        mediaAlt: "Bethany Blooms long floral styling table outdoors",
+        primaryCta: { label: "Plan Your Florals", href: "/contact", variant: "primary" },
+        secondaryCta: { label: "View Gallery", href: "/gallery", variant: "secondary" },
+      },
+      {
+        id: "hero-studio-products",
+        variant: "products",
+        badge: "Studio Products",
+        title: "Ready-to-ship Floral Finds",
+        description:
+          "Shop limited studio drops, DIY kits, and gift-ready frames curated with local botanicals for keepsakes that last.",
+        background: workshopGuestsSmiling,
+        mediaImage: workshopTableDetailsOne,
+        mediaAlt: "Colourful trays of dried flowers ready for a workshop",
+        primaryCta: { label: "Browse Products", href: "/products", variant: "primary" },
+        secondaryCta: { label: "Get in Touch", href: "/contact", variant: "secondary" },
+      },
+    ],
+    []
+  );
 
   const handleAddToCart = (product) => {
     if (!product.isPurchasable || !product.numericPrice) {
       alert("This product does not have a valid online price yet. Please enquire for availability.");
       return;
     }
-    addItem({ id: product.id, name: product.name, price: product.numericPrice });
+    addItem({
+      id: product.id,
+      name: product.name,
+      price: product.numericPrice,
+      itemType: "product",
+    });
     openCart();
   };
 
@@ -64,29 +119,7 @@ function HomePage() {
     <>
       <section className="section section--tight">
         <div className="section__inner">
-          <Hero
-            variant="home"
-            background={heroBackground}
-            media={<img src={heroHeroImage} alt="Bethany Blooms workshop experience" />}
-          >
-            <h1>Pressed Flower Art & Workshops, Made Simple 🌸</h1>
-            <p>
-              Discover the joy of preserving blooms with crafted workshops, ready-to-style floral products, bespoke art
-              pieces, and thoughtful gifting collections from the Bethany Blooms studio.
-            </p>
-            <div className="cta-group">
-              <Reveal as="div">
-                <Link to="/workshops" className="btn btn--primary">
-                  Book a Workshop
-                </Link>
-              </Reveal>
-              <Reveal as="div" delay={120}>
-                <Link to="/products" className="btn btn--secondary">
-                  Explore Products
-                </Link>
-              </Reveal>
-            </div>
-          </Hero>
+          <HeroCarousel slides={heroSlides} />
         </div>
       </section>
 
@@ -123,7 +156,7 @@ function HomePage() {
             </p>
           </Reveal>
           <div className="cards-grid">
-            {featuredProducts.map((product, index) => (
+            {displayProducts.map((product, index) => (
               <Reveal as="article" className="card" key={product.id} delay={index * 110}>
                 <img src={product.image} alt={`${product.title} product from Bethany Blooms`} />
                 <h3 className="card__title">{product.title}</h3>

@@ -5,12 +5,12 @@ import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyARCqLWDWgWo5wX5fSrFKR4WCXgiyYexx8",
-  authDomain: "bethanyblooms-771da.firebaseapp.com",
-  projectId: "bethanyblooms-771da",
-  storageBucket: "bethanyblooms-771da.firebasestorage.app",
-  messagingSenderId: "619954160581",
-  appId: "1:619954160581:web:cec6308d71f903c82081ac",
+  apiKey: "AIzaSyDVSRCzKJtApzAS7o1Q8eIFC2Sfku2lq_0",
+  authDomain: "bethanyblooms-89dcc.firebaseapp.com",
+  projectId: "bethanyblooms-89dcc",
+  storageBucket: "bethanyblooms-89dcc.firebasestorage.app",
+  messagingSenderId: "274838965032",
+  appId: "1:274838965032:web:ec3ddae38ad60f665ede1d",
 };
 
 function assertConfig(config) {

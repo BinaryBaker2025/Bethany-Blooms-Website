@@ -14,6 +14,15 @@ const readStorage = () => {
   }
 };
 
+const resolveItemType = (entry) => {
+  if (!entry) return null;
+  if (entry.metadata?.type === "workshop") return "workshop";
+  if (entry.itemType === "workshop" || entry.itemType === "product") {
+    return entry.itemType;
+  }
+  return "product";
+};
+
 export function CartProvider({ children }) {
   const [items, setItems] = useState(() => readStorage());
   const [isReady, setIsReady] = useState(false);
@@ -30,6 +39,18 @@ export function CartProvider({ children }) {
 
   const addItem = (item) => {
     setItems((prev) => {
+      const incomingType = resolveItemType(item) ?? "product";
+      const existingType = resolveItemType(prev[0]);
+
+      if (existingType && incomingType && existingType !== incomingType) {
+        if (typeof window !== "undefined") {
+          window.alert(
+            "You can only have workshops or products in your cart at one time. Please clear your cart to switch.",
+          );
+        }
+        return prev;
+      }
+
       const existing = prev.find((entry) => entry.id === item.id);
       if (existing) {
         return prev.map((entry) =>
@@ -38,7 +59,10 @@ export function CartProvider({ children }) {
             : entry,
         );
       }
-      return [...prev, { ...item, quantity: item.quantity ?? 1 }];
+      return [
+        ...prev,
+        { ...item, quantity: item.quantity ?? 1, itemType: incomingType },
+      ];
     });
   };
 

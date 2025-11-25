@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+  import { useEffect, useMemo, useRef, useState } from "react";
+import { httpsCallable } from "firebase/functions";
+import {
+  addDoc,
+  collection,
+  doc,
+  runTransaction,
+  serverTimestamp,
+} from "firebase/firestore";
 import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
-import { getFirebaseDb } from "../lib/firebase.js";
+import { getFirebaseDb, getFirebaseFunctions } from "../lib/firebase.js";
 
 const currency = (value) => `R${value.toFixed(2)}`;
 
@@ -26,6 +33,31 @@ function CartModal() {
       return null;
     }
   }, []);
+  const functions = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const cartTypeLabel = useMemo(() => {
+    if (!items.length) return null;
+    return items[0]?.metadata?.type === "workshop" ? "workshop bookings" : "products";
+  }, [items]);
+
+  const getNextOrderNumber = async () => {
+    if (!db) return 1000;
+    const counterRef = doc(db, "config", "orderCounter");
+    return runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(counterRef);
+      const currentValue = snapshot.exists() ? snapshot.data().value : 999;
+      const safeValue = Number.isFinite(currentValue) ? Number(currentValue) : 999;
+      const nextValue = safeValue + 1;
+      transaction.set(counterRef, { value: nextValue }, { merge: true });
+      return nextValue;
+    });
+  };
 
   useEffect(() => {
     if (isCartOpen) {
@@ -63,6 +95,25 @@ function CartModal() {
     setCheckoutDetails((prev) => ({ ...prev, [field]: value }));
   };
 
+  const submitPayfastForm = (url, fields) => {
+    if (typeof document === "undefined") return;
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = url;
+    form.style.display = "none";
+
+    Object.entries(fields || {}).forEach(([name, value]) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = String(value);
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+  };
+
   const handlePlaceOrder = async () => {
     if (!items.length || !db) return;
 
@@ -95,7 +146,9 @@ function CartModal() {
     const orderTotal = orderItems.reduce((sum, entry) => sum + entry.price * entry.quantity, 0);
 
     try {
-      await addDoc(collection(db, "orders"), {
+      const nextOrderNumber = await getNextOrderNumber();
+      const orderRef = await addDoc(collection(db, "orders"), {
+        orderNumber: nextOrderNumber,
         customer: {
           fullName: customer.fullName.trim(),
           email: customer.email.trim(),
@@ -105,10 +158,102 @@ function CartModal() {
         items: orderItems,
         totalPrice: orderTotal,
         status: "pending",
+        paymentStatus: "awaiting",
+        trackingLink: null,
         createdAt: serverTimestamp(),
       });
+
+      const workshopItems = orderItems.filter(
+        (item) => item.metadata?.type === "workshop",
+      );
+      if (workshopItems.length > 0) {
+        await Promise.all(
+          workshopItems.map((item) => {
+            const frameValue =
+              (item.metadata?.framePreference || "Workshop")
+                .toString()
+                .slice(0, 20) || "Workshop";
+            const notesParts = [
+              item.metadata?.sessionDayLabel ||
+                item.metadata?.scheduledDateLabel ||
+                null,
+              item.metadata?.sessionLabel ||
+                item.metadata?.sessionTimeRange ||
+                item.metadata?.sessionTime ||
+                null,
+              item.metadata?.location || null,
+              item.metadata?.attendeeCount
+                ? `${item.metadata.attendeeCount} attendee(s)`
+                : null,
+            ].filter(Boolean);
+            const notesValue = [
+              ...notesParts,
+              item.metadata?.notes || "",
+            ]
+              .filter(Boolean)
+              .join(" · ")
+              .slice(0, 1000);
+
+            const sessionDateValue =
+              item.metadata?.sessionDate ||
+              item.metadata?.session?.date ||
+              null;
+            const sessionLabelValue =
+              item.metadata?.sessionLabel ||
+              item.metadata?.sessionTimeRange ||
+              item.metadata?.sessionTime ||
+              null;
+
+            return addDoc(collection(db, "bookings"), {
+              name:
+                item.metadata?.customer?.fullName ||
+                customer.fullName ||
+                "Guest",
+              email:
+                item.metadata?.customer?.email ||
+                customer.email ||
+                "no-reply@bethanyblooms.co.za",
+              frame: frameValue,
+              notes: notesValue,
+              sessionDate: sessionDateValue,
+              sessionLabel: sessionLabelValue,
+              workshopId: item.metadata?.workshopId || null,
+              orderId: orderRef.id,
+              paid: false,
+              createdAt: serverTimestamp(),
+            });
+          }),
+        );
+      }
+
+      // Temporarily disable PayFast redirect while we gather account details
+      const shouldRequestPayment = false;
+      let payfastPayload = null;
+
+      if (shouldRequestPayment) {
+        try {
+          const createPayfastPayment = httpsCallable(functions, "createPayfastPayment");
+          const { data: payfastData } = await createPayfastPayment({
+            orderId: orderRef.id,
+            orderNumber: nextOrderNumber,
+            amount: orderTotal,
+            returnUrl: `${window.location.origin}/payment/success`,
+            cancelUrl: `${window.location.origin}/payment/cancel`,
+            customerName: customer.fullName,
+            customerEmail: customer.email,
+          });
+          payfastPayload = payfastData;
+        } catch (error) {
+          console.error("PayFast payload failed", error);
+        }
+      }
+
       clearCart();
-      setOrderSuccess("Thank you! Your order has been received.");
+      setOrderSuccess(payfastPayload ? "Redirecting to PayFast…" : "Thank you! Your order has been received.");
+
+      if (payfastPayload?.url && payfastPayload?.fields) {
+        submitPayfastForm(payfastPayload.url, payfastPayload.fields);
+      }
     } catch (error) {
       setOrderError(error.message);
     } finally {
@@ -140,6 +285,11 @@ function CartModal() {
         <h2 className="modal__title" id="cart-title">
           Your Cart
         </h2>
+        {cartTypeLabel && (
+          <p className="modal__meta">
+            Your cart currently contains {cartTypeLabel}. Clear it before switching between workshops and products.
+          </p>
+        )}
         {items.length === 0 ? (
           <p className="empty-state">Your cart is currently empty. Add a product or workshop booking to begin.</p>
         ) : (

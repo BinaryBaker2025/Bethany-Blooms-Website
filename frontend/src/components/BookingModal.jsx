@@ -31,6 +31,31 @@ function BookingModal() {
   const [selectedDay, setSelectedDay] = useState(null);
 
   const workshop = bookingContext?.workshop ?? null;
+  const bookingType = bookingContext?.type ?? "workshop";
+  const bookingCopy =
+    bookingType === "cut-flower"
+      ? {
+          heading: "Reserve Your Cut Flower Session",
+          nounLower: "class",
+          detailsUnavailable: "Class details unavailable. Close the dialog and try again.",
+          unavailable: "This class is not currently accepting bookings. Please check back soon.",
+          selectSession: "Please choose a class day and time slot before continuing.",
+          addLabel: "Reserve Spot",
+          itemLabel: "Cut Flower Session",
+          daySelectorLabel: "Class Day",
+          noSessionsCta: "No Sessions Available",
+        }
+      : {
+          heading: "Secure Your Workshop Seat",
+          nounLower: "workshop",
+          detailsUnavailable: "Workshop details unavailable. Close the dialog and try again.",
+          unavailable: "This workshop is not currently accepting bookings. Please check back soon.",
+          selectSession: "Please choose a workshop day and time slot before continuing.",
+          addLabel: "Add to Cart",
+          itemLabel: "Workshop",
+          daySelectorLabel: "Workshop Day",
+          noSessionsCta: "No Sessions Available",
+        };
   const sessions = useMemo(
     () => (Array.isArray(workshop?.sessions) ? workshop.sessions : []),
     [workshop],
@@ -224,19 +249,19 @@ function BookingModal() {
 
     if (!workshop) {
       setFormStatus("error");
-      setSubmitError("We couldn’t load the workshop details. Please close and try again.");
+      setSubmitError(bookingCopy.detailsUnavailable);
       return;
     }
 
     if (sessionDays.length === 0) {
       setFormStatus("error");
-      setSubmitError("This workshop is not currently accepting bookings. Please check back soon.");
+      setSubmitError(bookingCopy.unavailable);
       return;
     }
 
     if (!selectedDay || !selectedSession) {
       setFormStatus("error");
-      setSubmitError("Please choose a workshop day and time slot before continuing.");
+      setSubmitError(bookingCopy.selectSession);
       return;
     }
 
@@ -272,15 +297,15 @@ function BookingModal() {
       frameOptions[0]?.value ??
       INITIAL_BOOKING_FORM.framePreference;
 
-    const cartItemId = `workshop-${workshop.id}-${selectedSession.id}-${Date.now()}`;
+    const cartItemId = `${bookingType}-${workshop.id}-${selectedSession.id}-${Date.now()}`;
 
     addItem({
       id: cartItemId,
-      name: `${workshop.title} Workshop`,
+      name: `${workshop.title} ${bookingCopy.itemLabel}`,
       price: totalPrice,
       quantity: 1,
       metadata: {
-        type: "workshop",
+        type: bookingType,
         workshopId: workshop.id,
         workshopTitle: workshop.title,
         scheduledFor: selectedSession.start ?? workshop.scheduledFor ?? null,
@@ -345,13 +370,13 @@ function BookingModal() {
     !selectedSession ||
     (selectedSession.isPast && hasActiveSession);
   const submitLabel = (() => {
-    if (isSubmitting) return "Adding to cart…";
-    if (!workshop) return "Add to Cart";
-    if (sessionDays.length === 0) return "No Sessions Available";
+    if (isSubmitting) return bookingType === "cut-flower" ? "Reserving…" : "Adding to cart…";
+    if (!workshop) return bookingCopy.addLabel;
+    if (sessionDays.length === 0) return bookingCopy.noSessionsCta;
     if (!selectedDay) return "Select a Day";
     if (!selectedSession) return "Select Time Slot";
     if (selectedSession.isPast && hasActiveSession) return "Select Available Session";
-    return "Add to Cart";
+    return bookingCopy.addLabel;
   })();
 
   return (
@@ -376,7 +401,7 @@ function BookingModal() {
           &times;
         </button>
         <h2 className="modal__title" id="booking-title">
-          Secure Your Workshop Seat
+          {bookingCopy.heading}
         </h2>
         {workshop ? (
           <div className="booking-summary">
@@ -404,12 +429,12 @@ function BookingModal() {
             )}
           </div>
         ) : (
-          <p className="empty-state">Workshop details unavailable. Close the dialog and try again.</p>
+          <p className="empty-state">{bookingCopy.detailsUnavailable}</p>
         )}
         <form className="booking-grid" onSubmit={handleSubmit} noValidate>
           {sessionDays.length > 0 && (
             <div className="booking-grid__full booking-day-picker">
-              <span className="booking-picker__label">Workshop Day</span>
+              <span className="booking-picker__label">{bookingCopy.daySelectorLabel}</span>
               <div className="booking-day-picker__grid">
                 {sessionDays.map((day) => {
                   const isActive = day.date === selectedDay;

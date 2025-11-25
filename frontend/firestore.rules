@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDocPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(userDocPath(request.auth.uid))
+        && get(userDocPath(request.auth.uid)).data.role == "admin";
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function userDocHasOnlyAllowedFields(data) {
+      return data.keys().hasOnly(["role", "email", "createdAt", "updatedAt"]);
+    }
+
+    function isValidSelfUpdate(newData, existingData) {
+      return userDocHasOnlyAllowedFields(newData)
+        && newData.role == existingData.role
+        && newData.email == existingData.email;
+    }
+
+    function validBooking(data) {
+      return data.keys().hasOnly([
+          "name",
+          "email",
+          "frame",
+          "notes",
+          "createdAt",
+          "sessionDate",
+          "sessionLabel",
+          "workshopId",
+        ])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 120
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 160
+        && data.frame is string && data.frame.size() > 0 && data.frame.size() <= 40
+        && (!("notes" in data) || (data.notes is string && data.notes.size() <= 1000))
+        && (!("sessionDate" in data) || (data.sessionDate is string && data.sessionDate.size() > 0))
+        && (!("sessionLabel" in data) || (data.sessionLabel is string && data.sessionLabel.size() <= 120))
+        && (!("workshopId" in data) || (data.workshopId is string && data.workshopId.size() > 0))
+        && request.resource.data.createdAt == request.time;
+    }
+
+    function validOrder(data) {
+      return data.keys().hasOnly([
+          "customer",
+          "items",
+          "totalPrice",
+          "status",
+          "createdAt",
+          "orderNumber",
+          "trackingLink",
+        ])
+        && data.customer.keys().hasOnly(["fullName", "email", "phone", "address"])
+        && data.customer.fullName is string && data.customer.fullName.size() > 0
+        && data.customer.email is string && data.customer.email.size() > 0
+        && data.customer.phone is string && data.customer.phone.size() > 0
+        && data.customer.address is string && data.customer.address.size() > 0
+        && data.items is list && data.items.size() > 0
+        && data.items.size() <= 40
+        && data.totalPrice is number && data.totalPrice >= 0
+        && data.status is string
+        && (("orderNumber" in data) ? (data.orderNumber is number && data.orderNumber >= 1000) : true)
+        && (("trackingLink" in data) ? (data.trackingLink is string || data.trackingLink == null) : true)
+        && request.resource.data.createdAt == request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if isSelf(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if isSelf(userId)
+        && userDocHasOnlyAllowedFields(request.resource.data)
+        && request.resource.data.role == "customer";
+
+      allow update: if (isSelf(userId) && isValidSelfUpdate(request.resource.data, resource.data))
+        || isAdmin();
+
+      allow delete: if false;
+    }
+
+    match /products/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /workshops/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /events/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /cutFlowerBookings/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /cutFlowerClasses/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow create: if validBooking(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow create: if validOrder(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /config/{document=**} {
+      allow read: if true;
+    }
+
+    match /config/orderCounter {
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasOnly(["value"])
+        && request.resource.data.value is number
+        && request.resource.data.value >= 1000;
+
+      allow update: if request.resource.data.keys().hasOnly(["value"])
+        && request.resource.data.value is number
+        && resource.data.value is number
+        && request.resource.data.value == resource.data.value + 1;
+
+      allow delete: if false;
+    }
+  }
+}

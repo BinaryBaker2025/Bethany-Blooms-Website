@@ -23,7 +23,7 @@ function WorkshopsPage() {
     orderDirection: "asc",
   });
 
-  const workshops = remoteWorkshops;
+  const workshops = remoteWorkshops.filter((workshop) => (workshop.status ?? "live") === "live");
 
   const normalizedWorkshops = workshops.map((workshop) => {
     const parsedDate = workshop.scheduledFor ? new Date(workshop.scheduledFor) : null;

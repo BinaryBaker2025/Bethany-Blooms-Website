@@ -13,7 +13,18 @@ export function AdminDataProvider({ children }) {
   const [workshops, setWorkshops] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [orders, setOrders] = useState([]);
-  const readyRef = useRef({ products: false, workshops: false, bookings: false, orders: false });
+  const [events, setEvents] = useState([]);
+  const [cutFlowerBookings, setCutFlowerBookings] = useState([]);
+  const [cutFlowerClasses, setCutFlowerClasses] = useState([]);
+  const readyRef = useRef({
+    products: false,
+    workshops: false,
+    bookings: false,
+    orders: false,
+    events: false,
+    cutFlowerBookings: false,
+    cutFlowerClasses: false,
+  });
 
   const db = useMemo(() => {
     try {
@@ -39,13 +50,24 @@ export function AdminDataProvider({ children }) {
       setWorkshops([]);
       setBookings([]);
       setOrders([]);
+      setEvents([]);
+      setCutFlowerBookings([]);
+      setCutFlowerClasses([]);
       setInventoryLoading(false);
       setInventoryError(null);
       return undefined;
     }
 
     setInventoryLoading(true);
-    readyRef.current = { products: false, workshops: false, bookings: false, orders: false };
+    readyRef.current = {
+      products: false,
+      workshops: false,
+      bookings: false,
+      orders: false,
+      events: false,
+      cutFlowerBookings: false,
+      cutFlowerClasses: false,
+    };
 
     const markReady = (key) => {
       if (readyRef.current[key]) return;
@@ -101,11 +123,44 @@ export function AdminDataProvider({ children }) {
       handleError,
     );
 
+    const eventsUnsub = onSnapshot(
+      query(collection(db, "events"), orderBy("eventDate", "asc")),
+      (snapshot) => {
+        setEvents(snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })));
+        setInventoryError(null);
+        markReady("events");
+      },
+      handleError,
+    );
+
+    const cutFlowerBookingsUnsub = onSnapshot(
+      query(collection(db, "cutFlowerBookings"), orderBy("eventDate", "asc")),
+      (snapshot) => {
+        setCutFlowerBookings(snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })));
+        setInventoryError(null);
+        markReady("cutFlowerBookings");
+      },
+      handleError,
+    );
+
+    const cutFlowerClassesUnsub = onSnapshot(
+      query(collection(db, "cutFlowerClasses"), orderBy("eventDate", "asc")),
+      (snapshot) => {
+        setCutFlowerClasses(snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })));
+        setInventoryError(null);
+        markReady("cutFlowerClasses");
+      },
+      handleError,
+    );
+
     return () => {
       productsUnsub();
       workshopsUnsub();
       bookingsUnsub();
       ordersUnsub();
+      eventsUnsub();
+      cutFlowerBookingsUnsub();
+      cutFlowerClassesUnsub();
     };
   }, [db, inventoryEnabled, user, isAdmin]);
 
@@ -124,6 +179,9 @@ export function AdminDataProvider({ children }) {
       workshops,
       bookings,
       orders,
+      events,
+      cutFlowerBookings,
+      cutFlowerClasses,
     }),
     [
       bookings,
@@ -133,6 +191,9 @@ export function AdminDataProvider({ children }) {
       inventoryLoading,
       isAdmin,
       orders,
+      events,
+      cutFlowerBookings,
+      cutFlowerClasses,
       products,
       role,
       storage,
