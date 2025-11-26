@@ -16,6 +16,7 @@ import {
   AdminCutFlowerClassesView,
   AdminEventsView,
   AdminOrdersView,
+  AdminUsersView,
   AdminProductsView,
   AdminProfileView,
   AdminWorkshopsView,
@@ -59,6 +60,7 @@ function App() {
               <Route path="cut-flowers/classes" element={<AdminCutFlowerClassesView />} />
               <Route path="cut-flowers/bookings" element={<AdminCutFlowerBookingsView />} />
               <Route path="events" element={<AdminEventsView />} />
+              <Route path="users" element={<AdminUsersView />} />
               <Route path="orders" element={<AdminOrdersView />} />
               <Route path="profile" element={<AdminProfileView />} />
             </Route>

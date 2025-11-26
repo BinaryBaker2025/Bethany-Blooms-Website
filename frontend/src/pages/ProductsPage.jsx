@@ -24,7 +24,7 @@ function ProductsPage() {
 
   const normalizedProducts = liveProducts.map((product, index) => {
     const priceNumber = typeof product.price === "number" ? product.price : Number(product.price);
-    const isPurchasable = product.category === "kit" && Number.isFinite(priceNumber);
+    const isPurchasable = Number.isFinite(priceNumber);
     return {
       ...product,
       id: product.id || `product-${index}`,

@@ -126,6 +126,105 @@ const WORKSHOP_SEED = [
   },
 ];
 
+const EVENTS_SEED = [
+  {
+    id: "event-market-pop-up",
+    title: "Spring Pop-up & Bouquet Bar",
+    description: "Meet Bethany Blooms at the Riverside Market for bouquet bars, mini installs, and live demos.",
+    location: "Riverside Market, Johannesburg",
+    eventDate: "2025-09-20T10:00:00+02:00",
+    status: "live",
+    workshopId: "workshop-aug-02",
+    workshopTitle: "Pressed Bloom Storytelling",
+  },
+];
+
+const CUT_FLOWER_CLASSES_SEED = [
+  {
+    id: "cutclass-summer-bouquets",
+    title: "Summer Bouquets 101",
+    description: "Learn colour pairing, stem prep, and bouquet wrapping in a relaxed studio setting.",
+    location: "Bethany Blooms Studio",
+    price: 450,
+    capacity: 12,
+    eventDate: "2025-09-10T18:30:00+02:00",
+    status: "live",
+  },
+];
+
+const CUT_FLOWER_BOOKINGS_SEED = [
+  {
+    id: "cutbooking-demo-1",
+    customerName: "Demo Client",
+    email: "demo@bethanyblooms.co.za",
+    phone: "+27 74 123 4567",
+    occasion: "Brand launch florals",
+    location: "Johannesburg CBD",
+    budget: "R5 000",
+    notes: "Seeded booking for testing the admin dashboard.",
+    status: "new",
+    eventDate: "2025-09-15T10:00:00+02:00",
+  },
+];
+
+const BOOKINGS_SEED = [
+  {
+    id: "booking-demo-1",
+    name: "Workshop Guest",
+    email: "guest@bethanyblooms.co.za",
+    phone: "+27 74 000 0000",
+    frame: "A4 Frame",
+    notes: "Seeded booking linked to a demo order.",
+    sessionDate: "2025-08-02",
+    sessionLabel: "Saturday 2 August · 10:00",
+    workshopId: "workshop-aug-02",
+    orderId: "order-demo-1",
+    paid: false,
+    status: "new",
+  },
+];
+
+const ORDERS_SEED = [
+  {
+    id: "order-demo-1",
+    orderNumber: 1001,
+    customer: {
+      fullName: "Demo Customer",
+      email: "demo@bethanyblooms.co.za",
+      phone: "+27 74 000 0000",
+      address: "123 Demo Street, Vereeniging",
+    },
+    items: [
+      {
+        id: "item-kit-yellow",
+        name: "Yellow & White",
+        quantity: 1,
+        price: 400,
+        metadata: { type: "product", productId: "kit-yellow" },
+      },
+      {
+        id: "item-workshop-aug02",
+        name: "Pressed Bloom Storytelling",
+        quantity: 1,
+        price: 650,
+        metadata: {
+          type: "workshop",
+          workshopId: "workshop-aug-02",
+          sessionDate: "2025-08-02",
+          sessionLabel: "Saturday 2 August · 10:00",
+          location: "Vereeniging Studio",
+          framePreference: "A4",
+        },
+      },
+    ],
+    totalPrice: 1050,
+    status: "pending",
+    paymentStatus: "awaiting",
+    deliveryMethod: "collection",
+    trackingLink: "",
+  },
+];
+
 async function seedCollectionIfEmpty(db, collectionName, seedData) {
   const colRef = collection(db, collectionName);
   const count = await getCountFromServer(colRef);
@@ -145,8 +244,26 @@ async function seedCollectionIfEmpty(db, collectionName, seedData) {
   return true;
 }
 
-export async function seedSampleData(db) {
+export async function seedAllCollections(db) {
   const seededProducts = await seedCollectionIfEmpty(db, "products", PRODUCT_SEED);
   const seededWorkshops = await seedCollectionIfEmpty(db, "workshops", WORKSHOP_SEED);
-  return { seededProducts, seededWorkshops };
+  const seededEvents = await seedCollectionIfEmpty(db, "events", EVENTS_SEED);
+  const seededCutFlowerClasses = await seedCollectionIfEmpty(db, "cutFlowerClasses", CUT_FLOWER_CLASSES_SEED);
+  const seededCutFlowerBookings = await seedCollectionIfEmpty(db, "cutFlowerBookings", CUT_FLOWER_BOOKINGS_SEED);
+  const seededBookings = await seedCollectionIfEmpty(db, "bookings", BOOKINGS_SEED);
+  const seededOrders = await seedCollectionIfEmpty(db, "orders", ORDERS_SEED);
+
+  return {
+    seededProducts,
+    seededWorkshops,
+    seededEvents,
+    seededCutFlowerClasses,
+    seededCutFlowerBookings,
+    seededBookings,
+    seededOrders,
+  };
+}
+
+export async function seedSampleData(db) {
+  return seedAllCollections(db);
 }

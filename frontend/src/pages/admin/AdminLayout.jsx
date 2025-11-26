@@ -8,11 +8,12 @@ const NAV_LINKS = [
   { to: "/admin", label: "Dashboard", end: true },
   { to: "/admin/products", label: "Products" },
   { to: "/admin/workshops", label: "Workshops & Bookings" },
-  { to: "/admin/workshops/calendar", label: "Workshop Calendar" },
+  { to: "/admin/workshops/calendar", label: "Calendar" },
   { to: "/admin/cut-flowers/classes", label: "Cut Flower Classes" },
   { to: "/admin/cut-flowers/bookings", label: "Cut Flower Bookings" },
   { to: "/admin/events", label: "Events" },
   { to: "/admin/orders", label: "Orders" },
+  { to: "/admin/users", label: "Users" },
   { to: "/admin/profile", label: "Profile" },
 ];
 

@@ -3015,6 +3015,19 @@ main {
     padding: 3rem 1rem;
   }
 
+  .hero {
+    padding: 3rem 1.25rem;
+    gap: 1.25rem;
+  }
+
+  .hero h1 {
+    font-size: clamp(2rem, 7vw, 2.4rem);
+  }
+
+  .hero p {
+    font-size: 1rem;
+  }
+
   .footer__inner {
     grid-template-columns: 1fr;
   }
@@ -3024,14 +3037,27 @@ main {
   }
 
   .hero-carousel {
-    height: 360px;
+    height: auto;
+  }
+
+  .hero-carousel__item {
+    position: static;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    pointer-events: auto;
+    display: none;
+  }
+
+  .hero-carousel__item.is-active {
+    display: block;
   }
 
   .hero-carousel__controls {
-    right: 50%;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: 1rem;
+    position: static;
+    transform: none;
+    justify-content: center;
+    margin-top: 1.25rem;
   }
 }
 

@@ -18,6 +18,45 @@ import workshopTableLongClose from "../assets/photos/workshop-table-long-close.j
 import workshopTableDetailsOne from "../assets/photos/workshop-table-details-1.png";
 import { testimonials } from "../data/testimonials.js";
 
+const FALLBACK_PRODUCTS = [
+  {
+    id: "fallback-kit-yellow",
+    title: "Pressed Flower Kit",
+    description: "Create your own pressed bloom frame with curated seasonal stems.",
+    price: 400,
+    category: "kit",
+    image: homePhotoOne,
+    status: "live",
+  },
+  {
+    id: "fallback-market-bucket",
+    title: "Market Bucket",
+    description: "Fresh stems in coordinating palettes, ready for styling or gifting.",
+    price: "From R600",
+    category: "cut-flower",
+    image: workshopOutdoorVenue,
+    status: "live",
+  },
+  {
+    id: "fallback-bouquet",
+    title: "Seasonal Bouquet",
+    description: "Hand-tied bouquet featuring the best blooms of the week.",
+    price: "From R350",
+    category: "cut-flower",
+    image: homePhotoTwo,
+    status: "live",
+  },
+  {
+    id: "fallback-frame",
+    title: "Framed Bloom Art",
+    description: "Pressed flower artwork crafted in-studio for thoughtful gifting.",
+    price: "On request",
+    category: "products",
+    image: homePhotoThree,
+    status: "live",
+  },
+];
+
 function HomePage() {
   usePageMetadata({
     title: "Bethany Blooms | Pressed Flower Art, Made Beautifully Simple",
@@ -27,10 +66,10 @@ function HomePage() {
 
   const { addItem } = useCart();
   const { openCart } = useModal();
-
   const { items: remoteProducts, status: productsStatus } = useFirestoreCollection("products", {
     orderByField: "createdAt",
     orderDirection: "desc",
+    fallback: FALLBACK_PRODUCTS,
   });
 
   const liveProducts = remoteProducts.filter((product) => (product.status ?? "live") === "live");
@@ -158,7 +197,7 @@ function HomePage() {
           <div className="cards-grid">
             {displayProducts.map((product, index) => (
               <Reveal as="article" className="card" key={product.id} delay={index * 110}>
-                <img src={product.image} alt={`${product.title} product from Bethany Blooms`} />
+                <img src={product.image} alt={`${product.title} product from Bethany Blooms`} loading="lazy" />
                 <h3 className="card__title">{product.title}</h3>
                 <p className="card__price">{product.displayPrice}</p>
                 <p>{product.description}</p>

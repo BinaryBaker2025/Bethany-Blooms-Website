@@ -23,6 +23,16 @@ service cloud.firestore {
       return data.keys().hasOnly(["role", "email", "createdAt", "updatedAt"]);
     }
 
+    // Allow the very first creation of an admin profile by the signed-in user
+    // when their user document does not yet exist.
+    function canBootstrapAdminUser(userId) {
+      return isSelf(userId)
+        && !exists(userDocPath(userId))
+        && userDocHasOnlyAllowedFields(request.resource.data)
+        && request.resource.data.role == "admin"
+        && request.resource.data.email == request.auth.token.email;
+    }
+
     function isValidSelfUpdate(newData, existingData) {
       return userDocHasOnlyAllowedFields(newData)
         && newData.role == existingData.role
@@ -59,6 +69,7 @@ service cloud.firestore {
           "createdAt",
           "orderNumber",
           "trackingLink",
+          "paymentStatus",
         ])
         && data.customer.keys().hasOnly(["fullName", "email", "phone", "address"])
         && data.customer.fullName is string && data.customer.fullName.size() > 0
@@ -69,6 +80,7 @@ service cloud.firestore {
         && data.items.size() <= 40
         && data.totalPrice is number && data.totalPrice >= 0
         && data.status is string
+        && data.paymentStatus is string
         && (("orderNumber" in data) ? (data.orderNumber is number && data.orderNumber >= 1000) : true)
         && (("trackingLink" in data) ? (data.trackingLink is string || data.trackingLink == null) : true)
         && request.resource.data.createdAt == request.time;
@@ -78,14 +90,16 @@ service cloud.firestore {
       allow get: if isSelf(userId) || isAdmin();
       allow list: if isAdmin();
 
-      allow create: if isSelf(userId)
-        && userDocHasOnlyAllowedFields(request.resource.data)
-        && request.resource.data.role == "customer";
+      allow create: if isAdmin()
+        || canBootstrapAdminUser(userId)
+        || (isSelf(userId)
+          && userDocHasOnlyAllowedFields(request.resource.data)
+          && request.resource.data.role == "customer");
 
       allow update: if (isSelf(userId) && isValidSelfUpdate(request.resource.data, resource.data))
         || isAdmin();
 
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
 
     match /products/{document=**} {

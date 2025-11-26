@@ -10,21 +10,56 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { httpsCallable } from "firebase/functions";
 import Reveal from "../components/Reveal.jsx";
 import { read, utils } from "xlsx";
 import { useAdminData } from "../context/AdminDataContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
-import { seedSampleData } from "../lib/seedData.js";
+import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { getFirebaseFunctions } from "../lib/firebase.js";
+import { getFirebaseDb } from "../lib/firebase.js";
 import {
   DEFAULT_SLOT_CAPACITY,
   AUTO_REPEAT_DAYS,
   createDateGroup,
   createTimeSlot,
 } from "./admin/constants.js";
+
+function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel = "Delete",
+  cancelLabel = "Cancel",
+  busy = false,
+  onConfirm,
+  onCancel,
+}) {
+  if (!open) return null;
+  return (
+    <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div className="modal__content">
+        <button className="modal__close" type="button" onClick={onCancel} aria-label="Close">
+          ×
+        </button>
+        <h3 className="modal__title" id="confirm-title">
+          {title}
+        </h3>
+        <p>{message}</p>
+        <div className="admin-form__actions" style={{ marginTop: "1.5rem" }}>
+          <button className="btn btn--secondary" type="button" onClick={onCancel} disabled={busy}>
+            {cancelLabel}
+          </button>
+          <button className="btn btn--primary" type="button" onClick={onConfirm} disabled={busy}>
+            {busy ? "Working…" : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const INITIAL_PRODUCT_FORM = {
   name: "",
@@ -359,9 +394,6 @@ export function AdminDashboardView() {
     inventoryLoading,
     inventoryError,
   } = useAdminData();
-  const [seedLoading, setSeedLoading] = useState(false);
-  const [seedStatus, setSeedStatus] = useState(null);
-  const [seedError, setSeedError] = useState(null);
 
   const stats = useMemo(() => {
     const upcomingWorkshops = workshops.filter((workshop) => {
@@ -456,29 +488,6 @@ export function AdminDashboardView() {
 
   const recentOrders = useMemo(() => orders.slice(0, 4), [orders]);
 
-  const handleSeedData = async () => {
-    if (!db) {
-      setSeedError("Firebase is not configured. Add credentials in .env.");
-      return;
-    }
-    setSeedLoading(true);
-    setSeedStatus("Loading sample data…");
-    setSeedError(null);
-    try {
-      const { seededProducts, seededWorkshops } = await seedSampleData(db);
-      if (!seededProducts && !seededWorkshops) {
-        setSeedStatus("Sample data already present.");
-      } else {
-        setSeedStatus("Sample products & workshops added.");
-      }
-    } catch (error) {
-      setSeedError(error.message);
-      setSeedStatus(null);
-    } finally {
-      setSeedLoading(false);
-    }
-  };
-
   return (
     <div className="admin-dashboard">
       <Reveal as="section" className="admin-panel">
@@ -488,17 +497,6 @@ export function AdminDashboardView() {
             <p className="admin-panel__note">
               Monitor what is live before jumping into edits.
             </p>
-          </div>
-          <div className="admin-panel__header-actions">
-            <button
-              className="btn btn--secondary"
-              type="button"
-              onClick={handleSeedData}
-              disabled={seedLoading}
-            >
-              <IconPlus className="btn__icon" aria-hidden="true" />
-              {seedLoading ? "Seeding…" : "Load Demo Data"}
-            </button>
           </div>
         </div>
         <div className="admin-stats-grid">
@@ -510,8 +508,6 @@ export function AdminDashboardView() {
             </div>
           ))}
         </div>
-        {seedStatus && <p className="admin-panel__status">{seedStatus}</p>}
-        {seedError && <p className="admin-panel__error">{seedError}</p>}
       </Reveal>
 
       <Reveal as="section" className="admin-panel" delay={60}>
@@ -915,7 +911,7 @@ export function AdminProductsView() {
 
   return (
     <div className="admin-panel admin-panel--full">
-      <Reveal as="div" className="admin-panel__header">
+      <div className="admin-panel__header">
         <div>
           <h2>Products</h2>
           <p className="admin-panel__note">
@@ -948,9 +944,9 @@ export function AdminProductsView() {
             Add Product
           </button>
         </div>
-      </Reveal>
+      </div>
 
-      <Reveal as="div" className="admin-table__wrapper" delay={60}>
+      <div className="admin-table__wrapper">
         {products.length > 0 ? (
           <table className="admin-table">
             <thead>
@@ -1053,7 +1049,7 @@ export function AdminProductsView() {
         {statusMessage && (
           <p className="admin-panel__status">{statusMessage}</p>
         )}
-      </Reveal>
+      </div>
 
       <div
         className={`modal admin-modal ${isProductModalOpen ? "is-active" : ""}`}
@@ -2445,6 +2441,282 @@ export function AdminWorkshopsCalendarView() {
   );
 }
 
+export function AdminUsersView() {
+  usePageMetadata({
+    title: "Admin · Users",
+    description: "Manage user roles for the Bethany Blooms app.",
+  });
+  const db = useMemo(() => {
+    try {
+      return getFirebaseDb();
+    } catch {
+      return null;
+    }
+  }, []);
+  const { items: users, status, error: usersError } = useFirestoreCollection("users", {
+    orderByField: null,
+    orderDirection: null,
+  });
+  const [updatingId, setUpdatingId] = useState(null);
+  const [error, setError] = useState(null);
+  const [message, setMessage] = useState(null);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserRole, setNewUserRole] = useState("customer");
+  const [userSaving, setUserSaving] = useState(false);
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null });
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handleSetRole = async (userId, nextRole) => {
+    if (!db || !userId) return;
+    setUpdatingId(userId);
+    setError(null);
+    setMessage(null);
+    try {
+      await updateDoc(doc(db, "users", userId), {
+        role: nextRole,
+        updatedAt: serverTimestamp(),
+      });
+      setMessage(`Updated role to ${nextRole}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const friendlyStatus =
+    status === "loading"
+      ? "Loading users…"
+      : status === "error"
+      ? "Could not load users."
+      : null;
+
+  const resetUserForm = () => {
+    setNewUserEmail("");
+    setNewUserRole("customer");
+    setError(null);
+    setMessage(null);
+  };
+
+  const handleCreateUser = async (event) => {
+    event.preventDefault();
+    if (!db) {
+      setError("Firestore is not available.");
+      return;
+    }
+    if (!functionsInstance) {
+      setError("Cloud Functions not available.");
+      return;
+    }
+    const email = newUserEmail.trim();
+    const password = newUserPassword;
+    const role = newUserRole.trim() || "customer";
+    if (!email || !password) {
+      setError("Email and password are required.");
+      return;
+    }
+    setUserSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const createUser = httpsCallable(functionsInstance, "createUserWithRole");
+      await createUser({ email, password, role });
+      setMessage("User created in Auth and Firestore.");
+      resetUserForm();
+      setUserModalOpen(false);
+    } catch (err) {
+      const code = err?.code || err?.message || "";
+      if (code.includes("permission-denied") || code.includes("unauthenticated")) {
+        setError("You need an admin account with a Firestore user record to create users.");
+      } else if (code.includes("invalid-argument")) {
+        setError(err.message || "Check email and password (min 6 chars).");
+      } else {
+        setError(err.message || "Failed to create user.");
+      }
+    } finally {
+      setUserSaving(false);
+    }
+  };
+
+  return (
+    <div className="admin-panel admin-panel--full">
+      <div className="admin-panel__header">
+        <div>
+          <h2>Users</h2>
+          <p className="admin-panel__note">Manage account roles for admins and customers.</p>
+        </div>
+        <div className="admin-panel__header-actions">
+          <button className="btn btn--primary" type="button" onClick={() => setUserModalOpen(true)}>
+            Add User
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-table__wrapper">
+        {users.length > 0 ? (
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th scope="col">Email</th>
+                <th scope="col">Role</th>
+                <th scope="col">Updated</th>
+                <th scope="col" className="admin-table__actions">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((userDoc) => {
+                const updated = userDoc.updatedAt?.toDate?.()
+                  ? bookingDateFormatter.format(userDoc.updatedAt.toDate())
+                  : "—";
+                const role = userDoc.role || "customer";
+                return (
+                  <tr key={userDoc.id}>
+                    <td>
+                      <div className="admin-table__product">
+                        <div>
+                          <strong>{userDoc.email || "No email"}</strong>
+                          <p className="modal__meta">UID: {userDoc.id}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{role}</td>
+                    <td>{updated}</td>
+                    <td className="admin-table__actions">
+                      <div className="cta-group" style={{ gap: "0.35rem", flexWrap: "nowrap" }}>
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={() => handleSetRole(userDoc.id, "customer")}
+                          disabled={updatingId === userDoc.id || role === "customer"}
+                        >
+                          Set Customer
+                        </button>
+                        <button
+                          className="btn btn--primary"
+                          type="button"
+                          onClick={() => handleSetRole(userDoc.id, "admin")}
+                          disabled={updatingId === userDoc.id || role === "admin"}
+                        >
+                          Set Admin
+                        </button>
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={() => setDeleteDialog({ open: true, targetId: userDoc.id })}
+                          disabled={updatingId === userDoc.id}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <p className="admin-panel__notice">
+            {friendlyStatus || "No users found."}
+          </p>
+        )}
+        {message && <p className="admin-panel__status">{message}</p>}
+        {(error || usersError) && <p className="admin-panel__error">{error || usersError.message}</p>}
+      </div>
+      <div
+        className={`modal admin-modal ${userModalOpen ? "is-active" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={userModalOpen ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            setUserModalOpen(false);
+            resetUserForm();
+          }
+        }}
+      >
+        <div className="modal__content admin-modal__content">
+          <button className="modal__close" type="button" aria-label="Close" onClick={() => {
+            setUserModalOpen(false);
+            resetUserForm();
+          }}>
+            ×
+          </button>
+          <h3 className="modal__title">Create / Update User</h3>
+          <form className="admin-form" onSubmit={handleCreateUser}>
+            <input
+              className="input"
+              type="email"
+              placeholder="Email (required)"
+              value={newUserEmail}
+              onChange={(e) => setNewUserEmail(e.target.value)}
+            />
+            <select
+              className="input"
+              value={newUserRole}
+              onChange={(e) => setNewUserRole(e.target.value)}
+            >
+              <option value="customer">Customer</option>
+              <option value="admin">Admin</option>
+            </select>
+            <input
+              className="input"
+              type="password"
+              placeholder="Password (min 6 characters)"
+              value={newUserPassword}
+              onChange={(e) => setNewUserPassword(e.target.value)}
+            />
+            <div className="admin-form__actions">
+              <button className="btn btn--secondary" type="button" onClick={resetUserForm}>
+                Reset
+              </button>
+              <button className="btn btn--primary" type="submit" disabled={userSaving}>
+                {userSaving ? "Saving…" : "Save User"}
+              </button>
+            </div>
+            {error && <p className="admin-panel__error">{error}</p>}
+            <p className="modal__meta">
+              Note: This creates the Firebase Auth user and the matching Firestore user document.
+            </p>
+          </form>
+        </div>
+      </div>
+      <ConfirmDialog
+        open={deleteDialog.open}
+        title="Delete User"
+        message="Are you sure you want to delete this user record? This does not delete their auth account."
+        confirmLabel="Delete"
+        busy={deleteBusy}
+        onCancel={() => setDeleteDialog({ open: false, targetId: null })}
+        onConfirm={async () => {
+          if (!db || !deleteDialog.targetId) return;
+          setDeleteBusy(true);
+          setError(null);
+          try {
+            await deleteDoc(doc(db, "users", deleteDialog.targetId));
+            setMessage("User deleted. Remove the auth account separately if needed.");
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setDeleteBusy(false);
+            setDeleteDialog({ open: false, targetId: null });
+          }
+        }}
+      />
+    </div>
+  );
+}
+
 export function AdminEventsView() {
   usePageMetadata({
     title: "Admin · Events",
@@ -2469,6 +2741,27 @@ export function AdminEventsView() {
   const [eventStatus, setEventStatus] = useState(null);
   const eventPreviewUrlRef = useRef(null);
   const [eventPage, setEventPage] = useState(0);
+  const blocked = !inventoryEnabled;
+  const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null, label: "" });
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const normalizedEvents = useMemo(() => {
+    return events
+      .map((eventDoc) => {
+        const eventDate = parseDateValue(eventDoc.eventDate);
+        return {
+          ...eventDoc,
+          eventDate,
+          displayDate: eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed",
+        };
+      })
+      .sort((a, b) => {
+        if (!a.eventDate && !b.eventDate) return 0;
+        if (!a.eventDate) return 1;
+        if (!b.eventDate) return -1;
+        return a.eventDate - b.eventDate;
+      });
+  }, [events]);
 
   useEffect(() => {
     if (!eventStatus) return undefined;
@@ -2498,26 +2791,6 @@ export function AdminEventsView() {
       })),
     [workshops]
   );
-
-  const normalizedEvents = useMemo(() => {
-    return events
-      .map((eventDoc) => {
-        const eventDate = parseDateValue(eventDoc.eventDate);
-        return {
-          ...eventDoc,
-          eventDate,
-          displayDate: eventDate
-            ? bookingDateFormatter.format(eventDate)
-            : "Date to be confirmed",
-        };
-      })
-      .sort((a, b) => {
-        if (!a.eventDate && !b.eventDate) return 0;
-        if (!a.eventDate) return 1;
-        if (!b.eventDate) return -1;
-        return a.eventDate - b.eventDate;
-      });
-  }, [events]);
 
   const paginatedEvents = useMemo(() => {
     const start = eventPage * ADMIN_PAGE_SIZE;
@@ -2574,13 +2847,7 @@ export function AdminEventsView() {
 
   const handleDeleteEvent = async (eventId) => {
     if (!db || !inventoryEnabled) return;
-    const confirmed = window.confirm("Delete this event? This cannot be undone.");
-    if (!confirmed) return;
-    await deleteDoc(doc(db, "events", eventId));
-    setEventStatus("Event removed");
-    if (editingEventId === eventId) {
-      resetEventForm();
-    }
+    setDeleteDialog({ open: true, targetId: eventId, label: "event" });
   };
 
   const handleSaveEvent = async (event) => {
@@ -2654,12 +2921,13 @@ export function AdminEventsView() {
   };
 
   return (
-    <section className="section section--tight">
-      <div className="section__inner">
-        <div className="admin-panel">
-          <div className="admin-panel__header">
-            <div>
-              <h2>Events</h2>
+    <>
+      <section className="section section--tight">
+        <div className="section__inner">
+          <div className="admin-panel">
+            <div className="admin-panel__header">
+              <div>
+                <h2>Events</h2>
               <p className="admin-panel__note">
                 Share pop-ups, markets, and studio open days, then link a workshop so guests can book in one click.
               </p>
@@ -2667,6 +2935,12 @@ export function AdminEventsView() {
             {eventStatus && <span className="badge badge--muted">{eventStatus}</span>}
           </div>
           {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+          {blocked && !inventoryError && (
+            <p className="admin-panel__error">
+              Admin permissions or Firestore connection not detected. Ensure your account has role "admin" in
+              users/{{uid}} and that Firestore is configured for this project.
+            </p>
+          )}
           <div className="admin-panel__content admin-panel__content--split">
             <div>
               <h3>{editingEventId ? "Edit Event" : "Create Event"}</h3>
@@ -2838,7 +3112,33 @@ export function AdminEventsView() {
           </div>
         </div>
       </div>
-    </section>
+      </section>
+      <ConfirmDialog
+        open={deleteDialog.open}
+        title="Delete Event"
+        message="Are you sure you want to delete this event? This cannot be undone."
+        confirmLabel="Delete"
+        busy={deleteBusy}
+        onCancel={() => setDeleteDialog({ open: false, targetId: null, label: "" })}
+        onConfirm={async () => {
+          if (!db || !deleteDialog.targetId) return;
+          setDeleteBusy(true);
+          setEventError(null);
+          try {
+            await deleteDoc(doc(db, "events", deleteDialog.targetId));
+            setEventStatus("Event removed");
+            if (editingEventId === deleteDialog.targetId) {
+              resetEventForm();
+            }
+          } catch (err) {
+            setEventError(err.message);
+          } finally {
+            setDeleteBusy(false);
+            setDeleteDialog({ open: false, targetId: null, label: "" });
+          }
+        }}
+      />
+    </>
   );
 }
 
@@ -2865,6 +3165,8 @@ export function AdminCutFlowerClassesView() {
   const [statusMessage, setStatusMessage] = useState(null);
   const classPreviewUrlRef = useRef(null);
   const [classPage, setClassPage] = useState(0);
+  const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null });
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const normalizedClasses = useMemo(() => {
     return cutFlowerClasses
@@ -2962,13 +3264,7 @@ export function AdminCutFlowerClassesView() {
 
   const handleDeleteClass = async (classId) => {
     if (!db || !inventoryEnabled) return;
-    const confirmed = window.confirm("Delete this cut flower class? This cannot be undone.");
-    if (!confirmed) return;
-    await deleteDoc(doc(db, "cutFlowerClasses", classId));
-    setStatusMessage("Class removed");
-    if (editingClassId === classId) {
-      resetClassForm();
-    }
+    setDeleteDialog({ open: true, targetId: classId });
   };
 
   const handleSaveClass = async (event) => {
@@ -3039,12 +3335,13 @@ export function AdminCutFlowerClassesView() {
   };
 
   return (
-    <section className="section section--tight">
-      <div className="section__inner">
-        <div className="admin-panel">
-          <div className="admin-panel__header">
-            <div>
-              <h2>Cut Flower Classes</h2>
+    <>
+      <section className="section section--tight">
+        <div className="section__inner">
+          <div className="admin-panel">
+            <div className="admin-panel__header">
+              <div>
+                <h2>Cut Flower Classes</h2>
               <p className="admin-panel__note">
                 Publish bookable sessions for bouquets, styling experiences, and private floral classes.
               </p>
@@ -3235,7 +3532,33 @@ export function AdminCutFlowerClassesView() {
           </div>
         </div>
       </div>
-    </section>
+      </section>
+      <ConfirmDialog
+        open={deleteDialog.open}
+        title="Delete Cut Flower Class"
+        message="Are you sure you want to delete this class? This cannot be undone."
+        confirmLabel="Delete"
+        busy={deleteBusy}
+        onCancel={() => setDeleteDialog({ open: false, targetId: null })}
+        onConfirm={async () => {
+          if (!db || !deleteDialog.targetId) return;
+          setDeleteBusy(true);
+          setClassError(null);
+          try {
+            await deleteDoc(doc(db, "cutFlowerClasses", deleteDialog.targetId));
+            setStatusMessage("Class removed");
+            if (editingClassId === deleteDialog.targetId) {
+              resetClassForm();
+            }
+          } catch (err) {
+            setClassError(err.message);
+          } finally {
+            setDeleteBusy(false);
+            setDeleteDialog({ open: false, targetId: null });
+          }
+        }}
+      />
+    </>
   );
 }
 
@@ -3256,6 +3579,8 @@ export function AdminCutFlowerBookingsView() {
   const [statusMessage, setStatusMessage] = useState(null);
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null });
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -3307,13 +3632,7 @@ export function AdminCutFlowerBookingsView() {
 
   const handleDelete = async (bookingId) => {
     if (!db || !inventoryEnabled) return;
-    const confirmed = window.confirm("Delete this cut flower booking? This action cannot be undone.");
-    if (!confirmed) return;
-    await deleteDoc(doc(db, "cutFlowerBookings", bookingId));
-    setStatusMessage("Cut flower booking removed");
-    if (editingId === bookingId) {
-      resetForm();
-    }
+    setDeleteDialog({ open: true, targetId: bookingId });
   };
 
   const handleSave = async (event) => {
@@ -3372,12 +3691,13 @@ export function AdminCutFlowerBookingsView() {
   };
 
   return (
-    <section className="section section--tight">
-      <div className="section__inner">
-        <div className="admin-panel">
-          <div className="admin-panel__header">
-            <div>
-              <h2>Cut Flower Bookings</h2>
+    <>
+      <section className="section section--tight">
+        <div className="section__inner">
+          <div className="admin-panel">
+            <div className="admin-panel__header">
+              <div>
+                <h2>Cut Flower Bookings</h2>
               <p className="admin-panel__note">
                 Manage requests for installations, weekly drops, and bespoke bouquets without mixing them into workshop
                 bookings.
@@ -3567,7 +3887,33 @@ export function AdminCutFlowerBookingsView() {
           </div>
         </div>
       </div>
-    </section>
+      </section>
+      <ConfirmDialog
+        open={deleteDialog.open}
+        title="Delete Booking"
+        message="Are you sure you want to delete this cut flower booking? This cannot be undone."
+        confirmLabel="Delete"
+        busy={deleteBusy}
+        onCancel={() => setDeleteDialog({ open: false, targetId: null })}
+        onConfirm={async () => {
+          if (!db || !deleteDialog.targetId) return;
+          setDeleteBusy(true);
+          setFormError(null);
+          try {
+            await deleteDoc(doc(db, "cutFlowerBookings", deleteDialog.targetId));
+            setStatusMessage("Cut flower booking removed");
+            if (editingId === deleteDialog.targetId) {
+              resetForm();
+            }
+          } catch (err) {
+            setFormError(err.message);
+          } finally {
+            setDeleteBusy(false);
+            setDeleteDialog({ open: false, targetId: null });
+          }
+        }}
+      />
+    </>
   );
 }
 
