@@ -93,15 +93,40 @@ const INITIAL_WORKSHOP_FORM = {
   repeatWeekdays: false,
 };
 
+const createEventTimeSlot = () => ({
+  id: `event-time-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+  time: "",
+  endTime: "",
+  label: "",
+});
+
+const createCutFlowerOption = () => ({
+  id: `class-option-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+  label: "",
+  price: "",
+});
+
+const EVENT_REPEAT_WEEKDAYS = [
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+  { value: 0, label: "Sun" },
+];
+
 const INITIAL_EVENT_FORM = {
   title: "",
   description: "",
   location: "",
   date: "",
-  time: "",
+  timeSlots: [createEventTimeSlot()],
   image: "",
   workshopId: "",
   status: "live",
+  repeatWeekly: false,
+  repeatDays: [],
 };
 
 const INITIAL_CUT_FLOWER_BOOKING = {
@@ -127,8 +152,11 @@ const INITIAL_CUT_FLOWER_CLASS_FORM = {
   capacity: "",
   image: "",
   date: "",
-  time: "",
+  timeSlots: [createEventTimeSlot()],
+  options: [createCutFlowerOption()],
   status: "live",
+  repeatWeekly: false,
+  repeatDays: [],
 };
 const ORDER_STATUSES = [
   "pending",
@@ -152,6 +180,9 @@ const ADMIN_PAGE_SIZE = 100;
 const MAX_FEATURED_PRODUCTS = 4;
 const bookingDateFormatter = new Intl.DateTimeFormat("en-ZA", {
   dateStyle: "medium",
+  timeStyle: "short",
+});
+const timeOnlyFormatter = new Intl.DateTimeFormat("en-ZA", {
   timeStyle: "short",
 });
 const moneyFormatter = new Intl.NumberFormat("en-ZA", {
@@ -313,6 +344,50 @@ const combineDateAndTime = (dateInput, timeInput) => {
     base.setSeconds(0, 0);
   }
   return base;
+};
+
+const formatTimeValue = (value) => {
+  if (!value) return "";
+  if (value instanceof Date) return timeOnlyFormatter.format(value);
+  if (typeof value !== "string") return "";
+  const [hours, minutes] = value.split(":").map(Number);
+  if (!Number.isFinite(hours)) return value;
+  const date = new Date();
+  date.setHours(hours);
+  date.setMinutes(Number.isFinite(minutes) ? minutes : 0);
+  date.setSeconds(0, 0);
+  return timeOnlyFormatter.format(date);
+};
+
+const formatTimeRange = (startTime, endTime) => {
+  const startLabel = formatTimeValue(startTime);
+  if (!startLabel) return "";
+  const endLabel = formatTimeValue(endTime);
+  if (!endLabel) return startLabel;
+  return `${startLabel} – ${endLabel}`;
+};
+
+const formatRepeatLabel = (repeatDays) => {
+  const days = Array.isArray(repeatDays) ? repeatDays : [];
+  const normalized = days.map((day) => Number(day)).filter((day) => Number.isFinite(day));
+  const labels = normalized
+    .map((day) => EVENT_REPEAT_WEEKDAYS.find((entry) => entry.value === day)?.label)
+    .filter(Boolean);
+  if (!labels.length) return "";
+  return `Every ${labels.join(", ")}`;
+};
+
+const buildTimeSummary = (timeSlots) => {
+  const slots = Array.isArray(timeSlots) ? timeSlots : [];
+  const labels = slots
+    .filter((slot) => slot?.time)
+    .map((slot) => {
+      const formattedTime = formatTimeRange(slot.time, slot.endTime);
+      if (!formattedTime) return "";
+      return slot.label ? `${slot.label} (${formattedTime})` : formattedTime;
+    })
+    .filter(Boolean);
+  return labels.length ? labels.join(" · ") : "";
 };
 
 const formatPriceLabel = (value) => {
@@ -2214,12 +2289,9 @@ export function AdminWorkshopsCalendarView() {
   const bookingsByDate = useMemo(() => {
     const map = new Map();
     bookings.forEach((booking) => {
-      const dateValue =
-        booking.sessionDate ||
-        (booking.createdAt?.toDate
-          ? formatDateInput(booking.createdAt.toDate())
-          : null);
-      if (!dateValue) return;
+      const sessionDate = parseDateValue(booking.sessionDate);
+      if (!sessionDate) return;
+      const dateValue = formatDateInput(sessionDate);
       if (!map.has(dateValue)) {
         map.set(dateValue, []);
       }
@@ -2227,6 +2299,11 @@ export function AdminWorkshopsCalendarView() {
     });
     return map;
   }, [bookings]);
+
+  const undatedBookings = useMemo(
+    () => bookings.filter((booking) => !parseDateValue(booking.sessionDate)),
+    [bookings],
+  );
 
   const eventsByDate = useMemo(() => {
     const map = new Map();
@@ -2241,6 +2318,11 @@ export function AdminWorkshopsCalendarView() {
     });
     return map;
   }, [events]);
+
+  const undatedEvents = useMemo(
+    () => events.filter((eventDoc) => !parseDateValue(eventDoc.eventDate)),
+    [events],
+  );
 
   const monthMatrix = useMemo(() => {
     const matrix = [];
@@ -2433,6 +2515,53 @@ export function AdminWorkshopsCalendarView() {
               <p className="modal__meta">No events scheduled for this date.</p>
             )}
           </div>
+          {(undatedBookings.length > 0 || undatedEvents.length > 0) && (
+            <div className="admin-calendar__details-group">
+              <h5>Needs a date</h5>
+              <ul>
+                {undatedBookings.map((booking) => {
+                  const receivedAt = booking.createdAt?.toDate?.()
+                    ? bookingDateFormatter.format(booking.createdAt.toDate())
+                    : null;
+                  const bookingLabel =
+                    booking.name || booking.email || "Workshop booking";
+                  return (
+                    <li key={`undated-booking-${booking.id}`}>
+                      <div>
+                        <strong>{bookingLabel}</strong>
+                        <p className="modal__meta">Workshop booking</p>
+                      </div>
+                      <div className="admin-calendar__details-actions">
+                        {booking.email && (
+                          <a href={`mailto:${booking.email}`}>
+                            {booking.email}
+                          </a>
+                        )}
+                        {receivedAt && (
+                          <p className="modal__meta">
+                            Received {receivedAt}
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+                {undatedEvents.map((eventDoc) => (
+                  <li key={`undated-event-${eventDoc.id}`}>
+                    <div>
+                      <strong>{eventDoc.title || "Event"}</strong>
+                      {eventDoc.location && (
+                        <p className="modal__meta">{eventDoc.location}</p>
+                      )}
+                    </div>
+                    <div className="admin-calendar__details-actions">
+                      <p className="modal__meta">Date required</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2749,10 +2878,13 @@ export function AdminEventsView() {
     return events
       .map((eventDoc) => {
         const eventDate = parseDateValue(eventDoc.eventDate);
+        const repeatLabel = eventDoc.repeatWeekly ? formatRepeatLabel(eventDoc.repeatDays) : "";
+        const timeSummary = buildTimeSummary(eventDoc.timeSlots);
         return {
           ...eventDoc,
           eventDate,
-          displayDate: eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed",
+          displayDate: repeatLabel || (eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed"),
+          timeSummary,
         };
       })
       .sort((a, b) => {
@@ -2805,6 +2937,73 @@ export function AdminEventsView() {
     setEventError(null);
   };
 
+  const handleEventDateChange = (value) => {
+    setEventForm((prev) => {
+      const next = { ...prev, date: value };
+      if (prev.repeatWeekly && (!prev.repeatDays || prev.repeatDays.length === 0) && value) {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) {
+          next.repeatDays = [parsed.getDay()];
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleAddEventTimeSlot = () => {
+    setEventForm((prev) => ({
+      ...prev,
+      timeSlots: [...(prev.timeSlots || []), createEventTimeSlot()],
+    }));
+  };
+
+  const handleEventTimeSlotChange = (slotId, field, value) => {
+    setEventForm((prev) => ({
+      ...prev,
+      timeSlots: (prev.timeSlots || []).map((slot) =>
+        slot.id === slotId ? { ...slot, [field]: value } : slot
+      ),
+    }));
+  };
+
+  const handleRemoveEventTimeSlot = (slotId) => {
+    setEventForm((prev) => {
+      const remaining = (prev.timeSlots || []).filter((slot) => slot.id !== slotId);
+      return {
+        ...prev,
+        timeSlots: remaining.length > 0 ? remaining : [createEventTimeSlot()],
+      };
+    });
+  };
+
+  const handleToggleRepeatWeekly = (checked) => {
+    setEventForm((prev) => {
+      const next = { ...prev, repeatWeekly: checked };
+      if (!checked) {
+        next.repeatDays = [];
+      } else if ((!prev.repeatDays || prev.repeatDays.length === 0) && prev.date) {
+        const parsed = new Date(prev.date);
+        if (!Number.isNaN(parsed.getTime())) {
+          next.repeatDays = [parsed.getDay()];
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleToggleRepeatDay = (dayValue) => {
+    setEventForm((prev) => {
+      const existing = Array.isArray(prev.repeatDays) ? prev.repeatDays : [];
+      const normalized = existing.includes(dayValue)
+        ? existing.filter((day) => day !== dayValue)
+        : [...existing, dayValue];
+      return {
+        ...prev,
+        repeatDays: normalized,
+      };
+    });
+  };
+
   const handleEventImageChange = (event) => {
     const file = event.target.files?.[0] ?? null;
     if (eventPreviewUrlRef.current) {
@@ -2829,15 +3028,40 @@ export function AdminEventsView() {
 
   const handleEditEvent = (eventDoc) => {
     const eventDate = parseDateValue(eventDoc.eventDate);
+    const fallbackTime =
+      eventDate && (eventDate.getHours() || eventDate.getMinutes())
+        ? formatTimeInput(eventDate)
+        : "";
+    const rawTimeSlots = Array.isArray(eventDoc.timeSlots) ? eventDoc.timeSlots : [];
+    const normalizedSlots =
+      rawTimeSlots.length > 0
+        ? rawTimeSlots.map((slot, index) => ({
+            id: slot.id || `event-time-${index}-${eventDoc.id}`,
+            time: slot.time || "",
+            endTime: slot.endTime || "",
+            label: slot.label || "",
+          }))
+        : [
+            {
+              ...createEventTimeSlot(),
+              time: fallbackTime,
+            },
+          ];
     setEventForm({
       title: eventDoc.title || "",
       description: eventDoc.description || "",
       location: eventDoc.location || "",
       date: eventDate ? formatDateInput(eventDate) : "",
-      time: eventDate ? formatTimeInput(eventDate) : "",
+      timeSlots: normalizedSlots,
       image: eventDoc.image || "",
       workshopId: eventDoc.workshopId || "",
       status: eventDoc.status || "live",
+      repeatWeekly: Boolean(eventDoc.repeatWeekly),
+      repeatDays: Array.isArray(eventDoc.repeatDays)
+        ? eventDoc.repeatDays
+            .map((day) => Number(day))
+            .filter((day) => Number.isFinite(day))
+        : [],
     });
     setEventImagePreview(eventDoc.image || "");
     setEventImageFile(null);
@@ -2883,16 +3107,36 @@ export function AdminEventsView() {
         return;
       }
 
-      const combinedDate = combineDateAndTime(eventForm.date, eventForm.time);
+      const sanitizedSlots = (eventForm.timeSlots || [])
+        .map((slot) => ({
+          id: slot.id || createEventTimeSlot().id,
+          time: slot.time?.trim() || "",
+          endTime: slot.endTime?.trim() || "",
+          label: slot.label?.trim() || "",
+        }))
+        .filter((slot) => slot.time);
+      sanitizedSlots.sort((a, b) => a.time.localeCompare(b.time));
+      const primaryTime = sanitizedSlots[0]?.time ?? "";
+      const combinedDate = combineDateAndTime(eventForm.date, primaryTime);
       const linkedWorkshop = workshops.find(
         (workshop) => workshop.id === eventForm.workshopId
       );
+      const repeatDays = eventForm.repeatWeekly
+        ? Array.isArray(eventForm.repeatDays)
+          ? eventForm.repeatDays
+              .map((day) => Number(day))
+              .filter((day) => Number.isFinite(day))
+          : []
+        : [];
 
       const payload = {
         title,
         description: eventForm.description.trim(),
         location: eventForm.location.trim(),
         eventDate: combinedDate ?? null,
+        timeSlots: sanitizedSlots,
+        repeatWeekly: Boolean(eventForm.repeatWeekly),
+        repeatDays,
         image: imageUrl,
         workshopId: linkedWorkshop?.id || null,
         workshopTitle: linkedWorkshop?.title || linkedWorkshop?.name || null,
@@ -2978,18 +3222,136 @@ export function AdminEventsView() {
                   type="date"
                   value={eventForm.date}
                   onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, date: e.target.value }))
+                    handleEventDateChange(e.target.value)
                   }
                   required
                 />
-                <input
-                  className="input"
-                  type="time"
-                  value={eventForm.time}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, time: e.target.value }))
-                  }
-                />
+                <div className="admin-session-panel admin-form__full">
+                  <div className="admin-session-panel__header">
+                    <h4>Event times</h4>
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      onClick={handleAddEventTimeSlot}
+                      aria-label="Add time slot"
+                    >
+                      <IconPlus aria-hidden="true" />
+                    </button>
+                  </div>
+                  <p className="admin-panel__note">
+                    Add one or more time slots for this event day.
+                  </p>
+                  {(eventForm.timeSlots || []).map((slot) => (
+                    <div className="admin-session-row" key={slot.id}>
+                      <div className="admin-session-field">
+                        <label
+                          className="admin-session-label"
+                          htmlFor={`event-time-${slot.id}`}
+                        >
+                          Start
+                        </label>
+                        <input
+                          className="input"
+                          type="time"
+                          id={`event-time-${slot.id}`}
+                          value={slot.time}
+                          onChange={(event) =>
+                            handleEventTimeSlotChange(
+                              slot.id,
+                              "time",
+                              event.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="admin-session-field">
+                        <label
+                          className="admin-session-label"
+                          htmlFor={`event-end-${slot.id}`}
+                        >
+                          End
+                        </label>
+                        <input
+                          className="input"
+                          type="time"
+                          id={`event-end-${slot.id}`}
+                          value={slot.endTime || ""}
+                          onChange={(event) =>
+                            handleEventTimeSlotChange(
+                              slot.id,
+                              "endTime",
+                              event.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="admin-session-field admin-session-field--label">
+                        <label
+                          className="admin-session-label"
+                          htmlFor={`event-label-${slot.id}`}
+                        >
+                          Label (optional)
+                        </label>
+                        <input
+                          className="input"
+                          id={`event-label-${slot.id}`}
+                          value={slot.label}
+                          onChange={(event) =>
+                            handleEventTimeSlotChange(
+                              slot.id,
+                              "label",
+                              event.target.value
+                            )
+                          }
+                          placeholder="Morning, Afternoon, etc."
+                        />
+                      </div>
+                      <button
+                        className="icon-btn icon-btn--danger admin-session-remove"
+                        type="button"
+                        onClick={() => handleRemoveEventTimeSlot(slot.id)}
+                        aria-label="Remove time slot"
+                      >
+                        <IconTrash aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="admin-session-panel admin-form__full">
+                  <div className="admin-session-panel__header">
+                    <h4>Repeat weekly</h4>
+                  </div>
+                  <label className="admin-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={eventForm.repeatWeekly}
+                      onChange={(event) =>
+                        handleToggleRepeatWeekly(event.target.checked)
+                      }
+                    />
+                    <span>Repeat this event on selected weekdays</span>
+                  </label>
+                  {eventForm.repeatWeekly && (
+                    <div className="admin-repeat-days">
+                      {EVENT_REPEAT_WEEKDAYS.map((day) => (
+                        <label className="admin-repeat-day" key={day.value}>
+                          <input
+                            type="checkbox"
+                            checked={
+                              Array.isArray(eventForm.repeatDays) &&
+                              eventForm.repeatDays.includes(day.value)
+                            }
+                            onChange={() => handleToggleRepeatDay(day.value)}
+                          />
+                          <span>{day.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <p className="admin-panel__note">
+                    Use this for recurring events like every Saturday.
+                  </p>
+                </div>
                 <select
                   className="input"
                   value={eventForm.workshopId}
@@ -3079,6 +3441,11 @@ export function AdminEventsView() {
                           <h4>{eventDoc.title}</h4>
                           {eventDoc.location && (
                             <p className="admin-event-card__meta">{eventDoc.location}</p>
+                          )}
+                          {eventDoc.timeSummary && (
+                            <p className="admin-event-card__meta">
+                              Times: {eventDoc.timeSummary}
+                            </p>
                           )}
                           {eventDoc.workshopTitle && (
                             <p className="admin-event-card__meta">
@@ -3172,10 +3539,13 @@ export function AdminCutFlowerClassesView() {
     return cutFlowerClasses
       .map((doc) => {
         const eventDate = parseDateValue(doc.eventDate);
+        const repeatLabel = doc.repeatWeekly ? formatRepeatLabel(doc.repeatDays) : "";
+        const timeSummary = buildTimeSummary(doc.timeSlots);
         return {
           ...doc,
           eventDate,
-          displayDate: eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed",
+          displayDate: repeatLabel || (eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed"),
+          timeSummary,
           priceLabel: formatPriceLabel(doc.price),
         };
       })
@@ -3221,6 +3591,99 @@ export function AdminCutFlowerClassesView() {
     setClassSaving(false);
   };
 
+  const handleClassDateChange = (value) => {
+    setClassForm((prev) => {
+      const next = { ...prev, date: value };
+      if (prev.repeatWeekly && (!prev.repeatDays || prev.repeatDays.length === 0) && value) {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) {
+          next.repeatDays = [parsed.getDay()];
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleAddClassTimeSlot = () => {
+    setClassForm((prev) => ({
+      ...prev,
+      timeSlots: [...(prev.timeSlots || []), createEventTimeSlot()],
+    }));
+  };
+
+  const handleClassTimeSlotChange = (slotId, field, value) => {
+    setClassForm((prev) => ({
+      ...prev,
+      timeSlots: (prev.timeSlots || []).map((slot) =>
+        slot.id === slotId ? { ...slot, [field]: value } : slot
+      ),
+    }));
+  };
+
+  const handleRemoveClassTimeSlot = (slotId) => {
+    setClassForm((prev) => {
+      const remaining = (prev.timeSlots || []).filter((slot) => slot.id !== slotId);
+      return {
+        ...prev,
+        timeSlots: remaining.length > 0 ? remaining : [createEventTimeSlot()],
+      };
+    });
+  };
+
+  const handleAddClassOption = () => {
+    setClassForm((prev) => ({
+      ...prev,
+      options: [...(prev.options || []), createCutFlowerOption()],
+    }));
+  };
+
+  const handleClassOptionChange = (optionId, field, value) => {
+    setClassForm((prev) => ({
+      ...prev,
+      options: (prev.options || []).map((option) =>
+        option.id === optionId ? { ...option, [field]: value } : option
+      ),
+    }));
+  };
+
+  const handleRemoveClassOption = (optionId) => {
+    setClassForm((prev) => {
+      const remaining = (prev.options || []).filter((option) => option.id !== optionId);
+      return {
+        ...prev,
+        options: remaining.length > 0 ? remaining : [createCutFlowerOption()],
+      };
+    });
+  };
+
+  const handleToggleClassRepeatWeekly = (checked) => {
+    setClassForm((prev) => {
+      const next = { ...prev, repeatWeekly: checked };
+      if (!checked) {
+        next.repeatDays = [];
+      } else if ((!prev.repeatDays || prev.repeatDays.length === 0) && prev.date) {
+        const parsed = new Date(prev.date);
+        if (!Number.isNaN(parsed.getTime())) {
+          next.repeatDays = [parsed.getDay()];
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleToggleClassRepeatDay = (dayValue) => {
+    setClassForm((prev) => {
+      const existing = Array.isArray(prev.repeatDays) ? prev.repeatDays : [];
+      const normalized = existing.includes(dayValue)
+        ? existing.filter((day) => day !== dayValue)
+        : [...existing, dayValue];
+      return {
+        ...prev,
+        repeatDays: normalized,
+      };
+    });
+  };
+
   const handleClassImageChange = (event) => {
     const file = event.target.files?.[0] ?? null;
     if (classPreviewUrlRef.current) {
@@ -3245,6 +3708,37 @@ export function AdminCutFlowerClassesView() {
 
   const handleEditClass = (classDoc) => {
     const eventDate = parseDateValue(classDoc.eventDate);
+    const fallbackTime =
+      eventDate && (eventDate.getHours() || eventDate.getMinutes())
+        ? formatTimeInput(eventDate)
+        : "";
+    const rawTimeSlots = Array.isArray(classDoc.timeSlots) ? classDoc.timeSlots : [];
+    const normalizedSlots =
+      rawTimeSlots.length > 0
+        ? rawTimeSlots.map((slot, index) => ({
+            id: slot.id || `class-time-${index}-${classDoc.id}`,
+            time: slot.time || "",
+            endTime: slot.endTime || "",
+            label: slot.label || "",
+          }))
+        : [
+            {
+              ...createEventTimeSlot(),
+              time: fallbackTime,
+            },
+          ];
+    const rawOptions = Array.isArray(classDoc.options) ? classDoc.options : [];
+    const normalizedOptions =
+      rawOptions.length > 0
+        ? rawOptions.map((option, index) => ({
+            id: option.id || `class-option-${index}-${classDoc.id}`,
+            label: option.label || option.name || "",
+            price:
+              option.price === undefined || option.price === null
+                ? ""
+                : String(option.price),
+          }))
+        : [createCutFlowerOption()];
     setClassForm({
       title: classDoc.title || "",
       description: classDoc.description || "",
@@ -3253,8 +3747,15 @@ export function AdminCutFlowerClassesView() {
       capacity: classDoc.capacity === undefined || classDoc.capacity === null ? "" : String(classDoc.capacity),
       image: classDoc.image || "",
       date: eventDate ? formatDateInput(eventDate) : "",
-      time: eventDate ? formatTimeInput(eventDate) : "",
+      timeSlots: normalizedSlots,
+      options: normalizedOptions,
       status: classDoc.status || "live",
+      repeatWeekly: Boolean(classDoc.repeatWeekly),
+      repeatDays: Array.isArray(classDoc.repeatDays)
+        ? classDoc.repeatDays
+            .map((day) => Number(day))
+            .filter((day) => Number.isFinite(day))
+        : [],
     });
     setClassImagePreview(classDoc.image || "");
     setClassImageFile(null);
@@ -3299,7 +3800,40 @@ export function AdminCutFlowerClassesView() {
         return;
       }
 
-      const eventDate = combineDateAndTime(classForm.date, classForm.time);
+      const sanitizedSlots = (classForm.timeSlots || [])
+        .map((slot) => ({
+          id: slot.id || createEventTimeSlot().id,
+          time: slot.time?.trim() || "",
+          endTime: slot.endTime?.trim() || "",
+          label: slot.label?.trim() || "",
+        }))
+        .filter((slot) => slot.time);
+      sanitizedSlots.sort((a, b) => a.time.localeCompare(b.time));
+      const primaryTime = sanitizedSlots[0]?.time ?? "";
+      const eventDate = combineDateAndTime(classForm.date, primaryTime);
+      const repeatDays = classForm.repeatWeekly
+        ? Array.isArray(classForm.repeatDays)
+          ? classForm.repeatDays
+              .map((day) => Number(day))
+              .filter((day) => Number.isFinite(day))
+          : []
+        : [];
+      const sanitizedOptions = (classForm.options || [])
+        .map((option) => {
+          const label = option.label?.trim() || "";
+          if (!label) return null;
+          const rawPrice = option.price;
+          const priceNumber =
+            rawPrice === "" || rawPrice === null || rawPrice === undefined
+              ? null
+              : Number(rawPrice);
+          return {
+            id: option.id || createCutFlowerOption().id,
+            label,
+            price: Number.isFinite(priceNumber) ? priceNumber : null,
+          };
+        })
+        .filter(Boolean);
       const payload = {
         title: classForm.title.trim(),
         description: classForm.description.trim(),
@@ -3310,6 +3844,10 @@ export function AdminCutFlowerClassesView() {
           classForm.capacity === "" ? null : Number.isFinite(Number(classForm.capacity)) ? Number(classForm.capacity) : classForm.capacity,
         image: imageUrl,
         eventDate: eventDate ?? null,
+        timeSlots: sanitizedSlots,
+        repeatWeekly: Boolean(classForm.repeatWeekly),
+        repeatDays,
+        options: sanitizedOptions,
         status: classForm.status || "draft",
         updatedAt: serverTimestamp(),
       };
@@ -3378,7 +3916,7 @@ export function AdminCutFlowerClassesView() {
                 />
                 <input
                   className="input"
-                  placeholder="Price (numbers or text)"
+                  placeholder="Base price (optional)"
                   value={classForm.price}
                   onChange={(e) =>
                     setClassForm((prev) => ({
@@ -3398,6 +3936,71 @@ export function AdminCutFlowerClassesView() {
                     }))
                   }
                 />
+                <div className="admin-session-panel admin-form__full">
+                  <div className="admin-session-panel__header">
+                    <h4>Cut flower options</h4>
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      onClick={handleAddClassOption}
+                      aria-label="Add option"
+                    >
+                      <IconPlus aria-hidden="true" />
+                    </button>
+                  </div>
+                  <p className="admin-panel__note">
+                    Add the options shown in the booking dropdown. Leave blank to use the base price only.
+                  </p>
+                  {(classForm.options || []).map((option, index) => (
+                    <div className="admin-session-row" key={option.id}>
+                      <div className="admin-session-field admin-session-field--label">
+                        <label
+                          className="admin-session-label"
+                          htmlFor={`class-option-label-${option.id}`}
+                        >
+                          Option #{index + 1}
+                        </label>
+                        <input
+                          className="input"
+                          id={`class-option-label-${option.id}`}
+                          value={option.label}
+                          onChange={(event) =>
+                            handleClassOptionChange(option.id, "label", event.target.value)
+                          }
+                          placeholder="Small bouquet, Garden mix, etc."
+                        />
+                      </div>
+                      <div className="admin-session-field">
+                        <label
+                          className="admin-session-label"
+                          htmlFor={`class-option-price-${option.id}`}
+                        >
+                          Price (optional)
+                        </label>
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="1"
+                          id={`class-option-price-${option.id}`}
+                          value={option.price}
+                          onChange={(event) =>
+                            handleClassOptionChange(option.id, "price", event.target.value)
+                          }
+                          placeholder="0"
+                        />
+                      </div>
+                      <button
+                        className="icon-btn icon-btn--danger admin-session-remove"
+                        type="button"
+                        onClick={() => handleRemoveClassOption(option.id)}
+                        aria-label={`Remove option ${index + 1}`}
+                      >
+                        <IconTrash aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
                 <select
                   className="input"
                   value={classForm.status}
@@ -3417,24 +4020,136 @@ export function AdminCutFlowerClassesView() {
                   type="date"
                   value={classForm.date}
                   onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      date: e.target.value,
-                    }))
+                    handleClassDateChange(e.target.value)
                   }
                   required
                 />
-                <input
-                  className="input"
-                  type="time"
-                  value={classForm.time}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      time: e.target.value,
-                    }))
-                  }
-                />
+                <div className="admin-session-panel admin-form__full">
+                  <div className="admin-session-panel__header">
+                    <h4>Class times</h4>
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      onClick={handleAddClassTimeSlot}
+                      aria-label="Add time slot"
+                    >
+                      <IconPlus aria-hidden="true" />
+                    </button>
+                  </div>
+                  <p className="admin-panel__note">
+                    Add one or more time slots for this class day.
+                  </p>
+                  {(classForm.timeSlots || []).map((slot) => (
+                    <div className="admin-session-row" key={slot.id}>
+                      <div className="admin-session-field">
+                        <label
+                          className="admin-session-label"
+                          htmlFor={`class-time-${slot.id}`}
+                        >
+                          Start
+                        </label>
+                        <input
+                          className="input"
+                          type="time"
+                          id={`class-time-${slot.id}`}
+                          value={slot.time}
+                          onChange={(event) =>
+                            handleClassTimeSlotChange(
+                              slot.id,
+                              "time",
+                              event.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="admin-session-field">
+                        <label
+                          className="admin-session-label"
+                          htmlFor={`class-end-${slot.id}`}
+                        >
+                          End
+                        </label>
+                        <input
+                          className="input"
+                          type="time"
+                          id={`class-end-${slot.id}`}
+                          value={slot.endTime || ""}
+                          onChange={(event) =>
+                            handleClassTimeSlotChange(
+                              slot.id,
+                              "endTime",
+                              event.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="admin-session-field admin-session-field--label">
+                        <label
+                          className="admin-session-label"
+                          htmlFor={`class-label-${slot.id}`}
+                        >
+                          Label (optional)
+                        </label>
+                        <input
+                          className="input"
+                          id={`class-label-${slot.id}`}
+                          value={slot.label}
+                          onChange={(event) =>
+                            handleClassTimeSlotChange(
+                              slot.id,
+                              "label",
+                              event.target.value
+                            )
+                          }
+                          placeholder="Morning, Afternoon, etc."
+                        />
+                      </div>
+                      <button
+                        className="icon-btn icon-btn--danger admin-session-remove"
+                        type="button"
+                        onClick={() => handleRemoveClassTimeSlot(slot.id)}
+                        aria-label="Remove time slot"
+                      >
+                        <IconTrash aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="admin-session-panel admin-form__full">
+                  <div className="admin-session-panel__header">
+                    <h4>Repeat weekly</h4>
+                  </div>
+                  <label className="admin-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={classForm.repeatWeekly}
+                      onChange={(event) =>
+                        handleToggleClassRepeatWeekly(event.target.checked)
+                      }
+                    />
+                    <span>Repeat this class on selected weekdays</span>
+                  </label>
+                  {classForm.repeatWeekly && (
+                    <div className="admin-repeat-days">
+                      {EVENT_REPEAT_WEEKDAYS.map((day) => (
+                        <label className="admin-repeat-day" key={day.value}>
+                          <input
+                            type="checkbox"
+                            checked={
+                              Array.isArray(classForm.repeatDays) &&
+                              classForm.repeatDays.includes(day.value)
+                            }
+                            onChange={() => handleToggleClassRepeatDay(day.value)}
+                          />
+                          <span>{day.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <p className="admin-panel__note">
+                    Use this for recurring classes like every Saturday.
+                  </p>
+                </div>
                 <textarea
                   className="input textarea admin-form__full"
                   placeholder="Description"
@@ -3498,6 +4213,9 @@ export function AdminCutFlowerClassesView() {
                           <h4>{classDoc.title}</h4>
                           {classDoc.location && (
                             <p className="admin-event-card__meta">{classDoc.location}</p>
+                          )}
+                          {classDoc.timeSummary && (
+                            <p className="admin-event-card__meta">Times: {classDoc.timeSummary}</p>
                           )}
                           {classDoc.priceLabel && (
                             <p className="admin-event-card__meta">Fee: {classDoc.priceLabel}</p>

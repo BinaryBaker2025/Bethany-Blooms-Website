@@ -226,9 +226,10 @@ function CartModal() {
                           <strong>Per Attendee:</strong> R{item.metadata.perAttendeePrice.toFixed(2)}
                         </p>
                       )}
-                      {item.metadata.framePreference && (
+                      {(item.metadata.optionLabel || item.metadata.framePreference) && (
                         <p>
-                          <strong>Frame:</strong> {item.metadata.framePreference}
+                          <strong>{item.metadata.type === "cut-flower" ? "Option" : "Frame"}:</strong>{" "}
+                          {item.metadata.optionLabel || item.metadata.framePreference}
                         </p>
                       )}
                       {item.metadata.notes && (

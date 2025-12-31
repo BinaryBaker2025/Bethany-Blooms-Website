@@ -474,7 +474,8 @@ main {
   border-radius: 50%;
   border: none;
   background: rgba(255, 255, 255, 0.55);
-  transition: transform var(--transition-base), background var(--transition-base);
+  transition: transform var(--transition-base),
+    background var(--transition-base);
   cursor: pointer;
   padding: 0;
 }
@@ -601,24 +602,41 @@ main {
 
 .events-grid {
   display: grid;
-  gap: clamp(1.5rem, 3vw, 2rem);
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: clamp(1.25rem, 2.5vw, 1.75rem);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 420px));
+  justify-content: center;
   margin-top: 2rem;
 }
 
 .event-card {
   background: rgba(255, 255, 255, 0.9);
   border-radius: 24px;
-  box-shadow: 0 30px 50px -35px rgba(47, 54, 36, 0.4);
+  border: 2px solid rgb(85, 107, 47);
+  box-shadow: 0 22px 45px -30px rgba(47, 54, 36, 0.35);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 420px;
+}
+
+.event-card__media {
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+  width: 100%;
+  cursor: zoom-in;
+  text-align: left;
+  border-radius: 24px 24px 0 0;
+  overflow: hidden;
 }
 
 .event-card__media img {
   width: 100%;
-  height: 220px;
-  object-fit: cover;
+  height: auto;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   box-shadow: none;
@@ -627,8 +645,24 @@ main {
 .event-card__body {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1.5rem;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem 1.05rem;
+}
+
+.event-card__body h3 {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.5vw, 1.2rem);
+}
+
+.event-card__body p {
+  margin: 0;
+}
+
+.event-card__body > p:not(.event-card__meta) {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .event-card__meta {
@@ -639,7 +673,57 @@ main {
 .event-card__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.5rem;
+}
+
+.event-card__actions .btn {
+  padding: 0.6rem 1.2rem;
+  font-size: 0.95rem;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(47, 54, 36, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1rem, 4vw, 2.5rem);
+  z-index: 2000;
+}
+
+.lightbox__content {
+  position: relative;
+  max-width: min(92vw, 980px);
+  width: 100%;
+}
+
+.lightbox__image {
+  width: 100%;
+  height: auto;
+  border-radius: 20px;
+  box-shadow: 0 30px 70px -35px rgba(47, 54, 36, 0.6);
+  cursor: zoom-out;
+}
+
+.lightbox__close {
+  position: absolute;
+  top: -0.75rem;
+  right: -0.75rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(245, 234, 215, 0.95);
+  color: var(--color-text);
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 12px 24px -18px rgba(47, 54, 36, 0.6);
+}
+
+.lightbox__close:hover,
+.lightbox__close:focus-visible {
+  background: rgba(245, 234, 215, 1);
 }
 
 .cut-flowers-process {
@@ -730,7 +814,11 @@ main {
   width: 100%;
   height: 260px;
   border-radius: 24px;
-  background: linear-gradient(135deg, rgba(227, 166, 161, 0.35), rgba(167, 199, 161, 0.35));
+  background: linear-gradient(
+    135deg,
+    rgba(227, 166, 161, 0.35),
+    rgba(167, 199, 161, 0.35)
+  );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
@@ -1494,6 +1582,26 @@ main {
   flex: 1 1 360px;
 }
 
+.admin-calendar .card {
+  transition: none;
+}
+
+.admin-calendar .card::after {
+  opacity: 0;
+  transition: none;
+}
+
+.admin-calendar .card:hover,
+.admin-calendar .card:focus-within {
+  transform: none;
+  box-shadow: 0 40px 80px -45px rgba(58, 58, 58, 0.4);
+}
+
+.admin-calendar .card:hover::after,
+.admin-calendar .card:focus-within::after {
+  opacity: 0;
+}
+
 .admin-calendar__header {
   display: flex;
   align-items: center;
@@ -1505,6 +1613,15 @@ main {
   min-width: 46px;
   padding: 0.4rem 0.85rem;
   font-size: 1.2rem;
+  box-shadow: none;
+  transition: none;
+}
+
+.admin-calendar__nav:hover,
+.admin-calendar__nav:focus-visible {
+  transform: none;
+  box-shadow: none;
+  background: rgb(227, 166, 161);
 }
 
 .admin-calendar__legend {
@@ -1559,11 +1676,11 @@ main {
   text-align: center;
   font-weight: 600;
   cursor: pointer;
-  transition: transform var(--transition-base),
-    box-shadow var(--transition-base), background var(--transition-base);
+  transition: none;
 }
 
-.admin-calendar__cell:hover {
+.admin-calendar__cell:hover,
+.admin-calendar__cell:focus-visible {
   transform: none;
   box-shadow: none;
 }
@@ -1781,7 +1898,8 @@ main {
   font-weight: 600;
   color: var(--color-text);
   cursor: pointer;
-  transition: background var(--transition-base), border-color var(--transition-base);
+  transition: background var(--transition-base),
+    border-color var(--transition-base);
 }
 
 .admin-pagination__button:disabled {
@@ -2106,6 +2224,28 @@ main {
 .admin-session-panel__header h4 {
   margin: 0;
   font-size: 1.05rem;
+}
+
+.admin-repeat-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.admin-repeat-day {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(85, 107, 47, 0.18);
+  background: rgba(245, 234, 215, 0.55);
+  font-size: 0.9rem;
+  color: rgba(47, 54, 36, 0.85);
+}
+
+.admin-repeat-day input {
+  accent-color: var(--color-accent);
 }
 
 .admin-session-row {

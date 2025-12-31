@@ -154,5 +154,9 @@ service cloud.firestore {
 
       allow delete: if false;
     }
+
+    match /{document=**} {
+      allow read, write: if signedIn();
+    }
   }
 }

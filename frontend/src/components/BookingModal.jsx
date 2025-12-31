@@ -1,12 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
+import { getFirebaseDb } from "../lib/firebase.js";
 
 const DEFAULT_FRAME_OPTIONS = [
   { value: "A5", label: "A5 – R350", price: 350 },
   { value: "A4", label: "A4 – R550", price: 550 },
   { value: "A3", label: "A3 – R650", price: 650 },
 ];
+
+const formatOptionLabel = (label, price) => {
+  if (typeof label !== "string" || !label.trim()) return "Option";
+  if (Number.isFinite(price)) return `${label} · R${price}`;
+  return label;
+};
+
+const parseOptionalNumber = (value) => {
+  if (value === "" || value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
 
 const INITIAL_BOOKING_FORM = {
   fullName: "",
@@ -29,9 +43,17 @@ function BookingModal() {
   const [submitError, setSubmitError] = useState(null);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
+  const db = useMemo(() => {
+    try {
+      return getFirebaseDb();
+    } catch {
+      return null;
+    }
+  }, []);
 
   const workshop = bookingContext?.workshop ?? null;
   const bookingType = bookingContext?.type ?? "workshop";
+  const isCutFlower = bookingType === "cut-flower";
   const bookingCopy =
     bookingType === "cut-flower"
       ? {
@@ -44,6 +66,7 @@ function BookingModal() {
           itemLabel: "Cut Flower Session",
           daySelectorLabel: "Class Day",
           noSessionsCta: "No Sessions Available",
+          optionLabel: "Cut Flower Option",
         }
       : {
           heading: "Secure Your Workshop Seat",
@@ -55,6 +78,7 @@ function BookingModal() {
           itemLabel: "Workshop",
           daySelectorLabel: "Workshop Day",
           noSessionsCta: "No Sessions Available",
+          optionLabel: "Preferred Frame Size",
         };
   const sessions = useMemo(
     () => (Array.isArray(workshop?.sessions) ? workshop.sessions : []),
@@ -131,24 +155,58 @@ function BookingModal() {
     }
   }, [isBookingOpen, selectedDayData, selectedDaySlots, selectedSession, sessionDays]);
 
-  const frameOptions = useMemo(() => {
+  const selectionOptions = useMemo(() => {
+    if (isCutFlower) {
+      const rawOptions = Array.isArray(workshop?.options) ? workshop.options : [];
+      const normalized = rawOptions
+        .map((option, index) => {
+          if (typeof option !== "object" || option === null) return null;
+          const value = option.value ?? option.id ?? option.label ?? `option-${index}`;
+          const label = option.label ?? option.name ?? option.value ?? `Option ${index + 1}`;
+          const price = parseOptionalNumber(option.price);
+          return {
+            value,
+            label,
+            displayLabel: formatOptionLabel(label, price),
+            price,
+          };
+        })
+        .filter(Boolean);
+      if (normalized.length > 0) {
+        return normalized;
+      }
+      const rawFallbackPrice = parseOptionalNumber(workshop?.unitPrice ?? workshop?.price);
+      return [
+        {
+          value: "standard",
+          label: "Standard",
+          displayLabel: formatOptionLabel("Standard", rawFallbackPrice),
+          price: rawFallbackPrice,
+        },
+      ];
+    }
+
     if (Array.isArray(workshop?.frameOptions) && workshop.frameOptions.length > 0) {
       return workshop.frameOptions
         .map((option, index) => {
           if (typeof option !== "object" || option === null) return null;
           const value = option.value ?? option.size ?? option.label ?? `frame-${index}`;
           const label = option.label ?? option.name ?? value;
-          const priceValue = Number(option.price);
+          const price = parseOptionalNumber(option.price);
           return {
             value,
             label,
-            price: Number.isFinite(priceValue) ? priceValue : undefined,
+            displayLabel: label,
+            price,
           };
         })
         .filter(Boolean);
     }
-    return DEFAULT_FRAME_OPTIONS;
-  }, [workshop]);
+    return DEFAULT_FRAME_OPTIONS.map((option) => ({
+      ...option,
+      displayLabel: option.label,
+    }));
+  }, [isCutFlower, workshop]);
 
   useEffect(() => {
     if (isBookingOpen) {
@@ -170,10 +228,13 @@ function BookingModal() {
       bookingContext?.attendeeCount !== undefined
         ? String(bookingContext.attendeeCount)
         : INITIAL_BOOKING_FORM.attendeeCount;
-    const preferredFrame = bookingContext?.framePreference ?? INITIAL_BOOKING_FORM.framePreference;
-    const defaultFrameValue =
-      frameOptions.find((option) => option.value === preferredFrame)?.value ??
-      frameOptions[0]?.value ??
+    const preferredSelection =
+      (isCutFlower ? bookingContext?.optionValue : bookingContext?.framePreference) ??
+      bookingContext?.framePreference ??
+      INITIAL_BOOKING_FORM.framePreference;
+    const defaultSelectionValue =
+      selectionOptions.find((option) => option.value === preferredSelection)?.value ??
+      selectionOptions[0]?.value ??
       INITIAL_BOOKING_FORM.framePreference;
 
     const preferredSessionIds = [
@@ -190,21 +251,21 @@ function BookingModal() {
       preferredSession && (!preferredSession.isPast || !hasAnyActive) ? preferredSession : null;
     const fallbackSession = sessions.find((session) => !session.isPast) ?? sessions[0] ?? null;
 
-    setFormState({
-      fullName: customer.fullName ?? "",
-      email: customer.email ?? "",
-      phone: customer.phone ?? "",
-      address: customer.address ?? "",
-      attendeeCount,
-      framePreference: defaultFrameValue,
-      notes: bookingContext?.notes ?? "",
-    });
+      setFormState({
+        fullName: customer.fullName ?? "",
+        email: customer.email ?? "",
+        phone: customer.phone ?? "",
+        address: customer.address ?? "",
+        attendeeCount,
+        framePreference: defaultSelectionValue,
+        notes: bookingContext?.notes ?? "",
+      });
     const initialSession = normalizedPreferred ?? fallbackSession ?? null;
     setSelectedSessionId(initialSession?.id ?? null);
     setSelectedDay(initialSession?.date ?? sessions[0]?.date ?? null);
     setFormStatus("idle");
     setSubmitError(null);
-  }, [isBookingOpen, bookingContext, frameOptions, sessions, workshop]);
+  }, [isBookingOpen, bookingContext, isCutFlower, selectionOptions, sessions, workshop]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -225,11 +286,10 @@ function BookingModal() {
   };
 
   const pricingSummary = useMemo(() => {
-    const fallbackPrice =
-      workshop?.unitPrice ??
-      (typeof workshop?.price === "number" ? workshop.price : Number(workshop?.price) || 0);
+    const rawFallbackPrice = parseOptionalNumber(workshop?.unitPrice ?? workshop?.price);
+    const fallbackPrice = rawFallbackPrice ?? 0;
     const selectedOption =
-      frameOptions.find((option) => option.value === formState.framePreference) ?? frameOptions[0];
+      selectionOptions.find((option) => option.value === formState.framePreference) ?? selectionOptions[0];
     const perAttendeePrice =
       selectedOption?.price !== undefined && Number.isFinite(selectedOption.price)
         ? selectedOption.price
@@ -241,9 +301,9 @@ function BookingModal() {
       attendeeCount: attendeeCountNumber,
       total,
     };
-  }, [formState.attendeeCount, formState.framePreference, frameOptions, workshop]);
+  }, [formState.attendeeCount, formState.framePreference, selectionOptions, workshop]);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setSubmitError(null);
 
@@ -275,11 +335,12 @@ function BookingModal() {
       fullName: formState.fullName.trim(),
       email: formState.email.trim(),
       phone: formState.phone.trim(),
-      address: formState.address.trim(),
+      address: isCutFlower ? "" : formState.address.trim(),
       notes: formState.notes.trim(),
     };
 
-    const missing = REQUIRED_FIELDS.filter((field) => !trimmed[field]);
+    const requiredFields = isCutFlower ? ["fullName", "email", "phone"] : REQUIRED_FIELDS;
+    const missing = requiredFields.filter((field) => !trimmed[field]);
     if (missing.length > 0) {
       setFormStatus("error");
       setSubmitError("Please complete all contact fields before continuing.");
@@ -292,10 +353,73 @@ function BookingModal() {
     const perAttendeePrice = pricingSummary.perAttendeePrice;
     const totalPrice = pricingSummary.total;
 
-    const framePreference =
-      frameOptions.find((option) => option.value === formState.framePreference)?.value ??
-      frameOptions[0]?.value ??
-      INITIAL_BOOKING_FORM.framePreference;
+    const selectedOption =
+      selectionOptions.find((option) => option.value === formState.framePreference) ?? selectionOptions[0];
+    const selectionValue =
+      selectedOption?.value ?? selectionOptions[0]?.value ?? INITIAL_BOOKING_FORM.framePreference;
+    const selectionLabel = selectedOption?.label ?? selectionValue;
+
+    if (isCutFlower) {
+      if (!db) {
+        setFormStatus("error");
+        setSubmitError("Booking is unavailable right now. Please try again shortly.");
+        return;
+      }
+
+      const sessionLabel =
+        selectedSession.label ??
+        selectedSession.timeRangeLabel ??
+        selectedSession.formatted ??
+        "";
+      const sessionDate = (() => {
+        if (typeof selectedSession.start === "string") {
+          const parsed = new Date(selectedSession.start);
+          if (!Number.isNaN(parsed.getTime())) return parsed;
+        }
+        if (selectedSession.date) {
+          const parsed = new Date(selectedSession.date);
+          if (!Number.isNaN(parsed.getTime())) return parsed;
+        }
+        return null;
+      })();
+      const notesParts = [
+        workshop.title ? `Class: ${workshop.title}` : null,
+        sessionLabel ? `Session: ${sessionLabel}` : null,
+        `Attendees: ${attendeeCountNumber}`,
+        selectionLabel ? `Option: ${selectionLabel}` : null,
+        trimmed.notes || null,
+      ].filter(Boolean);
+      const notesValue = notesParts.join(" · ").slice(0, 1000);
+      const bookingPayload = {
+        customerName: trimmed.fullName,
+        email: trimmed.email,
+        phone: trimmed.phone,
+        occasion: workshop.title ?? "",
+        location: workshop.location ?? "",
+        status: "new",
+        eventDate: sessionDate ?? null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        classId: workshop.id,
+        sessionId: selectedSession.id,
+        sessionLabel: sessionLabel || null,
+        attendeeCount: attendeeCountNumber,
+        optionLabel: selectionLabel || null,
+        optionValue: selectionValue || null,
+      };
+      if (notesValue) bookingPayload.notes = notesValue;
+
+      try {
+        await addDoc(collection(db, "cutFlowerBookings"), bookingPayload);
+        setFormStatus("success");
+        setFormState(INITIAL_BOOKING_FORM);
+        closeBooking();
+      } catch (error) {
+        setFormStatus("error");
+        setSubmitError(error?.message || "We couldn’t save your booking. Please try again.");
+      }
+      return;
+    }
 
     const cartItemId = `${bookingType}-${workshop.id}-${selectedSession.id}-${Date.now()}`;
 
@@ -312,7 +436,9 @@ function BookingModal() {
         scheduledDateLabel: summaryLabel || selectedSession.formatted || workshop.scheduledDateLabel || null,
         location: workshop.location ?? null,
         attendeeCount: attendeeCountNumber,
-        framePreference,
+        framePreference: isCutFlower ? null : selectionValue,
+        optionLabel: isCutFlower ? selectionLabel : null,
+        optionValue: isCutFlower ? selectionValue : null,
         perAttendeePrice,
         notes: trimmed.notes,
         sessionId: selectedSession.id,
@@ -550,18 +676,20 @@ function BookingModal() {
               required
             />
           </div>
-          <div>
-            <label htmlFor="guest-address">Address</label>
-            <textarea
-              className="input textarea"
-              id="guest-address"
-              name="address"
-              placeholder="Delivery or correspondence address"
-              value={formState.address}
-              onChange={handleFieldChange("address")}
-              required
-            />
-          </div>
+          {!isCutFlower && (
+            <div>
+              <label htmlFor="guest-address">Address</label>
+              <textarea
+                className="input textarea"
+                id="guest-address"
+                name="address"
+                placeholder="Delivery or correspondence address"
+                value={formState.address}
+                onChange={handleFieldChange("address")}
+                required
+              />
+            </div>
+          )}
           <div>
             <label htmlFor="guest-attendees">Number of Attendees</label>
             <input
@@ -578,7 +706,7 @@ function BookingModal() {
             />
           </div>
           <div>
-            <label htmlFor="guest-frame">Preferred Frame Size</label>
+            <label htmlFor="guest-frame">{bookingCopy.optionLabel}</label>
             <select
               className="input"
               id="guest-frame"
@@ -586,9 +714,9 @@ function BookingModal() {
               value={formState.framePreference}
               onChange={handleFieldChange("framePreference")}
             >
-              {frameOptions.map((option) => (
+              {selectionOptions.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {option.displayLabel ?? option.label}
                 </option>
               ))}
             </select>

@@ -13,6 +13,58 @@ const classDateFormatter = new Intl.DateTimeFormat("en-ZA", {
   dateStyle: "long",
   timeStyle: "short",
 });
+const classDayFormatter = new Intl.DateTimeFormat("en-ZA", {
+  dateStyle: "long",
+});
+const timeOnlyFormatter = new Intl.DateTimeFormat("en-ZA", {
+  timeStyle: "short",
+});
+const weekdayLabels = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+function formatRepeatLabel(repeatDays) {
+  const days = Array.isArray(repeatDays) ? repeatDays : [];
+  const normalized = days.map((day) => Number(day)).filter((day) => Number.isFinite(day));
+  const labels = normalized
+    .map((day) => weekdayLabels[day])
+    .filter(Boolean);
+  if (!labels.length) return "";
+  return `Every ${labels.join(", ")}`;
+}
+
+function formatTimeValue(value) {
+  if (!value) return "";
+  if (value instanceof Date) return timeOnlyFormatter.format(value);
+  if (typeof value !== "string") return "";
+  const [hours, minutes] = value.split(":").map(Number);
+  if (!Number.isFinite(hours)) return value;
+  const date = new Date();
+  date.setHours(hours);
+  date.setMinutes(Number.isFinite(minutes) ? minutes : 0);
+  date.setSeconds(0, 0);
+  return timeOnlyFormatter.format(date);
+}
+
+function formatTimeRange(startTime, endTime) {
+  const startLabel = formatTimeValue(startTime);
+  if (!startLabel) return "";
+  const endLabel = formatTimeValue(endTime);
+  if (!endLabel) return startLabel;
+  return `${startLabel} – ${endLabel}`;
+}
+
+function parseOptionalNumber(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -38,6 +90,23 @@ function parseDateValue(value) {
   return null;
 }
 
+function formatTimeInput(date) {
+  return date.toISOString().slice(11, 16);
+}
+
+function combineDateAndTime(dateInput, timeInput) {
+  if (!dateInput) return null;
+  const base = new Date(dateInput);
+  if (Number.isNaN(base.getTime())) return null;
+  if (timeInput) {
+    const [hours, minutes] = timeInput.split(":").map(Number);
+    if (Number.isFinite(hours)) base.setHours(hours);
+    if (Number.isFinite(minutes)) base.setMinutes(minutes);
+    base.setSeconds(0, 0);
+  }
+  return base;
+}
+
 function CutFlowersPage() {
   usePageMetadata({
     title: "Cut Flowers | Bethany Blooms",
@@ -56,21 +125,81 @@ function CutFlowersPage() {
       .filter((session) => (session.status ?? "live") === "live")
       .map((session) => {
         const eventDate = parseDateValue(session.eventDate);
-        const priceNumber =
-          typeof session.price === "number"
-            ? session.price
-            : Number.isFinite(Number(session.price))
-            ? Number(session.price)
-            : null;
+        const repeatDays = Array.isArray(session.repeatDays)
+          ? session.repeatDays.map((day) => Number(day)).filter((day) => Number.isFinite(day))
+          : [];
+        const repeatLabel =
+          session.repeatWeekly && repeatDays.length > 0
+            ? formatRepeatLabel(repeatDays)
+            : "";
+        const isRepeating = Boolean(repeatLabel);
+        const fallbackTime =
+          eventDate && (eventDate.getHours() || eventDate.getMinutes())
+            ? formatTimeInput(eventDate)
+            : "";
+        const rawTimeSlots = Array.isArray(session.timeSlots) ? session.timeSlots : [];
+        const timeSlots =
+          rawTimeSlots.length > 0
+            ? rawTimeSlots
+                .map((slot) => ({
+                  time: typeof slot.time === "string" ? slot.time : "",
+                  endTime: typeof slot.endTime === "string" ? slot.endTime : "",
+                  label: typeof slot.label === "string" ? slot.label : "",
+                }))
+                .filter((slot) => slot.time)
+            : fallbackTime
+            ? [{ time: fallbackTime, endTime: "", label: "" }]
+            : [];
+        const timeLabels = timeSlots
+          .map((slot) => {
+            const formattedTime = formatTimeRange(slot.time, slot.endTime);
+            if (!formattedTime) return "";
+            return slot.label ? `${slot.label} (${formattedTime})` : formattedTime;
+          })
+          .filter(Boolean);
+        const hasLabeledSlot = timeSlots.some((slot) => slot.label?.trim());
+        const showTimes =
+          timeLabels.length > 0 &&
+          (timeLabels.length > 1 || hasLabeledSlot || isRepeating);
+        const rawOptions = Array.isArray(session.options) ? session.options : [];
+        const options = rawOptions
+          .map((option, index) => ({
+            value: option.value || option.id || option.label || `option-${index}`,
+            label: option.label || option.name || option.value || `Option ${index + 1}`,
+            price: parseOptionalNumber(option.price),
+          }))
+          .filter((option) => option.label);
+        const priceNumber = parseOptionalNumber(session.price);
+        const optionPrices = options.map((option) => option.price).filter((price) => Number.isFinite(price));
+        const minOptionPrice = optionPrices.length > 0 ? Math.min(...optionPrices) : null;
+        const baseDisplayDate = eventDate
+          ? showTimes
+            ? classDayFormatter.format(eventDate)
+            : classDateFormatter.format(eventDate)
+          : "Date to be confirmed";
         return {
           ...session,
           eventDate,
-          displayDate: eventDate ? classDateFormatter.format(eventDate) : "Date to be confirmed",
-          priceLabel: priceNumber !== null ? `R${priceNumber}` : session.price || "On request",
+          displayDate: repeatLabel || baseDisplayDate,
+          priceLabel:
+            minOptionPrice !== null
+              ? `From R${minOptionPrice}`
+              : priceNumber !== null
+              ? `R${priceNumber}`
+              : options.length > 0
+              ? "Options available"
+              : session.price || "On request",
           priceNumber,
+          timeSlots,
+          showTimes,
+          timeText: timeLabels.join(" · "),
+          isRepeating,
+          repeatDays,
+          options,
         };
       })
       .filter((session) => {
+        if (session.isRepeating) return true;
         if (!session.eventDate) return true;
         return session.eventDate.getTime() >= now;
       });
@@ -91,20 +220,81 @@ function CutFlowersPage() {
     },
   ];
 
+  const buildClassSessions = (classItem) => {
+    const baseDate = classItem.eventDate;
+    if (!baseDate) return [];
+
+    const rawSlots = Array.isArray(classItem.timeSlots) ? classItem.timeSlots : [];
+    const fallbackTime =
+      baseDate && (baseDate.getHours() || baseDate.getMinutes())
+        ? formatTimeInput(baseDate)
+        : "";
+    const slots =
+      rawSlots.length > 0
+        ? rawSlots
+        : fallbackTime
+        ? [{ time: fallbackTime, endTime: "", label: "" }]
+        : [];
+    if (slots.length === 0) return [];
+
+    const now = Date.now();
+    const repeatDays = Array.isArray(classItem.repeatDays) ? classItem.repeatDays : [];
+
+    const buildSession = (sessionDate, slot, index, dateKey) => {
+      const formatted = classDateFormatter.format(sessionDate);
+      const timeLabel = formatTimeRange(slot.time, slot.endTime);
+      const fallbackLabel = formatTimeValue(slot.time);
+      const label = slot.label ? `${slot.label} (${timeLabel || fallbackLabel})` : timeLabel || fallbackLabel || formatted;
+      const dateValue = sessionDate.toISOString().slice(0, 10);
+      const timeValue = slot.time || formatTimeInput(sessionDate);
+      return {
+        id: `${classItem.id}-${dateKey}-${index}`,
+        label,
+        start: sessionDate.toISOString(),
+        date: dateValue,
+        time: timeValue,
+        endTime: slot.endTime || null,
+        formatted,
+        timeRangeLabel: timeLabel || null,
+        capacity: classItem.capacity ? Number(classItem.capacity) : null,
+        isPast: sessionDate.getTime() < now,
+      };
+    };
+
+    if (classItem.isRepeating && repeatDays.length > 0) {
+      const sessions = [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const start = new Date(baseDate);
+      start.setHours(0, 0, 0, 0);
+      const cursor = start > today ? start : today;
+      const windowDays = 90;
+      for (let offset = 0; offset <= windowDays; offset += 1) {
+        const nextDate = new Date(cursor);
+        nextDate.setDate(cursor.getDate() + offset);
+        if (!repeatDays.includes(nextDate.getDay())) continue;
+        const dateKey = nextDate.toISOString().slice(0, 10);
+        slots.forEach((slot, index) => {
+          const sessionDate = combineDateAndTime(nextDate, slot.time);
+          if (!sessionDate) return;
+          sessions.push(buildSession(sessionDate, slot, index, dateKey));
+        });
+      }
+      return sessions;
+    }
+
+    return slots
+      .map((slot, index) => {
+        const sessionDate = combineDateAndTime(baseDate, slot.time);
+        if (!sessionDate) return null;
+        const dateKey = sessionDate.toISOString().slice(0, 10);
+        return buildSession(sessionDate, slot, index, dateKey);
+      })
+      .filter(Boolean);
+  };
+
   const handleBookClass = (classItem) => {
-    const sessionDate = classItem.eventDate;
-    const sessionId = `${classItem.id}-session`;
-    const session = sessionDate
-      ? {
-          id: sessionId,
-          label: classItem.displayDate,
-          start: sessionDate.toISOString(),
-          date: sessionDate.toISOString().slice(0, 10),
-          time: sessionDate.toISOString().slice(11, 16),
-          formatted: classItem.displayDate,
-          capacity: classItem.capacity ? Number(classItem.capacity) : null,
-        }
-      : null;
+    const sessions = buildClassSessions(classItem);
 
     openBooking({
       type: "cut-flower",
@@ -115,7 +305,8 @@ function CutFlowersPage() {
         location: classItem.location,
         unitPrice: classItem.priceNumber ?? null,
         image: classItem.image || cutFlowersTable,
-        sessions: session ? [session] : [],
+        sessions,
+        options: classItem.options || [],
       },
     });
   };
@@ -197,6 +388,9 @@ function CutFlowersPage() {
                   <h3 className="card__title">{classItem.title}</h3>
                   <p className="modal__meta">{classItem.displayDate}</p>
                   {classItem.location && <p className="modal__meta">{classItem.location}</p>}
+                  {classItem.showTimes && (
+                    <p className="modal__meta">Times: {classItem.timeText}</p>
+                  )}
                   <p>{classItem.description}</p>
                   <p className="card__price">{classItem.priceLabel}</p>
                   <div className="card__actions">
