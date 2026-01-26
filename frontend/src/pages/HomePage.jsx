@@ -7,6 +7,7 @@ import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
+import { getStockBadgeLabel, getStockStatus } from "../lib/stockStatus.js";
 import heroBackground from "../assets/photos/workshop-banner.jpg";
 import homePhotoOne from "../assets/photos/workshop-frame-hand-pink.jpeg";
 import homePhotoTwo from "../assets/photos/workshop-frame-hand-neutral.jpeg";
@@ -76,7 +77,12 @@ function HomePage() {
 
   const normalizedProducts = liveProducts.map((product, index) => {
     const priceNumber = typeof product.price === "number" ? product.price : Number(product.price);
-    const isPurchasable = product.category === "kit" && Number.isFinite(priceNumber);
+    const isPurchasable = Number.isFinite(priceNumber);
+    const stockStatus = getStockStatus({
+      quantity: product.quantity,
+      forceOutOfStock: product.forceOutOfStock,
+    });
+    const stockBadgeLabel = getStockBadgeLabel(stockStatus);
     return {
       ...product,
       id: product.id || `product-${index}`,
@@ -88,6 +94,8 @@ function HomePage() {
       category: product.category || "product",
       image: product.image || heroBackground,
       isPurchasable,
+      stockStatus,
+      stockBadgeLabel,
     };
   });
 
@@ -141,6 +149,10 @@ function HomePage() {
   );
 
   const handleAddToCart = (product) => {
+    if (product.stockStatus?.state === "out") {
+      alert("This product is currently out of stock. Please check back soon.");
+      return;
+    }
     if (!product.isPurchasable || !product.numericPrice) {
       alert("This product does not have a valid online price yet. Please enquire for availability.");
       return;
@@ -202,8 +214,17 @@ function HomePage() {
                 <p className="card__price">{product.displayPrice}</p>
                 <p>{product.description}</p>
                 <p className="modal__meta">Category: {product.category.replace(/-/g, " ")}</p>
+                {product.stockBadgeLabel && (
+                  <span className={`badge badge--stock-${product.stockStatus?.state || "in"}`}>
+                    {product.stockBadgeLabel}
+                  </span>
+                )}
                 <div className="card__actions">
-                  {product.isPurchasable ? (
+                  {product.stockStatus?.state === "out" ? (
+                    <button className="btn btn--secondary" type="button" disabled>
+                      Out of stock
+                    </button>
+                  ) : product.isPurchasable ? (
                     <button className="btn btn--primary" type="button" onClick={() => handleAddToCart(product)}>
                       Add to Cart
                     </button>

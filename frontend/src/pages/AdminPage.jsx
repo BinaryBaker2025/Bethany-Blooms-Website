@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import {
   addDoc,
   collection,
@@ -20,6 +20,7 @@ import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { getFirebaseFunctions } from "../lib/firebase.js";
 import { getFirebaseDb } from "../lib/firebase.js";
+import { getStockStatus, STOCK_LOW_THRESHOLD } from "../lib/stockStatus.js";
 import {
   DEFAULT_SLOT_CAPACITY,
   AUTO_REPEAT_DAYS,
@@ -57,19 +58,29 @@ function ConfirmDialog({
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={activeTab === "categories" && Boolean(pendingCategoryDelete)}
+        title={`Delete ${pendingCategoryDelete?.name || "category"}?`}
+        message="This category will be removed from the Shop menu. Update products that still use it before deleting."
+        confirmLabel="Delete category"
+        busy={categorySaving}
+        onConfirm={handleConfirmDeleteCategory}
+        onCancel={() => setPendingCategoryDelete(null)}
+      />
     </div>
   );
 }
 
 const INITIAL_PRODUCT_FORM = {
   name: "",
-  title: "",
   description: "",
   price: "",
   image: "",
-  category: "product",
+  categoryId: "",
+  category: "",
   status: "live",
   quantity: "1",
+  forceOutOfStock: false,
   featured: false,
 };
 
@@ -680,10 +691,17 @@ export function AdminProductsView() {
     db,
     storage,
     products,
+    productCategories,
     inventoryEnabled,
     inventoryLoading,
     inventoryError,
   } = useAdminData();
+  const location = useLocation();
+  const isCategoriesTab = location.pathname.includes("/admin/products/categories");
+  const activeTab = isCategoriesTab ? "categories" : "products";
+  const headerNote = isCategoriesTab
+    ? "Manage the categories shown across the storefront."
+    : "Build your storefront inventory directly from Firestore.";
   const [statusMessage, setStatusMessage] = useState(null);
   const [productForm, setProductForm] = useState(INITIAL_PRODUCT_FORM);
   const [editingProductId, setEditingProductId] = useState(null);
@@ -691,6 +709,11 @@ export function AdminProductsView() {
   const [productImageFile, setProductImageFile] = useState(null);
   const [productImagePreview, setProductImagePreview] = useState("");
   const [productError, setProductError] = useState(null);
+  const [categoryForm, setCategoryForm] = useState({ name: "" });
+  const [categoryError, setCategoryError] = useState(null);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryStatusMessage, setCategoryStatusMessage] = useState(null);
+  const [pendingCategoryDelete, setPendingCategoryDelete] = useState(null);
   const [productSaving, setProductSaving] = useState(false);
   const [productPage, setProductPage] = useState(0);
   const productPreviewUrlRef = useRef(null);
@@ -698,16 +721,68 @@ export function AdminProductsView() {
   const [productImporting, setProductImporting] = useState(false);
   const [featuredUpdatingId, setFeaturedUpdatingId] = useState(null);
   const uploadAsset = useUploadAsset(storage);
+  const categoryOptions = useMemo(
+    () =>
+      productCategories
+        .map((category) => {
+          const name = (category.name || category.title || category.label || category.id || "")
+            .toString()
+            .trim();
+          if (!name) return null;
+          const slug = (category.slug || category.id || name).toString().trim();
+          const id = (category.id || slug).toString().trim();
+          return { id, name, slug };
+        })
+        .filter(Boolean),
+    [productCategories],
+  );
+  const categoryLookup = useMemo(() => {
+    const map = new Map();
+    categoryOptions.forEach((category) => {
+      const idKey = (category.id || "").toString().trim().toLowerCase();
+      const slugKey = (category.slug || "").toString().trim().toLowerCase();
+      const nameKey = (category.name || "").toString().trim().toLowerCase();
+      if (idKey) map.set(idKey, category);
+      if (slugKey) map.set(slugKey, category);
+      if (nameKey) map.set(nameKey, category);
+    });
+    return map;
+  }, [categoryOptions]);
+  const resolveCategory = (value) => {
+    if (!value) return null;
+    const key = value.toString().trim().toLowerCase();
+    if (!key) return null;
+    return categoryLookup.get(key) || null;
+  };
+  const categoryUsage = useMemo(() => {
+    const usage = new Map();
+    products.forEach((product) => {
+      const resolved = resolveCategory(product.categoryId || product.category);
+      if (!resolved?.id) return;
+      usage.set(resolved.id, (usage.get(resolved.id) || 0) + 1);
+    });
+    return usage;
+  }, [products, categoryLookup]);
   const featuredProductCount = useMemo(
     () => products.filter((product) => product.featured).length,
     [products]
   );
+  const currentStockStatus = getStockStatus({
+    quantity: productForm.quantity,
+    forceOutOfStock: productForm.forceOutOfStock,
+  });
 
   useEffect(() => {
     if (!statusMessage) return undefined;
     const timeout = setTimeout(() => setStatusMessage(null), 3500);
     return () => clearTimeout(timeout);
   }, [statusMessage]);
+
+  useEffect(() => {
+    if (!categoryStatusMessage) return undefined;
+    const timeout = setTimeout(() => setCategoryStatusMessage(null), 3500);
+    return () => clearTimeout(timeout);
+  }, [categoryStatusMessage]);
 
   useEffect(
     () => () => {
@@ -729,7 +804,12 @@ export function AdminProductsView() {
   }, [products, productPage]);
 
   const openProductModal = () => {
-    setProductForm(INITIAL_PRODUCT_FORM);
+    const defaultCategory = categoryOptions[0] || null;
+    setProductForm({
+      ...INITIAL_PRODUCT_FORM,
+      categoryId: defaultCategory?.id || "",
+      category: defaultCategory?.name || "",
+    });
     setProductImageFile(null);
     setProductImagePreview("");
     setEditingProductId(null);
@@ -769,21 +849,29 @@ export function AdminProductsView() {
   };
 
   const handleEditProduct = (product) => {
+    const resolvedCategory = resolveCategory(product.categoryId || product.category);
+    const resolvedCategoryId =
+      resolvedCategory?.id || (product.categoryId || "").toString().trim();
+    const resolvedCategoryLabel =
+      resolvedCategory?.name || (product.category || "").toString().trim();
     setProductForm({
       name: product.name || product.title || "",
-      title: product.title || "",
       description: product.description || "",
       price:
         product.price === undefined || product.price === null
           ? ""
           : String(product.price),
       image: product.image || "",
-      category: product.category || "product",
+      categoryId: resolvedCategoryId,
+      category: resolvedCategoryLabel,
       status: product.status || "draft",
       quantity:
         product.quantity === undefined || product.quantity === null
           ? "1"
           : String(product.quantity),
+      forceOutOfStock: Boolean(
+        product.forceOutOfStock || product.outOfStockOverride || product.outOfStock
+      ),
       featured: Boolean(product.featured),
     });
     setProductImagePreview(product.image || "");
@@ -821,6 +909,50 @@ export function AdminProductsView() {
         throw new Error("No product rows detected. Check that the sheet has a header row followed by products.");
       }
       const usedIds = new Set();
+      const categoryCache = new Map();
+      const existingCategorySlugs = new Set(
+        categoryOptions
+          .map((category) => (category.id || "").toString().toLowerCase())
+          .filter(Boolean),
+      );
+      const existingCategoryNames = new Set(
+        categoryOptions
+          .map((category) => (category.name || "").toString().toLowerCase())
+          .filter(Boolean),
+      );
+      const ensureCategory = async (rawValue) => {
+        const cleaned = (rawValue || "").toString().trim();
+        if (!cleaned) return null;
+        const cacheKey = cleaned.toLowerCase();
+        if (categoryCache.has(cacheKey)) return categoryCache.get(cacheKey);
+        const existing = resolveCategory(cleaned);
+        if (existing) {
+          categoryCache.set(cacheKey, existing);
+          return existing;
+        }
+        const slug = slugifyId(cleaned);
+        if (slug) {
+          const slugKey = slug.toLowerCase();
+          if (!existingCategorySlugs.has(slugKey) && !existingCategoryNames.has(cacheKey)) {
+            await setDoc(
+              doc(collection(db, "productCategories"), slug),
+              {
+                name: cleaned,
+                slug,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true },
+            );
+            existingCategorySlugs.add(slugKey);
+            existingCategoryNames.add(cacheKey);
+          }
+          const createdCategory = { id: slug, name: cleaned, slug };
+          categoryCache.set(cacheKey, createdCategory);
+          return createdCategory;
+        }
+        return null;
+      };
       let importedCount = 0;
       /* eslint-disable no-await-in-loop */
       for (let index = 0; index < rows.length; index += 1) {
@@ -845,10 +977,17 @@ export function AdminProductsView() {
         const qtyRaw = row.QTY ?? row.Qty ?? row.qty ?? 0;
         const qtyNumber = Number(qtyRaw);
         const quantity = Number.isFinite(qtyNumber) ? Math.max(0, Math.floor(qtyNumber)) : 0;
-        const status = quantity > 0 ? "live" : "draft";
+        const statusInput = (row.Status || row.status || "live").toString().trim().toLowerCase();
+        const status = ["draft", "live", "archived"].includes(statusInput)
+          ? statusInput
+          : "live";
         const description = (row.Description || row.description || cleanedName).toString().trim();
-        const category =
-          (row.Category || row.category || "product").toString().trim() || "product";
+        const categoryInput = (row.Category || row.category || "").toString().trim();
+        const fallbackCategory = categoryOptions[0]?.name || "Product";
+        const categoryLabel = categoryInput || fallbackCategory;
+        const categoryRecord = await ensureCategory(categoryLabel);
+        const categoryName = categoryRecord?.name || categoryLabel;
+        const categoryId = categoryRecord?.id || slugifyId(categoryName) || "product";
         const priceValue = parseSheetPriceValue(row.Price ?? row.price ?? "");
         const normalizedPrice = priceValue === "" ? null : priceValue;
 
@@ -865,10 +1004,12 @@ export function AdminProductsView() {
           title: cleanedName,
           description,
           price: normalizedPrice,
-          category,
+          category: categoryName,
+          categoryId,
           quantity,
           status,
           barcode: rawBarcode || null,
+          forceOutOfStock: false,
           updatedAt: serverTimestamp(),
         };
         if (!docExists) {
@@ -888,6 +1029,125 @@ export function AdminProductsView() {
       );
     } finally {
       setProductImporting(false);
+    }
+  };
+
+  const handleCreateCategory = async (event) => {
+    event.preventDefault();
+    if (!inventoryEnabled || !db) {
+      setCategoryError("You do not have permission to update categories.");
+      return;
+    }
+    const name = (categoryForm.name || "").toString().trim();
+    if (!name) {
+      setCategoryError("Category name is required.");
+      return;
+    }
+    const slug = slugifyId(name);
+    if (!slug) {
+      setCategoryError("Please enter a category name with letters or numbers.");
+      return;
+    }
+    if (resolveCategory(slug) || resolveCategory(name)) {
+      setCategoryError("That category already exists.");
+      return;
+    }
+    try {
+      setCategorySaving(true);
+      setCategoryError(null);
+      await setDoc(doc(db, "productCategories", slug), {
+        name,
+        slug,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setCategoryForm({ name: "" });
+      setCategoryStatusMessage("Category saved");
+    } catch (error) {
+      setCategoryError(error.message || "Unable to save the category.");
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleSeedCategoriesFromProducts = async () => {
+    if (!inventoryEnabled || !db) {
+      setCategoryError("You do not have permission to update categories.");
+      return;
+    }
+    const existingSlugs = new Set(
+      categoryOptions
+        .map((category) => (category.id || "").toString().toLowerCase())
+        .filter(Boolean),
+    );
+    const existingNames = new Set(
+      categoryOptions
+        .map((category) => (category.name || "").toString().toLowerCase())
+        .filter(Boolean),
+    );
+    const toCreate = [];
+    products.forEach((product) => {
+      const raw = (product.category || product.categoryId || "").toString().trim();
+      if (!raw) return;
+      if (resolveCategory(raw)) return;
+      const slug = slugifyId(raw);
+      const nameKey = raw.toLowerCase();
+      const slugKey = slug.toLowerCase();
+      if (!slug || existingSlugs.has(slugKey) || existingNames.has(nameKey)) return;
+      existingSlugs.add(slugKey);
+      existingNames.add(nameKey);
+      toCreate.push({ name: raw, slug });
+    });
+
+    if (!toCreate.length) {
+      setCategoryStatusMessage("All product categories already exist.");
+      return;
+    }
+
+    try {
+      setCategorySaving(true);
+      setCategoryError(null);
+      await Promise.all(
+        toCreate.map((category) =>
+          setDoc(doc(db, "productCategories", category.slug), {
+            ...category,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }),
+        ),
+      );
+      setCategoryStatusMessage(
+        `Added ${toCreate.length} categor${toCreate.length === 1 ? "y" : "ies"} from products.`,
+      );
+    } catch (error) {
+      setCategoryError(error.message || "Unable to seed categories.");
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleConfirmDeleteCategory = async () => {
+    if (!pendingCategoryDelete) return;
+    if (!inventoryEnabled || !db) {
+      setCategoryError("You do not have permission to update categories.");
+      setPendingCategoryDelete(null);
+      return;
+    }
+    const usageCount = categoryUsage.get(pendingCategoryDelete.id) || 0;
+    if (usageCount > 0) {
+      setCategoryError("Remove this category from products before deleting it.");
+      setPendingCategoryDelete(null);
+      return;
+    }
+    try {
+      setCategorySaving(true);
+      await deleteDoc(doc(db, "productCategories", pendingCategoryDelete.id));
+      setCategoryStatusMessage("Category deleted");
+    } catch (error) {
+      setCategoryError(error.message || "Unable to delete the category.");
+    } finally {
+      setCategorySaving(false);
+      setPendingCategoryDelete(null);
     }
   };
 
@@ -928,7 +1188,7 @@ export function AdminProductsView() {
     }
 
     const name = productForm.name.trim();
-    const title = productForm.title.trim() || name;
+    const title = name;
     const priceNumber = Number(productForm.price);
     const priceValue = Number.isFinite(priceNumber)
       ? priceNumber
@@ -937,18 +1197,23 @@ export function AdminProductsView() {
     const quantityValue = Number.isFinite(quantityNumber)
       ? Math.max(0, Math.floor(quantityNumber))
       : 0;
-    const derivedStatus =
-      quantityValue <= 0 ? "draft" : productForm.status || "draft";
+    const derivedStatus = productForm.status || "draft";
 
     if (!name) {
       setProductError("Product name is required.");
       return;
     }
 
+    const selectedCategory = resolveCategory(productForm.categoryId || productForm.category);
+    if (!selectedCategory) {
+      setProductError("Please select a category for this product.");
+      return;
+    }
+
     try {
       setProductSaving(true);
       setStatusMessage(
-        editingProductId ? "Updating product…" : "Saving product…"
+        editingProductId ? "Updating product..." : "Saving product..."
       );
       let imageUrl = productForm.image.trim();
       if (productImageFile) {
@@ -961,9 +1226,11 @@ export function AdminProductsView() {
         description: productForm.description.trim(),
         price: priceValue,
         image: imageUrl,
-        category: productForm.category.trim() || "product",
+        category: selectedCategory.name,
+        categoryId: selectedCategory.id,
         status: derivedStatus,
         quantity: quantityValue,
+        forceOutOfStock: Boolean(productForm.forceOutOfStock),
         featured: Boolean(productForm.featured),
         updatedAt: serverTimestamp(),
       };
@@ -993,141 +1260,279 @@ export function AdminProductsView() {
         <div>
           <h2>Products</h2>
           <p className="admin-panel__note">
-            Build your storefront inventory directly from Firestore.
+            {headerNote}
           </p>
         </div>
-        <div className="admin-panel__header-actions">
-          <input
-            ref={productImportInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={handleProductImport}
-            style={{ display: "none" }}
-          />
-          <button
-            className="btn btn--secondary"
-            type="button"
-            onClick={() => productImportInputRef.current?.click()}
-            disabled={!inventoryEnabled || productImporting}
-          >
-            {productImporting ? "Importing…" : "Import Spreadsheet"}
-          </button>
-          <button
-            className="btn btn--primary"
-            type="button"
-            onClick={openProductModal}
-            disabled={!inventoryEnabled}
-          >
-            <IconPlus className="btn__icon" aria-hidden="true" />
-            Add Product
-          </button>
-        </div>
+        {activeTab === "products" && (
+          <div className="admin-panel__header-actions">
+            <input
+              ref={productImportInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleProductImport}
+              style={{ display: "none" }}
+            />
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={() => productImportInputRef.current?.click()}
+              disabled={!inventoryEnabled || productImporting}
+            >
+              {productImporting ? "Importing..." : "Import Spreadsheet"}
+            </button>
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={openProductModal}
+              disabled={!inventoryEnabled || !categoryOptions.length}
+            >
+              <IconPlus className="btn__icon" aria-hidden="true" />
+              Add Product
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="admin-table__wrapper">
-        {products.length > 0 ? (
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th scope="col">Item</th>
-                <th scope="col">Category</th>
-                <th scope="col">Price</th>
-                <th scope="col">Featured</th>
-                <th scope="col">Updated</th>
-                <th scope="col" className="admin-table__actions">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedProducts.map((product) => {
-                const updatedAt = product.updatedAt?.toDate?.()
-                  ? bookingDateFormatter.format(product.updatedAt.toDate())
-                  : "—";
-                return (
-                  <tr key={product.id}>
-                    <td>
-                      <div className="admin-table__product">
-                        {product.image ? (
-                          <img
-                            src={product.image}
-                            alt={product.title || product.name}
-                            className="admin-table__thumb"
-                          />
-                        ) : (
-                          <span className="admin-table__thumb admin-table__thumb--placeholder">
-                            <IconImage aria-hidden="true" />
-                          </span>
-                        )}
-                        <div>
-                          <strong>{product.title || product.name}</strong>
-                          {product.description && (
-                            <p className="modal__meta">{product.description}</p>
-                          )}
-                        </div>
+      <div className="admin-tabs">
+        <NavLink
+          to="/admin/products"
+          end
+          className={({ isActive }) => `admin-tab${isActive ? " is-active" : ""}`}
+        >
+          Products
+        </NavLink>
+        <NavLink
+          to="/admin/products/categories"
+          className={({ isActive }) => `admin-tab${isActive ? " is-active" : ""}`}
+        >
+          Categories
+        </NavLink>
+      </div>
+
+      {activeTab === "categories" && (
+        <div className="admin-panel__content admin-panel__content--split">
+          <div>
+            <h3>Create category</h3>
+            <form className="admin-form" onSubmit={handleCreateCategory}>
+              <input
+                className="input"
+                placeholder="Category name"
+                value={categoryForm.name}
+                onChange={(event) =>
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
+                }
+                required
+              />
+              <p className="modal__meta">
+                Categories appear in the Shop dropdown and can be assigned to products.
+              </p>
+              <div className="admin-form__actions">
+                <button
+                  className="btn btn--primary"
+                  type="submit"
+                  disabled={categorySaving || !inventoryEnabled}
+                >
+                  {categorySaving ? "Saving..." : "Save Category"}
+                </button>
+              </div>
+              {categoryError && (
+                <p className="admin-panel__error">{categoryError}</p>
+              )}
+              {categoryStatusMessage && (
+                <p className="admin-panel__status">{categoryStatusMessage}</p>
+              )}
+            </form>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={handleSeedCategoriesFromProducts}
+              disabled={categorySaving || !inventoryEnabled || products.length === 0}
+            >
+              {categorySaving ? "Working..." : "Seed from existing products"}
+            </button>
+            <p className="modal__meta">
+              Use this to create categories from products you already imported.
+            </p>
+          </div>
+          <div>
+            <h3>Existing categories</h3>
+            <div className="admin-panel__list">
+              {categoryOptions.length ? (
+                categoryOptions.map((category) => {
+                  const usageCount = categoryUsage.get(category.id) || 0;
+                  const canDelete = usageCount === 0;
+                  return (
+                    <div className="admin-category-card" key={category.id}>
+                      <div>
+                        <strong>{category.name}</strong>
+                        <p className="modal__meta">
+                          {usageCount}
+                          {usageCount === 1 ? " product" : " products"}
+                        </p>
                       </div>
-                    </td>
-                    <td>{product.category || "product"}</td>
-                    <td>{formatPriceLabel(product.price)}</td>
-                    <td>
-                      <button
-                        className={`icon-btn icon-btn--featured${
-                          product.featured ? " is-active" : ""
-                        }`}
-                        type="button"
-                        aria-pressed={product.featured ? "true" : "false"}
-                        onClick={() => handleToggleFeaturedProduct(product)}
-                        disabled={!inventoryEnabled || featuredUpdatingId === product.id}
-                        title={
-                          product.featured
-                            ? "Remove from home page features"
-                            : "Feature on home page"
-                        }
-                      >
-                        <IconStar filled={Boolean(product.featured)} aria-hidden="true" />
-                      </button>
-                    </td>
-                    <td>{updatedAt}</td>
-                    <td className="admin-table__actions">
-                      <button
-                        className="icon-btn"
-                        type="button"
-                        onClick={() => handleEditProduct(product)}
-                      >
-                        <IconEdit aria-hidden="true" />
-                      </button>
                       <button
                         className="icon-btn icon-btn--danger"
                         type="button"
-                        onClick={() => handleDeleteProduct(product.id)}
+                        disabled={!canDelete || categorySaving || !inventoryEnabled}
+                        onClick={() => setPendingCategoryDelete(category)}
+                        title={
+                          canDelete
+                            ? "Delete category"
+                            : "Remove this category from products before deleting"
+                        }
                       >
                         <IconTrash aria-hidden="true" />
                       </button>
-                    </td>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="admin-panel__notice">No categories yet.</p>
+              )}
+            </div>
+            {inventoryError && (
+              <p className="admin-panel__error">{inventoryError}</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "products" && (
+        <div className="admin-panel__content">
+          <div className="admin-table__wrapper">
+            {!categoryOptions.length && (
+              <p className="admin-panel__notice">
+                Create a category before adding new products.
+              </p>
+            )}
+            {products.length > 0 ? (
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Item</th>
+                    <th scope="col">Category</th>
+                    <th scope="col">Price</th>
+                    <th scope="col">Stock</th>
+                    <th scope="col">Featured</th>
+                    <th scope="col">Updated</th>
+                    <th scope="col" className="admin-table__actions">
+                      Actions
+                    </th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <p className="admin-panel__notice">
-            No products found. Add your first item.
-          </p>
-        )}
-        <p className="modal__meta">
-          {featuredProductCount}/{MAX_FEATURED_PRODUCTS} products featured on the home page.
-        </p>
-        <AdminPagination page={productPage} total={products.length} onPageChange={setProductPage} />
-        {inventoryLoading && (
-          <p className="modal__meta">Syncing latest products…</p>
-        )}
-        {inventoryError && (
-          <p className="admin-panel__error">{inventoryError}</p>
-        )}
-        {statusMessage && (
-          <p className="admin-panel__status">{statusMessage}</p>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {paginatedProducts.map((product) => {
+                    const updatedAt = product.updatedAt?.toDate?.()
+                      ? bookingDateFormatter.format(product.updatedAt.toDate())
+                      : "—";
+                    const stockStatus = getStockStatus({
+                      quantity: product.quantity,
+                      forceOutOfStock: product.forceOutOfStock,
+                    });
+                    const stockLabel = stockStatus.isForced
+                      ? "Out of stock (manual)"
+                      : stockStatus.label;
+                    return (
+                      <tr key={product.id}>
+                        <td>
+                          <div className="admin-table__product">
+                            {product.image ? (
+                              <img
+                                src={product.image}
+                                alt={product.title || product.name}
+                                className="admin-table__thumb"
+                              />
+                            ) : (
+                              <span className="admin-table__thumb admin-table__thumb--placeholder">
+                                <IconImage aria-hidden="true" />
+                              </span>
+                            )}
+                            <div>
+                              <strong>{product.title || product.name}</strong>
+                              {product.description && (
+                                <p className="modal__meta">{product.description}</p>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          {resolveCategory(product.categoryId || product.category)?.name ||
+                            product.category ||
+                            "product"}
+                        </td>
+                        <td>{formatPriceLabel(product.price)}</td>
+                        <td>
+                          <span className={`admin-status admin-status--stock-${stockStatus.state}`}>
+                            {stockLabel}
+                          </span>
+                          <p className="modal__meta">
+                            Qty: {stockStatus.quantity ?? "—"}
+                          </p>
+                        </td>
+                        <td>
+                          <button
+                            className={`icon-btn icon-btn--featured${
+                              product.featured ? " is-active" : ""
+                            }`}
+                            type="button"
+                            aria-pressed={product.featured ? "true" : "false"}
+                            onClick={() => handleToggleFeaturedProduct(product)}
+                            disabled={!inventoryEnabled || featuredUpdatingId === product.id}
+                            title={
+                              product.featured
+                                ? "Remove from home page features"
+                                : "Feature on home page"
+                            }
+                          >
+                            <IconStar filled={Boolean(product.featured)} aria-hidden="true" />
+                          </button>
+                        </td>
+                        <td>{updatedAt}</td>
+                        <td className="admin-table__actions">
+                          <button
+                            className="icon-btn"
+                            type="button"
+                            onClick={() => handleEditProduct(product)}
+                          >
+                            <IconEdit aria-hidden="true" />
+                          </button>
+                          <button
+                            className="icon-btn icon-btn--danger"
+                            type="button"
+                            onClick={() => handleDeleteProduct(product.id)}
+                          >
+                            <IconTrash aria-hidden="true" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <p className="admin-panel__notice">
+                No products found. Add your first item.
+              </p>
+            )}
+            <p className="modal__meta">
+              {featuredProductCount}/{MAX_FEATURED_PRODUCTS} products featured on the home page.
+            </p>
+            <AdminPagination page={productPage} total={products.length} onPageChange={setProductPage} />
+            {inventoryLoading && (
+              <p className="modal__meta">Syncing latest products...</p>
+            )}
+            {inventoryError && (
+              <p className="admin-panel__error">{inventoryError}</p>
+            )}
+            {statusMessage && (
+              <p className="admin-panel__status">{statusMessage}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div
         className={`modal admin-modal ${isProductModalOpen ? "is-active" : ""}`}
@@ -1172,7 +1577,7 @@ export function AdminProductsView() {
                   alt="Product preview"
                   className="admin-preview"
                 />
-                )}
+              )}
             </div>
             <input
               className="input"
@@ -1186,31 +1591,35 @@ export function AdminProductsView() {
               }
               required
             />
-            <input
-              className="input"
-              placeholder="Display title (optional)"
-              value={productForm.title}
-              onChange={(event) =>
-                setProductForm((prev) => ({
-                  ...prev,
-                  title: event.target.value,
-                }))
-              }
-            />
             <select
               className="input"
-              value={productForm.category}
-              onChange={(event) =>
+              value={productForm.categoryId}
+              onChange={(event) => {
+                const nextId = event.target.value;
+                const selected = categoryOptions.find((option) => option.id === nextId);
                 setProductForm((prev) => ({
                   ...prev,
-                  category: event.target.value,
-                }))
-              }
+                  categoryId: nextId,
+                  category: selected?.name || prev.category,
+                }));
+              }}
+              required
+              disabled={!categoryOptions.length}
             >
-              <option value="product">Product</option>
-              <option value="kit">Kit</option>
-              <option value="accessory">Accessory</option>
+              <option value="" disabled>
+                Select a category
+              </option>
+              {categoryOptions.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
             </select>
+            {!categoryOptions.length && (
+              <p className="admin-panel__note">
+                Add a category first to enable product creation.
+              </p>
+            )}
             <select
               className="input"
               value={productForm.status}
@@ -1250,6 +1659,23 @@ export function AdminProductsView() {
                 }))
               }
             />
+            <label className="admin-checkbox">
+              <input
+                type="checkbox"
+                checked={productForm.forceOutOfStock}
+                onChange={(event) =>
+                  setProductForm((prev) => ({
+                    ...prev,
+                    forceOutOfStock: event.target.checked,
+                  }))
+                }
+              />
+              Mark as out of stock (manual override)
+            </label>
+            <p className="admin-panel__note">
+              Stock is low below {STOCK_LOW_THRESHOLD} items. Current status:{" "}
+              {currentStockStatus.label}.
+            </p>
             <textarea
               className="input textarea admin-form__full"
               placeholder="Description"
@@ -1273,10 +1699,10 @@ export function AdminProductsView() {
               <button
                 className="btn btn--primary"
                 type="submit"
-                disabled={productSaving || !inventoryEnabled}
+                disabled={productSaving || !inventoryEnabled || !categoryOptions.length}
               >
                 {productSaving
-                  ? "Saving…"
+                  ? "Saving..."
                   : editingProductId
                   ? "Update Product"
                   : "Save Product"}

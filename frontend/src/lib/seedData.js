@@ -14,6 +14,7 @@ const PRODUCT_SEED = [
     description: "Sunlit hues mixed with airy neutrals for joyful, uplifting displays.",
     price: 400,
     category: "kit",
+    categoryId: "kit",
   },
   {
     id: "kit-red",
@@ -22,6 +23,7 @@ const PRODUCT_SEED = [
     description: "Romantic tones paired with delicate whites for heartfelt gifting moments.",
     price: 400,
     category: "kit",
+    categoryId: "kit",
   },
   {
     id: "market-buckets",
@@ -30,6 +32,7 @@ const PRODUCT_SEED = [
     description: "DIY buckets packed with 40–50 fresh stems for creative gatherings.",
     price: "From R600",
     category: "cut-flower",
+    categoryId: "cut-flower",
   },
   {
     id: "seasonal-bouquet",
@@ -38,6 +41,20 @@ const PRODUCT_SEED = [
     description: "Hand-tied bouquets featuring the best blooms of the week from local growers.",
     price: "From R350",
     category: "cut-flower",
+    categoryId: "cut-flower",
+  },
+];
+
+const PRODUCT_CATEGORY_SEED = [
+  {
+    id: "kit",
+    name: "Kit",
+    slug: "kit",
+  },
+  {
+    id: "cut-flower",
+    name: "Cut Flower",
+    slug: "cut-flower",
   },
 ];
 
@@ -246,6 +263,7 @@ async function seedCollectionIfEmpty(db, collectionName, seedData) {
 
 export async function seedAllCollections(db) {
   const seededProducts = await seedCollectionIfEmpty(db, "products", PRODUCT_SEED);
+  const seededProductCategories = await seedCollectionIfEmpty(db, "productCategories", PRODUCT_CATEGORY_SEED);
   const seededWorkshops = await seedCollectionIfEmpty(db, "workshops", WORKSHOP_SEED);
   const seededEvents = await seedCollectionIfEmpty(db, "events", EVENTS_SEED);
   const seededCutFlowerClasses = await seedCollectionIfEmpty(db, "cutFlowerClasses", CUT_FLOWER_CLASSES_SEED);
@@ -255,6 +273,7 @@ export async function seedAllCollections(db) {
 
   return {
     seededProducts,
+    seededProductCategories,
     seededWorkshops,
     seededEvents,
     seededCutFlowerClasses,

@@ -52,6 +52,7 @@ function App() {
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboardView />} />
               <Route path="products" element={<AdminProductsView />} />
+              <Route path="products/categories" element={<AdminProductsView />} />
               <Route path="workshops" element={<AdminWorkshopsView />} />
               <Route
                 path="workshops/calendar"

@@ -107,6 +107,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /productCategories/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /workshops/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
