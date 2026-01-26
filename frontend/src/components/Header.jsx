@@ -67,7 +67,7 @@ function Header() {
 
   return (
     <header>
-      <nav className="nav">
+      <nav className="nav" onMouseLeave={handleLeave}>
         <NavLink to="/" className="brand" aria-label="Bethany Blooms home">
           <img
             src={logo}

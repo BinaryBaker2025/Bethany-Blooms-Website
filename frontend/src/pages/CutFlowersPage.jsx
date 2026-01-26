@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
@@ -118,6 +118,7 @@ function CutFlowersPage() {
     orderByField: "eventDate",
     orderDirection: "asc",
   });
+  const classesSectionRef = useRef(null);
 
   const upcomingClasses = useMemo(() => {
     const now = Date.now();
@@ -167,6 +168,8 @@ function CutFlowersPage() {
             value: option.value || option.id || option.label || `option-${index}`,
             label: option.label || option.name || option.value || `Option ${index + 1}`,
             price: parseOptionalNumber(option.price),
+            minAttendees: parseOptionalNumber(option.minAttendees),
+            isExtra: Boolean(option.isExtra),
           }))
           .filter((option) => option.label);
         const priceNumber = parseOptionalNumber(session.price);
@@ -239,6 +242,8 @@ function CutFlowersPage() {
 
     const now = Date.now();
     const repeatDays = Array.isArray(classItem.repeatDays) ? classItem.repeatDays : [];
+    const capacityValue = Number(classItem.capacity);
+    const capacity = Number.isFinite(capacityValue) && capacityValue > 0 ? capacityValue : null;
 
     const buildSession = (sessionDate, slot, index, dateKey) => {
       const formatted = classDateFormatter.format(sessionDate);
@@ -256,7 +261,7 @@ function CutFlowersPage() {
         endTime: slot.endTime || null,
         formatted,
         timeRangeLabel: timeLabel || null,
-        capacity: classItem.capacity ? Number(classItem.capacity) : null,
+        capacity,
         isPast: sessionDate.getTime() < now,
       };
     };
@@ -311,6 +316,12 @@ function CutFlowersPage() {
     });
   };
 
+  const handleStartBookingClick = () => {
+    if (classesSectionRef.current) {
+      classesSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
   const processSteps = [
     {
       title: "1. Share Your Brief",
@@ -342,9 +353,9 @@ function CutFlowersPage() {
               cut flowers that feel personal, textural, and artfully wild.
             </p>
             <div className="cta-group">
-              <Link className="btn btn--primary" to="/contact">
+              <button className="btn btn--primary" type="button" onClick={handleStartBookingClick}>
                 Start a Booking
-              </Link>
+              </button>
               <Link className="btn btn--secondary" to="/events">
                 See Upcoming Events
               </Link>
@@ -374,7 +385,7 @@ function CutFlowersPage() {
         </div>
       </section>
 
-      <section className="section section--tight">
+      <section className="section section--tight" id="cut-flower-classes" ref={classesSectionRef}>
         <div className="section__inner">
           <Reveal as="div">
             <span className="badge">Upcoming Sessions</span>
@@ -384,19 +395,54 @@ function CutFlowersPage() {
           {upcomingClasses.length > 0 ? (
             <div className="cards-grid">
               {upcomingClasses.map((classItem) => (
-                <article className="card" key={classItem.id}>
-                  <h3 className="card__title">{classItem.title}</h3>
-                  <p className="modal__meta">{classItem.displayDate}</p>
-                  {classItem.location && <p className="modal__meta">{classItem.location}</p>}
-                  {classItem.showTimes && (
-                    <p className="modal__meta">Times: {classItem.timeText}</p>
-                  )}
-                  <p>{classItem.description}</p>
-                  <p className="card__price">{classItem.priceLabel}</p>
-                  <div className="card__actions">
-                    <button className="btn btn--primary" type="button" onClick={() => handleBookClass(classItem)}>
-                      Book This Session
-                    </button>
+                <article className="card cut-flower-card" key={classItem.id}>
+                  <div className="cut-flower-card__media">
+                    <img
+                      src={classItem.image || cutFlowersTable}
+                      alt={`${classItem.title} class`}
+                    />
+                    <span className="cut-flower-card__badge">{classItem.displayDate}</span>
+                    {classItem.priceLabel && (
+                      <span className="cut-flower-card__price-tag">{classItem.priceLabel}</span>
+                    )}
+                  </div>
+                  <div className="cut-flower-card__body">
+                    <div className="cut-flower-card__heading">
+                      <h3 className="card__title">{classItem.title}</h3>
+                      {classItem.location && (
+                        <p className="cut-flower-card__location">{classItem.location}</p>
+                      )}
+                    </div>
+                    <p className="cut-flower-card__summary">{classItem.description}</p>
+                    <div className="cut-flower-card__details">
+                      <div className="cut-flower-card__detail">
+                        <span className="cut-flower-card__detail-label">Booking</span>
+                        <span className="cut-flower-card__detail-value">
+                          {classItem.capacity
+                            ? `${classItem.capacity} seats per time slot`
+                            : "Open booking"}
+                        </span>
+                      </div>
+                      {classItem.showTimes && (
+                        <div className="cut-flower-card__detail">
+                          <span className="cut-flower-card__detail-label">Times</span>
+                          <span className="cut-flower-card__detail-value">{classItem.timeText}</span>
+                        </div>
+                      )}
+                      {classItem.options?.length > 0 && (
+                        <div className="cut-flower-card__detail">
+                          <span className="cut-flower-card__detail-label">Options</span>
+                          <span className="cut-flower-card__detail-value">
+                            {classItem.options.length} bouquet option{classItem.options.length === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="card__actions">
+                      <button className="btn btn--primary" type="button" onClick={() => handleBookClass(classItem)}>
+                        Book This Session
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}

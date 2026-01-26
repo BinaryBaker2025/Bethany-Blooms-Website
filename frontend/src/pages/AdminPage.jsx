@@ -104,6 +104,8 @@ const createCutFlowerOption = () => ({
   id: `class-option-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
   label: "",
   price: "",
+  minAttendees: "",
+  isExtra: false,
 });
 
 const EVENT_REPEAT_WEEKDAYS = [
@@ -150,6 +152,7 @@ const INITIAL_CUT_FLOWER_CLASS_FORM = {
   location: "",
   price: "",
   capacity: "",
+  capacityLimited: false,
   image: "",
   date: "",
   timeSlots: [createEventTimeSlot()],
@@ -597,7 +600,7 @@ export function AdminDashboardView() {
         </div>
       </Reveal>
 
-      <div className="admin-panel__content admin-panel__content--split">
+      <div className="admin-panel__content">
         <Reveal as="section" className="admin-panel" delay={90}>
           <div className="admin-panel__header">
             <h3>Upcoming sessions</h3>
@@ -1169,7 +1172,7 @@ export function AdminProductsView() {
                   alt="Product preview"
                   className="admin-preview"
                 />
-              )}
+                )}
             </div>
             <input
               className="input"
@@ -1921,7 +1924,7 @@ export function AdminWorkshopsView() {
                   alt="Workshop preview"
                   className="admin-preview"
                 />
-              )}
+                )}
             </div>
             <input
               className="input"
@@ -3178,14 +3181,14 @@ export function AdminEventsView() {
             </div>
             {eventStatus && <span className="badge badge--muted">{eventStatus}</span>}
           </div>
-          {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+            {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
           {blocked && !inventoryError && (
             <p className="admin-panel__error">
               Admin permissions or Firestore connection not detected. Ensure your account has role "admin" in
               users/{{uid}} and that Firestore is configured for this project.
             </p>
           )}
-          <div className="admin-panel__content admin-panel__content--split">
+          <div className="admin-panel__content">
             <div>
               <h3>{editingEventId ? "Edit Event" : "Create Event"}</h3>
               <form className="admin-form" onSubmit={handleSaveEvent}>
@@ -3429,7 +3432,7 @@ export function AdminEventsView() {
               <h3>Scheduled Events</h3>
               {inventoryLoading && !events.length ? (
                 <p className="admin-panel__note">Loading events…</p>
-              ) : (
+                ) : (
                 <div className="admin-panel__list">
                   {normalizedEvents.length === 0 ? (
                     <p className="admin-panel__note">No events yet.</p>
@@ -3473,7 +3476,7 @@ export function AdminEventsView() {
                     ))
                   )}
                 </div>
-              )}
+                )}
               <AdminPagination page={eventPage} total={normalizedEvents.length} onPageChange={setEventPage} />
             </div>
           </div>
@@ -3528,6 +3531,7 @@ export function AdminCutFlowerClassesView() {
   const [classImagePreview, setClassImagePreview] = useState("");
   const [editingClassId, setEditingClassId] = useState(null);
   const [classSaving, setClassSaving] = useState(false);
+  const [isClassModalOpen, setClassModalOpen] = useState(false);
   const [classError, setClassError] = useState(null);
   const [statusMessage, setStatusMessage] = useState(null);
   const classPreviewUrlRef = useRef(null);
@@ -3589,6 +3593,16 @@ export function AdminCutFlowerClassesView() {
     setEditingClassId(null);
     setClassError(null);
     setClassSaving(false);
+  };
+
+  const openCreateClassModal = () => {
+    resetClassForm();
+    setClassModalOpen(true);
+  };
+
+  const closeClassModal = () => {
+    setClassModalOpen(false);
+    resetClassForm();
   };
 
   const handleClassDateChange = (value) => {
@@ -3654,6 +3668,14 @@ export function AdminCutFlowerClassesView() {
         options: remaining.length > 0 ? remaining : [createCutFlowerOption()],
       };
     });
+  };
+
+  const handleToggleClassCapacity = (checked) => {
+    setClassForm((prev) => ({
+      ...prev,
+      capacityLimited: checked,
+      capacity: checked ? prev.capacity : "",
+    }));
   };
 
   const handleToggleClassRepeatWeekly = (checked) => {
@@ -3737,14 +3759,30 @@ export function AdminCutFlowerClassesView() {
               option.price === undefined || option.price === null
                 ? ""
                 : String(option.price),
+            minAttendees:
+              option.minAttendees === undefined || option.minAttendees === null
+                ? ""
+                : String(option.minAttendees),
+            isExtra: Boolean(option.isExtra),
           }))
         : [createCutFlowerOption()];
+    const rawCapacity = classDoc.capacity;
+    const hasCapacityValue =
+      rawCapacity !== undefined &&
+      rawCapacity !== null &&
+      String(rawCapacity).trim() !== "";
+    const capacityLimited =
+      classDoc.capacityLimited !== undefined
+        ? Boolean(classDoc.capacityLimited)
+        : hasCapacityValue;
     setClassForm({
       title: classDoc.title || "",
       description: classDoc.description || "",
       location: classDoc.location || "",
       price: classDoc.price === undefined || classDoc.price === null ? "" : String(classDoc.price),
-      capacity: classDoc.capacity === undefined || classDoc.capacity === null ? "" : String(classDoc.capacity),
+      capacity:
+        classDoc.capacity === undefined || classDoc.capacity === null ? "" : String(classDoc.capacity),
+      capacityLimited,
       image: classDoc.image || "",
       date: eventDate ? formatDateInput(eventDate) : "",
       timeSlots: normalizedSlots,
@@ -3761,6 +3799,11 @@ export function AdminCutFlowerClassesView() {
     setClassImageFile(null);
     setEditingClassId(classDoc.id);
     setClassError(null);
+  };
+
+  const openEditClassModal = (classDoc) => {
+    handleEditClass(classDoc);
+    setClassModalOpen(true);
   };
 
   const handleDeleteClass = async (classId) => {
@@ -3783,6 +3826,14 @@ export function AdminCutFlowerClassesView() {
     if (!classForm.date.trim()) {
       setClassError("Event date is required.");
       return;
+    }
+
+    if (classForm.capacityLimited) {
+      const capacityValue = Number.parseInt(classForm.capacity, 10);
+      if (!Number.isFinite(capacityValue) || capacityValue <= 0) {
+        setClassError("Seats per time slot must be a positive number.");
+        return;
+      }
     }
 
     let imageUrl = classForm.image.trim();
@@ -3827,21 +3878,33 @@ export function AdminCutFlowerClassesView() {
             rawPrice === "" || rawPrice === null || rawPrice === undefined
               ? null
               : Number(rawPrice);
+          const minAttendeesValue = Number.parseInt(option.minAttendees, 10);
+          const minAttendees =
+            Number.isFinite(minAttendeesValue) && minAttendeesValue > 0
+              ? minAttendeesValue
+              : null;
           return {
             id: option.id || createCutFlowerOption().id,
             label,
             price: Number.isFinite(priceNumber) ? priceNumber : null,
+            minAttendees,
+            isExtra: Boolean(option.isExtra),
           };
         })
         .filter(Boolean);
+      const capacityValue = classForm.capacityLimited
+        ? Number.isFinite(Number(classForm.capacity))
+          ? Number(classForm.capacity)
+          : classForm.capacity
+        : null;
       const payload = {
         title: classForm.title.trim(),
         description: classForm.description.trim(),
         location: classForm.location.trim(),
         price:
           classForm.price === "" ? null : Number.isFinite(Number(classForm.price)) ? Number(classForm.price) : classForm.price,
-        capacity:
-          classForm.capacity === "" ? null : Number.isFinite(Number(classForm.capacity)) ? Number(classForm.capacity) : classForm.capacity,
+        capacity: capacityValue,
+        capacityLimited: Boolean(classForm.capacityLimited),
         image: imageUrl,
         eventDate: eventDate ?? null,
         timeSlots: sanitizedSlots,
@@ -3863,10 +3926,10 @@ export function AdminCutFlowerClassesView() {
         setStatusMessage("Class created");
       }
 
-      resetClassForm();
+      closeClassModal();
     } catch (saveError) {
       console.error(saveError);
-      setClassError("We couldn’t save the class. Please try again.");
+      setClassError("We couldn't save the class. Please try again.");
     } finally {
       setClassSaving(false);
     }
@@ -3880,377 +3943,400 @@ export function AdminCutFlowerClassesView() {
             <div className="admin-panel__header">
               <div>
                 <h2>Cut Flower Classes</h2>
-              <p className="admin-panel__note">
-                Publish bookable sessions for bouquets, styling experiences, and private floral classes.
-              </p>
-            </div>
-            {statusMessage && <span className="badge badge--muted">{statusMessage}</span>}
-          </div>
-          {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
-          <div className="admin-panel__content admin-panel__content--split">
-            <div>
-              <h3>{editingClassId ? "Edit Class" : "Create Class"}</h3>
-              <form className="admin-form" onSubmit={handleSaveClass}>
-                <input
-                  className="input"
-                  placeholder="Class title"
-                  value={classForm.title}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      title: e.target.value,
-                    }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  placeholder="Location"
-                  value={classForm.location}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      location: e.target.value,
-                    }))
-                  }
-                />
-                <input
-                  className="input"
-                  placeholder="Base price (optional)"
-                  value={classForm.price}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      price: e.target.value,
-                    }))
-                  }
-                />
-                <input
-                  className="input"
-                  placeholder="Capacity"
-                  value={classForm.capacity}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      capacity: e.target.value.replace(/[^\d]/g, ""),
-                    }))
-                  }
-                />
-                <div className="admin-session-panel admin-form__full">
-                  <div className="admin-session-panel__header">
-                    <h4>Cut flower options</h4>
-                    <button
-                      className="icon-btn"
-                      type="button"
-                      onClick={handleAddClassOption}
-                      aria-label="Add option"
-                    >
-                      <IconPlus aria-hidden="true" />
-                    </button>
-                  </div>
-                  <p className="admin-panel__note">
-                    Add the options shown in the booking dropdown. Leave blank to use the base price only.
-                  </p>
-                  {(classForm.options || []).map((option, index) => (
-                    <div className="admin-session-row" key={option.id}>
-                      <div className="admin-session-field admin-session-field--label">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`class-option-label-${option.id}`}
-                        >
-                          Option #{index + 1}
-                        </label>
-                        <input
-                          className="input"
-                          id={`class-option-label-${option.id}`}
-                          value={option.label}
-                          onChange={(event) =>
-                            handleClassOptionChange(option.id, "label", event.target.value)
-                          }
-                          placeholder="Small bouquet, Garden mix, etc."
-                        />
-                      </div>
-                      <div className="admin-session-field">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`class-option-price-${option.id}`}
-                        >
-                          Price (optional)
-                        </label>
-                        <input
-                          className="input"
-                          type="number"
-                          min="0"
-                          step="1"
-                          id={`class-option-price-${option.id}`}
-                          value={option.price}
-                          onChange={(event) =>
-                            handleClassOptionChange(option.id, "price", event.target.value)
-                          }
-                          placeholder="0"
-                        />
-                      </div>
-                      <button
-                        className="icon-btn icon-btn--danger admin-session-remove"
-                        type="button"
-                        onClick={() => handleRemoveClassOption(option.id)}
-                        aria-label={`Remove option ${index + 1}`}
-                      >
-                        <IconTrash aria-hidden="true" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <select
-                  className="input"
-                  value={classForm.status}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      status: e.target.value,
-                    }))
-                  }
+                <p className="admin-panel__note">
+                  Publish bookable sessions for bouquets, styling experiences, and private floral classes.
+                </p>
+              </div>
+              <div className="admin-panel__header-actions">
+                {inventoryLoading && <span className="badge badge--muted">Syncing...</span>}
+                {statusMessage && <span className="badge badge--muted">{statusMessage}</span>}
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={openCreateClassModal}
+                  disabled={!inventoryEnabled}
                 >
-                  <option value="draft">Draft</option>
-                  <option value="live">Live</option>
-                  <option value="archived">Archived</option>
-                </select>
-                <input
-                  className="input"
-                  type="date"
-                  value={classForm.date}
-                  onChange={(e) =>
-                    handleClassDateChange(e.target.value)
-                  }
-                  required
-                />
-                <div className="admin-session-panel admin-form__full">
-                  <div className="admin-session-panel__header">
-                    <h4>Class times</h4>
-                    <button
-                      className="icon-btn"
-                      type="button"
-                      onClick={handleAddClassTimeSlot}
-                      aria-label="Add time slot"
-                    >
-                      <IconPlus aria-hidden="true" />
-                    </button>
+                  <IconPlus className="btn__icon" aria-hidden="true" />
+                  Create Class
+                </button>
+              </div>
+            </div>
+            {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+            <div className="admin-panel__content">
+              <div>
+                <h3>Scheduled Classes</h3>
+                {inventoryLoading && !normalizedClasses.length ? (
+                  <p className="admin-panel__note">Loading cut flower classes...</p>
+                ) : (
+                  <div className="admin-panel__list">
+                    {normalizedClasses.length === 0 ? (
+                      <p className="admin-panel__note">No cut flower classes yet.</p>
+                    ) : (
+                      paginatedClasses.map((classDoc) => (
+                        <article className="admin-event-card" key={classDoc.id}>
+                          <div className="admin-event-card__info">
+                            <p className="admin-event-card__date">{classDoc.displayDate}</p>
+                            <h4>{classDoc.title}</h4>
+                            {classDoc.location && (
+                              <p className="admin-event-card__meta">{classDoc.location}</p>
+                            )}
+                            {classDoc.timeSummary && (
+                              <p className="admin-event-card__meta">Times: {classDoc.timeSummary}</p>
+                            )}
+                            {classDoc.priceLabel && (
+                              <p className="admin-event-card__meta">Fee: {classDoc.priceLabel}</p>
+                            )}
+                            {classDoc.capacity && (
+                              <p className="admin-event-card__meta">Capacity: {classDoc.capacity}</p>
+                            )}
+                          </div>
+                          <div className="admin-event-card__actions">
+                            <button
+                              className="btn btn--secondary"
+                              type="button"
+                              onClick={() => openEditClassModal(classDoc)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn--primary"
+                              type="button"
+                              onClick={() => handleDeleteClass(classDoc.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </article>
+                      ))
+                    )}
                   </div>
-                  <p className="admin-panel__note">
-                    Add one or more time slots for this class day.
-                  </p>
-                  {(classForm.timeSlots || []).map((slot) => (
-                    <div className="admin-session-row" key={slot.id}>
-                      <div className="admin-session-field">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`class-time-${slot.id}`}
-                        >
-                          Start
-                        </label>
-                        <input
-                          className="input"
-                          type="time"
-                          id={`class-time-${slot.id}`}
-                          value={slot.time}
-                          onChange={(event) =>
-                            handleClassTimeSlotChange(
-                              slot.id,
-                              "time",
-                              event.target.value
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="admin-session-field">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`class-end-${slot.id}`}
-                        >
-                          End
-                        </label>
-                        <input
-                          className="input"
-                          type="time"
-                          id={`class-end-${slot.id}`}
-                          value={slot.endTime || ""}
-                          onChange={(event) =>
-                            handleClassTimeSlotChange(
-                              slot.id,
-                              "endTime",
-                              event.target.value
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="admin-session-field admin-session-field--label">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`class-label-${slot.id}`}
-                        >
-                          Label (optional)
-                        </label>
-                        <input
-                          className="input"
-                          id={`class-label-${slot.id}`}
-                          value={slot.label}
-                          onChange={(event) =>
-                            handleClassTimeSlotChange(
-                              slot.id,
-                              "label",
-                              event.target.value
-                            )
-                          }
-                          placeholder="Morning, Afternoon, etc."
-                        />
-                      </div>
-                      <button
-                        className="icon-btn icon-btn--danger admin-session-remove"
-                        type="button"
-                        onClick={() => handleRemoveClassTimeSlot(slot.id)}
-                        aria-label="Remove time slot"
-                      >
-                        <IconTrash aria-hidden="true" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="admin-session-panel admin-form__full">
-                  <div className="admin-session-panel__header">
-                    <h4>Repeat weekly</h4>
+                )}
+                <AdminPagination page={classPage} total={normalizedClasses.length} onPageChange={setClassPage} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <div
+        className={`modal admin-modal ${isClassModalOpen ? "is-active" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={isClassModalOpen ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closeClassModal();
+        }}
+      >
+        <div className="modal__content admin-modal__content">
+          <button className="modal__close" type="button" aria-label="Close" onClick={closeClassModal}>
+            &times;
+          </button>
+          <h3 className="modal__title">{editingClassId ? "Edit Class" : "Create Class"}</h3>
+          <form className="admin-form" onSubmit={handleSaveClass}>
+            <input
+              className="input"
+              placeholder="Class title"
+              value={classForm.title}
+              onChange={(e) =>
+                setClassForm((prev) => ({
+                  ...prev,
+                  title: e.target.value,
+                }))
+              }
+              required
+            />
+            <input
+              className="input"
+              placeholder="Location"
+              value={classForm.location}
+              onChange={(e) =>
+                setClassForm((prev) => ({
+                  ...prev,
+                  location: e.target.value,
+                }))
+              }
+            />
+            <input
+              className="input"
+              placeholder="Base price (optional)"
+              value={classForm.price}
+              onChange={(e) =>
+                setClassForm((prev) => ({
+                  ...prev,
+                  price: e.target.value,
+                }))
+              }
+            />
+            <label className="admin-checkbox">
+              <input
+                type="checkbox"
+                checked={classForm.capacityLimited}
+                onChange={(event) => handleToggleClassCapacity(event.target.checked)}
+              />
+              <span>Limit seats per time slot</span>
+            </label>
+            {classForm.capacityLimited && (
+              <input
+                className="input"
+                placeholder="Seats per time slot"
+                value={classForm.capacity}
+                onChange={(event) =>
+                  setClassForm((prev) => ({
+                    ...prev,
+                    capacity: event.target.value.replace(/[^\d]/g, ""),
+                  }))
+                }
+              />
+            )}
+            <div className="admin-session-panel admin-form__full">
+              <div className="admin-session-panel__header">
+                <h4>Cut flower options</h4>
+                <button
+                  className="icon-btn"
+                  type="button"
+                  onClick={handleAddClassOption}
+                  aria-label="Add option"
+                >
+                  <IconPlus aria-hidden="true" />
+                </button>
+              </div>
+              <p className="admin-panel__note">
+                Add the options shown in the booking dropdown. Leave blank to use the base price only.
+              </p>
+              {(classForm.options || []).map((option, index) => (
+                <div className="admin-session-row" key={option.id}>
+                  <div className="admin-session-field admin-session-field--label">
+                    <label className="admin-session-label" htmlFor={`class-option-label-${option.id}`}>
+                      Option #{index + 1}
+                    </label>
+                    <input
+                      className="input"
+                      id={`class-option-label-${option.id}`}
+                      value={option.label}
+                      onChange={(event) =>
+                        handleClassOptionChange(option.id, "label", event.target.value)
+                      }
+                      placeholder="Small bouquet, Garden mix, etc."
+                    />
+                  </div>
+                  <div className="admin-session-field">
+                    <label className="admin-session-label" htmlFor={`class-option-price-${option.id}`}>
+                      Price (optional)
+                    </label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      id={`class-option-price-${option.id}`}
+                      value={option.price}
+                      onChange={(event) =>
+                        handleClassOptionChange(option.id, "price", event.target.value)
+                      }
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="admin-session-field">
+                    <label className="admin-session-label" htmlFor={`class-option-min-${option.id}`}>
+                      Min attendees (optional)
+                    </label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="1"
+                      step="1"
+                      id={`class-option-min-${option.id}`}
+                      value={option.minAttendees}
+                      onChange={(event) =>
+                        handleClassOptionChange(option.id, "minAttendees", event.target.value)
+                      }
+                      placeholder="0"
+                    />
                   </div>
                   <label className="admin-checkbox">
                     <input
                       type="checkbox"
-                      checked={classForm.repeatWeekly}
+                      checked={Boolean(option.isExtra)}
                       onChange={(event) =>
-                        handleToggleClassRepeatWeekly(event.target.checked)
+                        handleClassOptionChange(option.id, "isExtra", event.target.checked)
                       }
                     />
-                    <span>Repeat this class on selected weekdays</span>
+                    <span>Extra add-on</span>
                   </label>
-                  {classForm.repeatWeekly && (
-                    <div className="admin-repeat-days">
-                      {EVENT_REPEAT_WEEKDAYS.map((day) => (
-                        <label className="admin-repeat-day" key={day.value}>
-                          <input
-                            type="checkbox"
-                            checked={
-                              Array.isArray(classForm.repeatDays) &&
-                              classForm.repeatDays.includes(day.value)
-                            }
-                            onChange={() => handleToggleClassRepeatDay(day.value)}
-                          />
-                          <span>{day.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  <p className="admin-panel__note">
-                    Use this for recurring classes like every Saturday.
-                  </p>
-                </div>
-                <textarea
-                  className="input textarea admin-form__full"
-                  placeholder="Description"
-                  value={classForm.description}
-                  onChange={(e) =>
-                    setClassForm((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
-                  }
-                />
-                <div className="admin-file-input admin-form__full">
-                  <label htmlFor="cutflower-class-image" className="sr-only">
-                    Class image
-                  </label>
-                  <input
-                    key={editingClassId ?? "new-class"}
-                    className="input input--file"
-                    id="cutflower-class-image"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleClassImageChange}
-                  />
-                  <p className="admin-panel__note">Upload JPG or PNG (max 3MB).</p>
-                  {(classImagePreview || classForm.image) && (
-                    <img
-                      src={classImagePreview || classForm.image}
-                      alt="Cut flower class preview"
-                      className="admin-preview"
-                    />
-                  )}
-                </div>
-                <div className="admin-form__actions">
-                  <button className="btn btn--secondary" type="button" onClick={resetClassForm} disabled={classSaving}>
-                    Reset
-                  </button>
-                  <button className="btn btn--primary" type="submit" disabled={classSaving || !inventoryEnabled}>
-                    {classSaving
-                      ? "Saving…"
-                      : editingClassId
-                      ? "Update Class"
-                      : "Create Class"}
+                  <button
+                    className="icon-btn icon-btn--danger admin-session-remove"
+                    type="button"
+                    onClick={() => handleRemoveClassOption(option.id)}
+                    aria-label={`Remove option ${index + 1}`}
+                  >
+                    <IconTrash aria-hidden="true" />
                   </button>
                 </div>
-                {classError && <p className="admin-panel__error">{classError}</p>}
-              </form>
+              ))}
             </div>
-            <div>
-              <h3>Scheduled Classes</h3>
-              {inventoryLoading && !normalizedClasses.length ? (
-                <p className="admin-panel__note">Loading cut flower classes…</p>
-              ) : (
-                <div className="admin-panel__list">
-                  {normalizedClasses.length === 0 ? (
-                    <p className="admin-panel__note">No cut flower classes yet.</p>
-                  ) : (
-                    paginatedClasses.map((classDoc) => (
-                      <article className="admin-event-card" key={classDoc.id}>
-                        <div className="admin-event-card__info">
-                          <p className="admin-event-card__date">{classDoc.displayDate}</p>
-                          <h4>{classDoc.title}</h4>
-                          {classDoc.location && (
-                            <p className="admin-event-card__meta">{classDoc.location}</p>
-                          )}
-                          {classDoc.timeSummary && (
-                            <p className="admin-event-card__meta">Times: {classDoc.timeSummary}</p>
-                          )}
-                          {classDoc.priceLabel && (
-                            <p className="admin-event-card__meta">Fee: {classDoc.priceLabel}</p>
-                          )}
-                          {classDoc.capacity && (
-                            <p className="admin-event-card__meta">Capacity: {classDoc.capacity}</p>
-                          )}
-                        </div>
-                        <div className="admin-event-card__actions">
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            onClick={() => handleEditClass(classDoc)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn--primary"
-                            type="button"
-                            onClick={() => handleDeleteClass(classDoc.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </article>
-                    ))
-                  )}
+            <select
+              className="input"
+              value={classForm.status}
+              onChange={(e) =>
+                setClassForm((prev) => ({
+                  ...prev,
+                  status: e.target.value,
+                }))
+              }
+            >
+              <option value="draft">Draft</option>
+              <option value="live">Live</option>
+              <option value="archived">Archived</option>
+            </select>
+            <input
+              className="input"
+              type="date"
+              value={classForm.date}
+              onChange={(e) => handleClassDateChange(e.target.value)}
+              required
+            />
+            <div className="admin-session-panel admin-form__full">
+              <div className="admin-session-panel__header">
+                <h4>Class times</h4>
+                <button
+                  className="icon-btn"
+                  type="button"
+                  onClick={handleAddClassTimeSlot}
+                  aria-label="Add time slot"
+                >
+                  <IconPlus aria-hidden="true" />
+                </button>
+              </div>
+              <p className="admin-panel__note">Add one or more time slots for this class day.</p>
+              {(classForm.timeSlots || []).map((slot) => (
+                <div className="admin-session-row" key={slot.id}>
+                  <div className="admin-session-field">
+                    <label className="admin-session-label" htmlFor={`class-time-${slot.id}`}>
+                      Start
+                    </label>
+                    <input
+                      className="input"
+                      type="time"
+                      id={`class-time-${slot.id}`}
+                      value={slot.time}
+                      onChange={(event) =>
+                        handleClassTimeSlotChange(slot.id, "time", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="admin-session-field">
+                    <label className="admin-session-label" htmlFor={`class-end-${slot.id}`}>
+                      End
+                    </label>
+                    <input
+                      className="input"
+                      type="time"
+                      id={`class-end-${slot.id}`}
+                      value={slot.endTime || ""}
+                      onChange={(event) =>
+                        handleClassTimeSlotChange(slot.id, "endTime", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="admin-session-field admin-session-field--label">
+                    <label className="admin-session-label" htmlFor={`class-label-${slot.id}`}>
+                      Label (optional)
+                    </label>
+                    <input
+                      className="input"
+                      id={`class-label-${slot.id}`}
+                      value={slot.label}
+                      onChange={(event) =>
+                        handleClassTimeSlotChange(slot.id, "label", event.target.value)
+                      }
+                      placeholder="Morning, Afternoon, etc."
+                    />
+                  </div>
+                  <button
+                    className="icon-btn icon-btn--danger admin-session-remove"
+                    type="button"
+                    onClick={() => handleRemoveClassTimeSlot(slot.id)}
+                    aria-label="Remove time slot"
+                  >
+                    <IconTrash aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="admin-session-panel admin-form__full">
+              <div className="admin-session-panel__header">
+                <h4>Repeat weekly</h4>
+              </div>
+              <label className="admin-checkbox">
+                <input
+                  type="checkbox"
+                  checked={classForm.repeatWeekly}
+                  onChange={(event) => handleToggleClassRepeatWeekly(event.target.checked)}
+                />
+                <span>Repeat this class on selected weekdays</span>
+              </label>
+              {classForm.repeatWeekly && (
+                <div className="admin-repeat-days">
+                  {EVENT_REPEAT_WEEKDAYS.map((day) => (
+                    <label className="admin-repeat-day" key={day.value}>
+                      <input
+                        type="checkbox"
+                        checked={
+                          Array.isArray(classForm.repeatDays) &&
+                          classForm.repeatDays.includes(day.value)
+                        }
+                        onChange={() => handleToggleClassRepeatDay(day.value)}
+                      />
+                      <span>{day.label}</span>
+                    </label>
+                  ))}
                 </div>
               )}
-              <AdminPagination page={classPage} total={normalizedClasses.length} onPageChange={setClassPage} />
+              <p className="admin-panel__note">Use this for recurring classes like every Saturday.</p>
             </div>
-          </div>
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Description"
+              value={classForm.description}
+              onChange={(e) =>
+                setClassForm((prev) => ({
+                  ...prev,
+                  description: e.target.value,
+                }))
+              }
+            />
+            <div className="admin-file-input admin-form__full">
+              <label htmlFor="cutflower-class-image" className="sr-only">
+                Class image
+              </label>
+              <input
+                key={editingClassId ?? "new-class"}
+                className="input input--file"
+                id="cutflower-class-image"
+                type="file"
+                accept="image/*"
+                onChange={handleClassImageChange}
+              />
+              <p className="admin-panel__note">Upload JPG or PNG (max 3MB).</p>
+              {(classImagePreview || classForm.image) && (
+                <img
+                  src={classImagePreview || classForm.image}
+                  alt="Cut flower class preview"
+                  className="admin-preview"
+                />
+              )}
+            </div>
+            <div className="admin-modal__actions admin-form__actions">
+              <button className="btn btn--secondary" type="button" onClick={closeClassModal} disabled={classSaving}>
+                Cancel
+              </button>
+              <button className="btn btn--primary" type="submit" disabled={classSaving || !inventoryEnabled}>
+                {classSaving ? "Saving..." : editingClassId ? "Update Class" : "Create Class"}
+              </button>
+            </div>
+            {classError && <p className="admin-panel__error">{classError}</p>}
+          </form>
         </div>
       </div>
-      </section>
       <ConfirmDialog
         open={deleteDialog.open}
         title="Delete Cut Flower Class"
@@ -4266,7 +4352,7 @@ export function AdminCutFlowerClassesView() {
             await deleteDoc(doc(db, "cutFlowerClasses", deleteDialog.targetId));
             setStatusMessage("Class removed");
             if (editingClassId === deleteDialog.targetId) {
-              resetClassForm();
+              closeClassModal();
             }
           } catch (err) {
             setClassError(err.message);
@@ -4297,6 +4383,10 @@ export function AdminCutFlowerBookingsView() {
   const [statusMessage, setStatusMessage] = useState(null);
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [isBookingModalOpen, setBookingModalOpen] = useState(false);
+  const [activeBooking, setActiveBooking] = useState(null);
+  const [dateFilter, setDateFilter] = useState("today");
+  const [sortOrder, setSortOrder] = useState("event-asc");
   const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null });
   const [deleteBusy, setDeleteBusy] = useState(false);
 
@@ -4324,10 +4414,63 @@ export function AdminCutFlowerBookingsView() {
       });
   }, [cutFlowerBookings]);
 
+  const filteredBookings = useMemo(() => {
+    if (!normalizedBookings.length) return [];
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    return normalizedBookings.filter((booking) => {
+      if (!booking.eventDate) return dateFilter === "all";
+      const eventTime = booking.eventDate.getTime();
+      if (dateFilter === "today") {
+        return eventTime >= startOfDay.getTime() && eventTime <= endOfDay.getTime();
+      }
+      if (dateFilter === "upcoming") return eventTime > endOfDay.getTime();
+      if (dateFilter === "past") return eventTime < startOfDay.getTime();
+      return true;
+    });
+  }, [normalizedBookings, dateFilter]);
+
+  const sortedBookings = useMemo(() => {
+    const bookings = [...filteredBookings];
+    const compareByDate = (first, second) => {
+      const firstTime = first.eventDate ? first.eventDate.getTime() : null;
+      const secondTime = second.eventDate ? second.eventDate.getTime() : null;
+      if (firstTime === null && secondTime === null) return 0;
+      if (firstTime === null) return 1;
+      if (secondTime === null) return -1;
+      return firstTime - secondTime;
+    };
+    const compareByName = (first, second) =>
+      (first.customerName || "").localeCompare(second.customerName || "", undefined, {
+        sensitivity: "base",
+      });
+
+    bookings.sort((a, b) => {
+      if (sortOrder === "event-desc") return compareByDate(b, a);
+      if (sortOrder === "name-asc") return compareByName(a, b);
+      if (sortOrder === "name-desc") return compareByName(b, a);
+      return compareByDate(a, b);
+    });
+
+    return bookings;
+  }, [filteredBookings, sortOrder]);
+
   const resetForm = () => {
     setFormState(INITIAL_CUT_FLOWER_BOOKING);
     setEditingId(null);
     setFormError(null);
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setBookingModalOpen(true);
+  };
+
+  const closeBookingModal = () => {
+    setBookingModalOpen(false);
+    resetForm();
   };
 
   const handleEdit = (booking) => {
@@ -4346,6 +4489,87 @@ export function AdminCutFlowerBookingsView() {
     });
     setEditingId(booking.id);
     setFormError(null);
+  };
+
+  const openEditModal = (booking) => {
+    handleEdit(booking);
+    setBookingModalOpen(true);
+  };
+
+  const openBookingDetails = (booking) => setActiveBooking(booking);
+
+  const closeBookingDetails = () => setActiveBooking(null);
+
+  const handleRowKeyDown = (event, booking) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openBookingDetails(booking);
+    }
+  };
+
+  const getBookingSummary = (booking) => {
+    const attendeeSelections = Array.isArray(booking.attendeeSelections)
+      ? booking.attendeeSelections
+      : [];
+    const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
+    const attendeeCount = Number.isFinite(attendeeCountValue)
+      ? attendeeCountValue
+      : attendeeSelections.length || null;
+    const hasEstimatedTotal =
+      booking.estimatedTotal !== undefined &&
+      booking.estimatedTotal !== null &&
+      booking.estimatedTotal !== "";
+    const estimatedTotalValue = hasEstimatedTotal ? Number(booking.estimatedTotal) : NaN;
+    const estimatedTotalLabel = Number.isFinite(estimatedTotalValue)
+      ? moneyFormatter.format(estimatedTotalValue)
+      : null;
+    const optionSummary = booking.optionLabel || booking.optionValue || "";
+    let optionSummaryLabel = "Option: -";
+
+    if (attendeeSelections.length > 1) {
+      optionSummaryLabel = "Options: Multiple";
+    } else if (attendeeSelections.length === 1) {
+      const selection = attendeeSelections[0];
+      const selectionLabel = selection?.optionLabel || selection?.optionValue || "Option";
+      const selectionPriceValue = Number(selection?.estimatedPrice);
+      const selectionPriceLabel = Number.isFinite(selectionPriceValue)
+        ? ` (est. ${moneyFormatter.format(selectionPriceValue)})`
+        : "";
+      optionSummaryLabel = `Option: ${selectionLabel}${selectionPriceLabel}`;
+    } else if (optionSummary) {
+      optionSummaryLabel = `Option: ${optionSummary}`;
+    }
+
+    const optionLines =
+      attendeeSelections.length > 0
+        ? attendeeSelections.map((selection, index) => {
+            const selectionLabel = selection?.optionLabel || selection?.optionValue || "Option";
+            const selectionIndexValue = Number.parseInt(selection?.attendee, 10);
+            const selectionIndex = Number.isFinite(selectionIndexValue)
+              ? selectionIndexValue
+              : index + 1;
+            const selectionPriceValue = Number(selection?.estimatedPrice);
+            const selectionPriceLabel = Number.isFinite(selectionPriceValue)
+              ? ` (est. ${moneyFormatter.format(selectionPriceValue)})`
+              : "";
+            return {
+              key: `attendee-${booking.id}-${selectionIndex}-${selectionLabel}`,
+              text: `Attendee ${selectionIndex}: ${selectionLabel}${selectionPriceLabel}`,
+            };
+          })
+        : [
+            {
+              key: `option-${booking.id}`,
+              text: optionSummaryLabel,
+            },
+          ];
+
+    return {
+      attendeeCount,
+      estimatedTotalLabel,
+      optionLines,
+      optionSummaryLabel,
+    };
   };
 
   const handleDelete = async (bookingId) => {
@@ -4399,14 +4623,30 @@ export function AdminCutFlowerBookingsView() {
         setStatusMessage("Booking added");
       }
 
-      resetForm();
+      closeBookingModal();
     } catch (saveError) {
       console.error(saveError);
-      setFormError("We couldn’t save the booking. Please try again.");
+      setFormError("We couldn't save the booking. Please try again.");
     } finally {
       setSaving(false);
     }
   };
+
+  const detailsSummary = activeBooking ? getBookingSummary(activeBooking) : null;
+  const detailsStatusLabel = activeBooking?.status
+    ? activeBooking.status.replace(/-/g, " ")
+    : "new";
+  const createdAtLabel = activeBooking?.createdAt?.toDate?.()
+    ? bookingDateFormatter.format(activeBooking.createdAt.toDate())
+    : null;
+  const emptyFilterLabel =
+    dateFilter === "today"
+      ? "No cut flower bookings scheduled for today."
+      : dateFilter === "upcoming"
+      ? "No upcoming cut flower bookings."
+      : dateFilter === "past"
+      ? "No past cut flower bookings."
+      : "No cut flower bookings match this view.";
 
   return (
     <>
@@ -4416,196 +4656,472 @@ export function AdminCutFlowerBookingsView() {
             <div className="admin-panel__header">
               <div>
                 <h2>Cut Flower Bookings</h2>
-              <p className="admin-panel__note">
-                Manage requests for installations, weekly drops, and bespoke bouquets without mixing them into workshop
-                bookings.
-              </p>
-            </div>
-            {statusMessage && <span className="badge badge--muted">{statusMessage}</span>}
-          </div>
-          {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
-          <div className="admin-panel__content admin-panel__content--split">
-            <div>
-              <h3>{editingId ? "Edit Booking" : "Create Booking"}</h3>
-              <form className="admin-form" onSubmit={handleSave}>
-                <input
-                  className="input"
-                  placeholder="Customer name"
-                  value={formState.customerName}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      customerName: e.target.value,
-                    }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  placeholder="Email"
-                  value={formState.email}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      email: e.target.value,
-                    }))
-                  }
-                />
-                <input
-                  className="input"
-                  placeholder="Phone"
-                  value={formState.phone}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      phone: e.target.value,
-                    }))
-                  }
-                />
-                <input
-                  className="input"
-                  placeholder="Occasion / brief"
-                  value={formState.occasion}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      occasion: e.target.value,
-                    }))
-                  }
-                />
-                <input
-                  className="input"
-                  placeholder="Location"
-                  value={formState.location}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      location: e.target.value,
-                    }))
-                  }
-                />
-                <input
-                  className="input"
-                  placeholder="Budget (optional)"
-                  value={formState.budget}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      budget: e.target.value,
-                    }))
-                  }
-                />
-                <input
-                  className="input"
-                  type="date"
-                  value={formState.date}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      date: e.target.value,
-                    }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  type="time"
-                  value={formState.time}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      time: e.target.value,
-                    }))
-                  }
-                />
-                <select
-                  className="input"
-                  value={formState.status}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      status: e.target.value,
-                    }))
-                  }
+                <p className="admin-panel__note">
+                  Manage requests for installations, weekly drops, and bespoke bouquets without mixing them into
+                  workshop bookings.
+                </p>
+              </div>
+              <div className="admin-panel__header-actions">
+                {inventoryLoading && <span className="badge badge--muted">Syncing...</span>}
+                {statusMessage && <span className="badge badge--muted">{statusMessage}</span>}
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={openCreateModal}
+                  disabled={!inventoryEnabled}
                 >
-                  {CUT_FLOWER_STATUS_OPTIONS.map((status) => (
-                    <option key={status} value={status}>
-                      {status.replace(/-/g, " ")}
-                    </option>
-                  ))}
-                </select>
-                <textarea
-                  className="input textarea admin-form__full"
-                  placeholder="Notes"
-                  value={formState.notes}
-                  onChange={(e) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      notes: e.target.value,
-                    }))
-                  }
-                />
-                <div className="admin-form__actions">
-                  <button className="btn btn--secondary" type="button" onClick={resetForm} disabled={saving}>
-                    Reset
-                  </button>
-                  <button className="btn btn--primary" type="submit" disabled={saving || !inventoryEnabled}>
-                    {saving ? "Saving…" : editingId ? "Update Booking" : "Create Booking"}
-                  </button>
-                </div>
-                {formError && <p className="admin-panel__error">{formError}</p>}
-              </form>
+                  <IconPlus className="btn__icon" aria-hidden="true" />
+                  Make Booking
+                </button>
+              </div>
             </div>
-            <div>
-              <h3>Upcoming Requests</h3>
+            {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+            <div className="admin-panel__content">
               {inventoryLoading && !normalizedBookings.length ? (
-                <p className="admin-panel__note">Loading cut flower bookings…</p>
-              ) : (
-                <div className="admin-panel__list">
-                  {normalizedBookings.length === 0 ? (
-                    <p className="admin-panel__note">No cut flower bookings yet.</p>
+                <p className="admin-panel__note">Loading cut flower bookings...</p>
+              ) : normalizedBookings.length > 0 ? (
+                <>
+                  <div className="admin-filters">
+                    <div className="admin-filters__left">
+                      <label className="admin-filters__field">
+                        <span>Date range</span>
+                        <select
+                          className="input"
+                          value={dateFilter}
+                          onChange={(event) => setDateFilter(event.target.value)}
+                        >
+                          <option value="today">Today</option>
+                          <option value="upcoming">Upcoming</option>
+                          <option value="past">Past</option>
+                          <option value="all">All</option>
+                        </select>
+                      </label>
+                      <label className="admin-filters__field">
+                        <span>Sort by</span>
+                        <select
+                          className="input"
+                          value={sortOrder}
+                          onChange={(event) => setSortOrder(event.target.value)}
+                        >
+                          <option value="event-asc">Date (soonest)</option>
+                          <option value="event-desc">Date (latest)</option>
+                          <option value="name-asc">Customer (A-Z)</option>
+                          <option value="name-desc">Customer (Z-A)</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  {sortedBookings.length > 0 ? (
+                    <>
+                      <div className="admin-bookings-table">
+                        <div className="admin-table__wrapper">
+                          <table className="admin-table admin-table--compact">
+                            <thead>
+                              <tr>
+                                <th scope="col">Customer</th>
+                                <th scope="col">Contact</th>
+                                <th scope="col">Event</th>
+                                <th scope="col">Options</th>
+                                <th scope="col">Status</th>
+                                <th scope="col" className="admin-table__actions">
+                                  Actions
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sortedBookings.map((booking) => {
+                                const summary = getBookingSummary(booking);
+                                const statusLabel = booking.status
+                                  ? booking.status.replace(/-/g, " ")
+                                  : "new";
+                                const rowLabel = booking.customerName || "Booking";
+                                return (
+                                  <tr
+                                    key={booking.id}
+                                    className="admin-table__row admin-table__row--clickable"
+                                    onClick={() => openBookingDetails(booking)}
+                                    onKeyDown={(event) => handleRowKeyDown(event, booking)}
+                                    tabIndex={0}
+                                    role="button"
+                                    aria-label={`View booking for ${rowLabel}`}
+                                  >
+                                    <td>
+                                      <strong>{booking.customerName || "-"}</strong>
+                                      {booking.occasion && (
+                                        <p className="modal__meta">Occasion: {booking.occasion}</p>
+                                      )}
+                                      {booking.budget && (
+                                        <p className="modal__meta">Budget: {booking.budget}</p>
+                                      )}
+                                    </td>
+                                    <td>
+                                      {booking.email ? (
+                                        <a
+                                          href={`mailto:${booking.email}`}
+                                          onClick={(event) => event.stopPropagation()}
+                                        >
+                                          {booking.email}
+                                        </a>
+                                      ) : (
+                                        "-"
+                                      )}
+                                      {booking.phone && <p className="modal__meta">{booking.phone}</p>}
+                                    </td>
+                                    <td>
+                                      <p className="modal__meta">{booking.displayDate}</p>
+                                      {booking.sessionLabel && (
+                                        <p className="modal__meta">{booking.sessionLabel}</p>
+                                      )}
+                                      {booking.location && <p className="modal__meta">{booking.location}</p>}
+                                    </td>
+                                    <td>
+                                      {Number.isFinite(summary.attendeeCount) &&
+                                        summary.attendeeCount > 0 && (
+                                          <p className="modal__meta">
+                                            Attendees: {summary.attendeeCount}
+                                          </p>
+                                        )}
+                                      <p className="modal__meta">{summary.optionSummaryLabel}</p>
+                                      {summary.estimatedTotalLabel && (
+                                        <p className="modal__meta">
+                                          Estimate: {summary.estimatedTotalLabel}
+                                        </p>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span className="badge badge--muted">{statusLabel}</span>
+                                    </td>
+                                    <td className="admin-table__actions">
+                                      <button
+                                        className="icon-btn"
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          openEditModal(booking);
+                                        }}
+                                        aria-label="Edit booking"
+                                      >
+                                        <IconEdit aria-hidden="true" />
+                                      </button>
+                                      <button
+                                        className="icon-btn icon-btn--danger"
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          handleDelete(booking.id);
+                                        }}
+                                        aria-label="Delete booking"
+                                      >
+                                        <IconTrash aria-hidden="true" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                      <div className="admin-bookings-cards">
+                        {sortedBookings.map((booking) => {
+                          const summary = getBookingSummary(booking);
+                          const statusLabel = booking.status
+                            ? booking.status.replace(/-/g, " ")
+                            : "new";
+                          const cardLabel = booking.customerName || "Booking";
+                          return (
+                            <article
+                              className="admin-event-card admin-booking-card"
+                              key={`card-${booking.id}`}
+                              onClick={() => openBookingDetails(booking)}
+                              onKeyDown={(event) => handleRowKeyDown(event, booking)}
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`View booking for ${cardLabel}`}
+                            >
+                              <div className="admin-event-card__info">
+                                <p className="admin-event-card__date">{booking.displayDate}</p>
+                                <h4>{booking.customerName || "-"}</h4>
+                                {booking.location && (
+                                  <p className="admin-event-card__meta">{booking.location}</p>
+                                )}
+                                {booking.email && (
+                                  <p className="admin-event-card__meta">{booking.email}</p>
+                                )}
+                                {booking.phone && (
+                                  <p className="admin-event-card__meta">{booking.phone}</p>
+                                )}
+                                {Number.isFinite(summary.attendeeCount) &&
+                                  summary.attendeeCount > 0 && (
+                                    <p className="admin-event-card__meta">
+                                      Attendees: {summary.attendeeCount}
+                                    </p>
+                                  )}
+                                <p className="admin-event-card__meta">{summary.optionSummaryLabel}</p>
+                                {summary.estimatedTotalLabel && (
+                                  <p className="admin-event-card__meta">
+                                    Estimate: {summary.estimatedTotalLabel}
+                                  </p>
+                                )}
+                                <p className="admin-event-card__meta">Status: {statusLabel}</p>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </>
                   ) : (
-                    normalizedBookings.map((booking) => (
-                      <article className="admin-event-card" key={booking.id}>
-                        <div className="admin-event-card__info">
-                          <p className="admin-event-card__date">{booking.displayDate}</p>
-                          <h4>{booking.customerName}</h4>
-                          {booking.occasion && (
-                            <p className="admin-event-card__meta">Occasion: {booking.occasion}</p>
-                          )}
-                          {booking.location && (
-                            <p className="admin-event-card__meta">Location: {booking.location}</p>
-                          )}
-                          <p className="admin-event-card__meta">
-                            Status: {booking.status ? booking.status.replace(/-/g, " ") : "new"}
-                          </p>
-                        </div>
-                        <div className="admin-event-card__actions">
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            onClick={() => handleEdit(booking)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn--primary"
-                            type="button"
-                            onClick={() => handleDelete(booking.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </article>
-                    ))
+                    <p className="admin-panel__note">{emptyFilterLabel}</p>
                   )}
-                </div>
+                </>
+              ) : (
+                <p className="admin-panel__note">No cut flower bookings yet.</p>
               )}
             </div>
-          </div>
         </div>
       </div>
       </section>
+      <div
+        className={`modal admin-modal ${isBookingModalOpen ? "is-active" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={isBookingModalOpen ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closeBookingModal();
+        }}
+      >
+        <div className="modal__content admin-modal__content">
+          <button className="modal__close" type="button" aria-label="Close" onClick={closeBookingModal}>
+            &times;
+          </button>
+          <h3 className="modal__title">{editingId ? "Edit Booking" : "Make Booking"}</h3>
+          <form className="admin-form" onSubmit={handleSave}>
+            <input
+              className="input"
+              placeholder="Customer name"
+              value={formState.customerName}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  customerName: e.target.value,
+                }))
+              }
+              required
+            />
+            <input
+              className="input"
+              placeholder="Email"
+              value={formState.email}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  email: e.target.value,
+                }))
+              }
+            />
+            <input
+              className="input"
+              placeholder="Phone"
+              value={formState.phone}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  phone: e.target.value,
+                }))
+              }
+            />
+            <input
+              className="input"
+              placeholder="Occasion / brief"
+              value={formState.occasion}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  occasion: e.target.value,
+                }))
+              }
+            />
+            <input
+              className="input"
+              placeholder="Location"
+              value={formState.location}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  location: e.target.value,
+                }))
+              }
+            />
+            <input
+              className="input"
+              placeholder="Budget (optional)"
+              value={formState.budget}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  budget: e.target.value,
+                }))
+              }
+            />
+            <input
+              className="input"
+              type="date"
+              value={formState.date}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  date: e.target.value,
+                }))
+              }
+              required
+            />
+            <input
+              className="input"
+              type="time"
+              value={formState.time}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  time: e.target.value,
+                }))
+              }
+            />
+            <select
+              className="input"
+              value={formState.status}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  status: e.target.value,
+                }))
+              }
+            >
+              {CUT_FLOWER_STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {status.replace(/-/g, " ")}
+                </option>
+              ))}
+            </select>
+            <textarea
+              className="input textarea admin-form__full"
+              placeholder="Notes"
+              value={formState.notes}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  notes: e.target.value,
+                }))
+              }
+            />
+            <div className="admin-modal__actions admin-form__actions">
+              <button className="btn btn--secondary" type="button" onClick={closeBookingModal} disabled={saving}>
+                Cancel
+              </button>
+              <button className="btn btn--primary" type="submit" disabled={saving || !inventoryEnabled}>
+                {saving ? "Saving..." : editingId ? "Update Booking" : "Create Booking"}
+              </button>
+            </div>
+            {formError && <p className="admin-panel__error">{formError}</p>}
+          </form>
+        </div>
+      </div>
+      {activeBooking && (
+        <div
+          className={`modal admin-modal ${activeBooking ? "is-active" : ""}`}
+          role="dialog"
+          aria-modal="true"
+          aria-hidden={activeBooking ? "false" : "true"}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeBookingDetails();
+          }}
+        >
+          <div className="modal__content admin-modal__content">
+            <button
+              className="modal__close"
+              type="button"
+              aria-label="Close"
+              onClick={closeBookingDetails}
+            >
+              &times;
+            </button>
+            <h3 className="modal__title">{activeBooking.customerName || "Booking Details"}</h3>
+            <div className="admin-detail-grid">
+              <div className="admin-detail-card">
+                <h4>Customer</h4>
+                <p className="modal__meta">{activeBooking.customerName || "-"}</p>
+                {activeBooking.email && <p className="modal__meta">{activeBooking.email}</p>}
+                {activeBooking.phone && <p className="modal__meta">{activeBooking.phone}</p>}
+                {activeBooking.occasion && (
+                  <p className="modal__meta">Occasion: {activeBooking.occasion}</p>
+                )}
+                {activeBooking.budget && (
+                  <p className="modal__meta">Budget: {activeBooking.budget}</p>
+                )}
+              </div>
+              <div className="admin-detail-card">
+                <h4>Event</h4>
+                <p className="modal__meta">{activeBooking.displayDate}</p>
+                {activeBooking.sessionLabel && (
+                  <p className="modal__meta">{activeBooking.sessionLabel}</p>
+                )}
+                {activeBooking.location && (
+                  <p className="modal__meta">{activeBooking.location}</p>
+                )}
+              </div>
+              <div className="admin-detail-card">
+                <h4>Options</h4>
+                {Number.isFinite(detailsSummary?.attendeeCount) &&
+                  detailsSummary.attendeeCount > 0 && (
+                    <p className="modal__meta">Attendees: {detailsSummary.attendeeCount}</p>
+                  )}
+                {detailsSummary?.optionLines.map((line) => (
+                  <p className="modal__meta" key={line.key}>
+                    {line.text}
+                  </p>
+                ))}
+                {detailsSummary?.estimatedTotalLabel && (
+                  <p className="modal__meta">
+                    Estimate: {detailsSummary.estimatedTotalLabel} (estimate only)
+                  </p>
+                )}
+              </div>
+              <div className="admin-detail-card">
+                <h4>Status</h4>
+                <p className="modal__meta">Status: {detailsStatusLabel}</p>
+                {createdAtLabel && <p className="modal__meta">Submitted: {createdAtLabel}</p>}
+                {activeBooking.notes && <p className="modal__meta">Notes: {activeBooking.notes}</p>}
+              </div>
+            </div>
+            <div className="admin-modal__actions">
+              <button className="btn btn--secondary" type="button" onClick={closeBookingDetails}>
+                Close
+              </button>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={() => {
+                  closeBookingDetails();
+                  openEditModal(activeBooking);
+                }}
+                disabled={!inventoryEnabled}
+              >
+                Edit Booking
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => {
+                  closeBookingDetails();
+                  handleDelete(activeBooking.id);
+                }}
+                disabled={!inventoryEnabled}
+              >
+                Delete Booking
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <ConfirmDialog
         open={deleteDialog.open}
         title="Delete Booking"
@@ -4621,7 +5137,7 @@ export function AdminCutFlowerBookingsView() {
             await deleteDoc(doc(db, "cutFlowerBookings", deleteDialog.targetId));
             setStatusMessage("Cut flower booking removed");
             if (editingId === deleteDialog.targetId) {
-              resetForm();
+              closeBookingModal();
             }
           } catch (err) {
             setFormError(err.message);
@@ -4634,7 +5150,6 @@ export function AdminCutFlowerBookingsView() {
     </>
   );
 }
-
 export function AdminOrdersView() {
   usePageMetadata({
     title: "Admin · Orders",
