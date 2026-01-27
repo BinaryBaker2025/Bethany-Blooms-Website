@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
-import { getFirebaseDb } from "../lib/firebase.js";
+import { getFirebaseDb, getFirebaseFunctions } from "../lib/firebase.js";
 
 const DEFAULT_FRAME_OPTIONS = [
   { value: "A5", label: "A5 – R350", price: 350 },
@@ -82,6 +83,13 @@ function BookingModal() {
   const db = useMemo(() => {
     try {
       return getFirebaseDb();
+    } catch {
+      return null;
+    }
+  }, []);
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
     } catch {
       return null;
     }
@@ -639,6 +647,27 @@ function BookingModal() {
 
       try {
         await addDoc(collection(db, "cutFlowerBookings"), bookingPayload);
+        if (functionsInstance) {
+          try {
+            const sendBookingEmail = httpsCallable(functionsInstance, "sendBookingEmail");
+            await sendBookingEmail({
+              type: "cut-flower",
+              fullName: trimmed.fullName,
+              email: trimmed.email,
+              phone: trimmed.phone,
+              occasion: workshop.title ?? "",
+              location: workshop.location ?? "",
+              eventDate: sessionDate ?? null,
+              sessionLabel: sessionLabel || null,
+              attendeeCount: attendeeCountNumber,
+              optionLabel: summarySelectionLabel || null,
+              notes: notesValue || "",
+              totalPrice,
+            });
+          } catch (error) {
+            console.warn("Unable to send booking email", error);
+          }
+        }
         setFormStatus("success");
         setFormState(INITIAL_BOOKING_FORM);
         closeBooking();
@@ -651,11 +680,11 @@ function BookingModal() {
 
     const cartItemId = `${bookingType}-${workshop.id}-${selectedSession.id}-${Date.now()}`;
 
-    addItem({
-      id: cartItemId,
-      name: `${workshop.title} ${bookingCopy.itemLabel}`,
-      price: totalPrice,
-      quantity: 1,
+  addItem({
+    id: cartItemId,
+    name: `${workshop.title} ${bookingCopy.itemLabel}`,
+    price: totalPrice,
+    quantity: 1,
       metadata: {
         type: bookingType,
         workshopId: workshop.id,
@@ -695,8 +724,32 @@ function BookingModal() {
           phone: trimmed.phone,
           address: trimmed.address,
         },
-      },
-    });
+    },
+  });
+
+  if (functionsInstance) {
+    try {
+      const sendBookingEmail = httpsCallable(functionsInstance, "sendBookingEmail");
+      await sendBookingEmail({
+        type: bookingType,
+        fullName: trimmed.fullName,
+        email: trimmed.email,
+        phone: trimmed.phone,
+        workshopTitle: workshop.title,
+        sessionDayLabel: selectedDayLabel ?? null,
+        sessionDate: selectedSession.date ?? null,
+        sessionLabel: selectedSession.label ?? selectedSession.formatted ?? null,
+        sessionTimeRange: selectedSession.timeRangeLabel ?? null,
+        attendeeCount: attendeeCountNumber,
+        optionLabel: selectionLabel || null,
+        framePreference: isCutFlower ? null : selectionValue,
+        notes: trimmed.notes,
+        totalPrice,
+      });
+    } catch (error) {
+      console.warn("Unable to send booking email", error);
+    }
+  }
 
     setFormStatus("success");
     setFormState(INITIAL_BOOKING_FORM);

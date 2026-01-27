@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Reveal from "../components/Reveal.jsx";
 import TestimonialCarousel from "../components/TestimonialCarousel.jsx";
 import HeroCarousel from "../components/HeroCarousel.jsx";
@@ -18,6 +18,22 @@ import workshopGuestsSmiling from "../assets/photos/workshop-guests-smiling.jpg"
 import workshopTableLongClose from "../assets/photos/workshop-table-long-close.jpg";
 import workshopTableDetailsOne from "../assets/photos/workshop-table-details-1.png";
 import { testimonials } from "../data/testimonials.js";
+
+const CartIcon = () => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="20"
+    height="20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path d="M6 6h15l-1.4 7H8.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="10" cy="20" r="1.3" fill="currentColor" />
+    <circle cx="18" cy="20" r="1.3" fill="currentColor" />
+    <path d="M6 6 5 3H3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+  </svg>
+);
 
 const FALLBACK_PRODUCTS = [
   {
@@ -58,6 +74,13 @@ const FALLBACK_PRODUCTS = [
   },
 ];
 
+const stripHtml = (value = "") =>
+  value
+    .toString()
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 function HomePage() {
   usePageMetadata({
     title: "Bethany Blooms | Pressed Flower Art, Made Beautifully Simple",
@@ -67,6 +90,7 @@ function HomePage() {
 
   const { addItem } = useCart();
   const { openCart } = useModal();
+  const [selectedVariants, setSelectedVariants] = useState({});
   const { items: remoteProducts, status: productsStatus } = useFirestoreCollection("products", {
     orderByField: "createdAt",
     orderDirection: "desc",
@@ -77,25 +101,79 @@ function HomePage() {
 
   const normalizedProducts = liveProducts.map((product, index) => {
     const priceNumber = typeof product.price === "number" ? product.price : Number(product.price);
-    const isPurchasable = Number.isFinite(priceNumber);
+    const salePriceNumber =
+      typeof product.sale_price === "number"
+        ? product.sale_price
+        : Number(product.sale_price ?? product.salePrice);
+    const hasSale = Number.isFinite(salePriceNumber) && salePriceNumber !== priceNumber;
+    const basePrice = hasSale ? salePriceNumber : priceNumber;
+    const isPurchasable = Number.isFinite(basePrice);
     const stockStatus = getStockStatus({
-      quantity: product.quantity,
-      forceOutOfStock: product.forceOutOfStock,
+      quantity: product.stock_quantity ?? product.quantity,
+      forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
+      status: product.stock_status,
     });
     const stockBadgeLabel = getStockBadgeLabel(stockStatus);
+    const variants = Array.isArray(product.variants)
+      ? product.variants
+          .map((variant) => {
+            const label = (variant.label || variant.name || "").toString().trim();
+            if (!label) return null;
+            const priceValue =
+              typeof variant.price === "number" ? variant.price : Number(variant.price);
+            return {
+              id: (variant.id || label).toString(),
+              label,
+              price: Number.isFinite(priceValue) ? priceValue : null,
+            };
+          })
+          .filter(Boolean)
+      : [];
+    const imageCandidates = [
+      product.main_image,
+      ...(Array.isArray(product.gallery_images) ? product.gallery_images : []),
+      product.image,
+      ...(Array.isArray(product.images) ? product.images : []),
+    ]
+      .map((value) => (value || "").toString().trim())
+      .filter(Boolean);
+    const images = Array.from(new Set(imageCandidates)).slice(0, 6);
+    const rawCategoryValues = Array.isArray(product.category_ids)
+      ? product.category_ids
+      : Array.isArray(product.categoryIds)
+      ? product.categoryIds
+      : product.categoryId
+      ? [product.categoryId]
+      : product.category
+      ? [product.category]
+      : [];
+    const primaryCategory = rawCategoryValues[0] || product.category || "product";
+    const slug = (product.slug || product.id || `product-${index}`).toString();
+    const description = stripHtml(
+      product.short_description ||
+        product.shortDescription ||
+        product.description ||
+        product.long_description ||
+        product.longDescription ||
+        "Details coming soon.",
+    );
     return {
       ...product,
       id: product.id || `product-${index}`,
+      slug,
       title: product.title || product.name || "Bethany Blooms Product",
       name: product.name || product.title || "Bethany Blooms Product",
-      description: product.description || "Details coming soon.",
-      displayPrice: Number.isFinite(priceNumber) ? `R${priceNumber}` : product.price ?? "Price on request",
-      numericPrice: Number.isFinite(priceNumber) ? priceNumber : null,
-      category: product.category || "product",
-      image: product.image || heroBackground,
+      description,
+      displayPrice: Number.isFinite(basePrice) ? `R${basePrice}` : product.price ?? "Price on request",
+      originalPrice: hasSale && Number.isFinite(priceNumber) ? `R${priceNumber}` : null,
+      numericPrice: Number.isFinite(basePrice) ? basePrice : null,
+      category: primaryCategory,
+      image: images[0] || product.image || heroBackground,
+      images,
       isPurchasable,
       stockStatus,
       stockBadgeLabel,
+      variants,
     };
   });
 
@@ -148,20 +226,33 @@ function HomePage() {
     []
   );
 
-  const handleAddToCart = (product) => {
+  const handleAddToCart = (product, variant) => {
     if (product.stockStatus?.state === "out") {
       alert("This product is currently out of stock. Please check back soon.");
       return;
     }
-    if (!product.isPurchasable || !product.numericPrice) {
+    if (product.variants?.length && !variant) {
+      alert("Please select a variant before adding this product to your cart.");
+      return;
+    }
+    const variantPrice = Number.isFinite(variant?.price) ? variant.price : null;
+    const finalPrice = Number.isFinite(variantPrice) ? variantPrice : product.numericPrice;
+    if (!Number.isFinite(finalPrice)) {
       alert("This product does not have a valid online price yet. Please enquire for availability.");
       return;
     }
     addItem({
-      id: product.id,
+      id: variant ? `${product.id}:${variant.id}` : product.id,
       name: product.name,
-      price: product.numericPrice,
+      price: finalPrice,
       itemType: "product",
+      metadata: {
+        type: "product",
+        productId: product.id,
+        variantId: variant?.id ?? null,
+        variantLabel: variant?.label ?? null,
+        variantPrice,
+      },
     });
     openCart();
   };
@@ -207,35 +298,99 @@ function HomePage() {
             </p>
           </Reveal>
           <div className="cards-grid">
-            {displayProducts.map((product, index) => (
-              <Reveal as="article" className="card" key={product.id} delay={index * 110}>
-                <img src={product.image} alt={`${product.title} product from Bethany Blooms`} loading="lazy" />
-                <h3 className="card__title">{product.title}</h3>
-                <p className="card__price">{product.displayPrice}</p>
-                <p>{product.description}</p>
-                <p className="modal__meta">Category: {product.category.replace(/-/g, " ")}</p>
-                {product.stockBadgeLabel && (
-                  <span className={`badge badge--stock-${product.stockStatus?.state || "in"}`}>
-                    {product.stockBadgeLabel}
-                  </span>
-                )}
-                <div className="card__actions">
-                  {product.stockStatus?.state === "out" ? (
-                    <button className="btn btn--secondary" type="button" disabled>
-                      Out of stock
-                    </button>
-                  ) : product.isPurchasable ? (
-                    <button className="btn btn--primary" type="button" onClick={() => handleAddToCart(product)}>
-                      Add to Cart
-                    </button>
-                  ) : (
-                    <Link className="btn btn--secondary" to="/contact">
-                      Enquire
-                    </Link>
+            {displayProducts.map((product, index) => {
+              const selectedVariantId = selectedVariants[product.id] || "";
+              const selectedVariant =
+                product.variants?.find((variant) => variant.id === selectedVariantId) || null;
+              const variantPrice = Number.isFinite(selectedVariant?.price) ? selectedVariant.price : null;
+              const displayPrice = Number.isFinite(variantPrice) ? `R${variantPrice}` : product.displayPrice;
+              const hasVariants = Boolean(product.variants?.length);
+              const variantSelected = Boolean(selectedVariant);
+              const canPurchase = hasVariants
+                ? variantSelected
+                  ? Number.isFinite(variantPrice) || product.isPurchasable
+                  : false
+                : product.isPurchasable;
+              const isOutOfStock = product.stockStatus?.state === "out";
+              const needsVariant = hasVariants && !variantSelected;
+              const canAddToCart = !isOutOfStock && !needsVariant && canPurchase;
+              const iconLabel = isOutOfStock
+                ? "Out of stock"
+                : needsVariant
+                ? "Select a variant"
+                : !canPurchase
+                ? "Enquire for pricing"
+                : "Add to cart";
+
+              return (
+                <Reveal as="article" className="card" key={product.id} delay={index * 110}>
+                  <Link to={`/products/${encodeURIComponent(product.slug)}`} aria-label={`View ${product.title}`}>
+                    <img src={product.image} alt={`${product.title} product from Bethany Blooms`} loading="lazy" />
+                  </Link>
+                  <h3 className="card__title">
+                    <Link to={`/products/${encodeURIComponent(product.slug)}`}>{product.title}</Link>
+                  </h3>
+                  <p className="card__price">
+                    <span className="price-stack">
+                      <span className="price-stack__current">{displayPrice}</span>
+                      {!Number.isFinite(variantPrice) && product.originalPrice && (
+                        <span className="price-stack__original">{product.originalPrice}</span>
+                      )}
+                    </span>
+                  </p>
+                  <p>{product.description}</p>
+                  <p className="modal__meta">Category: {product.category.replace(/-/g, " ")}</p>
+                  {product.variants?.length > 0 && (
+                    <label className="modal__meta">
+                      Variant
+                      <select
+                        className="input"
+                        value={selectedVariantId}
+                        onChange={(event) =>
+                          setSelectedVariants((prev) => ({
+                            ...prev,
+                            [product.id]: event.target.value,
+                          }))
+                        }
+                        required
+                      >
+                        <option value="" disabled>
+                          Select a variant
+                        </option>
+                        {product.variants.map((variant) => (
+                          <option key={variant.id} value={variant.id}>
+                            {variant.label}
+                            {Number.isFinite(variant.price) ? ` · R${variant.price}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   )}
-                </div>
-              </Reveal>
-            ))}
+                  {product.stockBadgeLabel && (
+                    <span className={`badge badge--stock-${product.stockStatus?.state || "in"}`}>
+                      {product.stockBadgeLabel}
+                    </span>
+                  )}
+                  <div className="card__actions">
+                    <Link className="btn btn--secondary" to={`/products/${encodeURIComponent(product.slug)}`}>
+                      View details
+                    </Link>
+                    <button
+                      className="btn btn--icon"
+                      type="button"
+                      onClick={() => handleAddToCart(product, selectedVariant)}
+                      disabled={!canAddToCart}
+                      aria-label={iconLabel}
+                      title={iconLabel}
+                    >
+                      <span className="btn__icon">
+                        <CartIcon />
+                      </span>
+                    </button>
+                  </div>
+                </Reveal>
+              );
+            })}
           </div>
           {normalizedProducts.length === 0 && productsStatus !== "loading" && (
             <p className="empty-state">No products are available just yet.</p>

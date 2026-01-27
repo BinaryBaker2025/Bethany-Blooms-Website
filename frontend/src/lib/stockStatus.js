@@ -6,9 +6,19 @@ const normalizeQuantity = (value) => {
   return Number.isFinite(quantity) ? Math.max(0, Math.floor(quantity)) : null;
 };
 
-export const getStockStatus = ({ quantity, forceOutOfStock } = {}) => {
+export const getStockStatus = ({ quantity, forceOutOfStock, status } = {}) => {
   const normalizedQuantity = normalizeQuantity(quantity);
   const isForcedOut = Boolean(forceOutOfStock);
+  const normalizedStatus = status ? status.toString().toLowerCase() : "";
+
+  if (normalizedStatus === "preorder") {
+    return {
+      state: "preorder",
+      label: "Preorder",
+      quantity: normalizedQuantity ?? null,
+      isForced: false,
+    };
+  }
 
   if (isForcedOut) {
     return {
@@ -57,6 +67,7 @@ export const getStockStatus = ({ quantity, forceOutOfStock } = {}) => {
 
 export const getStockBadgeLabel = (stockStatus) => {
   if (!stockStatus) return "";
+  if (stockStatus.state === "preorder") return "Preorder";
   if (stockStatus.state === "out") return "Out of stock";
   if (stockStatus.state === "low") return "Low stock — order now";
   return "In stock";

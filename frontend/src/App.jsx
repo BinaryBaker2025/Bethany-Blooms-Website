@@ -4,6 +4,7 @@ import HomePage from "./pages/HomePage.jsx";
 import WorkshopsPage from "./pages/WorkshopsPage.jsx";
 import WorkshopDetailPage from "./pages/WorkshopDetailPage.jsx";
 import ProductsPage from "./pages/ProductsPage.jsx";
+import ProductDetailPage from "./pages/ProductDetailPage.jsx";
 import GalleryPage from "./pages/GalleryPage.jsx";
 import ContactPage from "./pages/ContactPage.jsx";
 import EventsPage from "./pages/EventsPage.jsx";
@@ -18,11 +19,15 @@ import {
   AdminOrdersView,
   AdminUsersView,
   AdminProductsView,
+  AdminMediaLibraryView,
   AdminProfileView,
   AdminWorkshopsView,
   AdminWorkshopsCalendarView,
 } from "./pages/AdminPage.jsx";
 import AdminLayout from "./pages/admin/AdminLayout.jsx";
+import AdminPosPage from "./pages/admin/AdminPosPage.jsx";
+import AdminPosCashUpPage from "./pages/admin/AdminPosCashUpPage.jsx";
+import AdminReportsPage from "./pages/admin/AdminReportsPage.jsx";
 import { CartProvider } from "./context/CartContext.jsx";
 import { ModalProvider } from "./context/ModalContext.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
@@ -43,6 +48,7 @@ function App() {
               <Route path="/cut-flowers" element={<CutFlowersPage />} />
               <Route path="/events" element={<EventsPage />} />
               <Route path="/products" element={<ProductsPage />} />
+              <Route path="/products/:productId" element={<ProductDetailPage />} />
               <Route path="/gallery" element={<GalleryPage />} />
               <Route path="/contact" element={<ContactPage />} />
               <Route path="/payment/success" element={<PaymentSuccessPage />} />
@@ -52,6 +58,7 @@ function App() {
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboardView />} />
               <Route path="products" element={<AdminProductsView />} />
+              <Route path="media" element={<AdminMediaLibraryView />} />
               <Route path="products/categories" element={<AdminProductsView />} />
               <Route path="workshops" element={<AdminWorkshopsView />} />
               <Route
@@ -61,6 +68,9 @@ function App() {
               <Route path="cut-flowers/classes" element={<AdminCutFlowerClassesView />} />
               <Route path="cut-flowers/bookings" element={<AdminCutFlowerBookingsView />} />
               <Route path="events" element={<AdminEventsView />} />
+              <Route path="pos" element={<AdminPosPage />} />
+              <Route path="pos/cash-up" element={<AdminPosCashUpPage />} />
+              <Route path="reports" element={<AdminReportsPage />} />
               <Route path="users" element={<AdminUsersView />} />
               <Route path="orders" element={<AdminOrdersView />} />
               <Route path="profile" element={<AdminProfileView />} />

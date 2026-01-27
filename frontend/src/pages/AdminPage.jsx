@@ -4,16 +4,18 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 import Reveal from "../components/Reveal.jsx";
-import { read, utils } from "xlsx";
+import { read, utils, writeFile } from "xlsx";
 import { useAdminData } from "../context/AdminDataContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
@@ -58,29 +60,56 @@ function ConfirmDialog({
           </button>
         </div>
       </div>
-      <ConfirmDialog
-        open={activeTab === "categories" && Boolean(pendingCategoryDelete)}
-        title={`Delete ${pendingCategoryDelete?.name || "category"}?`}
-        message="This category will be removed from the Shop menu. Update products that still use it before deleting."
-        confirmLabel="Delete category"
-        busy={categorySaving}
-        onConfirm={handleConfirmDeleteCategory}
-        onCancel={() => setPendingCategoryDelete(null)}
-      />
     </div>
   );
 }
 
 const INITIAL_PRODUCT_FORM = {
-  name: "",
-  description: "",
+  title: "",
+  sku: "",
   price: "",
-  image: "",
-  categoryId: "",
-  category: "",
+  salePrice: "",
+  slug: "",
+  stockStatus: "in_stock",
+  stockQuantity: "",
+  categoryIds: [],
+  tagIds: [],
+  shortDescription: "",
+  longDescription: "",
+  mainImage: "",
+  galleryImages: [],
+  videoEmbed: "",
+  sunlight: "",
+  soilType: "",
+  watering: "",
+  climate: "",
+  plantingDepth: "",
+  plantingSpacing: "",
+  bestPlantingTime: "",
+  bloomPeriod: "",
+  flowerColor: "",
+  matureHeight: "",
+  pestIssues: "",
+  diseaseInfo: "",
+  propagation: "",
+  companions: "",
+  metaTitle: "",
+  metaDescription: "",
+  metaKeywords: "",
+  shippingWeight: "",
+  dimensions: {
+    width: "",
+    height: "",
+    depth: "",
+  },
+  countryOfOrigin: "",
+  deliveryInfo: "",
+  relatedProductIds: [],
+  upsellProductIds: [],
+  crossSellProductIds: [],
   status: "live",
-  quantity: "1",
-  forceOutOfStock: false,
+  hasVariants: false,
+  variants: [],
   featured: false,
 };
 
@@ -117,6 +146,12 @@ const createCutFlowerOption = () => ({
   price: "",
   minAttendees: "",
   isExtra: false,
+});
+
+const createProductVariant = () => ({
+  id: `product-variant-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+  label: "",
+  price: "",
 });
 
 const EVENT_REPEAT_WEEKDAYS = [
@@ -192,6 +227,7 @@ const COURIER_OPTIONS = [
 ];
 const ADMIN_PAGE_SIZE = 100;
 const MAX_FEATURED_PRODUCTS = 4;
+const MAX_PRODUCT_IMAGES = 6;
 const bookingDateFormatter = new Intl.DateTimeFormat("en-ZA", {
   dateStyle: "medium",
   timeStyle: "short",
@@ -261,6 +297,25 @@ const IconTrash = ({ title = "Delete", ...props }) => (
     <path d="M14 11v6" />
     <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" />
     <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+  </svg>
+);
+
+const IconCopy = ({ title = "Copy link", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <rect x="9" y="9" width="11" height="11" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
   </svg>
 );
 
@@ -419,8 +474,31 @@ const slugifyId = (value = "") =>
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
 
+const generateSku = (title = "", slug = "") => {
+  const base = slugifyId(title || slug);
+  if (base) return base.toUpperCase();
+  return `PROD-${Date.now().toString(36).toUpperCase()}`;
+};
+
 const stripSheetLinkLabel = (value = "") =>
   value.toString().replace(/\s+link\s*$/i, "").trim();
+
+const stripHtml = (value = "") =>
+  value
+    .toString()
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const sanitizePlainText = (value = "") => {
+  const raw = value.toString();
+  if (!raw) return "";
+  const withLineBreaks = raw
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<[^>]*>/g, "");
+  return withLineBreaks.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+};
 
 const parseSheetPriceValue = (value) => {
   if (value === undefined || value === null || value === "") return "";
@@ -692,6 +770,7 @@ export function AdminProductsView() {
     storage,
     products,
     productCategories,
+    productTags,
     inventoryEnabled,
     inventoryLoading,
     inventoryError,
@@ -706,21 +785,44 @@ export function AdminProductsView() {
   const [productForm, setProductForm] = useState(INITIAL_PRODUCT_FORM);
   const [editingProductId, setEditingProductId] = useState(null);
   const [isProductModalOpen, setProductModalOpen] = useState(false);
-  const [productImageFile, setProductImageFile] = useState(null);
-  const [productImagePreview, setProductImagePreview] = useState("");
+  const [productMainImageFile, setProductMainImageFile] = useState(null);
+  const [productMainImagePreview, setProductMainImagePreview] = useState("");
+  const [productGalleryFiles, setProductGalleryFiles] = useState([]);
+  const [productGalleryPreviews, setProductGalleryPreviews] = useState([]);
   const [productError, setProductError] = useState(null);
-  const [categoryForm, setCategoryForm] = useState({ name: "" });
+  const [categoryForm, setCategoryForm] = useState({ name: "", description: "", coverImage: "" });
   const [categoryError, setCategoryError] = useState(null);
   const [categorySaving, setCategorySaving] = useState(false);
   const [categoryStatusMessage, setCategoryStatusMessage] = useState(null);
+  const [categoryCoverFile, setCategoryCoverFile] = useState(null);
+  const [categoryCoverPreview, setCategoryCoverPreview] = useState("");
+  const categoryCoverPreviewUrlRef = useRef(null);
+  const [tagForm, setTagForm] = useState({ name: "" });
+  const [tagError, setTagError] = useState(null);
+  const [tagSaving, setTagSaving] = useState(false);
+  const [tagStatusMessage, setTagStatusMessage] = useState(null);
   const [pendingCategoryDelete, setPendingCategoryDelete] = useState(null);
   const [productSaving, setProductSaving] = useState(false);
   const [productPage, setProductPage] = useState(0);
-  const productPreviewUrlRef = useRef(null);
+  const productMainPreviewUrlRef = useRef(null);
+  const productGalleryPreviewUrlRef = useRef([]);
   const productImportInputRef = useRef(null);
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
+  const [mediaLibraryMode, setMediaLibraryMode] = useState("main");
+  const [mediaLibrarySelection, setMediaLibrarySelection] = useState([]);
   const [productImporting, setProductImporting] = useState(false);
+  const [productImportMessage, setProductImportMessage] = useState(null);
+  const [productImportError, setProductImportError] = useState(null);
   const [featuredUpdatingId, setFeaturedUpdatingId] = useState(null);
   const uploadAsset = useUploadAsset(storage);
+  const {
+    items: mediaItems,
+    status: mediaStatus,
+    error: mediaItemsError,
+  } = useFirestoreCollection("productMedia", {
+    orderByField: "createdAt",
+    orderDirection: "desc",
+  });
   const categoryOptions = useMemo(
     () =>
       productCategories
@@ -735,6 +837,19 @@ export function AdminProductsView() {
         })
         .filter(Boolean),
     [productCategories],
+  );
+  const tagOptions = useMemo(
+    () =>
+      productTags
+        .map((tag) => {
+          const name = (tag.name || tag.title || tag.label || tag.id || "").toString().trim();
+          if (!name) return null;
+          const slug = (tag.slug || tag.id || name).toString().trim();
+          const id = (tag.id || slug).toString().trim();
+          return { id, name, slug };
+        })
+        .filter(Boolean),
+    [productTags],
   );
   const categoryLookup = useMemo(() => {
     const map = new Map();
@@ -757,9 +872,20 @@ export function AdminProductsView() {
   const categoryUsage = useMemo(() => {
     const usage = new Map();
     products.forEach((product) => {
-      const resolved = resolveCategory(product.categoryId || product.category);
-      if (!resolved?.id) return;
-      usage.set(resolved.id, (usage.get(resolved.id) || 0) + 1);
+      const categoryIds = Array.isArray(product.category_ids)
+        ? product.category_ids
+        : Array.isArray(product.categoryIds)
+        ? product.categoryIds
+        : product.categoryId
+        ? [product.categoryId]
+        : product.category
+        ? [product.category]
+        : [];
+      categoryIds.forEach((id) => {
+        const resolved = resolveCategory(id);
+        if (!resolved?.id) return;
+        usage.set(resolved.id, (usage.get(resolved.id) || 0) + 1);
+      });
     });
     return usage;
   }, [products, categoryLookup]);
@@ -768,8 +894,9 @@ export function AdminProductsView() {
     [products]
   );
   const currentStockStatus = getStockStatus({
-    quantity: productForm.quantity,
-    forceOutOfStock: productForm.forceOutOfStock,
+    quantity: productForm.stockQuantity,
+    forceOutOfStock: productForm.stockStatus === "out_of_stock",
+    status: productForm.stockStatus,
   });
 
   useEffect(() => {
@@ -784,10 +911,23 @@ export function AdminProductsView() {
     return () => clearTimeout(timeout);
   }, [categoryStatusMessage]);
 
+  useEffect(() => {
+    if (!tagStatusMessage) return undefined;
+    const timeout = setTimeout(() => setTagStatusMessage(null), 3500);
+    return () => clearTimeout(timeout);
+  }, [tagStatusMessage]);
+
   useEffect(
     () => () => {
-      if (productPreviewUrlRef.current) {
-        URL.revokeObjectURL(productPreviewUrlRef.current);
+      if (productMainPreviewUrlRef.current) {
+        URL.revokeObjectURL(productMainPreviewUrlRef.current);
+        productMainPreviewUrlRef.current = null;
+      }
+      if (Array.isArray(productGalleryPreviewUrlRef.current)) {
+        productGalleryPreviewUrlRef.current.forEach((url) => {
+          URL.revokeObjectURL(url);
+        });
+        productGalleryPreviewUrlRef.current = [];
       }
     },
     []
@@ -804,14 +944,13 @@ export function AdminProductsView() {
   }, [products, productPage]);
 
   const openProductModal = () => {
-    const defaultCategory = categoryOptions[0] || null;
     setProductForm({
       ...INITIAL_PRODUCT_FORM,
-      categoryId: defaultCategory?.id || "",
-      category: defaultCategory?.name || "",
     });
-    setProductImageFile(null);
-    setProductImagePreview("");
+    setProductMainImageFile(null);
+    setProductMainImagePreview("");
+    setProductGalleryFiles([]);
+    setProductGalleryPreviews([]);
     setEditingProductId(null);
     setProductError(null);
     setProductModalOpen(true);
@@ -819,63 +958,390 @@ export function AdminProductsView() {
 
   const closeProductModal = () => {
     setProductModalOpen(false);
-    setProductImageFile(null);
-    setProductImagePreview("");
+    if (productMainPreviewUrlRef.current) {
+      URL.revokeObjectURL(productMainPreviewUrlRef.current);
+      productMainPreviewUrlRef.current = null;
+    }
+    if (Array.isArray(productGalleryPreviewUrlRef.current)) {
+      productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
+      productGalleryPreviewUrlRef.current = [];
+    }
+    setProductMainImageFile(null);
+    setProductMainImagePreview("");
+    setProductGalleryFiles([]);
+    setProductGalleryPreviews([]);
     setEditingProductId(null);
     setProductError(null);
     setProductSaving(false);
   };
 
-  const handleProductImageChange = (event) => {
+  const handleMainImageChange = (event) => {
     const file = event.target.files?.[0] ?? null;
-    if (productPreviewUrlRef.current) {
-      URL.revokeObjectURL(productPreviewUrlRef.current);
-      productPreviewUrlRef.current = null;
+    if (productMainPreviewUrlRef.current) {
+      URL.revokeObjectURL(productMainPreviewUrlRef.current);
+      productMainPreviewUrlRef.current = null;
     }
-    if (file) {
-      if (file.size > 3 * 1024 * 1024) {
-        setProductError("Please choose an image smaller than 3MB.");
-        event.target.value = "";
-        return;
-      }
-      const preview = URL.createObjectURL(file);
-      productPreviewUrlRef.current = preview;
-      setProductImageFile(file);
-      setProductImagePreview(preview);
+    if (!file) {
+      setProductMainImageFile(null);
+      setProductMainImagePreview(productForm.mainImage || "");
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setProductError("Please choose an image smaller than 3MB.");
+      event.target.value = "";
+      return;
+    }
+    const preview = URL.createObjectURL(file);
+    productMainPreviewUrlRef.current = preview;
+    setProductMainImageFile(file);
+    setProductMainImagePreview(preview);
+    setProductForm((prev) => ({ ...prev, mainImage: "" }));
+  };
+
+  const handleGalleryImagesChange = (event) => {
+    const files = Array.from(event.target.files ?? []);
+    if (Array.isArray(productGalleryPreviewUrlRef.current)) {
+      productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
+      productGalleryPreviewUrlRef.current = [];
+    }
+
+    const existingUrls = Array.isArray(productForm.galleryImages)
+      ? productForm.galleryImages.filter(Boolean)
+      : [];
+    if (existingUrls.length + files.length > MAX_PRODUCT_IMAGES) {
+      setProductError(`Please select up to ${MAX_PRODUCT_IMAGES} images total.`);
+      event.target.value = "";
+      return;
+    }
+
+    const oversized = files.find((file) => file.size > 3 * 1024 * 1024);
+    if (oversized) {
+      setProductError("Please choose images smaller than 3MB.");
+      event.target.value = "";
+      return;
+    }
+
+    if (files.length) {
+      const previews = files.map((file) => URL.createObjectURL(file));
+      productGalleryPreviewUrlRef.current = previews;
+      setProductGalleryFiles(files);
+      setProductGalleryPreviews([...existingUrls, ...previews]);
     } else {
-      setProductImageFile(null);
-      setProductImagePreview(productForm.image || "");
+      setProductGalleryFiles([]);
+      setProductGalleryPreviews(existingUrls);
     }
   };
 
-  const handleEditProduct = (product) => {
-    const resolvedCategory = resolveCategory(product.categoryId || product.category);
-    const resolvedCategoryId =
-      resolvedCategory?.id || (product.categoryId || "").toString().trim();
-    const resolvedCategoryLabel =
-      resolvedCategory?.name || (product.category || "").toString().trim();
-    setProductForm({
-      name: product.name || product.title || "",
-      description: product.description || "",
-      price:
-        product.price === undefined || product.price === null
-          ? ""
-          : String(product.price),
-      image: product.image || "",
-      categoryId: resolvedCategoryId,
-      category: resolvedCategoryLabel,
-      status: product.status || "draft",
-      quantity:
-        product.quantity === undefined || product.quantity === null
-          ? "1"
-          : String(product.quantity),
-      forceOutOfStock: Boolean(
-        product.forceOutOfStock || product.outOfStockOverride || product.outOfStock
+  const handleCategoryCoverChange = (event) => {
+    const file = event.target.files?.[0] ?? null;
+    if (categoryCoverPreviewUrlRef.current) {
+      URL.revokeObjectURL(categoryCoverPreviewUrlRef.current);
+      categoryCoverPreviewUrlRef.current = null;
+    }
+    if (!file) {
+      setCategoryCoverFile(null);
+      setCategoryCoverPreview(categoryForm.coverImage || "");
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setCategoryError("Please choose an image smaller than 3MB.");
+      event.target.value = "";
+      return;
+    }
+    const preview = URL.createObjectURL(file);
+    categoryCoverPreviewUrlRef.current = preview;
+    setCategoryCoverFile(file);
+    setCategoryCoverPreview(preview);
+    setCategoryForm((prev) => ({ ...prev, coverImage: "" }));
+  };
+
+  const uploadProductMedia = async (file) => {
+    if (!storage) throw new Error("Firebase Storage is not configured.");
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "-");
+    const storagePath = `product-media/${Date.now()}-${sanitizedName}`;
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file, { contentType: file.type });
+    const url = await getDownloadURL(storageRef);
+    if (db) {
+      try {
+        await addDoc(collection(db, "productMedia"), {
+          name: file.name,
+          url,
+          storagePath,
+          size: file.size,
+          contentType: file.type,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        console.warn("Unable to add image to library", error);
+      }
+    }
+    return url;
+  };
+
+  const openMediaLibrary = (mode) => {
+    setMediaLibraryMode(mode);
+    if (mode === "gallery") {
+      const existingUrls = Array.isArray(productForm.galleryImages)
+        ? productForm.galleryImages.filter(Boolean)
+        : [];
+      setMediaLibrarySelection(existingUrls);
+    } else if (mode === "category") {
+      setMediaLibrarySelection(categoryForm.coverImage ? [categoryForm.coverImage] : []);
+    } else {
+      setMediaLibrarySelection(productForm.mainImage ? [productForm.mainImage] : []);
+    }
+    setMediaLibraryOpen(true);
+  };
+
+  const closeMediaLibrary = () => {
+    setMediaLibraryOpen(false);
+  };
+
+  const handleMediaLibrarySelect = (url) => {
+    if (!url) return;
+    if (mediaLibraryMode === "main") {
+      if (productMainPreviewUrlRef.current) {
+        URL.revokeObjectURL(productMainPreviewUrlRef.current);
+        productMainPreviewUrlRef.current = null;
+      }
+      setProductMainImageFile(null);
+      setProductMainImagePreview(url);
+      setProductForm((prev) => ({ ...prev, mainImage: url }));
+      setMediaLibraryOpen(false);
+      return;
+    }
+    if (mediaLibraryMode === "category") {
+      if (categoryCoverPreviewUrlRef.current) {
+        URL.revokeObjectURL(categoryCoverPreviewUrlRef.current);
+        categoryCoverPreviewUrlRef.current = null;
+      }
+      setCategoryCoverFile(null);
+      setCategoryCoverPreview(url);
+      setCategoryForm((prev) => ({ ...prev, coverImage: url }));
+      setMediaLibraryOpen(false);
+      return;
+    }
+
+    setMediaLibrarySelection((prev) => {
+      if (prev.includes(url)) {
+        return prev.filter((item) => item !== url);
+      }
+      return [...prev, url];
+    });
+  };
+
+  const applyMediaLibrarySelection = () => {
+    if (mediaLibraryMode !== "gallery") {
+      setMediaLibraryOpen(false);
+      return;
+    }
+    const existingUrls = Array.isArray(productForm.galleryImages)
+      ? productForm.galleryImages.filter(Boolean)
+      : [];
+    const merged = Array.from(new Set([...existingUrls, ...mediaLibrarySelection])).filter(Boolean);
+    const maxUrls = Math.max(0, MAX_PRODUCT_IMAGES - productGalleryFiles.length);
+    const limited = merged.slice(0, maxUrls);
+    if (merged.length > maxUrls) {
+      setProductError(`You can add up to ${MAX_PRODUCT_IMAGES} images total.`);
+    }
+    setProductForm((prev) => ({ ...prev, galleryImages: limited }));
+    const filePreviews = Array.isArray(productGalleryPreviewUrlRef.current)
+      ? productGalleryPreviewUrlRef.current
+      : [];
+    setProductGalleryPreviews([...limited, ...filePreviews]);
+    setMediaLibraryOpen(false);
+  };
+
+  const handleToggleHasVariants = (checked) => {
+    setProductForm((prev) => {
+      if (!checked) {
+        return { ...prev, hasVariants: false, variants: [] };
+      }
+      const nextVariants =
+        prev.variants && prev.variants.length > 0 ? prev.variants : [createProductVariant()];
+      return { ...prev, hasVariants: true, variants: nextVariants };
+    });
+  };
+
+  const handleAddProductVariant = () => {
+    setProductForm((prev) => ({
+      ...prev,
+      hasVariants: true,
+      variants: [...(prev.variants || []), createProductVariant()],
+    }));
+  };
+
+  const handleProductVariantChange = (variantId, field, value) => {
+    setProductForm((prev) => ({
+      ...prev,
+      variants: (prev.variants || []).map((variant) =>
+        variant.id === variantId ? { ...variant, [field]: value } : variant,
       ),
+    }));
+  };
+
+  const handleRemoveProductVariant = (variantId) => {
+    setProductForm((prev) => ({
+      ...prev,
+      variants: (prev.variants || []).filter((variant) => variant.id !== variantId),
+    }));
+  };
+
+  const handleSingleSelectChange = (field, event) => {
+    const value = event.target.value;
+    setProductForm((prev) => ({
+      ...prev,
+      [field]: value ? [value] : [],
+    }));
+  };
+
+  const handleEditProduct = (product) => {
+    const resolvedCategoryIds = Array.isArray(product.category_ids)
+      ? product.category_ids
+      : Array.isArray(product.categoryIds)
+      ? product.categoryIds
+      : product.categoryId
+      ? [product.categoryId]
+      : product.category
+      ? [product.category]
+      : [];
+    const normalizedCategoryIds = resolvedCategoryIds
+      .map((value) => resolveCategory(value)?.id || value)
+      .filter(Boolean)
+      .map((value) => value.toString());
+    const normalizedTagIds = Array.isArray(product.tag_ids)
+      ? product.tag_ids
+      : Array.isArray(product.tagIds)
+      ? product.tagIds
+      : [];
+    const existingGallery = Array.isArray(product.gallery_images)
+      ? product.gallery_images
+      : Array.isArray(product.galleryImages)
+      ? product.galleryImages
+      : Array.isArray(product.images)
+      ? product.images
+      : [];
+    const fallbackGallery = product.image ? [product.image] : [];
+    const galleryImages = (existingGallery.length ? existingGallery : fallbackGallery)
+      .filter(Boolean)
+      .slice(0, MAX_PRODUCT_IMAGES);
+    const mainImage =
+      product.main_image ||
+      product.mainImage ||
+      galleryImages[0] ||
+      product.image ||
+      "";
+    const priceValue =
+      product.price === undefined || product.price === null ? "" : String(product.price);
+    const salePriceValue =
+      product.sale_price === undefined || product.sale_price === null
+        ? product.salePrice === undefined || product.salePrice === null
+          ? ""
+          : String(product.salePrice)
+        : String(product.sale_price);
+    const stockStatusValue =
+      product.stock_status ||
+      product.stockStatus ||
+      (product.forceOutOfStock ? "out_of_stock" : "in_stock");
+    const stockQuantityValue =
+      product.stock_quantity === undefined || product.stock_quantity === null
+        ? product.stockQuantity === undefined || product.stockQuantity === null
+          ? product.quantity === undefined || product.quantity === null
+            ? ""
+            : String(product.quantity)
+          : String(product.stockQuantity)
+        : String(product.stock_quantity);
+    setProductForm({
+      title: product.title || product.name || "",
+      sku: product.sku || "",
+      price: priceValue,
+      salePrice: salePriceValue,
+      slug: product.slug || slugifyId(product.title || product.name || ""),
+      stockStatus: stockStatusValue,
+      stockQuantity: stockQuantityValue,
+      categoryIds: normalizedCategoryIds.slice(0, 1),
+      tagIds: normalizedTagIds.map((value) => value.toString()).slice(0, 1),
+      shortDescription: product.short_description || product.shortDescription || product.description || "",
+      longDescription: product.long_description || product.longDescription || "",
+      mainImage,
+      galleryImages,
+      videoEmbed: product.video_embed || product.videoEmbed || "",
+      sunlight: product.sunlight || "",
+      soilType: product.soil_type || product.soilType || "",
+      watering: product.watering || "",
+      climate: product.climate || "",
+      plantingDepth: product.planting_depth || product.plantingDepth || "",
+      plantingSpacing: product.planting_spacing || product.plantingSpacing || "",
+      bestPlantingTime: product.best_planting_time || product.bestPlantingTime || "",
+      bloomPeriod: product.bloom_period || product.bloomPeriod || "",
+      flowerColor: product.flower_color || product.flowerColor || "",
+      matureHeight: product.mature_height || product.matureHeight || "",
+      pestIssues: product.pest_issues || product.pestIssues || "",
+      diseaseInfo: product.disease_info || product.diseaseInfo || "",
+      propagation: product.propagation || "",
+      companions: product.companions || "",
+      metaTitle: product.meta_title || product.metaTitle || "",
+      metaDescription: product.meta_description || product.metaDescription || "",
+      metaKeywords: product.meta_keywords || product.metaKeywords || "",
+      shippingWeight: product.shipping_weight || product.shippingWeight || "",
+      dimensions: {
+        width: product.dimensions?.width || "",
+        height: product.dimensions?.height || "",
+        depth: product.dimensions?.depth || "",
+      },
+      countryOfOrigin: product.country_of_origin || product.countryOfOrigin || "",
+      deliveryInfo: product.delivery_info || product.deliveryInfo || "",
+      relatedProductIds: (
+        Array.isArray(product.related_product_ids)
+          ? product.related_product_ids
+          : Array.isArray(product.relatedProductIds)
+          ? product.relatedProductIds
+          : []
+      ).slice(0, 1),
+      upsellProductIds: (
+        Array.isArray(product.upsell_product_ids)
+          ? product.upsell_product_ids
+          : Array.isArray(product.upsellProductIds)
+          ? product.upsellProductIds
+          : []
+      ).slice(0, 1),
+      crossSellProductIds: (
+        Array.isArray(product.cross_sell_product_ids)
+          ? product.cross_sell_product_ids
+          : Array.isArray(product.crossSellProductIds)
+          ? product.crossSellProductIds
+          : []
+      ).slice(0, 1),
+      status: product.status || "draft",
+      hasVariants: Array.isArray(product.variants) && product.variants.length > 0,
+      variants: Array.isArray(product.variants)
+        ? product.variants.map((variant) => ({
+            id:
+              variant.id ||
+              `product-variant-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            label: (variant.label || variant.name || "").toString(),
+            price:
+              variant.price === undefined || variant.price === null
+                ? ""
+                : String(variant.price),
+          }))
+        : [],
       featured: Boolean(product.featured),
     });
-    setProductImagePreview(product.image || "");
-    setProductImageFile(null);
+    if (productMainPreviewUrlRef.current) {
+      URL.revokeObjectURL(productMainPreviewUrlRef.current);
+      productMainPreviewUrlRef.current = null;
+    }
+    if (Array.isArray(productGalleryPreviewUrlRef.current)) {
+      productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
+      productGalleryPreviewUrlRef.current = [];
+    }
+    setProductMainImageFile(null);
+    setProductMainImagePreview(mainImage);
+    setProductGalleryFiles([]);
+    setProductGalleryPreviews(galleryImages);
     setEditingProductId(product.id);
     setProductError(null);
     setProductModalOpen(true);
@@ -892,11 +1358,12 @@ export function AdminProductsView() {
     if (!file) return;
     event.target.value = "";
     if (!db || !inventoryEnabled) {
-      setProductError("You do not have permission to import products.");
+      setProductImportError("You do not have permission to import products.");
       return;
     }
     setProductImporting(true);
-    setProductError(null);
+    setProductImportError(null);
+    setProductImportMessage("Importing products...");
     try {
       const buffer = await file.arrayBuffer();
       const workbook = read(buffer, { type: "array" });
@@ -904,12 +1371,13 @@ export function AdminProductsView() {
         throw new Error("No sheets were found in that spreadsheet.");
       }
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = utils.sheet_to_json(sheet, { range: 1, defval: "" });
+      const rows = utils.sheet_to_json(sheet, { defval: "", raw: false });
       if (!rows.length) {
         throw new Error("No product rows detected. Check that the sheet has a header row followed by products.");
       }
       const usedIds = new Set();
       const categoryCache = new Map();
+      const tagCache = new Map();
       const existingCategorySlugs = new Set(
         categoryOptions
           .map((category) => (category.id || "").toString().toLowerCase())
@@ -920,6 +1388,24 @@ export function AdminProductsView() {
           .map((category) => (category.name || "").toString().toLowerCase())
           .filter(Boolean),
       );
+      const existingTagSlugs = new Set(
+        tagOptions.map((tag) => (tag.id || "").toString().toLowerCase()).filter(Boolean),
+      );
+      const existingTagNames = new Set(
+        tagOptions.map((tag) => (tag.name || "").toString().toLowerCase()).filter(Boolean),
+      );
+      const getCellValue = (row, keys) => {
+        for (const key of keys) {
+          if (row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
+        }
+        return "";
+      };
+      const parseListValue = (value) =>
+        value
+          .toString()
+          .split(/[,;]+/)
+          .map((entry) => entry.trim())
+          .filter(Boolean);
       const ensureCategory = async (rawValue) => {
         const cleaned = (rawValue || "").toString().trim();
         if (!cleaned) return null;
@@ -953,17 +1439,61 @@ export function AdminProductsView() {
         }
         return null;
       };
+      const ensureTag = async (rawValue) => {
+        const cleaned = (rawValue || "").toString().trim();
+        if (!cleaned) return null;
+        const cacheKey = cleaned.toLowerCase();
+        if (tagCache.has(cacheKey)) return tagCache.get(cacheKey);
+        const existing = tagOptions.find(
+          (tag) =>
+            tag.id?.toString().toLowerCase() === cacheKey ||
+            tag.slug?.toString().toLowerCase() === cacheKey ||
+            tag.name?.toString().toLowerCase() === cacheKey,
+        );
+        if (existing) {
+          tagCache.set(cacheKey, existing);
+          return existing;
+        }
+        const slug = slugifyId(cleaned);
+        if (slug) {
+          const slugKey = slug.toLowerCase();
+          if (!existingTagSlugs.has(slugKey) && !existingTagNames.has(cacheKey)) {
+            await setDoc(
+              doc(collection(db, "productTags"), slug),
+              {
+                name: cleaned,
+                slug,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true },
+            );
+            existingTagSlugs.add(slugKey);
+            existingTagNames.add(cacheKey);
+          }
+          const createdTag = { id: slug, name: cleaned, slug };
+          tagCache.set(cacheKey, createdTag);
+          return createdTag;
+        }
+        return null;
+      };
       let importedCount = 0;
       /* eslint-disable no-await-in-loop */
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
-        const rawName = row.Name || row.name || row["Product Name"] || row[0] || "";
-        const cleanedName = stripSheetLinkLabel(rawName);
-        if (!cleanedName) continue;
-        const rawBarcode = (row.Barcode || row.barcode || "").toString().trim();
+        const rawTitle =
+          getCellValue(row, ["Title", "Name", "Product Name", "title", "name"]) || row[0] || "";
+        const cleanedTitle = stripSheetLinkLabel(rawTitle);
+        if (!cleanedTitle) continue;
+        const lowerTitle = cleanedTitle.toLowerCase();
+        const rawPriceValue = parseSheetPriceValue(getCellValue(row, ["Price", "price"]) ?? "");
+        if ((lowerTitle === "notes" || lowerTitle === "notes:") && rawPriceValue === "") {
+          continue;
+        }
+        const rawBarcode = (getCellValue(row, ["Barcode", "barcode"]) || "").toString().trim();
         const barcodeId = slugifyId(rawBarcode);
         const baseId =
-          barcodeId ? `sku-${barcodeId}` : slugifyId(cleanedName) || `imported-${index + 1}`;
+          barcodeId ? `sku-${barcodeId}` : slugifyId(cleanedTitle) || `imported-${index + 1}`;
         let docId = baseId;
         if (usedIds.has(docId)) {
           let suffix = 2;
@@ -974,22 +1504,147 @@ export function AdminProductsView() {
         }
         usedIds.add(docId);
 
-        const qtyRaw = row.QTY ?? row.Qty ?? row.qty ?? 0;
+        const qtyRaw =
+          getCellValue(row, ["Stock Quantity", "Stock Qty", "QTY", "Qty", "qty"]) ?? 0;
         const qtyNumber = Number(qtyRaw);
-        const quantity = Number.isFinite(qtyNumber) ? Math.max(0, Math.floor(qtyNumber)) : 0;
-        const statusInput = (row.Status || row.status || "live").toString().trim().toLowerCase();
+        const quantity = Number.isFinite(qtyNumber) ? Math.max(0, Math.floor(qtyNumber)) : null;
+        const statusInput = (getCellValue(row, ["Status", "status"]) || "live")
+          .toString()
+          .trim()
+          .toLowerCase();
         const status = ["draft", "live", "archived"].includes(statusInput)
           ? statusInput
           : "live";
-        const description = (row.Description || row.description || cleanedName).toString().trim();
-        const categoryInput = (row.Category || row.category || "").toString().trim();
+        const shortDescription = sanitizePlainText(
+          getCellValue(row, ["Short Description", "Description", "short_description", "description"]) ||
+            cleanedTitle,
+        );
+        const longDescription = sanitizePlainText(
+          getCellValue(row, ["Long Description", "long_description", "Long description"]) || "",
+        );
+        const categoryInput = (getCellValue(row, ["Category", "category"]) || "").toString().trim();
         const fallbackCategory = categoryOptions[0]?.name || "Product";
         const categoryLabel = categoryInput || fallbackCategory;
         const categoryRecord = await ensureCategory(categoryLabel);
         const categoryName = categoryRecord?.name || categoryLabel;
         const categoryId = categoryRecord?.id || slugifyId(categoryName) || "product";
-        const priceValue = parseSheetPriceValue(row.Price ?? row.price ?? "");
+        const categorySlug = categoryRecord?.slug || slugifyId(categoryName) || categoryId;
+        const tagInput = (getCellValue(row, ["Tag", "tag"]) || "").toString().trim();
+        const tagRecord = tagInput ? await ensureTag(tagInput) : null;
+        const tagId = tagRecord?.id || (tagInput ? slugifyId(tagInput) : "");
+        const priceValue = rawPriceValue;
         const normalizedPrice = priceValue === "" ? null : priceValue;
+        const salePriceValue = parseSheetPriceValue(getCellValue(row, ["Sale Price", "sale_price", "Sale"]) ?? "");
+        const normalizedSalePrice = salePriceValue === "" ? null : salePriceValue;
+        const stockStatusInput = (getCellValue(row, ["Stock Status", "stock_status"]) || "")
+          .toString()
+          .trim()
+          .toLowerCase();
+        const normalizedStockStatus = ["in_stock", "out_of_stock", "preorder"].includes(stockStatusInput)
+          ? stockStatusInput
+          : quantity === null
+          ? "in_stock"
+          : quantity <= 0
+          ? "out_of_stock"
+          : "in_stock";
+        const resolvedQuantity =
+          quantity === null
+            ? normalizedStockStatus === "out_of_stock"
+              ? 0
+              : null
+            : quantity;
+        const slugInput = (getCellValue(row, ["Slug", "slug"]) || "").toString().trim();
+        const slugValue = slugInput || slugifyId(cleanedTitle) || docId;
+        const mainImageValue = (getCellValue(row, ["Main Image URL", "Main Image", "main_image"]) || "")
+          .toString()
+          .trim();
+        const galleryInput = getCellValue(row, ["Gallery Images", "gallery_images"]) || "";
+        const galleryImages = parseListValue(galleryInput)
+          .map((value) => value.toString().trim())
+          .filter(Boolean)
+          .slice(0, MAX_PRODUCT_IMAGES);
+        const videoValue = (getCellValue(row, ["Video URL", "Video", "video_embed"]) || "")
+          .toString()
+          .trim();
+        const sunlightValue = (getCellValue(row, ["Sunlight", "sunlight"]) || "").toString().trim();
+        const soilTypeValue = (getCellValue(row, ["Soil Type", "soil_type"]) || "").toString().trim();
+        const wateringValue = (getCellValue(row, ["Watering", "watering"]) || "").toString().trim();
+        const climateValue = (getCellValue(row, ["Climate", "climate"]) || "").toString().trim();
+        const plantingDepthValue = (getCellValue(row, ["Planting Depth", "planting_depth"]) || "")
+          .toString()
+          .trim();
+        const plantingSpacingValue = (getCellValue(row, ["Planting Spacing", "planting_spacing"]) || "")
+          .toString()
+          .trim();
+        const bestPlantingTimeValue = (getCellValue(row, ["Best Planting Time", "best_planting_time"]) || "")
+          .toString()
+          .trim();
+        const bloomPeriodValue = (getCellValue(row, ["Bloom Period", "bloom_period"]) || "")
+          .toString()
+          .trim();
+        const flowerColorValue = (getCellValue(row, ["Flower Color", "flower_color"]) || "")
+          .toString()
+          .trim();
+        const matureHeightValue = (getCellValue(row, ["Mature Height", "mature_height"]) || "")
+          .toString()
+          .trim();
+        const pestIssuesValue = (getCellValue(row, ["Pest Issues", "pest_issues"]) || "")
+          .toString()
+          .trim();
+        const diseaseInfoValue = (getCellValue(row, ["Disease Info", "disease_info"]) || "")
+          .toString()
+          .trim();
+        const propagationValue = (getCellValue(row, ["Propagation", "propagation"]) || "")
+          .toString()
+          .trim();
+        const companionsValue = (getCellValue(row, ["Companions", "companions"]) || "")
+          .toString()
+          .trim();
+        const featuredInput = (getCellValue(row, ["Featured", "featured"]) || "")
+          .toString()
+          .trim()
+          .toLowerCase();
+        const featured = ["yes", "true", "1"].includes(featuredInput);
+
+        const variantLabels = parseListValue(getCellValue(row, ["Variant Labels", "Variants"]) || "");
+        const variantPrices = parseListValue(getCellValue(row, ["Variant Prices", "Variant Price"]) || "");
+        let variants = variantLabels
+          .map((label, idx) => {
+            const cleanedLabel = label.toString().trim();
+            if (!cleanedLabel) return null;
+            const rawPrice = variantPrices[idx] ?? "";
+            const parsedPrice = parseSheetPriceValue(rawPrice);
+            return {
+              id: slugifyId(cleanedLabel) || `variant-${idx + 1}`,
+              label: cleanedLabel,
+              price: parsedPrice === "" ? null : parsedPrice,
+            };
+          })
+          .filter(Boolean);
+
+        if (!variants.length) {
+          const fallbackVariants = [];
+          for (let i = 1; i <= 5; i += 1) {
+            const label = getCellValue(row, [`Variant ${i} Label`, `Variant ${i}`]);
+            const price = getCellValue(row, [`Variant ${i} Price`]);
+            if (!label) continue;
+            const parsedPrice = parseSheetPriceValue(price);
+            fallbackVariants.push({
+              id: slugifyId(label) || `variant-${i}`,
+              label: label.toString().trim(),
+              price: parsedPrice === "" ? null : parsedPrice,
+            });
+          }
+          variants = fallbackVariants;
+        }
+
+        const seoDescriptionSource = shortDescription || longDescription;
+        const metaTitle = cleanedTitle;
+        const metaDescription = seoDescriptionSource ? seoDescriptionSource.slice(0, 160) : "";
+        const keywordTokens = `${cleanedTitle} ${tagRecord?.name || ""}`.split(/\s+/).filter(Boolean);
+        const metaKeywords = Array.from(new Set(keywordTokens)).join(", ");
+        const skuValue = generateSku(cleanedTitle, slugValue);
+        const primaryImage = mainImageValue || galleryImages[0] || "";
 
         const docRef = doc(collection(db, "products"), docId);
         let docExists = false;
@@ -1000,16 +1655,50 @@ export function AdminProductsView() {
           console.warn("Unable to check existing product", docId, lookupError);
         }
         const payload = {
-          name: cleanedName,
-          title: cleanedName,
-          description,
+          name: cleanedTitle,
+          title: cleanedTitle,
+          slug: slugValue,
+          sku: skuValue,
+          description: shortDescription || longDescription,
+          short_description: shortDescription,
+          long_description: longDescription,
           price: normalizedPrice,
+          sale_price: normalizedSalePrice,
           category: categoryName,
           categoryId,
-          quantity,
+          categorySlug,
+          category_ids: categoryId ? [categoryId] : [],
+          tag_ids: tagId ? [tagId] : [],
+          main_image: primaryImage,
+          gallery_images: galleryImages,
+          video_embed: videoValue,
+          sunlight: sunlightValue,
+          soil_type: soilTypeValue,
+          watering: wateringValue,
+          climate: climateValue,
+          planting_depth: plantingDepthValue,
+          planting_spacing: plantingSpacingValue,
+          best_planting_time: bestPlantingTimeValue,
+          bloom_period: bloomPeriodValue,
+          flower_color: flowerColorValue,
+          mature_height: matureHeightValue,
+          pest_issues: pestIssuesValue,
+          disease_info: diseaseInfoValue,
+          propagation: propagationValue,
+          companions: companionsValue,
+          meta_title: metaTitle,
+          meta_description: metaDescription,
+          meta_keywords: metaKeywords,
+          stock_status: normalizedStockStatus,
+          stock_quantity: resolvedQuantity,
+          quantity: resolvedQuantity,
           status,
           barcode: rawBarcode || null,
-          forceOutOfStock: false,
+          forceOutOfStock: normalizedStockStatus === "out_of_stock",
+          variants,
+          featured,
+          image: primaryImage,
+          images: galleryImages,
           updatedAt: serverTimestamp(),
         };
         if (!docExists) {
@@ -1022,14 +1711,103 @@ export function AdminProductsView() {
       setStatusMessage(
         `Imported ${importedCount} product${importedCount === 1 ? "" : "s"} from spreadsheet.`,
       );
+      setProductImportMessage(
+        `Imported ${importedCount} product${importedCount === 1 ? "" : "s"} successfully.`,
+      );
     } catch (importError) {
       console.error(importError);
-      setProductError(
+      setProductImportError(
         importError.message || "We couldn’t import products from the selected spreadsheet.",
       );
+      setProductImportMessage(null);
     } finally {
       setProductImporting(false);
     }
+  };
+
+  const handleDownloadProductTemplate = () => {
+    const header = [
+      "Title",
+      "Slug",
+      "Price",
+      "Sale Price",
+      "Stock Status",
+      "Stock Quantity",
+      "Category",
+      "Tag",
+      "Short Description",
+      "Long Description",
+      "Main Image URL",
+      "Gallery Images",
+      "Video URL",
+      "Sunlight",
+      "Soil Type",
+      "Watering",
+      "Climate",
+      "Planting Depth",
+      "Planting Spacing",
+      "Best Planting Time",
+      "Bloom Period",
+      "Flower Color",
+      "Mature Height",
+      "Pest Issues",
+      "Disease Info",
+      "Propagation",
+      "Companions",
+      "Status",
+      "Featured",
+      "Variant Labels",
+      "Variant Prices",
+      "Barcode",
+    ];
+    const sample = [
+      "Allium Winter Fairy Bulbs",
+      "allium-winter-fairy-bulbs",
+      "150",
+      "120",
+      "in_stock",
+      "25",
+      "Cut flower",
+      "Gift",
+      "Short description goes here.",
+      "Longer description goes here.",
+      "https://example.com/main.jpg",
+      "https://example.com/gallery-1.jpg, https://example.com/gallery-2.jpg",
+      "https://www.youtube.com/watch?v=abcdef",
+      "full_sun",
+      "Well-drained",
+      "Weekly",
+      "Temperate",
+      "5 cm",
+      "10 cm",
+      "Autumn",
+      "Spring",
+      "White",
+      "35 cm",
+      "Aphids",
+      "None",
+      "Offsets",
+      "Tulips",
+      "live",
+      "no",
+      "Small, Medium, Large",
+      "0, 20, 40",
+      "",
+    ];
+    const notes = [
+      "Notes:",
+      "Title and Price are required. Slug is optional.",
+      "Stock Status: in_stock, out_of_stock, preorder.",
+      "Category and Tag are single values.",
+      "Featured: yes or no.",
+      "Variant Labels/Prices: comma-separated (prices optional).",
+      "Use the admin Image Library to upload and copy image links.",
+    ];
+
+    const sheet = utils.aoa_to_sheet([header, sample, [], notes]);
+    const workbook = utils.book_new();
+    utils.book_append_sheet(workbook, sheet, "Products");
+    writeFile(workbook, "bethany-blooms-product-template.xlsx");
   };
 
   const handleCreateCategory = async (event) => {
@@ -1039,6 +1817,7 @@ export function AdminProductsView() {
       return;
     }
     const name = (categoryForm.name || "").toString().trim();
+    const description = sanitizePlainText((categoryForm.description || "").toString().trim());
     if (!name) {
       setCategoryError("Category name is required.");
       return;
@@ -1055,13 +1834,25 @@ export function AdminProductsView() {
     try {
       setCategorySaving(true);
       setCategoryError(null);
+      let coverImageUrl = (categoryForm.coverImage || "").toString().trim();
+      if (categoryCoverFile) {
+        coverImageUrl = await uploadProductMedia(categoryCoverFile);
+      }
       await setDoc(doc(db, "productCategories", slug), {
         name,
         slug,
+        description,
+        coverImage: coverImageUrl || "",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      setCategoryForm({ name: "" });
+      setCategoryForm({ name: "", description: "", coverImage: "" });
+      if (categoryCoverPreviewUrlRef.current) {
+        URL.revokeObjectURL(categoryCoverPreviewUrlRef.current);
+        categoryCoverPreviewUrlRef.current = null;
+      }
+      setCategoryCoverFile(null);
+      setCategoryCoverPreview("");
       setCategoryStatusMessage("Category saved");
     } catch (error) {
       setCategoryError(error.message || "Unable to save the category.");
@@ -1087,16 +1878,28 @@ export function AdminProductsView() {
     );
     const toCreate = [];
     products.forEach((product) => {
-      const raw = (product.category || product.categoryId || "").toString().trim();
-      if (!raw) return;
-      if (resolveCategory(raw)) return;
-      const slug = slugifyId(raw);
-      const nameKey = raw.toLowerCase();
-      const slugKey = slug.toLowerCase();
-      if (!slug || existingSlugs.has(slugKey) || existingNames.has(nameKey)) return;
-      existingSlugs.add(slugKey);
-      existingNames.add(nameKey);
-      toCreate.push({ name: raw, slug });
+      const rawValues = [];
+      if (Array.isArray(product.category_ids)) {
+        rawValues.push(...product.category_ids);
+      } else if (Array.isArray(product.categoryIds)) {
+        rawValues.push(...product.categoryIds);
+      } else if (product.categoryId) {
+        rawValues.push(product.categoryId);
+      }
+      if (product.category) rawValues.push(product.category);
+      rawValues
+        .map((value) => (value ?? "").toString().trim())
+        .filter(Boolean)
+        .forEach((raw) => {
+          if (resolveCategory(raw)) return;
+          const slug = slugifyId(raw);
+          const nameKey = raw.toLowerCase();
+          const slugKey = slug.toLowerCase();
+          if (!slug || existingSlugs.has(slugKey) || existingNames.has(nameKey)) return;
+          existingSlugs.add(slugKey);
+          existingNames.add(nameKey);
+          toCreate.push({ name: raw, slug });
+        });
     });
 
     if (!toCreate.length) {
@@ -1111,6 +1914,8 @@ export function AdminProductsView() {
         toCreate.map((category) =>
           setDoc(doc(db, "productCategories", category.slug), {
             ...category,
+            description: "",
+            coverImage: "",
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           }),
@@ -1126,6 +1931,7 @@ export function AdminProductsView() {
     }
   };
 
+
   const handleConfirmDeleteCategory = async () => {
     if (!pendingCategoryDelete) return;
     if (!inventoryEnabled || !db) {
@@ -1133,21 +1939,120 @@ export function AdminProductsView() {
       setPendingCategoryDelete(null);
       return;
     }
-    const usageCount = categoryUsage.get(pendingCategoryDelete.id) || 0;
-    if (usageCount > 0) {
-      setCategoryError("Remove this category from products before deleting it.");
-      setPendingCategoryDelete(null);
-      return;
-    }
     try {
       setCategorySaving(true);
+      setCategoryError(null);
+      const normalizedTargetValues = new Set(
+        [pendingCategoryDelete.id, pendingCategoryDelete.slug, pendingCategoryDelete.name]
+          .filter(Boolean)
+          .map((value) => value.toString().trim().toLowerCase()),
+      );
+
+      const updates = [];
+      products.forEach((product) => {
+        const payload = { updatedAt: serverTimestamp() };
+        let changed = false;
+
+        if (Array.isArray(product.category_ids)) {
+          const nextCategoryIds = product.category_ids.filter(
+            (value) => !normalizedTargetValues.has((value ?? "").toString().trim().toLowerCase()),
+          );
+          if (nextCategoryIds.length !== product.category_ids.length) {
+            payload.category_ids = nextCategoryIds;
+            changed = true;
+          }
+        }
+
+        if (Array.isArray(product.categoryIds)) {
+          const nextCategoryIds = product.categoryIds.filter(
+            (value) => !normalizedTargetValues.has((value ?? "").toString().trim().toLowerCase()),
+          );
+          if (nextCategoryIds.length !== product.categoryIds.length) {
+            payload.categoryIds = nextCategoryIds;
+            changed = true;
+          }
+        }
+
+        if (
+          product.categoryId &&
+          normalizedTargetValues.has(product.categoryId.toString().trim().toLowerCase())
+        ) {
+          payload.categoryId = deleteField();
+          changed = true;
+        }
+
+        if (
+          product.categorySlug &&
+          normalizedTargetValues.has(product.categorySlug.toString().trim().toLowerCase())
+        ) {
+          payload.categorySlug = deleteField();
+          changed = true;
+        }
+
+        if (
+          product.category &&
+          normalizedTargetValues.has(product.category.toString().trim().toLowerCase())
+        ) {
+          payload.category = deleteField();
+          changed = true;
+        }
+
+        if (changed) {
+          updates.push({ id: product.id, payload });
+        }
+      });
+
+      if (updates.length) {
+        for (let i = 0; i < updates.length; i += 450) {
+          const batch = writeBatch(db);
+          updates.slice(i, i + 450).forEach((update) => {
+            batch.update(doc(db, "products", update.id), update.payload);
+          });
+          await batch.commit();
+        }
+      }
+
       await deleteDoc(doc(db, "productCategories", pendingCategoryDelete.id));
-      setCategoryStatusMessage("Category deleted");
+      setCategoryStatusMessage("Category deleted and removed from products.");
     } catch (error) {
       setCategoryError(error.message || "Unable to delete the category.");
     } finally {
       setCategorySaving(false);
       setPendingCategoryDelete(null);
+    }
+  };
+
+  const handleCreateTag = async (event) => {
+    event?.preventDefault?.();
+    if (!inventoryEnabled || !db) {
+      setTagError("You do not have permission to update tags.");
+      return;
+    }
+    const name = tagForm.name.trim();
+    if (!name) {
+      setTagError("Tag name is required.");
+      return;
+    }
+    const slug = slugifyId(name);
+    if (!slug) {
+      setTagError("Please enter a valid tag name.");
+      return;
+    }
+    try {
+      setTagSaving(true);
+      setTagError(null);
+      await setDoc(doc(db, "productTags", slug), {
+        name,
+        slug,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setTagForm({ name: "" });
+      setTagStatusMessage("Tag saved");
+    } catch (error) {
+      setTagError(error.message || "Unable to save the tag.");
+    } finally {
+      setTagSaving(false);
     }
   };
 
@@ -1187,50 +2092,176 @@ export function AdminProductsView() {
       return;
     }
 
-    const name = productForm.name.trim();
-    const title = name;
+    const title = productForm.title.trim();
+    const slug = productForm.slug.trim();
+    const sku = productForm.sku.trim();
+    const shortDescriptionText = sanitizePlainText(productForm.shortDescription);
+    const longDescriptionText = sanitizePlainText(productForm.longDescription);
     const priceNumber = Number(productForm.price);
-    const priceValue = Number.isFinite(priceNumber)
-      ? priceNumber
-      : productForm.price.trim();
-    const quantityNumber = Number(productForm.quantity);
-    const quantityValue = Number.isFinite(quantityNumber)
-      ? Math.max(0, Math.floor(quantityNumber))
-      : 0;
+    const salePriceNumber =
+      productForm.salePrice === "" ? null : Number(productForm.salePrice);
+    const stockQuantityNumber =
+      productForm.stockQuantity === "" ? null : Number(productForm.stockQuantity);
     const derivedStatus = productForm.status || "draft";
 
-    if (!name) {
-      setProductError("Product name is required.");
+    if (!title) {
+      setProductError("Product title is required.");
+      return;
+    }
+    if (!slug) {
+      setProductError("Product slug is required.");
+      return;
+    }
+    if (!Number.isFinite(priceNumber)) {
+      setProductError("Please enter a valid price.");
+      return;
+    }
+    if (salePriceNumber !== null && !Number.isFinite(salePriceNumber)) {
+      setProductError("Please enter a valid sale price.");
+      return;
+    }
+    if (stockQuantityNumber !== null && !Number.isFinite(stockQuantityNumber)) {
+      setProductError("Please enter a valid stock quantity.");
       return;
     }
 
-    const selectedCategory = resolveCategory(productForm.categoryId || productForm.category);
-    if (!selectedCategory) {
-      setProductError("Please select a category for this product.");
+    const normalizedCategoryIds = Array.isArray(productForm.categoryIds)
+      ? productForm.categoryIds.filter(Boolean)
+      : [];
+    const normalizedTagIds = Array.isArray(productForm.tagIds)
+      ? productForm.tagIds.filter(Boolean)
+      : [];
+    const tagLabels = normalizedTagIds
+      .map((tagId) => tagOptions.find((tag) => tag.id === tagId)?.name)
+      .filter(Boolean);
+    const seoDescriptionSource = shortDescriptionText || longDescriptionText;
+    const metaTitle = title;
+    const metaDescription = seoDescriptionSource ? seoDescriptionSource.slice(0, 160) : "";
+    const keywordTokens = `${title} ${tagLabels.join(" ")}`.split(/\s+/).filter(Boolean);
+    const metaKeywords = Array.from(new Set(keywordTokens)).join(", ");
+    const skuValue = sku || generateSku(title, slug);
+
+    const rawVariants = Array.isArray(productForm.variants) ? productForm.variants : [];
+    const sanitizedVariants = rawVariants
+      .map((variant, index) => {
+        const label = (variant.label || "").toString().trim();
+        if (!label) return null;
+        const priceNumber = Number(variant.price);
+        return {
+          id: variant.id || slugifyId(label) || `variant-${index + 1}`,
+          label,
+          price: Number.isFinite(priceNumber) ? priceNumber : null,
+        };
+      })
+      .filter(Boolean);
+    if (productForm.hasVariants && sanitizedVariants.length === 0) {
+      setProductError("Add at least one variant before saving.");
       return;
     }
+    const normalizedVariants = productForm.hasVariants ? sanitizedVariants : [];
 
     try {
       setProductSaving(true);
       setStatusMessage(
         editingProductId ? "Updating product..." : "Saving product..."
       );
-      let imageUrl = productForm.image.trim();
-      if (productImageFile) {
-        imageUrl = await uploadAsset(productImageFile, "products");
+      let mainImageUrl = productForm.mainImage.trim();
+      if (productMainImageFile) {
+        const uploaded = await uploadProductMedia(productMainImageFile);
+        if (uploaded) mainImageUrl = uploaded;
       }
 
+      let galleryUrls = Array.isArray(productForm.galleryImages)
+        ? productForm.galleryImages.filter(Boolean)
+        : [];
+      if (productGalleryFiles.length > 0) {
+        for (const file of productGalleryFiles) {
+          const uploaded = await uploadProductMedia(file);
+          if (uploaded) galleryUrls.push(uploaded);
+        }
+      }
+      const limitedGallery = galleryUrls.slice(0, MAX_PRODUCT_IMAGES);
+      const primaryImage = mainImageUrl || limitedGallery[0] || "";
+
+      const primaryCategory = normalizedCategoryIds.length
+        ? resolveCategory(normalizedCategoryIds[0])
+        : null;
+      const primaryCategoryLabel = primaryCategory?.name || "";
+      const primaryCategoryId = primaryCategory?.id || normalizedCategoryIds[0] || "";
+      const primaryCategorySlug = primaryCategory?.slug || "";
+
+      const dimensionsPayload = {
+        width: productForm.dimensions?.width || "",
+        height: productForm.dimensions?.height || "",
+        depth: productForm.dimensions?.depth || "",
+      };
+
       const payload = {
-        name,
         title,
-        description: productForm.description.trim(),
-        price: priceValue,
-        image: imageUrl,
-        category: selectedCategory.name,
-        categoryId: selectedCategory.id,
+        sku: skuValue,
+        price: priceNumber,
+        sale_price: salePriceNumber,
+        slug,
+        stock_status: productForm.stockStatus,
+        stock_quantity:
+          stockQuantityNumber === null
+            ? productForm.stockStatus === "out_of_stock"
+              ? 0
+              : null
+            : Math.max(0, Math.floor(stockQuantityNumber)),
+        category_ids: normalizedCategoryIds,
+        tag_ids: normalizedTagIds,
+        short_description: shortDescriptionText,
+        long_description: longDescriptionText,
+        main_image: primaryImage,
+        gallery_images: limitedGallery,
+        video_embed: productForm.videoEmbed.trim(),
+        sunlight: productForm.sunlight || "",
+        soil_type: productForm.soilType || "",
+        watering: productForm.watering || "",
+        climate: productForm.climate || "",
+        planting_depth: productForm.plantingDepth || "",
+        planting_spacing: productForm.plantingSpacing || "",
+        best_planting_time: productForm.bestPlantingTime || "",
+        bloom_period: productForm.bloomPeriod || "",
+        flower_color: productForm.flowerColor || "",
+        mature_height: productForm.matureHeight || "",
+        pest_issues: productForm.pestIssues || "",
+        disease_info: productForm.diseaseInfo || "",
+        propagation: productForm.propagation || "",
+        companions: productForm.companions || "",
+        meta_title: metaTitle,
+        meta_description: metaDescription,
+        meta_keywords: metaKeywords,
+        shipping_weight: productForm.shippingWeight || "",
+        dimensions: dimensionsPayload,
+        country_of_origin: productForm.countryOfOrigin.trim(),
+        delivery_info: productForm.deliveryInfo.trim(),
+        related_product_ids: Array.isArray(productForm.relatedProductIds)
+          ? productForm.relatedProductIds.filter(Boolean)
+          : [],
+        upsell_product_ids: Array.isArray(productForm.upsellProductIds)
+          ? productForm.upsellProductIds.filter(Boolean)
+          : [],
+        cross_sell_product_ids: Array.isArray(productForm.crossSellProductIds)
+          ? productForm.crossSellProductIds.filter(Boolean)
+          : [],
+        name: title,
+        description: shortDescriptionText || longDescriptionText,
+        image: primaryImage,
+        images: limitedGallery,
+        category: primaryCategoryLabel,
+        categoryId: primaryCategoryId,
+        categorySlug: primaryCategorySlug,
         status: derivedStatus,
-        quantity: quantityValue,
-        forceOutOfStock: Boolean(productForm.forceOutOfStock),
+        quantity:
+          stockQuantityNumber === null
+            ? productForm.stockStatus === "out_of_stock"
+              ? 0
+              : null
+            : Math.max(0, Math.floor(stockQuantityNumber)),
+        forceOutOfStock: productForm.stockStatus === "out_of_stock",
+        variants: normalizedVariants,
         featured: Boolean(productForm.featured),
         updatedAt: serverTimestamp(),
       };
@@ -1264,31 +2295,47 @@ export function AdminProductsView() {
           </p>
         </div>
         {activeTab === "products" && (
-          <div className="admin-panel__header-actions">
-            <input
-              ref={productImportInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleProductImport}
-              style={{ display: "none" }}
-            />
-            <button
-              className="btn btn--secondary"
-              type="button"
-              onClick={() => productImportInputRef.current?.click()}
-              disabled={!inventoryEnabled || productImporting}
-            >
-              {productImporting ? "Importing..." : "Import Spreadsheet"}
-            </button>
-            <button
-              className="btn btn--primary"
-              type="button"
-              onClick={openProductModal}
-              disabled={!inventoryEnabled || !categoryOptions.length}
-            >
-              <IconPlus className="btn__icon" aria-hidden="true" />
-              Add Product
-            </button>
+          <div>
+            <div className="admin-panel__header-actions">
+              <input
+                ref={productImportInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleProductImport}
+                style={{ display: "none" }}
+              />
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={() => productImportInputRef.current?.click()}
+                disabled={!inventoryEnabled || productImporting}
+              >
+                {productImporting ? "Importing..." : "Import Spreadsheet"}
+              </button>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={handleDownloadProductTemplate}
+                disabled={!inventoryEnabled}
+              >
+                Download template
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={openProductModal}
+                disabled={!inventoryEnabled}
+              >
+                <IconPlus className="btn__icon" aria-hidden="true" />
+                Add Product
+              </button>
+            </div>
+            {productImportError && <p className="admin-panel__error">{productImportError}</p>}
+            {productImportMessage && !productImportError && (
+              <p className={productImporting ? "admin-panel__notice" : "admin-panel__status"}>
+                {productImportMessage}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -1326,8 +2373,43 @@ export function AdminProductsView() {
                 }
                 required
               />
+              <textarea
+                className="input textarea"
+                rows="3"
+                placeholder="Short category description"
+                value={categoryForm.description}
+                onChange={(event) =>
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    description: event.target.value,
+                  }))
+                }
+              />
+              <label className="admin-form__field admin-form__full">
+                Category cover image
+                <input
+                  className="input input--file"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCategoryCoverChange}
+                />
+                <div className="admin-media-picker">
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    onClick={() => openMediaLibrary("category")}
+                  >
+                    Choose from library
+                  </button>
+                </div>
+                {categoryCoverPreview && (
+                  <div className="admin-preview-grid">
+                    <img src={categoryCoverPreview} alt="Category cover preview" className="admin-preview" />
+                  </div>
+                )}
+              </label>
               <p className="modal__meta">
-                Categories appear in the Shop dropdown and can be assigned to products.
+                Categories appear in the Shop dropdown and power the category hero on the products page.
               </p>
               <div className="admin-form__actions">
                 <button
@@ -1363,7 +2445,6 @@ export function AdminProductsView() {
               {categoryOptions.length ? (
                 categoryOptions.map((category) => {
                   const usageCount = categoryUsage.get(category.id) || 0;
-                  const canDelete = usageCount === 0;
                   return (
                     <div className="admin-category-card" key={category.id}>
                       <div>
@@ -1376,12 +2457,12 @@ export function AdminProductsView() {
                       <button
                         className="icon-btn icon-btn--danger"
                         type="button"
-                        disabled={!canDelete || categorySaving || !inventoryEnabled}
+                        disabled={categorySaving || !inventoryEnabled}
                         onClick={() => setPendingCategoryDelete(category)}
                         title={
-                          canDelete
-                            ? "Delete category"
-                            : "Remove this category from products before deleting"
+                          usageCount > 0
+                            ? "Delete category (will be removed from products)"
+                            : "Delete category"
                         }
                       >
                         <IconTrash aria-hidden="true" />
@@ -1400,12 +2481,28 @@ export function AdminProductsView() {
         </div>
       )}
 
+      <ConfirmDialog
+        open={Boolean(pendingCategoryDelete)}
+        title="Delete category?"
+        message={
+          pendingCategoryDelete
+            ? `${pendingCategoryDelete.name} will be removed from ${
+                categoryUsage.get(pendingCategoryDelete.id) || 0
+              } product(s). This cannot be undone.`
+            : "This cannot be undone."
+        }
+        confirmLabel="Delete category"
+        busy={categorySaving}
+        onCancel={() => setPendingCategoryDelete(null)}
+        onConfirm={handleConfirmDeleteCategory}
+      />
+
       {activeTab === "products" && (
         <div className="admin-panel__content">
           <div className="admin-table__wrapper">
             {!categoryOptions.length && (
               <p className="admin-panel__notice">
-                Create a category before adding new products.
+                No categories yet. Add one to help customers browse products.
               </p>
             )}
             {products.length > 0 ? (
@@ -1429,19 +2526,61 @@ export function AdminProductsView() {
                       ? bookingDateFormatter.format(product.updatedAt.toDate())
                       : "—";
                     const stockStatus = getStockStatus({
-                      quantity: product.quantity,
-                      forceOutOfStock: product.forceOutOfStock,
+                      quantity: product.stock_quantity ?? product.quantity,
+                      forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
+                      status: product.stock_status,
                     });
-                    const stockLabel = stockStatus.isForced
-                      ? "Out of stock (manual)"
-                      : stockStatus.label;
+                    const stockLabel =
+                      stockStatus.state === "preorder"
+                        ? "Preorder"
+                        : stockStatus.isForced
+                        ? "Out of stock (manual)"
+                        : stockStatus.label;
+                    const imageCandidates = [
+                      product.main_image,
+                      ...(Array.isArray(product.gallery_images) ? product.gallery_images : []),
+                      product.image,
+                      ...(Array.isArray(product.images) ? product.images : []),
+                    ]
+                      .map((value) => (value || "").toString().trim())
+                      .filter(Boolean);
+                    const image = imageCandidates[0] || "";
+                    const rawCategoryValues = [];
+                    if (Array.isArray(product.category_ids)) {
+                      rawCategoryValues.push(...product.category_ids);
+                    } else if (Array.isArray(product.categoryIds)) {
+                      rawCategoryValues.push(...product.categoryIds);
+                    } else if (product.categoryId) {
+                      rawCategoryValues.push(product.categoryId);
+                    }
+                    if (product.category) rawCategoryValues.push(product.category);
+                    const categoryLabels = [];
+                    rawCategoryValues
+                      .map((value) => (value ?? "").toString().trim())
+                      .filter(Boolean)
+                      .forEach((value) => {
+                        const resolved = resolveCategory(value);
+                        const label = resolved?.name || value;
+                        if (!categoryLabels.includes(label)) categoryLabels.push(label);
+                      });
+                    const primaryCategory = categoryLabels[0] || "—";
+                    const extraCategoryCount = Math.max(0, categoryLabels.length - 1);
+                    const descriptionText = stripHtml(
+                      product.short_description ||
+                        product.shortDescription ||
+                        product.description ||
+                        "",
+                    );
+                    const salePriceValue = product.sale_price ?? product.salePrice ?? null;
+                    const hasSalePrice =
+                      salePriceValue !== null && salePriceValue !== undefined && salePriceValue !== "";
                     return (
                       <tr key={product.id}>
                         <td>
                           <div className="admin-table__product">
-                            {product.image ? (
+                            {image ? (
                               <img
-                                src={product.image}
+                                src={image}
                                 alt={product.title || product.name}
                                 className="admin-table__thumb"
                               />
@@ -1452,18 +2591,28 @@ export function AdminProductsView() {
                             )}
                             <div>
                               <strong>{product.title || product.name}</strong>
-                              {product.description && (
-                                <p className="modal__meta">{product.description}</p>
+                              {descriptionText && (
+                                <p className="modal__meta">{descriptionText}</p>
                               )}
                             </div>
                           </div>
                         </td>
                         <td>
-                          {resolveCategory(product.categoryId || product.category)?.name ||
-                            product.category ||
-                            "product"}
+                          <span>{primaryCategory}</span>
+                          {extraCategoryCount > 0 && (
+                            <p className="modal__meta">+{extraCategoryCount} more</p>
+                          )}
                         </td>
-                        <td>{formatPriceLabel(product.price)}</td>
+                        <td>
+                          {hasSalePrice ? (
+                            <>
+                              <strong>{formatPriceLabel(salePriceValue)}</strong>
+                              <p className="modal__meta">Was {formatPriceLabel(product.price)}</p>
+                            </>
+                          ) : (
+                            formatPriceLabel(product.price)
+                          )}
+                        </td>
                         <td>
                           <span className={`admin-status admin-status--stock-${stockStatus.state}`}>
                             {stockLabel}
@@ -1556,137 +2705,602 @@ export function AdminProductsView() {
             {editingProductId ? "Edit Product" : "Add Product"}
           </h3>
           <form className="admin-form" onSubmit={handleCreateProduct}>
-            <div className="admin-file-input admin-form__full">
-              <label htmlFor="product-image-upload" className="sr-only">
-                Product image
-              </label>
-              <input
-                key={editingProductId ?? "new-product"}
-                className="input input--file"
-                id="product-image-upload"
-                type="file"
-                accept="image/*"
-                onChange={handleProductImageChange}
-              />
-              <p className="admin-panel__note">
-                Upload JPG or PNG (max 3MB). A preview appears below.
-              </p>
-              {productImagePreview && (
-                <img
-                  src={productImagePreview}
-                  alt="Product preview"
-                  className="admin-preview"
-                />
-              )}
+            <div className="admin-form__section admin-form__full">
+              <div className="admin-form__section-header">
+                <h4>General</h4>
+                <span className={`badge badge--stock-${currentStockStatus.state || "in"}`}>
+                  {currentStockStatus.label}
+                </span>
+              </div>
+              <div className="admin-form__section-grid">
+                <label className="admin-form__field">
+                  Title *
+                  <input
+                    className="input"
+                    value={productForm.title}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, title: event.target.value }))
+                    }
+                    required
+                  />
+                </label>
+                <label className="admin-form__field admin-form__field--inline">
+                  Slug *
+                  <div className="admin-form__inline">
+                    <input
+                      className="input"
+                      value={productForm.slug}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, slug: event.target.value }))
+                      }
+                      required
+                    />
+                    <button
+                      className="btn btn--secondary btn--small"
+                      type="button"
+                      onClick={() =>
+                        setProductForm((prev) => ({
+                          ...prev,
+                          slug: slugifyId(prev.title || prev.slug || ""),
+                        }))
+                      }
+                    >
+                      Use title
+                    </button>
+                  </div>
+                </label>
+                <label className="admin-form__field">
+                  Price *
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={productForm.price}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, price: event.target.value }))
+                    }
+                    required
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Sale price
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={productForm.salePrice}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, salePrice: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Stock status
+                  <select
+                    className="input"
+                    value={productForm.stockStatus}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, stockStatus: event.target.value }))
+                    }
+                  >
+                    <option value="in_stock">In stock</option>
+                    <option value="out_of_stock">Out of stock</option>
+                    <option value="preorder">Preorder</option>
+                  </select>
+                </label>
+                <label className="admin-form__field">
+                  Stock quantity
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={productForm.stockQuantity}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, stockQuantity: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Status
+                  <select
+                    className="input"
+                    value={productForm.status}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, status: event.target.value }))
+                    }
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="live">Live</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </label>
+                <label className="admin-form__field">
+                  Featured on home page
+                  <select
+                    className="input"
+                    value={productForm.featured ? "yes" : "no"}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, featured: event.target.value === "yes" }))
+                    }
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
+                </label>
+                <div className="admin-form__field admin-form__full">
+                  <label>Categories</label>
+                  {categoryOptions.length ? (
+                    <>
+                      <select
+                        className="input"
+                        value={productForm.categoryIds[0] || ""}
+                        onChange={(event) => handleSingleSelectChange("categoryIds", event)}
+                      >
+                        <option value="">Select a category</option>
+                        {categoryOptions.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  ) : (
+                    <p className="admin-panel__note">Create a category to organize products.</p>
+                  )}
+                </div>
+                <div className="admin-form__field admin-form__full">
+                  <label>Tags</label>
+                  {tagOptions.length ? (
+                    <select
+                      className="input"
+                      value={productForm.tagIds[0] || ""}
+                      onChange={(event) => handleSingleSelectChange("tagIds", event)}
+                    >
+                      <option value="">Select a tag (optional)</option>
+                      {tagOptions.map((tag) => (
+                        <option key={tag.id} value={tag.id}>
+                          {tag.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="admin-panel__note">No tags yet. Add one below.</p>
+                  )}
+                  <div className="admin-inline-form">
+                    <input
+                      className="input"
+                      placeholder="New tag"
+                      value={tagForm.name}
+                      onChange={(event) => setTagForm({ name: event.target.value })}
+                    />
+                    <button
+                      className="btn btn--secondary btn--small"
+                      type="button"
+                      onClick={handleCreateTag}
+                      disabled={tagSaving || !inventoryEnabled}
+                    >
+                      {tagSaving ? "Saving..." : "Add tag"}
+                    </button>
+                  </div>
+                  {tagError && <p className="admin-panel__error">{tagError}</p>}
+                  {tagStatusMessage && <p className="admin-panel__status">{tagStatusMessage}</p>}
+                </div>
+              </div>
             </div>
-            <input
-              className="input"
-              placeholder="Product name"
-              value={productForm.name}
-              onChange={(event) =>
-                setProductForm((prev) => ({
-                  ...prev,
-                  name: event.target.value,
-                }))
-              }
-              required
-            />
-            <select
-              className="input"
-              value={productForm.categoryId}
-              onChange={(event) => {
-                const nextId = event.target.value;
-                const selected = categoryOptions.find((option) => option.id === nextId);
-                setProductForm((prev) => ({
-                  ...prev,
-                  categoryId: nextId,
-                  category: selected?.name || prev.category,
-                }));
-              }}
-              required
-              disabled={!categoryOptions.length}
-            >
-              <option value="" disabled>
-                Select a category
-              </option>
-              {categoryOptions.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-            {!categoryOptions.length && (
-              <p className="admin-panel__note">
-                Add a category first to enable product creation.
-              </p>
-            )}
-            <select
-              className="input"
-              value={productForm.status}
-              onChange={(event) =>
-                setProductForm((prev) => ({
-                  ...prev,
-                  status: event.target.value,
-                }))
-              }
-            >
-              <option value="draft">Draft</option>
-              <option value="live">Live</option>
-              <option value="archived">Archived</option>
-            </select>
-            <input
-              className="input"
-              placeholder="Price (numbers or text)"
-              value={productForm.price}
-              onChange={(event) =>
-                setProductForm((prev) => ({
-                  ...prev,
-                  price: event.target.value,
-                }))
-              }
-              required
-            />
-            <input
-              className="input"
-              type="number"
-              min="0"
-              placeholder="Quantity in stock"
-              value={productForm.quantity}
-              onChange={(event) =>
-                setProductForm((prev) => ({
-                  ...prev,
-                  quantity: event.target.value,
-                }))
-              }
-            />
-            <label className="admin-checkbox">
-              <input
-                type="checkbox"
-                checked={productForm.forceOutOfStock}
-                onChange={(event) =>
-                  setProductForm((prev) => ({
-                    ...prev,
-                    forceOutOfStock: event.target.checked,
-                  }))
-                }
-              />
-              Mark as out of stock (manual override)
-            </label>
-            <p className="admin-panel__note">
-              Stock is low below {STOCK_LOW_THRESHOLD} items. Current status:{" "}
-              {currentStockStatus.label}.
-            </p>
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Description"
-              value={productForm.description}
-              onChange={(event) =>
-                setProductForm((prev) => ({
-                  ...prev,
-                  description: event.target.value,
-                }))
-              }
-            />
+
+            <div className="admin-form__section admin-form__full">
+              <div className="admin-form__section-header">
+                <h4>Descriptions</h4>
+              </div>
+              <div className="admin-form__section-grid">
+                <label className="admin-form__field admin-form__full">
+                  Short description
+                  <textarea
+                    className="input textarea"
+                    rows="4"
+                    value={productForm.shortDescription}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, shortDescription: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field admin-form__full">
+                  Long description
+                  <textarea
+                    className="input textarea"
+                    rows="6"
+                    value={productForm.longDescription}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, longDescription: event.target.value }))
+                    }
+                  />
+                </label>
+                <p className="admin-panel__note admin-form__full">
+                  Plain text only. Line breaks will be preserved on the product page. SEO metadata is generated from the
+                  title and short description.
+                </p>
+              </div>
+            </div>
+
+            <div className="admin-form__section admin-form__full">
+              <div className="admin-form__section-header">
+                <h4>Media</h4>
+              </div>
+              <div className="admin-form__section-grid">
+                <div className="admin-form__field admin-form__full">
+                  <label htmlFor="product-main-image">Main image</label>
+                  <input
+                    className="input input--file"
+                    id="product-main-image"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleMainImageChange}
+                  />
+                  <div className="admin-media-picker">
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={() => openMediaLibrary("main")}
+                    >
+                      Choose from library
+                    </button>
+                  </div>
+                  {productMainImagePreview && (
+                    <div className="admin-preview-grid">
+                      <img src={productMainImagePreview} alt="Main product preview" className="admin-preview" />
+                    </div>
+                  )}
+                </div>
+                <div className="admin-form__field admin-form__full">
+                  <label htmlFor="product-gallery-images">Gallery images</label>
+                  <input
+                    key={editingProductId ?? "new-product-gallery"}
+                    className="input input--file"
+                    id="product-gallery-images"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleGalleryImagesChange}
+                  />
+                  <div className="admin-media-picker">
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={() => openMediaLibrary("gallery")}
+                    >
+                      Choose from library
+                    </button>
+                  </div>
+                  <p className="admin-panel__note">
+                    Upload up to {MAX_PRODUCT_IMAGES} JPG or PNG files (max 3MB each).
+                  </p>
+                  {productGalleryPreviews.length > 0 && (
+                    <div className="admin-preview-grid">
+                      {productGalleryPreviews.map((preview, index) => (
+                        <img
+                          key={`${preview}-${index}`}
+                          src={preview}
+                          alt={`Product gallery preview ${index + 1}`}
+                          className="admin-preview"
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <label className="admin-form__field admin-form__full">
+                  Video from YouTube
+                  <textarea
+                    className="input textarea"
+                    rows="3"
+                    value={productForm.videoEmbed}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, videoEmbed: event.target.value }))
+                    }
+                    placeholder="https://www.youtube.com/watch?v=..."
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="admin-form__section admin-form__full">
+              <div className="admin-form__section-header">
+                <h4>Attributes</h4>
+              </div>
+              <div className="admin-form__section-grid">
+                <label className="admin-form__field">
+                  Sunlight
+                  <select
+                    className="input"
+                    value={productForm.sunlight}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, sunlight: event.target.value }))
+                    }
+                  >
+                    <option value="">Select sunlight</option>
+                    <option value="full_sun">Full sun</option>
+                    <option value="partial_shade">Partial shade</option>
+                    <option value="shade">Shade</option>
+                  </select>
+                </label>
+                <label className="admin-form__field">
+                  Soil type
+                  <input
+                    className="input"
+                    value={productForm.soilType}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, soilType: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Watering
+                  <input
+                    className="input"
+                    value={productForm.watering}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, watering: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Climate
+                  <input
+                    className="input"
+                    value={productForm.climate}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, climate: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Planting depth
+                  <input
+                    className="input"
+                    value={productForm.plantingDepth}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, plantingDepth: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Planting spacing
+                  <input
+                    className="input"
+                    value={productForm.plantingSpacing}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, plantingSpacing: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Best planting time
+                  <input
+                    className="input"
+                    value={productForm.bestPlantingTime}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, bestPlantingTime: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Bloom period
+                  <input
+                    className="input"
+                    value={productForm.bloomPeriod}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, bloomPeriod: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Flower color
+                  <input
+                    className="input"
+                    value={productForm.flowerColor}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, flowerColor: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Mature height
+                  <input
+                    className="input"
+                    value={productForm.matureHeight}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, matureHeight: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field admin-form__full">
+                  Pest issues
+                  <textarea
+                    className="input textarea"
+                    rows="2"
+                    value={productForm.pestIssues}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, pestIssues: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field admin-form__full">
+                  Disease info
+                  <textarea
+                    className="input textarea"
+                    rows="2"
+                    value={productForm.diseaseInfo}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, diseaseInfo: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field admin-form__full">
+                  Propagation
+                  <textarea
+                    className="input textarea"
+                    rows="2"
+                    value={productForm.propagation}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, propagation: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field admin-form__full">
+                  Companions
+                  <textarea
+                    className="input textarea"
+                    rows="2"
+                    value={productForm.companions}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, companions: event.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="admin-form__section admin-form__full">
+              <div className="admin-form__section-header">
+                <h4>Variants</h4>
+              </div>
+              <div className="admin-form__section-grid">
+                <label className="admin-form__field">
+                  Has variants
+                  <select
+                    className="input"
+                    value={productForm.hasVariants ? "yes" : "no"}
+                    onChange={(event) => handleToggleHasVariants(event.target.value === "yes")}
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
+                </label>
+                <p className="admin-panel__note admin-form__full">
+                  Add size, colour, shape, or other variants when enabled. Leave price blank to use the base price.
+                </p>
+                {productForm.hasVariants ? (
+                  <>
+                    {(productForm.variants || []).map((variant, index) => (
+                      <div className="admin-session-row" key={variant.id}>
+                        <div className="admin-session-field admin-session-field--label">
+                          <label
+                            className="admin-session-label"
+                            htmlFor={`product-variant-label-${variant.id}`}
+                          >
+                            Variant #{index + 1}
+                          </label>
+                          <input
+                            className="input"
+                            id={`product-variant-label-${variant.id}`}
+                            value={variant.label}
+                            onChange={(event) =>
+                              handleProductVariantChange(variant.id, "label", event.target.value)
+                            }
+                            placeholder="Small, Red, Round, etc."
+                          />
+                        </div>
+                        <div className="admin-session-field">
+                          <label
+                            className="admin-session-label"
+                            htmlFor={`product-variant-price-${variant.id}`}
+                          >
+                            Price (optional)
+                          </label>
+                          <input
+                            className="input"
+                            type="number"
+                            min="0"
+                            step="1"
+                            id={`product-variant-price-${variant.id}`}
+                            value={variant.price}
+                            onChange={(event) =>
+                              handleProductVariantChange(variant.id, "price", event.target.value)
+                            }
+                            placeholder="0"
+                          />
+                        </div>
+                        <button
+                          className="icon-btn icon-btn--danger admin-session-remove"
+                          type="button"
+                          onClick={() => handleRemoveProductVariant(variant.id)}
+                          aria-label={`Remove variant ${index + 1}`}
+                        >
+                          <IconTrash aria-hidden="true" />
+                        </button>
+                      </div>
+                    ))}
+                    <button className="btn btn--secondary" type="button" onClick={handleAddProductVariant}>
+                      Add variant
+                    </button>
+                  </>
+                ) : (
+                  <p className="modal__meta admin-form__full">No variants added.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="admin-form__section admin-form__full">
+              <div className="admin-form__section-header">
+                <h4>Related products</h4>
+              </div>
+              <div className="admin-form__section-grid">
+                <div className="admin-form__field admin-form__full">
+                  <label>Related products</label>
+                  <select
+                    className="input"
+                    value={productForm.relatedProductIds[0] || ""}
+                    onChange={(event) => handleSingleSelectChange("relatedProductIds", event)}
+                  >
+                    <option value="">Select a related product</option>
+                    {products
+                      .filter((product) => product.id !== editingProductId)
+                      .map((product) => (
+                        <option key={`related-${product.id}`} value={product.id}>
+                          {product.title || product.name || "Product"}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="admin-form__field admin-form__full">
+                  <label>Upsell products</label>
+                  <select
+                    className="input"
+                    value={productForm.upsellProductIds[0] || ""}
+                    onChange={(event) => handleSingleSelectChange("upsellProductIds", event)}
+                  >
+                    <option value="">Select an upsell product</option>
+                    {products
+                      .filter((product) => product.id !== editingProductId)
+                      .map((product) => (
+                        <option key={`upsell-${product.id}`} value={product.id}>
+                          {product.title || product.name || "Product"}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="admin-form__field admin-form__full">
+                  <label>Cross-sell products</label>
+                  <select
+                    className="input"
+                    value={productForm.crossSellProductIds[0] || ""}
+                    onChange={(event) => handleSingleSelectChange("crossSellProductIds", event)}
+                  >
+                    <option value="">Select a cross-sell product</option>
+                    {products
+                      .filter((product) => product.id !== editingProductId)
+                      .map((product) => (
+                        <option key={`cross-${product.id}`} value={product.id}>
+                          {product.title || product.name || "Product"}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div className="admin-modal__actions admin-form__actions">
               <button
                 className="btn btn--secondary"
@@ -1699,7 +3313,7 @@ export function AdminProductsView() {
               <button
                 className="btn btn--primary"
                 type="submit"
-                disabled={productSaving || !inventoryEnabled || !categoryOptions.length}
+                disabled={productSaving || !inventoryEnabled}
               >
                 {productSaving
                   ? "Saving..."
@@ -1714,6 +3328,326 @@ export function AdminProductsView() {
           </form>
         </div>
       </div>
+
+      {mediaLibraryOpen && (
+        <div
+          className="modal is-active admin-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="media-library-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeMediaLibrary();
+          }}
+        >
+          <div className="modal__content admin-modal__content admin-media-modal">
+            <button className="modal__close" type="button" onClick={closeMediaLibrary} aria-label="Close">
+              &times;
+            </button>
+            <h3 className="modal__title" id="media-library-title">
+              {mediaLibraryMode === "main"
+                ? "Select main image"
+                : mediaLibraryMode === "category"
+                ? "Select category cover"
+                : "Select gallery images"}
+            </h3>
+            <p className="modal__meta">
+              {mediaLibraryMode === "main"
+                ? "Tap an image to use it as the main product image."
+                : mediaLibraryMode === "category"
+                ? "Tap an image to use it as the category cover."
+                : `Select up to ${MAX_PRODUCT_IMAGES} images for the gallery.`}
+            </p>
+            {mediaItemsError && (
+              <p className="admin-panel__error">Unable to load the image library.</p>
+            )}
+            {mediaStatus === "loading" && (
+              <p className="admin-panel__notice">Loading images...</p>
+            )}
+            {mediaItems.length > 0 ? (
+              <div className="admin-media__grid admin-media__grid--compact">
+                {mediaItems.map((item) => {
+                  const imageUrl = (item.url || "").toString().trim();
+                  const label = (item.name || item.filename || item.id || "Image").toString();
+                  const isSelected =
+                    mediaLibraryMode === "main"
+                      ? imageUrl && productForm.mainImage === imageUrl
+                      : imageUrl && mediaLibrarySelection.includes(imageUrl);
+                  return (
+                    <button
+                      key={item.id}
+                      className={`admin-media__card admin-media__card--select${isSelected ? " is-selected" : ""}`}
+                      type="button"
+                      onClick={() => handleMediaLibrarySelect(imageUrl)}
+                      title={label}
+                    >
+                      {imageUrl ? (
+                        <img
+                          className="admin-media__thumb"
+                          src={imageUrl}
+                          alt={label}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="admin-media__thumb admin-media__thumb--empty">
+                          <IconImage aria-hidden="true" />
+                        </div>
+                      )}
+                      <div className="admin-media__body">
+                        <strong className="admin-media__filename">{label}</strong>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="admin-panel__notice">No images in the library yet.</p>
+            )}
+            {mediaLibraryMode === "gallery" && (
+              <div className="admin-form__actions">
+                <button className="btn btn--secondary" type="button" onClick={closeMediaLibrary}>
+                  Cancel
+                </button>
+                <button className="btn btn--primary" type="button" onClick={applyMediaLibrarySelection}>
+                  Add selected
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AdminMediaLibraryView() {
+  usePageMetadata({
+    title: "Admin · Image Library",
+    description: "Upload and manage product images for bulk imports.",
+  });
+  const { db, storage, inventoryEnabled, inventoryError } = useAdminData();
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaUploadError, setMediaUploadError] = useState(null);
+  const [mediaUploadMessage, setMediaUploadMessage] = useState(null);
+  const [mediaDeleting, setMediaDeleting] = useState(false);
+  const [mediaDeleteDialog, setMediaDeleteDialog] = useState({ open: false, item: null });
+  const [copiedMediaId, setCopiedMediaId] = useState(null);
+  const mediaUploadInputRef = useRef(null);
+  const {
+    items: mediaItems,
+    status: mediaStatus,
+    error: mediaItemsError,
+  } = useFirestoreCollection("productMedia", {
+    orderByField: "createdAt",
+    orderDirection: "desc",
+  });
+
+  const uploadMediaAsset = async (file) => {
+    if (!storage) throw new Error("Storage is not configured.");
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "-");
+    const storagePath = `product-media/${Date.now()}-${sanitizedName}`;
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file, { contentType: file.type });
+    const url = await getDownloadURL(storageRef);
+    return { url, storagePath };
+  };
+
+  const handleMediaUpload = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+    if (!storage || !db || !inventoryEnabled) {
+      setMediaUploadError("You do not have permission to upload images.");
+      return;
+    }
+    setMediaUploading(true);
+    setMediaUploadError(null);
+    setMediaUploadMessage(null);
+    try {
+      let uploadedCount = 0;
+      for (const file of files) {
+        const { url, storagePath } = await uploadMediaAsset(file);
+        await addDoc(collection(db, "productMedia"), {
+          name: file.name,
+          url,
+          storagePath,
+          size: file.size,
+          contentType: file.type,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        uploadedCount += 1;
+      }
+      setMediaUploadMessage(
+        `Uploaded ${uploadedCount} image${uploadedCount === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      setMediaUploadError(error.message || "Unable to upload images.");
+    } finally {
+      setMediaUploading(false);
+    }
+  };
+
+  const handleConfirmDeleteMedia = async () => {
+    const item = mediaDeleteDialog.item;
+    if (!item || !db) {
+      setMediaDeleteDialog({ open: false, item: null });
+      return;
+    }
+    setMediaDeleting(true);
+    setMediaUploadError(null);
+    setMediaUploadMessage(null);
+    try {
+      if (storage) {
+        const storagePath = (item.storagePath || item.path || "").toString().trim();
+        const url = (item.url || "").toString().trim();
+        if (storagePath) {
+          await deleteObject(ref(storage, storagePath));
+        } else if (url) {
+          await deleteObject(ref(storage, url));
+        }
+      }
+      await deleteDoc(doc(db, "productMedia", item.id));
+      setMediaUploadMessage("Image deleted.");
+      setMediaDeleteDialog({ open: false, item: null });
+    } catch (error) {
+      setMediaUploadError(error.message || "Unable to delete image.");
+    } finally {
+      setMediaDeleting(false);
+    }
+  };
+
+  const handleCopyMediaUrl = async (url, id) => {
+    if (!url) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = url;
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textArea);
+      }
+      setCopiedMediaId(id);
+      setTimeout(() => setCopiedMediaId(null), 1500);
+    } catch (error) {
+      console.warn("Unable to copy media URL", error);
+    }
+  };
+
+  return (
+    <div className="admin-panel admin-panel--full">
+      <div className="admin-panel__header">
+        <div>
+          <h2>Image Library</h2>
+          <p className="admin-panel__note">
+            Upload product images in bulk and copy direct links for the spreadsheet (Main Image URL
+            or Gallery Images columns).
+          </p>
+        </div>
+        <div className="admin-panel__header-actions">
+          <input
+            ref={mediaUploadInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleMediaUpload}
+            style={{ display: "none" }}
+          />
+          <button
+            className="btn btn--secondary"
+            type="button"
+            onClick={() => mediaUploadInputRef.current?.click()}
+            disabled={!inventoryEnabled || mediaUploading}
+          >
+            {mediaUploading ? "Uploading..." : "Upload images"}
+          </button>
+        </div>
+      </div>
+
+      {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+
+      <div className="admin-panel__content">
+        <section className="admin-media">
+          {mediaUploadError && <p className="admin-panel__error">{mediaUploadError}</p>}
+          {mediaUploadMessage && (
+            <p className="admin-panel__status">{mediaUploadMessage}</p>
+          )}
+          {mediaItemsError && (
+            <p className="admin-panel__error">Unable to load image library.</p>
+          )}
+          {mediaStatus === "loading" && (
+            <p className="admin-panel__notice">Loading image library...</p>
+          )}
+          {mediaItems.length > 0 ? (
+            <div className="admin-media__grid">
+              {mediaItems.map((item) => {
+                const imageUrl = (item.url || "").toString().trim();
+                const label = (item.name || item.filename || item.id || "Image").toString();
+                return (
+                  <article className="admin-media__card" key={item.id}>
+                    {imageUrl ? (
+                      <img
+                        className="admin-media__thumb"
+                        src={imageUrl}
+                        alt={label}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="admin-media__thumb admin-media__thumb--empty">
+                        <IconImage aria-hidden="true" />
+                      </div>
+                    )}
+                    <div className="admin-media__body">
+                      <strong className="admin-media__filename">{label}</strong>
+                      <div className="admin-media__buttons">
+                        <button
+                          className="icon-btn"
+                          type="button"
+                          disabled={!imageUrl}
+                          onClick={() => handleCopyMediaUrl(imageUrl, item.id)}
+                          aria-label={copiedMediaId === item.id ? "Link copied" : "Copy link"}
+                        >
+                          {copiedMediaId === item.id ? (
+                            <IconCheck aria-hidden="true" title="Copied" />
+                          ) : (
+                            <IconCopy aria-hidden="true" />
+                          )}
+                        </button>
+                        <button
+                          className="icon-btn icon-btn--danger"
+                          type="button"
+                          onClick={() => setMediaDeleteDialog({ open: true, item })}
+                          aria-label={`Delete ${label}`}
+                        >
+                          <IconTrash aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="admin-panel__notice">
+              No images yet. Upload files to generate links for the product spreadsheet.
+            </p>
+          )}
+        </section>
+      </div>
+
+      <ConfirmDialog
+        open={mediaDeleteDialog.open}
+        title="Delete image?"
+        message="This will remove the image from the library. Products using this link will no longer display the image."
+        confirmLabel="Delete image"
+        busy={mediaDeleting}
+        onCancel={() => setMediaDeleteDialog({ open: false, item: null })}
+        onConfirm={handleConfirmDeleteMedia}
+      />
     </div>
   );
 }
@@ -6099,6 +8033,11 @@ export function AdminOrdersView() {
                               item.metadata.sessionLabel ||
                               "Session"}{" "}
                             · {item.metadata.attendeeCount || 1} attendee(s)
+                          </span>
+                        )}
+                        {item.metadata?.type === "product" && item.metadata.variantLabel && (
+                          <span className="modal__meta">
+                            Variant: {item.metadata.variantLabel}
                           </span>
                         )}
                       </li>

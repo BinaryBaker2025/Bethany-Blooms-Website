@@ -252,6 +252,13 @@ function CartModal() {
                       )}
                     </div>
                   )}
+                  {item.metadata?.type === "product" && item.metadata.variantLabel && (
+                    <div className="cart-list__meta">
+                      <p>
+                        <strong>Variant:</strong> {item.metadata.variantLabel}
+                      </p>
+                    </div>
+                  )}
                   <div className="cart-list__actions">
                     <button
                       className="remove-btn"

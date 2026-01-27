@@ -113,11 +113,23 @@ function Header() {
             height="60"
           />
         </NavLink>
+        <button
+          className={`nav__overlay ${menuOpen ? "is-open" : ""}`}
+          type="button"
+          onClick={() => setMenuOpen(false)}
+          aria-label="Close navigation"
+        />
         <div
           id="mobile-navigation"
           className={`nav__links ${menuOpen ? "is-open" : ""}`}
           data-nav-links=""
         >
+          <div className="nav__mobile-header">
+            <span>Menu</span>
+            <button className="nav__mobile-close" type="button" onClick={() => setMenuOpen(false)} aria-label="Close menu">
+              &times;
+            </button>
+          </div>
           {navItems.map((item) => {
             if (item.type === "link") {
               const { to, label, end } = item;

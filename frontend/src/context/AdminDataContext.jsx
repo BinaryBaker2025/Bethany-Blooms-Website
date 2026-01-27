@@ -11,6 +11,7 @@ export function AdminDataProvider({ children }) {
   const [inventoryError, setInventoryError] = useState(null);
   const [products, setProducts] = useState([]);
   const [productCategories, setProductCategories] = useState([]);
+  const [productTags, setProductTags] = useState([]);
   const [workshops, setWorkshops] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -20,6 +21,7 @@ export function AdminDataProvider({ children }) {
   const readyRef = useRef({
     products: false,
     productCategories: false,
+    productTags: false,
     workshops: false,
     bookings: false,
     orders: false,
@@ -50,6 +52,7 @@ export function AdminDataProvider({ children }) {
     if (!inventoryEnabled) {
       setProducts([]);
       setProductCategories([]);
+      setProductTags([]);
       setWorkshops([]);
       setBookings([]);
       setOrders([]);
@@ -65,6 +68,7 @@ export function AdminDataProvider({ children }) {
     readyRef.current = {
       products: false,
       productCategories: false,
+      productTags: false,
       workshops: false,
       bookings: false,
       orders: false,
@@ -103,6 +107,16 @@ export function AdminDataProvider({ children }) {
         setProductCategories(snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })));
         setInventoryError(null);
         markReady("productCategories");
+      },
+      handleError,
+    );
+
+    const tagsUnsub = onSnapshot(
+      query(collection(db, "productTags"), orderBy("name", "asc")),
+      (snapshot) => {
+        setProductTags(snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })));
+        setInventoryError(null);
+        markReady("productTags");
       },
       handleError,
     );
@@ -170,6 +184,7 @@ export function AdminDataProvider({ children }) {
     return () => {
       productsUnsub();
       categoriesUnsub();
+      tagsUnsub();
       workshopsUnsub();
       bookingsUnsub();
       ordersUnsub();
@@ -192,6 +207,7 @@ export function AdminDataProvider({ children }) {
       setInventoryError,
       products,
       productCategories,
+      productTags,
       workshops,
       bookings,
       orders,
@@ -212,6 +228,7 @@ export function AdminDataProvider({ children }) {
       cutFlowerClasses,
       products,
       productCategories,
+      productTags,
       role,
       storage,
       user,
