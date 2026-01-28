@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import Reveal from "../../components/Reveal.jsx";
 import { AdminDataProvider } from "../../context/AdminDataContext.jsx";
+import logo from "../../assets/BethanyBloomsLogo.png";
 
 const NAV_LINKS = [
   { to: "/admin", label: "Dashboard", end: true },
@@ -17,6 +18,7 @@ const NAV_LINKS = [
   { to: "/admin/pos/cash-up", label: "POS Cash Up" },
   { to: "/admin/reports", label: "Reports" },
   { to: "/admin/orders", label: "Orders" },
+  { to: "/admin/shipping", label: "Shipping & Courier" },
   { to: "/admin/users", label: "Users" },
   { to: "/admin/profile", label: "Profile" },
 ];
@@ -56,50 +58,66 @@ function AdminLayout() {
 
   if (!user || !isAdmin) {
     return (
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Reveal as="div">
-            <h2>Admin Sign In</h2>
+      <section className="section section--tight admin-auth">
+        <div className="section__inner admin-auth__inner">
+          <Reveal as="div" className="admin-auth__card">
+            <div className="admin-auth__header">
+              <img className="admin-auth__logo" src={logo} alt="Bethany Blooms logo" />
+              <h2>Admin Sign In</h2>
+              <p>Secure access to orders, workshops, and the full product catalog.</p>
+            </div>
             {initError && (
-              <p className="empty-state">
-                Firebase credentials missing. Add them to <code>.env</code> to
-                activate admin login.
+              <p className="admin-auth__notice" role="alert">
+                Firebase credentials missing. Add them to <code>.env</code> to activate admin login.
               </p>
             )}
-            <form className="contact-form contact-form--stack" onSubmit={handleSignIn}>
-              <label className="sr-only" htmlFor="admin-email">
-                Email
+            <form className="admin-auth__form" onSubmit={handleSignIn}>
+              <label className="admin-auth__field" htmlFor="admin-email">
+                <span>Admin email</span>
+                <input
+                  className="input"
+                  id="admin-email"
+                  type="email"
+                  value={loginForm.email}
+                  onChange={(event) =>
+                    setLoginForm((prev) => ({ ...prev, email: event.target.value }))
+                  }
+                  placeholder="name@bethanyblooms.co.za"
+                  autoComplete="email"
+                  required
+                />
               </label>
-              <input
-                className="input"
-                id="admin-email"
-                type="email"
-                value={loginForm.email}
-                onChange={(event) =>
-                  setLoginForm((prev) => ({ ...prev, email: event.target.value }))
-                }
-                placeholder="Admin email"
-                required
-              />
-              <label className="sr-only" htmlFor="admin-password">
-                Password
+              <label className="admin-auth__field" htmlFor="admin-password">
+                <span>Password</span>
+                <input
+                  className="input"
+                  id="admin-password"
+                  type="password"
+                  value={loginForm.password}
+                  onChange={(event) =>
+                    setLoginForm((prev) => ({ ...prev, password: event.target.value }))
+                  }
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  required
+                />
               </label>
-              <input
-                className="input"
-                id="admin-password"
-                type="password"
-                value={loginForm.password}
-                onChange={(event) =>
-                  setLoginForm((prev) => ({ ...prev, password: event.target.value }))
-                }
-                placeholder="Password"
-                required
-              />
-              <button className="btn btn--primary" type="submit" disabled={loading || roleLoading}>
+              <button
+                className="btn btn--primary admin-auth__submit"
+                type="submit"
+                disabled={loading || roleLoading}
+              >
                 {loading ? "Checking..." : "Sign In"}
               </button>
-              {authError && <p className="admin-panel__error">{authError}</p>}
+              {authError && (
+                <p className="admin-panel__error" role="alert">
+                  {authError}
+                </p>
+              )}
             </form>
+            <p className="admin-auth__helper">
+              Need access? Ask the site owner to enable your admin account.
+            </p>
           </Reveal>
         </div>
       </section>

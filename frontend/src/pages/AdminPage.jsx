@@ -22,6 +22,7 @@ import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { getFirebaseFunctions } from "../lib/firebase.js";
 import { getFirebaseDb } from "../lib/firebase.js";
+import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
 import { getStockStatus, STOCK_LOW_THRESHOLD } from "../lib/stockStatus.js";
 import {
   DEFAULT_SLOT_CAPACITY,
@@ -181,6 +182,8 @@ const INITIAL_CUT_FLOWER_BOOKING = {
   customerName: "",
   email: "",
   phone: "",
+  attendeeCount: "1",
+  attendeeSelections: [],
   occasion: "",
   location: "",
   budget: "",
@@ -399,8 +402,66 @@ const parseDateValue = (value) => {
   return null;
 };
 
-const formatDateInput = (date) => date.toISOString().slice(0, 10);
-const formatTimeInput = (date) => date.toISOString().slice(11, 16);
+const parseOptionalNumber = (value) => {
+  if (value === "" || value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const parseMinAttendees = (option, label) => {
+  const raw =
+    option?.minAttendees ??
+    option?.minimumAttendees ??
+    option?.minPeople ??
+    option?.minGuests;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  if (!label) return null;
+  const normalized = label.toLowerCase();
+  const match = normalized.match(/(\d+)\s*\+|(\d+)\s*(?:or|and)\s*more|minimum\s*(\d+)/);
+  if (!match) return null;
+  const parsed = Number(match[1] || match[2] || match[3]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const parseIsExtra = (option, label) => {
+  if (option?.isExtra || option?.extra || option?.isAddOn) return true;
+  if (!label) return false;
+  return /extra|add[- ]?on|addon/.test(label.toLowerCase());
+};
+
+const formatOptionLabel = (label, price) => {
+  if (typeof label !== "string" || !label.trim()) return "Option";
+  if (Number.isFinite(price)) return `${label} · R${price}`;
+  return label;
+};
+
+const buildAttendeeSelections = (count, selections, optionValues, fallbackValue) => {
+  const normalized = [];
+  for (let i = 0; i < count; i += 1) {
+    const value = selections?.[i];
+    normalized.push(optionValues.has(value) ? value : fallbackValue);
+  }
+  return normalized;
+};
+
+const selectionsMatch = (left = [], right = []) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const formatDateInput = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatTimeInput = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const hours = `${date.getHours()}`.padStart(2, "0");
+  const minutes = `${date.getMinutes()}`.padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
 
 const combineDateAndTime = (dateInput, timeInput) => {
   if (!dateInput) return null;
@@ -4631,7 +4692,15 @@ export function AdminWorkshopsCalendarView() {
     title: "Admin · Calendar",
     description: "Overview of scheduled workshops, bookings, and events by date.",
   });
-  const { bookings, events, inventoryLoading, inventoryError } = useAdminData();
+  const {
+    db,
+    bookings,
+    events,
+    cutFlowerBookings,
+    inventoryLoading,
+    inventoryError,
+    inventoryEnabled,
+  } = useAdminData();
   const [visibleMonth, setVisibleMonth] = useState(() => {
     const today = new Date();
     today.setDate(1);
@@ -4640,6 +4709,17 @@ export function AdminWorkshopsCalendarView() {
   const [selectedDate, setSelectedDate] = useState(() =>
     formatDateInput(new Date())
   );
+  const [quickEventOpen, setQuickEventOpen] = useState(false);
+  const [quickEventForm, setQuickEventForm] = useState(() => ({
+    title: "",
+    location: "",
+    date: formatDateInput(new Date()),
+    time: "",
+    notes: "",
+  }));
+  const [quickEventError, setQuickEventError] = useState(null);
+  const [quickEventStatus, setQuickEventStatus] = useState(null);
+  const [quickEventSaving, setQuickEventSaving] = useState(false);
 
   const handleMonthChange = (offset) => {
     setVisibleMonth((prev) => {
@@ -4649,7 +4729,7 @@ export function AdminWorkshopsCalendarView() {
     });
   };
 
-  const bookingsByDate = useMemo(() => {
+  const workshopBookingsByDate = useMemo(() => {
     const map = new Map();
     bookings.forEach((booking) => {
       const sessionDate = parseDateValue(booking.sessionDate);
@@ -4666,6 +4746,25 @@ export function AdminWorkshopsCalendarView() {
   const undatedBookings = useMemo(
     () => bookings.filter((booking) => !parseDateValue(booking.sessionDate)),
     [bookings],
+  );
+
+  const cutFlowerBookingsByDate = useMemo(() => {
+    const map = new Map();
+    cutFlowerBookings.forEach((booking) => {
+      const eventDate = parseDateValue(booking.eventDate);
+      if (!eventDate) return;
+      const dateValue = formatDateInput(eventDate);
+      if (!map.has(dateValue)) {
+        map.set(dateValue, []);
+      }
+      map.get(dateValue).push(booking);
+    });
+    return map;
+  }, [cutFlowerBookings]);
+
+  const undatedCutFlowerBookings = useMemo(
+    () => cutFlowerBookings.filter((booking) => !parseDateValue(booking.eventDate)),
+    [cutFlowerBookings],
   );
 
   const eventsByDate = useMemo(() => {
@@ -4705,17 +4804,20 @@ export function AdminWorkshopsCalendarView() {
           label: cellDate.getDate(),
           isCurrentMonth: cellDate.getMonth() === month,
           isToday: iso === formatDateInput(new Date()),
-          hasBookings: bookingsByDate.has(iso),
+          hasBookings: workshopBookingsByDate.has(iso) || cutFlowerBookingsByDate.has(iso),
           hasEvents: eventsByDate.has(iso),
         });
       }
       matrix.push(weekRow);
     }
     return matrix;
-  }, [visibleMonth, bookingsByDate, eventsByDate]);
+  }, [visibleMonth, workshopBookingsByDate, cutFlowerBookingsByDate, eventsByDate]);
 
-  const activeBookings = bookingsByDate.get(selectedDate) || [];
+  const activeWorkshopBookings = workshopBookingsByDate.get(selectedDate) || [];
+  const activeCutFlowerBookings = cutFlowerBookingsByDate.get(selectedDate) || [];
   const activeEvents = eventsByDate.get(selectedDate) || [];
+  const workshopBookingCount = activeWorkshopBookings.length;
+  const cutFlowerBookingCount = activeCutFlowerBookings.length;
 
   const monthLabel = visibleMonth.toLocaleString("en-ZA", {
     month: "long",
@@ -4727,6 +4829,100 @@ export function AdminWorkshopsCalendarView() {
     if (Number.isNaN(parsed.getTime())) return selectedDate;
     return parsed.toLocaleString("en-ZA", { dateStyle: "long" });
   }, [selectedDate]);
+
+  useEffect(() => {
+    if (!quickEventStatus) return undefined;
+    const timeout = setTimeout(() => setQuickEventStatus(null), 3200);
+    return () => clearTimeout(timeout);
+  }, [quickEventStatus]);
+
+  const openQuickEventForm = () => {
+    setQuickEventForm({
+      title: "",
+      location: "",
+      date: selectedDate || formatDateInput(new Date()),
+      time: "",
+      notes: "",
+    });
+    setQuickEventError(null);
+    setQuickEventOpen(true);
+  };
+
+  const closeQuickEventForm = () => {
+    setQuickEventOpen(false);
+    setQuickEventError(null);
+  };
+
+  const handleQuickEventSave = async (event) => {
+    event.preventDefault();
+    if (!db || !inventoryEnabled) {
+      setQuickEventError("You do not have permission to manage events.");
+      return;
+    }
+
+    const title = quickEventForm.title.trim();
+    if (!title) {
+      setQuickEventError("Event title is required.");
+      return;
+    }
+
+    if (!quickEventForm.date.trim()) {
+      setQuickEventError("Event date is required.");
+      return;
+    }
+
+    setQuickEventSaving(true);
+    setQuickEventError(null);
+
+    try {
+      const timeValue = quickEventForm.time.trim();
+      const combinedDate = combineDateAndTime(quickEventForm.date, timeValue);
+      const timeSlots = timeValue
+        ? [
+            {
+              id: createEventTimeSlot().id,
+              time: timeValue,
+              endTime: "",
+              label: "",
+            },
+          ]
+        : [];
+      const payload = {
+        title,
+        description: quickEventForm.notes.trim(),
+        location: quickEventForm.location.trim(),
+        eventDate: combinedDate ?? null,
+        timeSlots,
+        repeatWeekly: false,
+        repeatDays: [],
+        image: "",
+        workshopId: null,
+        workshopTitle: null,
+        status: "draft",
+        updatedAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, "events"), {
+        ...payload,
+        createdAt: serverTimestamp(),
+      });
+
+      setQuickEventStatus("Event added to calendar.");
+      setQuickEventForm((prev) => ({
+        ...prev,
+        title: "",
+        location: "",
+        time: "",
+        notes: "",
+        date: selectedDate || prev.date,
+      }));
+    } catch (saveError) {
+      console.error(saveError);
+      setQuickEventError("We couldn't save the event. Please try again.");
+    } finally {
+      setQuickEventSaving(false);
+    }
+  };
 
   return (
     <div className="admin-panel admin-panel--full">
@@ -4756,7 +4952,7 @@ export function AdminWorkshopsCalendarView() {
             </button>
             <div>
               <h3>{monthLabel}</h3>
-              <p className="modal__meta">Showing bookings & events for this month</p>
+              <p className="modal__meta">Showing workshop + cut flower bookings and events for this month</p>
             </div>
             <button
               className="btn btn--secondary admin-calendar__nav"
@@ -4770,7 +4966,7 @@ export function AdminWorkshopsCalendarView() {
 
           <div className="admin-calendar__legend">
             <span>
-              <span className="legend-dot legend-dot--booked" /> Booking days
+              <span className="legend-dot legend-dot--booked" /> Booking days (workshops + cut flowers)
             </span>
             <span>
               <span className="legend-dot legend-dot--event" /> Event days
@@ -4813,17 +5009,23 @@ export function AdminWorkshopsCalendarView() {
             <div>
               <h4>{selectedDateLabel}</h4>
               <p className="modal__meta">
-                {activeBookings.length} booking
-                {activeBookings.length === 1 ? "" : "s"} · {activeEvents.length} event
-                {activeEvents.length === 1 ? "" : "s"}
+                Workshops: {workshopBookingCount} | Cut flowers: {cutFlowerBookingCount} | Events: {activeEvents.length}
               </p>
             </div>
+            <button
+              className="btn btn--secondary btn--small"
+              type="button"
+              onClick={quickEventOpen ? closeQuickEventForm : openQuickEventForm}
+              disabled={!inventoryEnabled}
+            >
+              {quickEventOpen ? "Close" : "Add calendar event"}
+            </button>
           </div>
           <div className="admin-calendar__details-group">
-            <h5>Bookings</h5>
-            {activeBookings.length > 0 ? (
+            <h5>Workshop bookings</h5>
+            {activeWorkshopBookings.length > 0 ? (
               <ul>
-                {activeBookings.map((booking) => (
+                {activeWorkshopBookings.map((booking) => (
                   <li key={booking.id}>
                     <div>
                       <strong>{booking.name}</strong>
@@ -4843,7 +5045,43 @@ export function AdminWorkshopsCalendarView() {
               </ul>
             ) : (
               <p className="modal__meta">
-                No bookings recorded for this date yet.
+                No workshop bookings recorded for this date yet.
+              </p>
+            )}
+          </div>
+          <div className="admin-calendar__details-group">
+            <h5>Cut flower bookings</h5>
+            {activeCutFlowerBookings.length > 0 ? (
+              <ul>
+                {activeCutFlowerBookings.map((booking) => {
+                  const eventDate = parseDateValue(booking.eventDate);
+                  const timeLabel = eventDate ? formatTimeValue(eventDate) : "";
+                  return (
+                    <li key={booking.id}>
+                      <div>
+                        <strong>{booking.customerName || "Cut flower booking"}</strong>
+                        <p className="modal__meta">
+                          {timeLabel ? `${timeLabel} - ` : ""}{booking.location || "Location tbc"}
+                        </p>
+                        {booking.occasion && (
+                          <p className="modal__meta">Occasion: {booking.occasion}</p>
+                        )}
+                      </div>
+                      <div className="admin-calendar__details-actions">
+                        {booking.email && (
+                          <a href={`mailto:${booking.email}`}>{booking.email}</a>
+                        )}
+                        {booking.phone && (
+                          <p className="modal__meta">{booking.phone}</p>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="modal__meta">
+                No cut flower bookings recorded for this date yet.
               </p>
             )}
           </div>
@@ -4878,7 +5116,72 @@ export function AdminWorkshopsCalendarView() {
               <p className="modal__meta">No events scheduled for this date.</p>
             )}
           </div>
-          {(undatedBookings.length > 0 || undatedEvents.length > 0) && (
+          {quickEventOpen && (
+            <div className="admin-calendar__details-group">
+              <h5>Add calendar event</h5>
+              <form className="admin-form" onSubmit={handleQuickEventSave}>
+                <input
+                  className="input"
+                  placeholder="Event title"
+                  value={quickEventForm.title}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, title: event.target.value }))
+                  }
+                  required
+                />
+                <input
+                  className="input"
+                  placeholder="Location (optional)"
+                  value={quickEventForm.location}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, location: event.target.value }))
+                  }
+                />
+                <input
+                  className="input"
+                  type="date"
+                  value={quickEventForm.date}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, date: event.target.value }))
+                  }
+                  required
+                />
+                <input
+                  className="input"
+                  type="time"
+                  value={quickEventForm.time}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, time: event.target.value }))
+                  }
+                />
+                <textarea
+                  className="input textarea admin-form__full"
+                  placeholder="Notes (optional)"
+                  value={quickEventForm.notes}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, notes: event.target.value }))
+                  }
+                />
+                <div className="admin-form__actions">
+                  <button className="btn btn--secondary" type="button" onClick={closeQuickEventForm}>
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn--primary"
+                    type="submit"
+                    disabled={quickEventSaving || !inventoryEnabled}
+                  >
+                    {quickEventSaving ? "Saving..." : "Save event"}
+                  </button>
+                </div>
+                {quickEventError && <p className="admin-panel__error">{quickEventError}</p>}
+                {quickEventStatus && <p className="admin-panel__status">{quickEventStatus}</p>}
+              </form>
+            </div>
+          )}
+          {(undatedBookings.length > 0 ||
+            undatedCutFlowerBookings.length > 0 ||
+            undatedEvents.length > 0) && (
             <div className="admin-calendar__details-group">
               <h5>Needs a date</h5>
               <ul>
@@ -4909,6 +5212,20 @@ export function AdminWorkshopsCalendarView() {
                     </li>
                   );
                 })}
+                {undatedCutFlowerBookings.map((booking) => (
+                  <li key={`undated-cut-flower-${booking.id}`}>
+                    <div>
+                      <strong>{booking.customerName || "Cut flower booking"}</strong>
+                      <p className="modal__meta">Cut flower booking</p>
+                    </div>
+                    <div className="admin-calendar__details-actions">
+                      {booking.email && (
+                        <a href={`mailto:${booking.email}`}>{booking.email}</a>
+                      )}
+                      {booking.phone && <p className="modal__meta">{booking.phone}</p>}
+                    </div>
+                  </li>
+                ))}
                 {undatedEvents.map((eventDoc) => (
                   <li key={`undated-event-${eventDoc.id}`}>
                     <div>
@@ -6734,6 +7051,7 @@ export function AdminCutFlowerBookingsView() {
   const {
     db,
     cutFlowerBookings,
+    cutFlowerClasses,
     inventoryEnabled,
     inventoryLoading,
     inventoryError,
@@ -6747,6 +7065,7 @@ export function AdminCutFlowerBookingsView() {
   const [activeBooking, setActiveBooking] = useState(null);
   const [dateFilter, setDateFilter] = useState("today");
   const [sortOrder, setSortOrder] = useState("event-asc");
+  const [showExtraOptions, setShowExtraOptions] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null });
   const [deleteBusy, setDeleteBusy] = useState(false);
 
@@ -6817,10 +7136,132 @@ export function AdminCutFlowerBookingsView() {
     return bookings;
   }, [filteredBookings, sortOrder]);
 
+  const selectionOptions = useMemo(() => {
+    const rawOptions = (cutFlowerClasses || [])
+      .flatMap((classItem) => (Array.isArray(classItem.options) ? classItem.options : []))
+      .filter(Boolean);
+    const normalized = rawOptions
+      .map((option, index) => {
+        if (typeof option !== "object" || option === null) return null;
+        const value = option.value ?? option.id ?? option.label ?? `option-${index}`;
+        const label = option.label ?? option.name ?? option.value ?? `Option ${index + 1}`;
+        const price = parseOptionalNumber(option.price);
+        const minAttendees = parseMinAttendees(option, label);
+        const isExtra = parseIsExtra(option, label);
+        return {
+          value,
+          label,
+          displayLabel: formatOptionLabel(label, price),
+          price,
+          minAttendees,
+          isExtra,
+        };
+      })
+      .filter(Boolean);
+    const unique = [];
+    const seen = new Set();
+    normalized.forEach((option) => {
+      const key = String(option.value);
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push(option);
+    });
+    if (unique.length > 0) return unique;
+    return [
+      {
+        value: "standard",
+        label: "Standard",
+        displayLabel: "Standard",
+        price: undefined,
+        minAttendees: null,
+        isExtra: false,
+      },
+    ];
+  }, [cutFlowerClasses]);
+
+  const attendeeCountNumber = useMemo(
+    () => Math.max(1, Number.parseInt(formState.attendeeCount, 10) || 1),
+    [formState.attendeeCount],
+  );
+  const defaultSelectionValue = selectionOptions[0]?.value ?? "standard";
+  const cutFlowerOptionGroups = useMemo(() => {
+    const base = selectionOptions.filter((option) => !option.isExtra);
+    const extra = selectionOptions.filter((option) => option.isExtra);
+    return { base, extra };
+  }, [selectionOptions]);
+  const hasExtraOptions = cutFlowerOptionGroups.extra.length > 0;
+  const visibleCutFlowerOptions = useMemo(
+    () => (showExtraOptions ? selectionOptions : cutFlowerOptionGroups.base),
+    [cutFlowerOptionGroups.base, selectionOptions, showExtraOptions],
+  );
+  const restrictedCutFlowerOptions = useMemo(
+    () =>
+      visibleCutFlowerOptions.filter(
+        (option) => option.minAttendees && option.minAttendees > attendeeCountNumber,
+      ),
+    [attendeeCountNumber, visibleCutFlowerOptions],
+  );
+  const availableCutFlowerOptions = useMemo(
+    () =>
+      visibleCutFlowerOptions.filter(
+        (option) => !option.minAttendees || option.minAttendees <= attendeeCountNumber,
+      ),
+    [attendeeCountNumber, visibleCutFlowerOptions],
+  );
+  const restrictedOptionsNote = useMemo(() => {
+    if (restrictedCutFlowerOptions.length === 0) return "";
+    const labels = restrictedCutFlowerOptions
+      .map((option) => option.label)
+      .filter((label) => typeof label === "string" && label.trim().length > 0);
+    const minValues = Array.from(
+      new Set(
+        restrictedCutFlowerOptions
+          .map((option) => option.minAttendees)
+          .filter((value) => Number.isFinite(value)),
+      ),
+    ).sort((a, b) => a - b);
+    const minText =
+      minValues.length === 1 ? `at least ${minValues[0]} attendees` : "a minimum number of attendees";
+    const labelText = labels.length > 0 ? `: ${labels.join(", ")}` : ".";
+    return `Options requiring ${minText} are hidden${labelText}`;
+  }, [restrictedCutFlowerOptions]);
+
+  const normalizedAttendeeSelections = useMemo(() => {
+    const optionValues = new Set(availableCutFlowerOptions.map((option) => option.value));
+    if (optionValues.size === 0 && selectionOptions[0]) {
+      optionValues.add(selectionOptions[0].value);
+    }
+    const fallbackValue =
+      availableCutFlowerOptions[0]?.value ?? selectionOptions[0]?.value ?? defaultSelectionValue;
+    return buildAttendeeSelections(
+      attendeeCountNumber,
+      formState.attendeeSelections,
+      optionValues,
+      fallbackValue,
+    );
+  }, [
+    attendeeCountNumber,
+    availableCutFlowerOptions,
+    defaultSelectionValue,
+    formState.attendeeSelections,
+    selectionOptions,
+  ]);
+
+  useEffect(() => {
+    if (selectionsMatch(formState.attendeeSelections, normalizedAttendeeSelections)) {
+      return;
+    }
+    setFormState((prev) => ({
+      ...prev,
+      attendeeSelections: normalizedAttendeeSelections,
+    }));
+  }, [formState.attendeeSelections, normalizedAttendeeSelections]);
+
   const resetForm = () => {
     setFormState(INITIAL_CUT_FLOWER_BOOKING);
     setEditingId(null);
     setFormError(null);
+    setShowExtraOptions(false);
   };
 
   const openCreateModal = () => {
@@ -6835,10 +7276,21 @@ export function AdminCutFlowerBookingsView() {
 
   const handleEdit = (booking) => {
     const eventDate = parseDateValue(booking.eventDate);
+    const attendeeSelections = Array.isArray(booking.attendeeSelections)
+      ? booking.attendeeSelections
+          .map((selection) => selection?.optionValue || selection?.optionLabel || selection?.value || "")
+          .filter((value) => value)
+      : [];
+    const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
+    const attendeeCount = Number.isFinite(attendeeCountValue)
+      ? attendeeCountValue
+      : attendeeSelections.length || 1;
     setFormState({
       customerName: booking.customerName || "",
       email: booking.email || "",
       phone: booking.phone || "",
+      attendeeCount: String(attendeeCount),
+      attendeeSelections,
       occasion: booking.occasion || "",
       location: booking.location || "",
       budget: booking.budget || "",
@@ -6849,6 +7301,10 @@ export function AdminCutFlowerBookingsView() {
     });
     setEditingId(booking.id);
     setFormError(null);
+    const hasExtraSelection = attendeeSelections.some((value) =>
+      selectionOptions.some((option) => option.value === value && option.isExtra),
+    );
+    setShowExtraOptions(hasExtraSelection);
   };
 
   const openEditModal = (booking) => {
@@ -6949,8 +7405,18 @@ export function AdminCutFlowerBookingsView() {
       return;
     }
 
+    if (!formState.phone.trim()) {
+      setFormError("Customer phone number is required.");
+      return;
+    }
+
     if (!formState.date.trim()) {
       setFormError("Please select an event date.");
+      return;
+    }
+
+    if (!formState.time.trim()) {
+      setFormError("Please select an event time.");
       return;
     }
 
@@ -6959,10 +7425,33 @@ export function AdminCutFlowerBookingsView() {
 
     try {
       const eventDate = combineDateAndTime(formState.date, formState.time);
+      const optionLookup = new Map(selectionOptions.map((option) => [option.value, option]));
+      const attendeeItems = normalizedAttendeeSelections.map((value, index) => {
+        const option = optionLookup.get(value);
+        return {
+          attendee: index + 1,
+          optionValue: option?.value ?? value,
+          optionLabel: option?.label ?? value,
+          estimatedPrice: option?.price ?? null,
+          isExtra: option?.isExtra ?? false,
+        };
+      });
+      const hasEstimatedTotal = attendeeItems.some((item) =>
+        Number.isFinite(Number(item.estimatedPrice)),
+      );
+      const estimatedTotal = hasEstimatedTotal
+        ? attendeeItems.reduce((sum, item) => sum + (Number(item.estimatedPrice) || 0), 0)
+        : null;
+      const firstSelection = attendeeItems[0] || null;
       const payload = {
         customerName: formState.customerName.trim(),
         email: formState.email.trim(),
         phone: formState.phone.trim(),
+        attendeeCount: attendeeCountNumber,
+        attendeeSelections: attendeeItems,
+        optionValue: firstSelection?.optionValue ?? "",
+        optionLabel: firstSelection?.optionLabel ?? "",
+        estimatedTotal,
         occasion: formState.occasion.trim(),
         location: formState.location.trim(),
         budget: formState.budget.trim(),
@@ -7289,6 +7778,20 @@ export function AdminCutFlowerBookingsView() {
                   phone: e.target.value,
                 }))
               }
+              required
+            />
+            <input
+              className="input"
+              type="number"
+              min="1"
+              placeholder="Attendee count"
+              value={formState.attendeeCount}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  attendeeCount: e.target.value,
+                }))
+              }
             />
             <input
               className="input"
@@ -7345,7 +7848,52 @@ export function AdminCutFlowerBookingsView() {
                   time: e.target.value,
                 }))
               }
+              required
             />
+            <div className="admin-form__section admin-form__full">
+              <div className="admin-form__section-header">
+                <h4>Cut flower options</h4>
+                {hasExtraOptions && (
+                  <label className="admin-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={showExtraOptions}
+                      onChange={(e) => setShowExtraOptions(e.target.checked)}
+                    />
+                    <span>Show extra options</span>
+                  </label>
+                )}
+              </div>
+              {restrictedOptionsNote && <p className="admin-panel__note">{restrictedOptionsNote}</p>}
+              <div className="admin-form__section-grid">
+                {normalizedAttendeeSelections.map((selection, index) => (
+                  <label className="admin-form__field" key={`attendee-option-${index + 1}`}>
+                    Attendee {index + 1} option
+                    <select
+                      className="input"
+                      value={selection}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setFormState((prev) => {
+                          const nextSelections = [...(prev.attendeeSelections || [])];
+                          nextSelections[index] = value;
+                          return {
+                            ...prev,
+                            attendeeSelections: nextSelections,
+                          };
+                        });
+                      }}
+                    >
+                      {availableCutFlowerOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.displayLabel || option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </div>
             <select
               className="input"
               value={formState.status}
@@ -7744,6 +8292,11 @@ export function AdminOrdersView() {
   const selectedOrder = selectedOrderId
     ? filteredOrders.find((order) => order.id === selectedOrderId) || null
     : null;
+  const shippingAddressLabel = selectedOrder
+    ? formatShippingAddress(selectedOrder.shippingAddress) ||
+      selectedOrder.customer?.address ||
+      ""
+    : "";
 
   useEffect(() => {
     if (selectedOrder) {
@@ -7988,10 +8541,16 @@ export function AdminOrdersView() {
                     <p>{selectedOrder.customer?.fullName || "—"}</p>
                     <p className="modal__meta">{selectedOrder.customer?.email || "—"}</p>
                     {selectedOrder.customer?.phone && <p className="modal__meta">{selectedOrder.customer.phone}</p>}
-                    {selectedOrder.customer?.address && <p className="modal__meta">{selectedOrder.customer.address}</p>}
+                    {shippingAddressLabel && <p className="modal__meta">{shippingAddressLabel}</p>}
                   </div>
                   <div>
                     <h4>Payment</h4>
+                    {Number.isFinite(selectedOrder.subtotal) && (
+                      <p className="modal__meta">Subtotal: {formatPriceLabel(selectedOrder.subtotal)}</p>
+                    )}
+                    {Number.isFinite(selectedOrder.shippingCost) && (
+                      <p className="modal__meta">Shipping: {formatPriceLabel(selectedOrder.shippingCost)}</p>
+                    )}
                     <p className="modal__meta">Total: {formatPriceLabel(selectedOrder.totalPrice)}</p>
                     {selectedOrder.payfast?.paymentReference && (
                       <p className="modal__meta">Ref: {selectedOrder.payfast.paymentReference}</p>
@@ -8002,6 +8561,12 @@ export function AdminOrdersView() {
                   </div>
                   <div>
                     <h4>Delivery</h4>
+                    {selectedOrder.shipping?.courierName && (
+                      <p className="modal__meta">Courier: {selectedOrder.shipping.courierName}</p>
+                    )}
+                    {selectedOrder.shipping?.province && (
+                      <p className="modal__meta">Province: {selectedOrder.shipping.province}</p>
+                    )}
                     {selectedOrder.trackingLink ? (
                       <a
                         href={selectedOrder.trackingLink}
@@ -8014,8 +8579,8 @@ export function AdminOrdersView() {
                     ) : (
                       <p className="modal__meta">No tracking link yet</p>
                     )}
-                    {selectedOrder.customer?.address && (
-                      <p className="modal__meta">Ship to: {selectedOrder.customer.address}</p>
+                    {shippingAddressLabel && (
+                      <p className="modal__meta">Ship to: {shippingAddressLabel}</p>
                     )}
                   </div>
                 </div>
@@ -8235,6 +8800,345 @@ export function AdminOrdersView() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function AdminShippingView() {
+  usePageMetadata({
+    title: "Admin · Shipping & Courier",
+    description: "Configure courier options and province-based delivery costs.",
+  });
+  const { inventoryEnabled } = useAdminData();
+  const db = useMemo(() => {
+    try {
+      return getFirebaseDb();
+    } catch {
+      return null;
+    }
+  }, []);
+  const { items: courierOptions = [], status, error } = useFirestoreCollection("courierOptions", {
+    orderByField: "createdAt",
+    orderDirection: "desc",
+    fallback: [],
+  });
+  const [drafts, setDrafts] = useState({});
+  const [newCourier, setNewCourier] = useState({ name: "", isActive: true });
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [savingId, setSavingId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  useEffect(() => {
+    setDrafts((prev) => {
+      const next = { ...prev };
+      courierOptions.forEach((option) => {
+        if (next[option.id]) return;
+        const provinceDraft = {};
+        SA_PROVINCES.forEach(({ value }) => {
+          const config = option.provinces?.[value] || {};
+          provinceDraft[value] = {
+            isAvailable: Boolean(config.isAvailable),
+            price: Number.isFinite(config.price) ? config.price.toString() : "",
+          };
+        });
+        next[option.id] = {
+          name: option.name || "",
+          isActive: option.isActive ?? true,
+          provinces: provinceDraft,
+        };
+      });
+
+      Object.keys(next).forEach((key) => {
+        if (!courierOptions.some((option) => option.id === key)) {
+          delete next[key];
+        }
+      });
+      return next;
+    });
+  }, [courierOptions]);
+
+  const handleDraftChange = (id, field, value) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleProvinceChange = (id, province, field, value) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        provinces: {
+          ...(prev[id]?.provinces || {}),
+          [province]: {
+            ...(prev[id]?.provinces?.[province] || {}),
+            [field]: value,
+          },
+        },
+      },
+    }));
+  };
+
+  const buildProvincePayload = (draft) => {
+    const payload = {};
+    const errors = [];
+    SA_PROVINCES.forEach(({ value }) => {
+      const provinceDraft = draft?.provinces?.[value] || {};
+      const isAvailable = Boolean(provinceDraft.isAvailable);
+      const priceValue = Number.parseFloat(provinceDraft.price);
+      if (isAvailable && !Number.isFinite(priceValue)) {
+        errors.push(`${value} requires a price.`);
+      }
+      payload[value] = {
+        isAvailable,
+        price: Number.isFinite(priceValue) ? priceValue : 0,
+      };
+    });
+    return { payload, errors };
+  };
+
+  const handleSaveCourier = async (id) => {
+    if (!db || !inventoryEnabled) return;
+    const draft = drafts[id];
+    if (!draft?.name?.trim()) {
+      setStatusMessage("Courier name is required.");
+      return;
+    }
+    const { payload, errors } = buildProvincePayload(draft);
+    if (errors.length) {
+      setStatusMessage(errors[0]);
+      return;
+    }
+    setSavingId(id);
+    try {
+      await updateDoc(doc(db, "courierOptions", id), {
+        name: draft.name.trim(),
+        isActive: Boolean(draft.isActive),
+        provinces: payload,
+        updatedAt: serverTimestamp(),
+      });
+      setStatusMessage("Courier option updated.");
+    } catch (saveError) {
+      setStatusMessage(saveError.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleCreateCourier = async (event) => {
+    event.preventDefault();
+    if (!db || !inventoryEnabled) return;
+    if (!newCourier.name.trim()) {
+      setStatusMessage("Courier name is required.");
+      return;
+    }
+    const payload = {};
+    SA_PROVINCES.forEach(({ value }) => {
+      payload[value] = { isAvailable: false, price: 0 };
+    });
+    setSavingId("new");
+    try {
+      await addDoc(collection(db, "courierOptions"), {
+        name: newCourier.name.trim(),
+        isActive: Boolean(newCourier.isActive),
+        provinces: payload,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setNewCourier({ name: "", isActive: true });
+      setStatusMessage("Courier option created.");
+    } catch (saveError) {
+      setStatusMessage(saveError.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleDeleteCourier = async () => {
+    if (!db || !inventoryEnabled || !deleteTarget) return;
+    setSavingId(deleteTarget);
+    try {
+      await deleteDoc(doc(db, "courierOptions", deleteTarget));
+      setStatusMessage("Courier option removed.");
+      setDeleteTarget(null);
+    } catch (deleteError) {
+      setStatusMessage(deleteError.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <div className="admin-panel">
+      <Reveal as="section" className="admin-panel">
+        <div className="admin-panel__header">
+          <div>
+            <h2>Shipping & Courier</h2>
+            <p className="admin-panel__note">
+              Configure courier options with province-specific pricing and availability.
+            </p>
+          </div>
+        </div>
+
+        <form className="admin-form" onSubmit={handleCreateCourier}>
+          <div className="admin-form__section">
+            <div className="admin-form__section-header">
+              <h4>Add courier option</h4>
+            </div>
+            <div className="admin-form__section-grid">
+              <label className="admin-form__field">
+                Display name
+                <input
+                  className="input"
+                  type="text"
+                  value={newCourier.name}
+                  onChange={(event) =>
+                    setNewCourier((prev) => ({ ...prev, name: event.target.value }))
+                  }
+                  placeholder="Standard Delivery"
+                  required
+                />
+              </label>
+              <label className="admin-checkbox">
+                <input
+                  type="checkbox"
+                  checked={newCourier.isActive}
+                  onChange={(event) =>
+                    setNewCourier((prev) => ({ ...prev, isActive: event.target.checked }))
+                  }
+                />
+                Active for checkout
+              </label>
+            </div>
+            <div className="admin-form__actions">
+              <button className="btn btn--primary" type="submit" disabled={savingId === "new"}>
+                {savingId === "new" ? "Saving…" : "Create courier"}
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <div className="admin-session-panel">
+          <h3>Courier options</h3>
+          {status === "loading" && <p className="modal__meta">Loading courier options…</p>}
+          {error && <p className="admin-panel__error">{error.message}</p>}
+          {courierOptions.length === 0 ? (
+            <p className="admin-panel__notice">No courier options configured yet.</p>
+          ) : (
+            <div className="admin-shipping-grid">
+              {courierOptions.map((option) => {
+                const draft = drafts[option.id];
+                if (!draft) return null;
+                return (
+                  <div key={option.id} className="admin-detail-card">
+                    <div className="admin-form__section-header">
+                      <h4>{option.name || "Courier option"}</h4>
+                      <label className="admin-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(draft.isActive)}
+                          onChange={(event) =>
+                            handleDraftChange(option.id, "isActive", event.target.checked)
+                          }
+                        />
+                        Active
+                      </label>
+                    </div>
+                    <label className="admin-form__field">
+                      Display name
+                      <input
+                        className="input"
+                        type="text"
+                        value={draft.name}
+                        onChange={(event) =>
+                          handleDraftChange(option.id, "name", event.target.value)
+                        }
+                      />
+                    </label>
+                    <div className="admin-shipping-provinces">
+                      {SA_PROVINCES.map((province) => {
+                        const provinceDraft = draft.provinces?.[province.value] || {};
+                        return (
+                          <div key={`${option.id}-${province.value}`} className="admin-shipping-row">
+                            <span>{province.label}</span>
+                            <label className="admin-checkbox">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(provinceDraft.isAvailable)}
+                                onChange={(event) =>
+                                  handleProvinceChange(
+                                    option.id,
+                                    province.value,
+                                    "isAvailable",
+                                    event.target.checked,
+                                  )
+                                }
+                              />
+                              Available
+                            </label>
+                            <label className="admin-form__field admin-form__field--price">
+                              Price (ZAR)
+                              <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={provinceDraft.price}
+                                onChange={(event) =>
+                                  handleProvinceChange(
+                                    option.id,
+                                    province.value,
+                                    "price",
+                                    event.target.value,
+                                  )
+                                }
+                                placeholder="0.00"
+                              />
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="admin-form__actions">
+                      <button
+                        className="btn btn--secondary"
+                        type="button"
+                        onClick={() => setDeleteTarget(option.id)}
+                        disabled={savingId === option.id}
+                      >
+                        Remove
+                      </button>
+                      <button
+                        className="btn btn--primary"
+                        type="button"
+                        onClick={() => handleSaveCourier(option.id)}
+                        disabled={savingId === option.id}
+                      >
+                        {savingId === option.id ? "Saving…" : "Save changes"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+      </Reveal>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete courier option"
+        message="This removes the courier option and all configured province rates."
+        confirmLabel="Delete"
+        busy={savingId === deleteTarget}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteCourier}
+      />
     </div>
   );
 }

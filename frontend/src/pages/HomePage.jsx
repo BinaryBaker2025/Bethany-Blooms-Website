@@ -1,10 +1,8 @@
 import { Link } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Reveal from "../components/Reveal.jsx";
 import TestimonialCarousel from "../components/TestimonialCarousel.jsx";
 import HeroCarousel from "../components/HeroCarousel.jsx";
-import { useCart } from "../context/CartContext.jsx";
-import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { getStockBadgeLabel, getStockStatus } from "../lib/stockStatus.js";
@@ -18,22 +16,6 @@ import workshopGuestsSmiling from "../assets/photos/workshop-guests-smiling.jpg"
 import workshopTableLongClose from "../assets/photos/workshop-table-long-close.jpg";
 import workshopTableDetailsOne from "../assets/photos/workshop-table-details-1.png";
 import { testimonials } from "../data/testimonials.js";
-
-const CartIcon = () => (
-  <svg
-    aria-hidden="true"
-    viewBox="0 0 24 24"
-    width="20"
-    height="20"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path d="M6 6h15l-1.4 7H8.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    <circle cx="10" cy="20" r="1.3" fill="currentColor" />
-    <circle cx="18" cy="20" r="1.3" fill="currentColor" />
-    <path d="M6 6 5 3H3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-  </svg>
-);
 
 const FALLBACK_PRODUCTS = [
   {
@@ -88,9 +70,6 @@ function HomePage() {
       "Bethany Blooms offers artisanal pressed flower workshops, DIY kits, and custom floral art from Vereeniging, South Africa.",
   });
 
-  const { addItem } = useCart();
-  const { openCart } = useModal();
-  const [selectedVariants, setSelectedVariants] = useState({});
   const { items: remoteProducts, status: productsStatus } = useFirestoreCollection("products", {
     orderByField: "createdAt",
     orderDirection: "desc",
@@ -226,37 +205,6 @@ function HomePage() {
     []
   );
 
-  const handleAddToCart = (product, variant) => {
-    if (product.stockStatus?.state === "out") {
-      alert("This product is currently out of stock. Please check back soon.");
-      return;
-    }
-    if (product.variants?.length && !variant) {
-      alert("Please select a variant before adding this product to your cart.");
-      return;
-    }
-    const variantPrice = Number.isFinite(variant?.price) ? variant.price : null;
-    const finalPrice = Number.isFinite(variantPrice) ? variantPrice : product.numericPrice;
-    if (!Number.isFinite(finalPrice)) {
-      alert("This product does not have a valid online price yet. Please enquire for availability.");
-      return;
-    }
-    addItem({
-      id: variant ? `${product.id}:${variant.id}` : product.id,
-      name: product.name,
-      price: finalPrice,
-      itemType: "product",
-      metadata: {
-        type: "product",
-        productId: product.id,
-        variantId: variant?.id ?? null,
-        variantLabel: variant?.label ?? null,
-        variantPrice,
-      },
-    });
-    openCart();
-  };
-
   return (
     <>
       <section className="section section--tight">
@@ -297,97 +245,45 @@ function HomePage() {
               of ready-to-enjoy arrangements, pressed art keepsakes, and bespoke kits.
             </p>
           </Reveal>
-          <div className="cards-grid">
+          <div className="cards-grid cards-grid--featured">
             {displayProducts.map((product, index) => {
-              const selectedVariantId = selectedVariants[product.id] || "";
-              const selectedVariant =
-                product.variants?.find((variant) => variant.id === selectedVariantId) || null;
-              const variantPrice = Number.isFinite(selectedVariant?.price) ? selectedVariant.price : null;
-              const displayPrice = Number.isFinite(variantPrice) ? `R${variantPrice}` : product.displayPrice;
-              const hasVariants = Boolean(product.variants?.length);
-              const variantSelected = Boolean(selectedVariant);
-              const canPurchase = hasVariants
-                ? variantSelected
-                  ? Number.isFinite(variantPrice) || product.isPurchasable
-                  : false
-                : product.isPurchasable;
-              const isOutOfStock = product.stockStatus?.state === "out";
-              const needsVariant = hasVariants && !variantSelected;
-              const canAddToCart = !isOutOfStock && !needsVariant && canPurchase;
-              const iconLabel = isOutOfStock
-                ? "Out of stock"
-                : needsVariant
-                ? "Select a variant"
-                : !canPurchase
-                ? "Enquire for pricing"
-                : "Add to cart";
+              const displayPrice = product.displayPrice;
+              const categoryLabel = (product.category || "Product").toString().replace(/[-_]+/g, " ");
+              const productUrl = `/products/${encodeURIComponent(product.slug)}`;
 
               return (
-                <Reveal as="article" className="card" key={product.id} delay={index * 110}>
-                  <Link to={`/products/${encodeURIComponent(product.slug)}`} aria-label={`View ${product.title}`}>
-                    <img src={product.image} alt={`${product.title} product from Bethany Blooms`} loading="lazy" />
-                  </Link>
-                  <h3 className="card__title">
-                    <Link to={`/products/${encodeURIComponent(product.slug)}`}>{product.title}</Link>
-                  </h3>
+                <Reveal
+                  as={Link}
+                  to={productUrl}
+                  className="card product-card product-card--link"
+                  key={product.id}
+                  delay={index * 110}
+                >
+                  <span className="product-card__category">{categoryLabel}</span>
+                  <div className="product-card__media" aria-hidden="true">
+                    <img
+                      className="product-card__image"
+                      src={product.image}
+                      alt=""
+                      loading="lazy"
+                    />
+                    {product.stockBadgeLabel && (
+                      <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
+                        {product.stockBadgeLabel}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="card__title">{product.title}</h3>
                   <p className="card__price">
                     <span className="price-stack">
                       <span className="price-stack__current">{displayPrice}</span>
-                      {!Number.isFinite(variantPrice) && product.originalPrice && (
+                      {product.originalPrice && (
                         <span className="price-stack__original">{product.originalPrice}</span>
                       )}
                     </span>
                   </p>
-                  <p>{product.description}</p>
-                  <p className="modal__meta">Category: {product.category.replace(/-/g, " ")}</p>
-                  {product.variants?.length > 0 && (
-                    <label className="modal__meta">
-                      Variant
-                      <select
-                        className="input"
-                        value={selectedVariantId}
-                        onChange={(event) =>
-                          setSelectedVariants((prev) => ({
-                            ...prev,
-                            [product.id]: event.target.value,
-                          }))
-                        }
-                        required
-                      >
-                        <option value="" disabled>
-                          Select a variant
-                        </option>
-                        {product.variants.map((variant) => (
-                          <option key={variant.id} value={variant.id}>
-                            {variant.label}
-                            {Number.isFinite(variant.price) ? ` · R${variant.price}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  {product.stockBadgeLabel && (
-                    <span className={`badge badge--stock-${product.stockStatus?.state || "in"}`}>
-                      {product.stockBadgeLabel}
-                    </span>
-                  )}
-                  <div className="card__actions">
-                    <Link className="btn btn--secondary" to={`/products/${encodeURIComponent(product.slug)}`}>
-                      View details
-                    </Link>
-                    <button
-                      className="btn btn--icon"
-                      type="button"
-                      onClick={() => handleAddToCart(product, selectedVariant)}
-                      disabled={!canAddToCart}
-                      aria-label={iconLabel}
-                      title={iconLabel}
-                    >
-                      <span className="btn__icon">
-                        <CartIcon />
-                      </span>
-                    </button>
-                  </div>
+                  <p className="product-card__description">{product.description}</p>
+                  <span className="btn btn--secondary">View details</span>
                 </Reveal>
               );
             })}

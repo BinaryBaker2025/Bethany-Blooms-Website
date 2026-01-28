@@ -70,6 +70,19 @@ export function CartProvider({ children }) {
     setItems((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const updateItemQuantity = (id, quantity) => {
+    const normalized = Number(quantity);
+    if (!Number.isFinite(normalized)) return;
+    const nextQuantity = Math.max(0, Math.floor(normalized));
+    setItems((prev) =>
+      nextQuantity <= 0
+        ? prev.filter((item) => item.id !== id)
+        : prev.map((item) =>
+            item.id === id ? { ...item, quantity: nextQuantity } : item,
+          ),
+    );
+  };
+
   const clearCart = () => {
     setItems([]);
   };
@@ -84,6 +97,7 @@ export function CartProvider({ children }) {
       items,
       addItem,
       removeItem,
+      updateItemQuantity,
       clearCart,
       totalCount,
       totalPrice,

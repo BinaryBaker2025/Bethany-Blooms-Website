@@ -209,7 +209,7 @@ function Header() {
             className="cart-button"
             type="button"
             onClick={openCart}
-            aria-label="Open cart"
+            aria-label="View cart"
           >
             <span>Cart</span>
             <span className="cart-count" aria-live="polite">

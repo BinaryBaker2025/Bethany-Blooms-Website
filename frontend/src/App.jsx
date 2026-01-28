@@ -5,12 +5,14 @@ import WorkshopsPage from "./pages/WorkshopsPage.jsx";
 import WorkshopDetailPage from "./pages/WorkshopDetailPage.jsx";
 import ProductsPage from "./pages/ProductsPage.jsx";
 import ProductDetailPage from "./pages/ProductDetailPage.jsx";
+import CartPage from "./pages/CartPage.jsx";
 import GalleryPage from "./pages/GalleryPage.jsx";
 import ContactPage from "./pages/ContactPage.jsx";
 import EventsPage from "./pages/EventsPage.jsx";
 import CutFlowersPage from "./pages/CutFlowersPage.jsx";
 import PaymentSuccessPage from "./pages/PaymentSuccessPage.jsx";
 import PaymentCancelPage from "./pages/PaymentCancelPage.jsx";
+import DesignSystemPage from "./pages/DesignSystemPage.jsx";
 import {
   AdminDashboardView,
   AdminCutFlowerBookingsView,
@@ -21,6 +23,7 @@ import {
   AdminProductsView,
   AdminMediaLibraryView,
   AdminProfileView,
+  AdminShippingView,
   AdminWorkshopsView,
   AdminWorkshopsCalendarView,
 } from "./pages/AdminPage.jsx";
@@ -49,10 +52,12 @@ function App() {
               <Route path="/events" element={<EventsPage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/products/:productId" element={<ProductDetailPage />} />
+              <Route path="/cart" element={<CartPage />} />
               <Route path="/gallery" element={<GalleryPage />} />
               <Route path="/contact" element={<ContactPage />} />
               <Route path="/payment/success" element={<PaymentSuccessPage />} />
               <Route path="/payment/cancel" element={<PaymentCancelPage />} />
+              <Route path="/design" element={<DesignSystemPage />} />
               <Route path="*" element={<HomePage />} />
             </Route>
             <Route path="/admin" element={<AdminLayout />}>
@@ -73,6 +78,7 @@ function App() {
               <Route path="reports" element={<AdminReportsPage />} />
               <Route path="users" element={<AdminUsersView />} />
               <Route path="orders" element={<AdminOrdersView />} />
+              <Route path="shipping" element={<AdminShippingView />} />
               <Route path="profile" element={<AdminProfileView />} />
             </Route>
           </Routes>

@@ -64,6 +64,10 @@ service cloud.firestore {
       return data.keys().hasOnly([
           "customer",
           "items",
+          "subtotal",
+          "shippingCost",
+          "shipping",
+          "shippingAddress",
           "totalPrice",
           "status",
           "createdAt",
@@ -76,6 +80,19 @@ service cloud.firestore {
         && data.customer.email is string && data.customer.email.size() > 0
         && data.customer.phone is string && data.customer.phone.size() > 0
         && data.customer.address is string && data.customer.address.size() > 0
+        && (!("shippingAddress" in data) || data.shippingAddress == null || data.shippingAddress.keys().hasOnly(["street", "suburb", "city", "province", "postalCode"]))
+        && (!("shippingAddress" in data) || data.shippingAddress == null || data.shippingAddress.street is string)
+        && (!("shippingAddress" in data) || data.shippingAddress == null || data.shippingAddress.suburb is string)
+        && (!("shippingAddress" in data) || data.shippingAddress == null || data.shippingAddress.city is string)
+        && (!("shippingAddress" in data) || data.shippingAddress == null || data.shippingAddress.province is string)
+        && (!("shippingAddress" in data) || data.shippingAddress == null || data.shippingAddress.postalCode is string)
+        && (!("shipping" in data) || data.shipping == null || data.shipping.keys().hasOnly(["courierId", "courierName", "courierPrice", "province"]))
+        && (!("shipping" in data) || data.shipping == null || (data.shipping.courierId is string || data.shipping.courierId == null))
+        && (!("shipping" in data) || data.shipping == null || (data.shipping.courierName is string || data.shipping.courierName == null))
+        && (!("shipping" in data) || data.shipping == null || data.shipping.courierPrice is number)
+        && (!("shipping" in data) || data.shipping == null || (data.shipping.province is string || data.shipping.province == null))
+        && (!("subtotal" in data) || data.subtotal is number)
+        && (!("shippingCost" in data) || data.shippingCost is number)
         && data.items is list && data.items.size() > 0
         && data.items.size() <= 40
         && data.totalPrice is number && data.totalPrice >= 0
@@ -143,6 +160,11 @@ service cloud.firestore {
 
     match /config/{document=**} {
       allow read: if true;
+    }
+
+    match /courierOptions/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /config/orderCounter {

@@ -1,14 +1,23 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const ModalContext = createContext(null);
 
 export function ModalProvider({ children }) {
-  const [isCartOpen, setCartOpen] = useState(false);
+  const navigate = useNavigate();
   const [isBookingOpen, setBookingOpen] = useState(false);
   const [bookingContext, setBookingContext] = useState(null);
+  const [cartNotice, setCartNotice] = useState(null);
 
-  const openCart = useCallback(() => setCartOpen(true), []);
-  const closeCart = useCallback(() => setCartOpen(false), []);
+  const openCart = useCallback(() => {
+    navigate("/cart");
+  }, [navigate]);
+  const notifyCart = useCallback((message = "Added to cart") => {
+    setCartNotice({ message, id: Date.now() });
+  }, []);
+  const dismissCartNotice = useCallback(() => {
+    setCartNotice(null);
+  }, []);
   const openBooking = useCallback((context = null) => {
     setBookingContext(context);
     setBookingOpen(true);
@@ -20,15 +29,25 @@ export function ModalProvider({ children }) {
 
   const value = useMemo(
     () => ({
-      isCartOpen,
       openCart,
-      closeCart,
+      notifyCart,
+      cartNotice,
+      dismissCartNotice,
       isBookingOpen,
       openBooking,
       closeBooking,
       bookingContext,
     }),
-    [isCartOpen, isBookingOpen, openCart, closeCart, openBooking, closeBooking, bookingContext],
+    [
+      isBookingOpen,
+      openCart,
+      notifyCart,
+      cartNotice,
+      dismissCartNotice,
+      openBooking,
+      closeBooking,
+      bookingContext,
+    ],
   );
 
   return <ModalContext.Provider value={value}>{children}</ModalContext.Provider>;

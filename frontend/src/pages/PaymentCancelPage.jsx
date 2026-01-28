@@ -17,8 +17,8 @@ function PaymentCancelPage() {
           payment method.
         </p>
         <div className="cta-group">
-          <Link className="btn btn--primary" to="/">
-            Return home
+          <Link className="btn btn--primary" to="/cart">
+            Back to cart
           </Link>
           <Link className="btn btn--secondary" to="/contact">
             Contact us

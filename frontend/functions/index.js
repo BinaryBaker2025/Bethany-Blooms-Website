@@ -17,8 +17,9 @@ const RESEND_FROM = defineString("RESEND_FROM", {
   default: "Bethany Blooms <admin@bethanyblooms.co.za>",
 });
 const ADMIN_EMAIL = defineString("ADMIN_EMAIL", {
-  default: "bethanyblooms1@gmail.com",
+  default: "admin@bethanyblooms.co.za",
 });
+const RESEND_PREVIEW_TO = defineString("RESEND_PREVIEW_TO", { default: "" });
 const SITE_URL = defineString("SITE_URL", {
   default: "",
 });
@@ -67,7 +68,11 @@ function getResendFrom() {
 }
 
 function getAdminEmail() {
-  return process.env.ADMIN_EMAIL || safeParamValue(ADMIN_EMAIL, "bethanyblooms1@gmail.com");
+  return process.env.ADMIN_EMAIL || safeParamValue(ADMIN_EMAIL, "admin@bethanyblooms.co.za");
+}
+
+function getPreviewEmail() {
+  return process.env.RESEND_PREVIEW_TO || safeParamValue(RESEND_PREVIEW_TO, "");
 }
 
 function getSiteUrl() {
@@ -626,10 +631,34 @@ async function buildPayfastPaymentPayload(dataInput = {}) {
     address: (requestCustomer.address || fallback.address || "").toString().trim(),
   };
 
-  const requiredFields = ["fullName", "email", "phone", "address"];
+  const shippingAddressInput = data?.shippingAddress || data?.address || {};
+  const shippingAddress = {
+    street: (shippingAddressInput.street || shippingAddressInput.streetAddress || "").toString().trim(),
+    suburb: (shippingAddressInput.suburb || "").toString().trim(),
+    city: (shippingAddressInput.city || "").toString().trim(),
+    province: (shippingAddressInput.province || "").toString().trim(),
+    postalCode: (shippingAddressInput.postalCode || shippingAddressInput.postcode || "").toString().trim(),
+  };
+  const structuredAddressParts = [
+    shippingAddress.street,
+    shippingAddress.suburb,
+    shippingAddress.city,
+    shippingAddress.province,
+    shippingAddress.postalCode,
+  ];
+  const hasStructuredAddress = structuredAddressParts.every(Boolean);
+  const formattedShippingAddress = hasStructuredAddress ? structuredAddressParts.join(", ") : "";
+  if (formattedShippingAddress) {
+    customer.address = formattedShippingAddress;
+  }
+
+  const requiredFields = ["fullName", "email", "phone"];
   const missing = requiredFields.filter((field) => !customer[field]);
   if (missing.length) {
     throw new Error(`Missing customer information: ${missing.join(", ")}.`);
+  }
+  if (!customer.address) {
+    throw new Error("Missing customer address details.");
   }
 
   const items = Array.isArray(data?.items) ? data.items : [];
@@ -637,16 +666,39 @@ async function buildPayfastPaymentPayload(dataInput = {}) {
     throw new Error("Order items are required.");
   }
 
+  const computedSubtotal = items.reduce((sum, item) => {
+    const price = Number(item?.price ?? 0);
+    const quantity = Number(item?.quantity ?? 1);
+    if (!Number.isFinite(price)) return sum;
+    return sum + price * (Number.isFinite(quantity) ? quantity : 1);
+  }, 0);
+
   const totalPrice = Number(data?.totalPrice ?? 0);
   if (!Number.isFinite(totalPrice) || totalPrice <= 0) {
     throw new Error("Order total must be greater than zero.");
   }
+
+  const shippingCost = Number(data?.shippingCost ?? data?.shipping?.courierPrice ?? 0);
+  const subtotalInput = Number(data?.subtotal ?? computedSubtotal);
+  const subtotal = Number.isFinite(subtotalInput) ? subtotalInput : computedSubtotal;
+  const shipping = data?.shipping
+    ? {
+        courierId: (data.shipping.courierId || "").toString().trim() || null,
+        courierName: (data.shipping.courierName || "").toString().trim() || null,
+        courierPrice: Number.isFinite(shippingCost) ? shippingCost : 0,
+        province: (data.shipping.province || shippingAddress.province || "").toString().trim() || null,
+      }
+    : null;
 
   const pendingRef = db.collection(PENDING_COLLECTION).doc();
   await pendingRef.set({
     customer,
     items,
     totalPrice,
+    subtotal: Number.isFinite(subtotal) && subtotal > 0 ? subtotal : null,
+    shippingCost: Number.isFinite(shippingCost) ? shippingCost : 0,
+    shipping: shipping || null,
+    shippingAddress: hasStructuredAddress ? shippingAddress : null,
     status: "pending",
     createdAt: FIELD_VALUE.serverTimestamp(),
   });
@@ -793,6 +845,10 @@ exports.payfastItn = onRequest(async (req, res) => {
     const orderPayload = {
       customer: pending.customer,
       items: pending.items,
+      subtotal: pending.subtotal ?? null,
+      shippingCost: pending.shippingCost ?? 0,
+      shipping: pending.shipping ?? null,
+      shippingAddress: pending.shippingAddress ?? null,
       totalPrice: pending.totalPrice,
       status: "processing",
       paymentStatus: "paid",

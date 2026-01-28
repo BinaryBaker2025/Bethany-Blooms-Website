@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
 import { useCart } from "../context/CartContext.jsx";
@@ -99,7 +99,7 @@ function ProductDetailPage() {
   const { productId } = useParams();
   const slugParam = useMemo(() => decodeURIComponent(productId || "").toLowerCase(), [productId]);
   const { addItem } = useCart();
-  const { openCart } = useModal();
+  const { notifyCart } = useModal();
   const { items: productItems, status: productsStatus, error: productsError } = useFirestoreCollection("products", {
     orderByField: "createdAt",
     orderDirection: "desc",
@@ -113,6 +113,8 @@ function ProductDetailPage() {
     orderDirection: "asc",
   });
   const [selectedVariantId, setSelectedVariantId] = useState("");
+  const [justAdded, setJustAdded] = useState(false);
+  const addedTimeoutRef = useRef(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
 
   const categoryLookup = useMemo(() => buildLookup(categoryItems), [categoryItems]);
@@ -443,8 +445,23 @@ function ProductDetailPage() {
         variantPrice,
       },
     });
-    openCart();
+    notifyCart("Item added to cart");
+    setJustAdded(true);
+    if (addedTimeoutRef.current) {
+      clearTimeout(addedTimeoutRef.current);
+    }
+    addedTimeoutRef.current = setTimeout(() => {
+      setJustAdded(false);
+    }, 1600);
   };
+
+  useEffect(() => {
+    return () => {
+      if (addedTimeoutRef.current) {
+        clearTimeout(addedTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const relationSections = [
     { key: "related", title: "Related products", items: relatedProducts },
@@ -554,8 +571,16 @@ function ProductDetailPage() {
                       Select variant
                     </button>
                   ) : canPurchase ? (
-                    <button className="btn btn--primary" type="button" onClick={handleAddToCart}>
-                      {product.stockStatus?.state === "preorder" ? "Preorder now" : "Add to Cart"}
+                    <button
+                      className={`btn btn--primary ${justAdded ? "is-added" : ""}`}
+                      type="button"
+                      onClick={handleAddToCart}
+                    >
+                      {justAdded
+                        ? "Added!"
+                        : product.stockStatus?.state === "preorder"
+                        ? "Preorder now"
+                        : "Add to Cart"}
                     </button>
                   ) : (
                     <Link className="btn btn--secondary" to="/contact">
@@ -635,32 +660,48 @@ function ProductDetailPage() {
                 <section className="product-detail__section" key={section.key}>
                   <h2>{section.title}</h2>
                   <div className="cards-grid product-detail__related-grid">
-                    {section.items.map((item) => (
-                      <article className="card product-related-card" key={item.id}>
-                        <Link to={`/products/${encodeURIComponent(item.slug)}`} aria-label={`View ${item.title}`}>
-                          <img
-                            className="product-related-card__image"
-                            src={item.image}
-                            alt={item.title}
-                            loading="lazy"
-                          />
-                        </Link>
-                        <h3 className="card__title">
-                          <Link to={`/products/${encodeURIComponent(item.slug)}`}>{item.title}</Link>
-                        </h3>
-                        <p className="card__price">
-                          <span className="price-stack">
-                            <span className="price-stack__current">{item.displayPrice}</span>
-                            {item.originalPrice && (
-                              <span className="price-stack__original">{item.originalPrice}</span>
+                    {section.items.map((item) => {
+                      const categoryLabel = (item.categoryLabels?.[0] || item.category || "Product")
+                        .toString()
+                        .replace(/[-_]+/g, " ");
+                      const description = item.summaryText || item.shortDescription || item.description || "";
+                      const productUrl = `/products/${encodeURIComponent(item.slug)}`;
+                      return (
+                        <Link
+                          className="card product-card product-card--link product-related-card"
+                          to={productUrl}
+                          key={item.id}
+                        >
+                          <span className="product-card__category">{categoryLabel}</span>
+                          <div className="product-card__media" aria-hidden="true">
+                            <img
+                              className="product-card__image"
+                              src={item.image}
+                              alt=""
+                              loading="lazy"
+                            />
+                            {item.stockBadgeLabel && (
+                              <span
+                                className={`badge badge--stock-${item.stockStatus?.state || "in"} product-card__badge`}
+                              >
+                                {item.stockBadgeLabel}
+                              </span>
                             )}
-                          </span>
-                        </p>
-                        <Link className="btn btn--secondary" to={`/products/${encodeURIComponent(item.slug)}`}>
-                          View details
+                          </div>
+                          <h3 className="card__title">{item.title}</h3>
+                          <p className="product-card__description">{description}</p>
+                          <p className="card__price">
+                            <span className="price-stack">
+                              <span className="price-stack__current">{item.displayPrice}</span>
+                              {item.originalPrice && (
+                                <span className="price-stack__original">{item.originalPrice}</span>
+                              )}
+                            </span>
+                          </p>
+                          <span className="btn btn--secondary">View details</span>
                         </Link>
-                      </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
               ))}

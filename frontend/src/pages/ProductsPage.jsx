@@ -1,29 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
-import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 import { getStockBadgeLabel, getStockStatus } from "../lib/stockStatus.js";
-
-const CartIcon = () => (
-  <svg
-    aria-hidden="true"
-    viewBox="0 0 24 24"
-    width="20"
-    height="20"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path d="M6 6h15l-1.4 7H8.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    <circle cx="10" cy="20" r="1.3" fill="currentColor" />
-    <circle cx="18" cy="20" r="1.3" fill="currentColor" />
-    <path d="M6 6 5 3H3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-  </svg>
-);
 
 const stripHtml = (value = "") =>
   value
@@ -33,10 +16,8 @@ const stripHtml = (value = "") =>
     .trim();
 
 function ProductsPage() {
-  const { addItem } = useCart();
   const { openCart } = useModal();
   const [searchParams] = useSearchParams();
-  const [selectedVariants, setSelectedVariants] = useState({});
   const activeCategoryParam = (searchParams.get("category") || "").toString().trim();
   const { items: remoteProducts, status } = useFirestoreCollection("products", {
     orderByField: "createdAt",
@@ -247,37 +228,6 @@ function ProductsPage() {
     activeCategory?.description ||
     "Bring the studio experience home. Explore framed pressed art, gifting collections, ready-to-style blooms, and premium DIY options handcrafted by Bethany Blooms.";
 
-  const handleAddToCart = (product, variant) => {
-    if (product.stockStatus?.state === "out") {
-      alert("This product is currently out of stock. Please check back soon.");
-      return;
-    }
-    if (product.variants?.length && !variant) {
-      alert("Please select a variant before adding this product to your cart.");
-      return;
-    }
-    const variantPrice = Number.isFinite(variant?.price) ? variant.price : null;
-    const finalPrice = Number.isFinite(variantPrice) ? variantPrice : product.numericPrice;
-    if (!Number.isFinite(finalPrice)) {
-      alert("This product is not available for direct purchase online yet. Please enquire for pricing.");
-      return;
-    }
-    addItem({
-      id: variant ? `${product.id}:${variant.id}` : product.id,
-      name: product.name,
-      price: finalPrice,
-      itemType: "product",
-      metadata: {
-        type: "product",
-        productId: product.id,
-        variantId: variant?.id ?? null,
-        variantLabel: variant?.label ?? null,
-        variantPrice,
-      },
-    });
-    openCart();
-  };
-
   return (
     <>
       <section className="section section--tight">
@@ -316,108 +266,40 @@ function ProductsPage() {
           )}
           <div className="kits-grid">
             {displayProducts.map((product, index) => {
-              const selectedVariantId = selectedVariants[product.id] || "";
-              const selectedVariant =
-                product.variants?.find((variant) => variant.id === selectedVariantId) || null;
-              const variantPrice = Number.isFinite(selectedVariant?.price) ? selectedVariant.price : null;
-              const displayPrice = Number.isFinite(variantPrice) ? `R${variantPrice}` : product.displayPrice;
-              const hasVariants = Boolean(product.variants?.length);
-              const variantSelected = Boolean(selectedVariant);
-              const canPurchase = hasVariants
-                ? variantSelected
-                  ? Number.isFinite(variantPrice) || product.isPurchasable
-                  : false
-                : product.isPurchasable;
-              const isOutOfStock = product.stockStatus?.state === "out";
-              const needsVariant = hasVariants && !variantSelected;
-              const canAddToCart = !isOutOfStock && !needsVariant && canPurchase;
-              const iconLabel = isOutOfStock
-                ? "Out of stock"
-                : needsVariant
-                ? "Select a variant"
-                : !canPurchase
-                ? "Enquire for pricing"
-                : "Add to cart";
+              const displayPrice = product.displayPrice;
+              const categoryLabel = (product.categoryLabels?.[0] || product.category || "Product")
+                .toString()
+                .replace(/[-_]+/g, " ");
+              const productUrl = `/products/${encodeURIComponent(product.slug)}`;
 
               return (
-                <Reveal as="article" className="kit-card" key={product.id} delay={index * 90}>
-                  <div className="kit-card__image">
-                    <Link to={`/products/${encodeURIComponent(product.slug)}`} aria-label={`View ${product.title}`}>
-                      <img src={product.image} alt={`${product.title} pressed flower product`} />
-                    </Link>
-                  </div>
-                  <div className="kit-card__body">
-                    <div className="kit-card__meta">
-                      {(product.categoryLabels?.length ? product.categoryLabels : ["Product"]).slice(0, 2).map((label) => (
-                        <span key={`${product.id}-category-${label}`} className="badge">
-                          {label.replace(/-/g, " ")}
-                        </span>
-                      ))}
-                      {(product.categoryLabels?.length ?? 0) > 2 && (
-                        <span className="badge badge--muted">+{product.categoryLabels.length - 2}</span>
-                      )}
-                      {product.stockBadgeLabel && (
-                        <span className={`badge badge--stock-${product.stockStatus?.state || "in"}`}>
-                          {product.stockBadgeLabel}
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="kit-card__title">
-                      <Link to={`/products/${encodeURIComponent(product.slug)}`}>{product.title}</Link>
-                    </h3>
-                    <p>{product.description}</p>
-                    {product.variants?.length > 0 && (
-                      <label className="modal__meta">
-                        Variant
-                        <select
-                          className="input"
-                          value={selectedVariantId}
-                          onChange={(event) =>
-                            setSelectedVariants((prev) => ({
-                              ...prev,
-                              [product.id]: event.target.value,
-                            }))
-                          }
-                          required
-                        >
-                          <option value="" disabled>
-                            Select a variant
-                          </option>
-                          {product.variants.map((variant) => (
-                            <option key={variant.id} value={variant.id}>
-                              {variant.label}
-                              {Number.isFinite(variant.price) ? ` · R${variant.price}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
-                    <p className="kit-card__price">
-                      <span className="price-stack">
-                        <span className="price-stack__current">{displayPrice}</span>
-                        {!Number.isFinite(variantPrice) && product.originalPrice && (
-                          <span className="price-stack__original">{product.originalPrice}</span>
-                        )}
+                <Reveal
+                  as={Link}
+                  to={productUrl}
+                  className="card product-card product-card--link"
+                  key={product.id}
+                  delay={index * 90}
+                >
+                  <span className="product-card__category">{categoryLabel}</span>
+                  <div className="product-card__media" aria-hidden="true">
+                    <img className="product-card__image" src={product.image} alt="" />
+                    {product.stockBadgeLabel && (
+                      <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
+                        {product.stockBadgeLabel}
                       </span>
-                    </p>
-                    <div className="kit-card__actions">
-                      <Link className="btn btn--secondary" to={`/products/${encodeURIComponent(product.slug)}`}>
-                        View details
-                      </Link>
-                      <button
-                        className="btn btn--icon"
-                        type="button"
-                        onClick={() => handleAddToCart(product, selectedVariant)}
-                        disabled={!canAddToCart}
-                        aria-label={iconLabel}
-                        title={iconLabel}
-                      >
-                        <span className="btn__icon">
-                          <CartIcon />
-                        </span>
-                      </button>
-                    </div>
+                    )}
                   </div>
+                  <h3 className="card__title">{product.title}</h3>
+                  <p className="product-card__description">{product.description}</p>
+                  <p className="card__price">
+                    <span className="price-stack">
+                      <span className="price-stack__current">{displayPrice}</span>
+                      {product.originalPrice && (
+                        <span className="price-stack__original">{product.originalPrice}</span>
+                      )}
+                    </span>
+                  </p>
+                  <span className="btn btn--secondary">View details</span>
                 </Reveal>
               );
             })}

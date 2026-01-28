@@ -71,7 +71,7 @@ const INITIAL_BOOKING_FORM = {
 const REQUIRED_FIELDS = ["fullName", "email", "phone", "address"];
 
 function BookingModal() {
-  const { isBookingOpen, closeBooking, openCart, bookingContext } = useModal();
+  const { isBookingOpen, closeBooking, notifyCart, bookingContext } = useModal();
   const { addItem } = useCart();
   const closeButtonRef = useRef(null);
   const [formState, setFormState] = useState(INITIAL_BOOKING_FORM);
@@ -754,7 +754,7 @@ function BookingModal() {
     setFormStatus("success");
     setFormState(INITIAL_BOOKING_FORM);
     closeBooking();
-    openCart();
+    notifyCart("Added to cart");
   };
 
   const summaryLabel = (() => {
