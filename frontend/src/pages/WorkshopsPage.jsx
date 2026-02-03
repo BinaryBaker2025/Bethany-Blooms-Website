@@ -51,7 +51,7 @@ function WorkshopsPage() {
           <Hero
             variant="workshops"
             background={heroBackground}
-            media={<img src={workshopDetailImage} alt="Bethany Blooms workshop table set with flowers and tools" />}
+            media={<img src={workshopDetailImage} alt="Bethany Blooms workshop table set with flowers and tools" loading="lazy" decoding="async"/>}
           >
             <h1>Bespoke Pressed Flower Workshops</h1>
             <p>

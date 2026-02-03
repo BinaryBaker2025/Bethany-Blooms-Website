@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import {
   addDoc,
@@ -22,6 +22,11 @@ import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { getFirebaseFunctions } from "../lib/firebase.js";
 import { getFirebaseDb } from "../lib/firebase.js";
+import {
+  formatPreorderSendMonth,
+  getProductPreorderSendMonth,
+  normalizePreorderSendMonth,
+} from "../lib/preorder.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
 import { getStockStatus, STOCK_LOW_THRESHOLD } from "../lib/stockStatus.js";
 import {
@@ -72,6 +77,7 @@ const INITIAL_PRODUCT_FORM = {
   salePrice: "",
   slug: "",
   stockStatus: "in_stock",
+  preorderSendMonth: "",
   stockQuantity: "",
   categoryIds: [],
   tagIds: [],
@@ -211,12 +217,33 @@ const INITIAL_CUT_FLOWER_CLASS_FORM = {
   repeatDays: [],
 };
 const ORDER_STATUSES = [
-  "pending",
-  "processing",
-  "ready",
-  "fulfilled",
+  "order-placed",
+  "packing-order",
+  "order-ready-for-shipping",
+  "shipped",
+  "completed",
   "cancelled",
 ];
+
+const normalizeOrderStatus = (status) => {
+  const normalized = (status || "").toString().trim().toLowerCase();
+  if (!normalized) return "order-placed";
+  const legacyMap = {
+    pending: "order-placed",
+    processing: "packing-order",
+    ready: "order-ready-for-shipping",
+    fulfilled: "completed",
+  };
+  return legacyMap[normalized] || normalized;
+};
+
+const formatOrderStatusLabel = (status) =>
+  (status || "")
+    .toString()
+    .trim()
+    .replace(/-/g, " ")
+    .replace(/\w/g, (char) => char.toUpperCase());
+
 const DELIVERY_METHODS = ["company", "courier"];
 const COURIER_OPTIONS = [
   "The Courier Guy",
@@ -383,7 +410,7 @@ const parseDateValue = (value) => {
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value;
   }
-  if (typeof value?.toDate === "function") {
+  if (typeof value.toDate === "function") {
     try {
       const converted = value.toDate();
       return Number.isNaN(converted.getTime()) ? null : converted;
@@ -418,16 +445,16 @@ const parseMinAttendees = (option, label) => {
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
   if (!label) return null;
   const normalized = label.toLowerCase();
-  const match = normalized.match(/(\d+)\s*\+|(\d+)\s*(?:or|and)\s*more|minimum\s*(\d+)/);
+  const match = normalized.match(/(\d+)\s*\+|(\d+)\s*(:or|and)\s*more|minimum\s*(\d+)/);
   if (!match) return null;
   const parsed = Number(match[1] || match[2] || match[3]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
 const parseIsExtra = (option, label) => {
-  if (option?.isExtra || option?.extra || option?.isAddOn) return true;
+  if (option.isExtra || option.extra || option.isAddOn) return true;
   if (!label) return false;
-  return /extra|add[- ]?on|addon/.test(label.toLowerCase());
+  return /extra|add[- ]on|addon/.test(label.toLowerCase());
 };
 
 const formatOptionLabel = (label, price) => {
@@ -501,7 +528,7 @@ const formatRepeatLabel = (repeatDays) => {
   const days = Array.isArray(repeatDays) ? repeatDays : [];
   const normalized = days.map((day) => Number(day)).filter((day) => Number.isFinite(day));
   const labels = normalized
-    .map((day) => EVENT_REPEAT_WEEKDAYS.find((entry) => entry.value === day)?.label)
+    .map((day) => EVENT_REPEAT_WEEKDAYS.find((entry) => entry.value === day).label)
     .filter(Boolean);
   if (!labels.length) return "";
   return `Every ${labels.join(", ")}`;
@@ -510,7 +537,7 @@ const formatRepeatLabel = (repeatDays) => {
 const buildTimeSummary = (timeSlots) => {
   const slots = Array.isArray(timeSlots) ? timeSlots : [];
   const labels = slots
-    .filter((slot) => slot?.time)
+    .filter((slot) => slot.time)
     .map((slot) => {
       const formattedTime = formatTimeRange(slot.time, slot.endTime);
       if (!formattedTime) return "";
@@ -555,7 +582,7 @@ const sanitizePlainText = (value = "") => {
   const raw = value.toString();
   if (!raw) return "";
   const withLineBreaks = raw
-    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\s*br\s*\/>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<[^>]*>/g, "");
   return withLineBreaks.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -635,7 +662,9 @@ export function AdminDashboardView() {
 
     const confirmedBookings = bookings.length;
     const openOrders = orders.filter(
-      (order) => order.status !== "fulfilled" && order.status !== "cancelled"
+      (order) =>
+        normalizeOrderStatus(order.status) !== "completed" &&
+        normalizeOrderStatus(order.status) !== "cancelled"
     ).length;
     const totalProducts = products.length;
 
@@ -721,7 +750,7 @@ export function AdminDashboardView() {
       <Reveal as="section" className="admin-panel">
         <div className="admin-panel__header">
           <div>
-            <h2>Hi {user?.email || "admin"}</h2>
+            <h2>Hi {user.email || "admin"}</h2>
             <p className="admin-panel__note">
               Monitor what is live before jumping into edits.
             </p>
@@ -793,15 +822,15 @@ export function AdminDashboardView() {
                 <li key={order.id} className="admin-order-card">
                   <div>
                     <p>
-                      <strong>{order.customer?.fullName || "Guest"}</strong>
+                      <strong>{order.customer.fullName || "Guest"}</strong>
                     </p>
                     <p className="modal__meta">
-                      {order.customer?.email || "—"}
+                      {order.customer.email || "—"}
                     </p>
                   </div>
                   <div>
                     <p className="modal__meta">
-                      {order.items?.length || 0} item(s)
+                      {order.items.length || 0} item(s)
                     </p>
                     <p className="modal__meta">
                       {formatPriceLabel(order.totalPrice)}
@@ -839,8 +868,8 @@ export function AdminProductsView() {
   const location = useLocation();
   const isCategoriesTab = location.pathname.includes("/admin/products/categories");
   const activeTab = isCategoriesTab ? "categories" : "products";
-  const headerNote = isCategoriesTab
-    ? "Manage the categories shown across the storefront."
+  const headerNote = isCategoriesTab ?
+     "Manage the categories shown across the storefront."
     : "Build your storefront inventory directly from Firestore.";
   const [statusMessage, setStatusMessage] = useState(null);
   const [productForm, setProductForm] = useState(INITIAL_PRODUCT_FORM);
@@ -851,12 +880,19 @@ export function AdminProductsView() {
   const [productGalleryFiles, setProductGalleryFiles] = useState([]);
   const [productGalleryPreviews, setProductGalleryPreviews] = useState([]);
   const [productError, setProductError] = useState(null);
-  const [categoryForm, setCategoryForm] = useState({ name: "", description: "", coverImage: "" });
+  const [categoryForm, setCategoryForm] = useState({
+    name: "",
+    description: "",
+    subHeading: "",
+    productDescription: "",
+    coverImage: "",
+  });
   const [categoryError, setCategoryError] = useState(null);
   const [categorySaving, setCategorySaving] = useState(false);
   const [categoryStatusMessage, setCategoryStatusMessage] = useState(null);
   const [categoryCoverFile, setCategoryCoverFile] = useState(null);
   const [categoryCoverPreview, setCategoryCoverPreview] = useState("");
+  const [editingCategory, setEditingCategory] = useState(null);
   const categoryCoverPreviewUrlRef = useRef(null);
   const [tagForm, setTagForm] = useState({ name: "" });
   const [tagError, setTagError] = useState(null);
@@ -894,7 +930,21 @@ export function AdminProductsView() {
           if (!name) return null;
           const slug = (category.slug || category.id || name).toString().trim();
           const id = (category.id || slug).toString().trim();
-          return { id, name, slug };
+          const description = (category.description || category.short_description || "")
+            .toString()
+            .trim();
+          const subHeading = (category.subHeading || category.subheading || "").toString().trim();
+          const productDescription = (
+            category.productDescription ||
+            category.collectionDescription ||
+            ""
+          )
+            .toString()
+            .trim();
+          const coverImage = (category.coverImage || category.cover_image || "")
+            .toString()
+            .trim();
+          return { id, name, slug, description, subHeading, productDescription, coverImage };
         })
         .filter(Boolean),
     [productCategories],
@@ -933,18 +983,18 @@ export function AdminProductsView() {
   const categoryUsage = useMemo(() => {
     const usage = new Map();
     products.forEach((product) => {
-      const categoryIds = Array.isArray(product.category_ids)
-        ? product.category_ids
-        : Array.isArray(product.categoryIds)
-        ? product.categoryIds
-        : product.categoryId
-        ? [product.categoryId]
-        : product.category
-        ? [product.category]
+      const categoryIds = Array.isArray(product.category_ids) ?
+         product.category_ids
+        : Array.isArray(product.categoryIds) ?
+         product.categoryIds
+        : product.categoryId ?
+         [product.categoryId]
+        : product.category ?
+         [product.category]
         : [];
       categoryIds.forEach((id) => {
         const resolved = resolveCategory(id);
-        if (!resolved?.id) return;
+        if (!resolved.id) return;
         usage.set(resolved.id, (usage.get(resolved.id) || 0) + 1);
       });
     });
@@ -1066,8 +1116,8 @@ export function AdminProductsView() {
       productGalleryPreviewUrlRef.current = [];
     }
 
-    const existingUrls = Array.isArray(productForm.galleryImages)
-      ? productForm.galleryImages.filter(Boolean)
+    const existingUrls = Array.isArray(productForm.galleryImages) ?
+       productForm.galleryImages.filter(Boolean)
       : [];
     if (existingUrls.length + files.length > MAX_PRODUCT_IMAGES) {
       setProductError(`Please select up to ${MAX_PRODUCT_IMAGES} images total.`);
@@ -1116,6 +1166,43 @@ export function AdminProductsView() {
     setCategoryForm((prev) => ({ ...prev, coverImage: "" }));
   };
 
+  const resetCategoryForm = () => {
+    if (categoryCoverPreviewUrlRef.current) {
+      URL.revokeObjectURL(categoryCoverPreviewUrlRef.current);
+      categoryCoverPreviewUrlRef.current = null;
+    }
+    setCategoryForm({
+      name: "",
+      description: "",
+      subHeading: "",
+      productDescription: "",
+      coverImage: "",
+    });
+    setCategoryCoverFile(null);
+    setCategoryCoverPreview("");
+    setEditingCategory(null);
+  };
+
+  const handleEditCategory = (category) => {
+    if (!category) return;
+    if (categoryCoverPreviewUrlRef.current) {
+      URL.revokeObjectURL(categoryCoverPreviewUrlRef.current);
+      categoryCoverPreviewUrlRef.current = null;
+    }
+    setCategoryForm({
+      name: category.name || "",
+      description: category.description || "",
+      subHeading: category.subHeading || "",
+      productDescription: category.productDescription || "",
+      coverImage: category.coverImage || "",
+    });
+    setCategoryCoverFile(null);
+    setCategoryCoverPreview(category.coverImage || "");
+    setEditingCategory(category);
+    setCategoryError(null);
+    setCategoryStatusMessage(null);
+  };
+
   const uploadProductMedia = async (file) => {
     if (!storage) throw new Error("Firebase Storage is not configured.");
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "-");
@@ -1144,8 +1231,8 @@ export function AdminProductsView() {
   const openMediaLibrary = (mode) => {
     setMediaLibraryMode(mode);
     if (mode === "gallery") {
-      const existingUrls = Array.isArray(productForm.galleryImages)
-        ? productForm.galleryImages.filter(Boolean)
+      const existingUrls = Array.isArray(productForm.galleryImages) ?
+         productForm.galleryImages.filter(Boolean)
         : [];
       setMediaLibrarySelection(existingUrls);
     } else if (mode === "category") {
@@ -1198,8 +1285,8 @@ export function AdminProductsView() {
       setMediaLibraryOpen(false);
       return;
     }
-    const existingUrls = Array.isArray(productForm.galleryImages)
-      ? productForm.galleryImages.filter(Boolean)
+    const existingUrls = Array.isArray(productForm.galleryImages) ?
+       productForm.galleryImages.filter(Boolean)
       : [];
     const merged = Array.from(new Set([...existingUrls, ...mediaLibrarySelection])).filter(Boolean);
     const maxUrls = Math.max(0, MAX_PRODUCT_IMAGES - productGalleryFiles.length);
@@ -1208,8 +1295,8 @@ export function AdminProductsView() {
       setProductError(`You can add up to ${MAX_PRODUCT_IMAGES} images total.`);
     }
     setProductForm((prev) => ({ ...prev, galleryImages: limited }));
-    const filePreviews = Array.isArray(productGalleryPreviewUrlRef.current)
-      ? productGalleryPreviewUrlRef.current
+    const filePreviews = Array.isArray(productGalleryPreviewUrlRef.current) ?
+       productGalleryPreviewUrlRef.current
       : [];
     setProductGalleryPreviews([...limited, ...filePreviews]);
     setMediaLibraryOpen(false);
@@ -1259,30 +1346,31 @@ export function AdminProductsView() {
   };
 
   const handleEditProduct = (product) => {
-    const resolvedCategoryIds = Array.isArray(product.category_ids)
-      ? product.category_ids
-      : Array.isArray(product.categoryIds)
-      ? product.categoryIds
-      : product.categoryId
-      ? [product.categoryId]
-      : product.category
-      ? [product.category]
+    try {
+    const resolvedCategoryIds = Array.isArray(product.category_ids) ?
+       product.category_ids
+      : Array.isArray(product.categoryIds) ?
+       product.categoryIds
+      : product.categoryId ?
+       [product.categoryId]
+      : product.category ?
+       [product.category]
       : [];
     const normalizedCategoryIds = resolvedCategoryIds
       .map((value) => resolveCategory(value)?.id || value)
       .filter(Boolean)
       .map((value) => value.toString());
-    const normalizedTagIds = Array.isArray(product.tag_ids)
-      ? product.tag_ids
-      : Array.isArray(product.tagIds)
-      ? product.tagIds
+    const normalizedTagIds = Array.isArray(product.tag_ids) ?
+       product.tag_ids
+      : Array.isArray(product.tagIds) ?
+       product.tagIds
       : [];
-    const existingGallery = Array.isArray(product.gallery_images)
-      ? product.gallery_images
-      : Array.isArray(product.galleryImages)
-      ? product.galleryImages
-      : Array.isArray(product.images)
-      ? product.images
+    const existingGallery = Array.isArray(product.gallery_images) ?
+       product.gallery_images
+      : Array.isArray(product.galleryImages) ?
+       product.galleryImages
+      : Array.isArray(product.images) ?
+       product.images
       : [];
     const fallbackGallery = product.image ? [product.image] : [];
     const galleryImages = (existingGallery.length ? existingGallery : fallbackGallery)
@@ -1314,6 +1402,8 @@ export function AdminProductsView() {
             : String(product.quantity)
           : String(product.stockQuantity)
         : String(product.stock_quantity);
+    const dimensionsSource =
+      product.dimensions && typeof product.dimensions === "object" ? product.dimensions : {};
     setProductForm({
       title: product.title || product.name || "",
       sku: product.sku || "",
@@ -1321,6 +1411,7 @@ export function AdminProductsView() {
       salePrice: salePriceValue,
       slug: product.slug || slugifyId(product.title || product.name || ""),
       stockStatus: stockStatusValue,
+      preorderSendMonth: getProductPreorderSendMonth(product),
       stockQuantity: stockQuantityValue,
       categoryIds: normalizedCategoryIds.slice(0, 1),
       tagIds: normalizedTagIds.map((value) => value.toString()).slice(0, 1),
@@ -1348,37 +1439,37 @@ export function AdminProductsView() {
       metaKeywords: product.meta_keywords || product.metaKeywords || "",
       shippingWeight: product.shipping_weight || product.shippingWeight || "",
       dimensions: {
-        width: product.dimensions?.width || "",
-        height: product.dimensions?.height || "",
-        depth: product.dimensions?.depth || "",
+        width: dimensionsSource.width || "",
+        height: dimensionsSource.height || "",
+        depth: dimensionsSource.depth || "",
       },
       countryOfOrigin: product.country_of_origin || product.countryOfOrigin || "",
       deliveryInfo: product.delivery_info || product.deliveryInfo || "",
       relatedProductIds: (
-        Array.isArray(product.related_product_ids)
-          ? product.related_product_ids
-          : Array.isArray(product.relatedProductIds)
-          ? product.relatedProductIds
+        Array.isArray(product.related_product_ids) ?
+           product.related_product_ids
+          : Array.isArray(product.relatedProductIds) ?
+           product.relatedProductIds
           : []
       ).slice(0, 1),
       upsellProductIds: (
-        Array.isArray(product.upsell_product_ids)
-          ? product.upsell_product_ids
-          : Array.isArray(product.upsellProductIds)
-          ? product.upsellProductIds
+        Array.isArray(product.upsell_product_ids) ?
+           product.upsell_product_ids
+          : Array.isArray(product.upsellProductIds) ?
+           product.upsellProductIds
           : []
       ).slice(0, 1),
       crossSellProductIds: (
-        Array.isArray(product.cross_sell_product_ids)
-          ? product.cross_sell_product_ids
-          : Array.isArray(product.crossSellProductIds)
-          ? product.crossSellProductIds
+        Array.isArray(product.cross_sell_product_ids) ?
+           product.cross_sell_product_ids
+          : Array.isArray(product.crossSellProductIds) ?
+           product.crossSellProductIds
           : []
       ).slice(0, 1),
       status: product.status || "draft",
       hasVariants: Array.isArray(product.variants) && product.variants.length > 0,
       variants: Array.isArray(product.variants)
-        ? product.variants.map((variant) => ({
+        ? product.variants.filter(Boolean).map((variant) => ({
             id:
               variant.id ||
               `product-variant-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -1406,6 +1497,11 @@ export function AdminProductsView() {
     setEditingProductId(product.id);
     setProductError(null);
     setProductModalOpen(true);
+    } catch (error) {
+      console.error("Unable to load product for editing", error);
+      setProductError("We could not load this product for editing. Please refresh and try again.");
+      setStatusMessage("We could not load this product for editing.");
+    }
   };
 
   const handleDeleteProduct = async (productId) => {
@@ -1507,9 +1603,9 @@ export function AdminProductsView() {
         if (tagCache.has(cacheKey)) return tagCache.get(cacheKey);
         const existing = tagOptions.find(
           (tag) =>
-            tag.id?.toString().toLowerCase() === cacheKey ||
-            tag.slug?.toString().toLowerCase() === cacheKey ||
-            tag.name?.toString().toLowerCase() === cacheKey,
+            tag.id.toString().toLowerCase() === cacheKey ||
+            tag.slug.toString().toLowerCase() === cacheKey ||
+            tag.name.toString().toLowerCase() === cacheKey,
         );
         if (existing) {
           tagCache.set(cacheKey, existing);
@@ -1573,8 +1669,8 @@ export function AdminProductsView() {
           .toString()
           .trim()
           .toLowerCase();
-        const status = ["draft", "live", "archived"].includes(statusInput)
-          ? statusInput
+        const status = ["draft", "live", "archived"].includes(statusInput) ?
+           statusInput
           : "live";
         const shortDescription = sanitizePlainText(
           getCellValue(row, ["Short Description", "Description", "short_description", "description"]) ||
@@ -1584,15 +1680,15 @@ export function AdminProductsView() {
           getCellValue(row, ["Long Description", "long_description", "Long description"]) || "",
         );
         const categoryInput = (getCellValue(row, ["Category", "category"]) || "").toString().trim();
-        const fallbackCategory = categoryOptions[0]?.name || "Product";
+        const fallbackCategory = categoryOptions[0].name || "Product";
         const categoryLabel = categoryInput || fallbackCategory;
         const categoryRecord = await ensureCategory(categoryLabel);
-        const categoryName = categoryRecord?.name || categoryLabel;
-        const categoryId = categoryRecord?.id || slugifyId(categoryName) || "product";
-        const categorySlug = categoryRecord?.slug || slugifyId(categoryName) || categoryId;
+        const categoryName = categoryRecord.name || categoryLabel;
+        const categoryId = categoryRecord.id || slugifyId(categoryName) || "product";
+        const categorySlug = categoryRecord.slug || slugifyId(categoryName) || categoryId;
         const tagInput = (getCellValue(row, ["Tag", "tag"]) || "").toString().trim();
         const tagRecord = tagInput ? await ensureTag(tagInput) : null;
-        const tagId = tagRecord?.id || (tagInput ? slugifyId(tagInput) : "");
+        const tagId = tagRecord.id || (tagInput ? slugifyId(tagInput) : "");
         const priceValue = rawPriceValue;
         const normalizedPrice = priceValue === "" ? null : priceValue;
         const salePriceValue = parseSheetPriceValue(getCellValue(row, ["Sale Price", "sale_price", "Sale"]) ?? "");
@@ -1601,13 +1697,25 @@ export function AdminProductsView() {
           .toString()
           .trim()
           .toLowerCase();
-        const normalizedStockStatus = ["in_stock", "out_of_stock", "preorder"].includes(stockStatusInput)
-          ? stockStatusInput
-          : quantity === null
-          ? "in_stock"
-          : quantity <= 0
-          ? "out_of_stock"
+        const normalizedStockStatus = ["in_stock", "out_of_stock", "preorder"].includes(stockStatusInput) ?
+           stockStatusInput
+          : quantity === null ?
+           "in_stock"
+          : quantity <= 0 ?
+           "out_of_stock"
           : "in_stock";
+        const preorderSendMonthInput = (
+          getCellValue(row, [
+            "Preorder Send Month",
+            "Preorder send month",
+            "preorder_send_month",
+            "preorderSendMonth",
+          ]) || ""
+        )
+          .toString()
+          .trim();
+        const preorderSendMonthValue = normalizePreorderSendMonth(preorderSendMonthInput);
+        const preorderSendMonth = normalizedStockStatus === "preorder" ? preorderSendMonthValue : "";
         const resolvedQuantity =
           quantity === null
             ? normalizedStockStatus === "out_of_stock"
@@ -1702,7 +1810,7 @@ export function AdminProductsView() {
         const seoDescriptionSource = shortDescription || longDescription;
         const metaTitle = cleanedTitle;
         const metaDescription = seoDescriptionSource ? seoDescriptionSource.slice(0, 160) : "";
-        const keywordTokens = `${cleanedTitle} ${tagRecord?.name || ""}`.split(/\s+/).filter(Boolean);
+        const keywordTokens = `${cleanedTitle} ${tagRecord.name || ""}`.split(/\s+/).filter(Boolean);
         const metaKeywords = Array.from(new Set(keywordTokens)).join(", ");
         const skuValue = generateSku(cleanedTitle, slugValue);
         const primaryImage = mainImageValue || galleryImages[0] || "";
@@ -1751,6 +1859,8 @@ export function AdminProductsView() {
           meta_description: metaDescription,
           meta_keywords: metaKeywords,
           stock_status: normalizedStockStatus,
+          preorder_send_month: preorderSendMonth,
+          preorderSendMonth: preorderSendMonth,
           stock_quantity: resolvedQuantity,
           quantity: resolvedQuantity,
           status,
@@ -1793,6 +1903,7 @@ export function AdminProductsView() {
       "Price",
       "Sale Price",
       "Stock Status",
+      "Preorder Send Month",
       "Stock Quantity",
       "Category",
       "Tag",
@@ -1827,6 +1938,7 @@ export function AdminProductsView() {
       "150",
       "120",
       "in_stock",
+      "",
       "25",
       "Cut flower",
       "Gift",
@@ -1834,7 +1946,7 @@ export function AdminProductsView() {
       "Longer description goes here.",
       "https://example.com/main.jpg",
       "https://example.com/gallery-1.jpg, https://example.com/gallery-2.jpg",
-      "https://www.youtube.com/watch?v=abcdef",
+      "https://www.youtube.com/watchv=abcdef",
       "full_sun",
       "Well-drained",
       "Weekly",
@@ -1859,6 +1971,7 @@ export function AdminProductsView() {
       "Notes:",
       "Title and Price are required. Slug is optional.",
       "Stock Status: in_stock, out_of_stock, preorder.",
+      "Preorder Send Month: YYYY-MM (only used for preorder items).",
       "Category and Tag are single values.",
       "Featured: yes or no.",
       "Variant Labels/Prices: comma-separated (prices optional).",
@@ -1879,18 +1992,31 @@ export function AdminProductsView() {
     }
     const name = (categoryForm.name || "").toString().trim();
     const description = sanitizePlainText((categoryForm.description || "").toString().trim());
+    const subHeading = sanitizePlainText((categoryForm.subHeading || "").toString().trim());
+    const productDescription = sanitizePlainText(
+      (categoryForm.productDescription || "").toString().trim(),
+    );
     if (!name) {
       setCategoryError("Category name is required.");
       return;
     }
-    const slug = slugifyId(name);
+    const isEditing = Boolean(editingCategory.id);
+    const slug = isEditing ? editingCategory.id : slugifyId(name);
     if (!slug) {
       setCategoryError("Please enter a category name with letters or numbers.");
       return;
     }
-    if (resolveCategory(slug) || resolveCategory(name)) {
-      setCategoryError("That category already exists.");
-      return;
+    if (!isEditing) {
+      if (resolveCategory(slug) || resolveCategory(name)) {
+        setCategoryError("That category already exists.");
+        return;
+      }
+    } else {
+      const existing = resolveCategory(name);
+      if (existing && existing.id !== editingCategory.id) {
+        setCategoryError("That category already exists.");
+        return;
+      }
     }
     try {
       setCategorySaving(true);
@@ -1899,22 +2025,25 @@ export function AdminProductsView() {
       if (categoryCoverFile) {
         coverImageUrl = await uploadProductMedia(categoryCoverFile);
       }
-      await setDoc(doc(db, "productCategories", slug), {
+      const payload = {
         name,
-        slug,
         description,
+        subHeading,
+        productDescription,
         coverImage: coverImageUrl || "",
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      setCategoryForm({ name: "", description: "", coverImage: "" });
-      if (categoryCoverPreviewUrlRef.current) {
-        URL.revokeObjectURL(categoryCoverPreviewUrlRef.current);
-        categoryCoverPreviewUrlRef.current = null;
+      };
+      if (isEditing) {
+        await updateDoc(doc(db, "productCategories", slug), payload);
+      } else {
+        await setDoc(doc(db, "productCategories", slug), {
+          ...payload,
+          slug,
+          createdAt: serverTimestamp(),
+        });
       }
-      setCategoryCoverFile(null);
-      setCategoryCoverPreview("");
-      setCategoryStatusMessage("Category saved");
+      resetCategoryForm();
+      setCategoryStatusMessage(isEditing ? "Category updated" : "Category saved");
     } catch (error) {
       setCategoryError(error.message || "Unable to save the category.");
     } finally {
@@ -2084,7 +2213,7 @@ export function AdminProductsView() {
   };
 
   const handleCreateTag = async (event) => {
-    event?.preventDefault?.();
+    event.preventDefault?.();
     if (!inventoryEnabled || !db) {
       setTagError("You do not have permission to update tags.");
       return;
@@ -2118,7 +2247,7 @@ export function AdminProductsView() {
   };
 
   const handleToggleFeaturedProduct = async (product) => {
-    if (!db || !inventoryEnabled || !product?.id) return;
+    if (!db || !inventoryEnabled || !product.id) return;
     const isFeatured = Boolean(product.featured);
     const currentFeaturedCount = products.filter((entry) => entry.featured).length;
     if (!isFeatured && currentFeaturedCount >= MAX_FEATURED_PRODUCTS) {
@@ -2135,8 +2264,8 @@ export function AdminProductsView() {
         updatedAt: serverTimestamp(),
       });
       setStatusMessage(
-        !isFeatured
-          ? "Product featured on the home page."
+        !isFeatured ?
+           "Product featured on the home page."
           : "Product removed from the featured list."
       );
     } catch (toggleError) {
@@ -2186,14 +2315,14 @@ export function AdminProductsView() {
       return;
     }
 
-    const normalizedCategoryIds = Array.isArray(productForm.categoryIds)
-      ? productForm.categoryIds.filter(Boolean)
+    const normalizedCategoryIds = Array.isArray(productForm.categoryIds) ?
+       productForm.categoryIds.filter(Boolean)
       : [];
-    const normalizedTagIds = Array.isArray(productForm.tagIds)
-      ? productForm.tagIds.filter(Boolean)
+    const normalizedTagIds = Array.isArray(productForm.tagIds) ?
+       productForm.tagIds.filter(Boolean)
       : [];
     const tagLabels = normalizedTagIds
-      .map((tagId) => tagOptions.find((tag) => tag.id === tagId)?.name)
+      .map((tagId) => tagOptions.find((tag) => tag.id === tagId).name)
       .filter(Boolean);
     const seoDescriptionSource = shortDescriptionText || longDescriptionText;
     const metaTitle = title;
@@ -2232,8 +2361,8 @@ export function AdminProductsView() {
         if (uploaded) mainImageUrl = uploaded;
       }
 
-      let galleryUrls = Array.isArray(productForm.galleryImages)
-        ? productForm.galleryImages.filter(Boolean)
+      let galleryUrls = Array.isArray(productForm.galleryImages) ?
+         productForm.galleryImages.filter(Boolean)
         : [];
       if (productGalleryFiles.length > 0) {
         for (const file of productGalleryFiles) {
@@ -2244,18 +2373,20 @@ export function AdminProductsView() {
       const limitedGallery = galleryUrls.slice(0, MAX_PRODUCT_IMAGES);
       const primaryImage = mainImageUrl || limitedGallery[0] || "";
 
-      const primaryCategory = normalizedCategoryIds.length
-        ? resolveCategory(normalizedCategoryIds[0])
+      const primaryCategory = normalizedCategoryIds.length ?
+         resolveCategory(normalizedCategoryIds[0])
         : null;
-      const primaryCategoryLabel = primaryCategory?.name || "";
-      const primaryCategoryId = primaryCategory?.id || normalizedCategoryIds[0] || "";
-      const primaryCategorySlug = primaryCategory?.slug || "";
+      const primaryCategoryLabel = primaryCategory.name || "";
+      const primaryCategoryId = primaryCategory.id || normalizedCategoryIds[0] || "";
+      const primaryCategorySlug = primaryCategory.slug || "";
 
       const dimensionsPayload = {
-        width: productForm.dimensions?.width || "",
-        height: productForm.dimensions?.height || "",
-        depth: productForm.dimensions?.depth || "",
+        width: productForm.dimensions.width || "",
+        height: productForm.dimensions.height || "",
+        depth: productForm.dimensions.depth || "",
       };
+      const preorderSendMonthValue = normalizePreorderSendMonth(productForm.preorderSendMonth);
+      const preorderSendMonthPayload = productForm.stockStatus === "preorder" ? preorderSendMonthValue : "";
 
       const payload = {
         title,
@@ -2264,6 +2395,8 @@ export function AdminProductsView() {
         sale_price: salePriceNumber,
         slug,
         stock_status: productForm.stockStatus,
+        preorder_send_month: preorderSendMonthPayload,
+        preorderSendMonth: preorderSendMonthPayload,
         stock_quantity:
           stockQuantityNumber === null
             ? productForm.stockStatus === "out_of_stock"
@@ -2298,14 +2431,14 @@ export function AdminProductsView() {
         dimensions: dimensionsPayload,
         country_of_origin: productForm.countryOfOrigin.trim(),
         delivery_info: productForm.deliveryInfo.trim(),
-        related_product_ids: Array.isArray(productForm.relatedProductIds)
-          ? productForm.relatedProductIds.filter(Boolean)
+        related_product_ids: Array.isArray(productForm.relatedProductIds) ?
+           productForm.relatedProductIds.filter(Boolean)
           : [],
-        upsell_product_ids: Array.isArray(productForm.upsellProductIds)
-          ? productForm.upsellProductIds.filter(Boolean)
+        upsell_product_ids: Array.isArray(productForm.upsellProductIds) ?
+           productForm.upsellProductIds.filter(Boolean)
           : [],
-        cross_sell_product_ids: Array.isArray(productForm.crossSellProductIds)
-          ? productForm.crossSellProductIds.filter(Boolean)
+        cross_sell_product_ids: Array.isArray(productForm.crossSellProductIds) ?
+           productForm.crossSellProductIds.filter(Boolean)
           : [],
         name: title,
         description: shortDescriptionText || longDescriptionText,
@@ -2368,7 +2501,7 @@ export function AdminProductsView() {
               <button
                 className="btn btn--secondary"
                 type="button"
-                onClick={() => productImportInputRef.current?.click()}
+                onClick={() => productImportInputRef.current.click()}
                 disabled={!inventoryEnabled || productImporting}
               >
                 {productImporting ? "Importing..." : "Import Spreadsheet"}
@@ -2420,7 +2553,7 @@ export function AdminProductsView() {
       {activeTab === "categories" && (
         <div className="admin-panel__content admin-panel__content--split">
           <div>
-            <h3>Create category</h3>
+            <h3>{editingCategory ? "Edit category" : "Create category"}</h3>
             <form className="admin-form" onSubmit={handleCreateCategory}>
               <input
                 className="input"
@@ -2446,6 +2579,29 @@ export function AdminProductsView() {
                   }))
                 }
               />
+              <input
+                className="input"
+                placeholder="Collection sub heading"
+                value={categoryForm.subHeading}
+                onChange={(event) =>
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    subHeading: event.target.value,
+                  }))
+                }
+              />
+              <textarea
+                className="input textarea"
+                rows="3"
+                placeholder="Collection product description"
+                value={categoryForm.productDescription}
+                onChange={(event) =>
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    productDescription: event.target.value,
+                  }))
+                }
+              />
               <label className="admin-form__field admin-form__full">
                 Category cover image
                 <input
@@ -2465,7 +2621,7 @@ export function AdminProductsView() {
                 </div>
                 {categoryCoverPreview && (
                   <div className="admin-preview-grid">
-                    <img src={categoryCoverPreview} alt="Category cover preview" className="admin-preview" />
+                    <img src={categoryCoverPreview} alt="Category cover preview" className="admin-preview" loading="lazy" decoding="async"/>
                   </div>
                 )}
               </label>
@@ -2478,8 +2634,24 @@ export function AdminProductsView() {
                   type="submit"
                   disabled={categorySaving || !inventoryEnabled}
                 >
-                  {categorySaving ? "Saving..." : "Save Category"}
+                  {categorySaving
+                    ? editingCategory
+                      ? "Updating..."
+                      : "Saving..."
+                    : editingCategory
+                      ? "Update Category"
+                      : "Save Category"}
                 </button>
+                {editingCategory && (
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    disabled={categorySaving}
+                    onClick={resetCategoryForm}
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
               {categoryError && (
                 <p className="admin-panel__error">{categoryError}</p>
@@ -2515,19 +2687,30 @@ export function AdminProductsView() {
                           {usageCount === 1 ? " product" : " products"}
                         </p>
                       </div>
-                      <button
-                        className="icon-btn icon-btn--danger"
-                        type="button"
-                        disabled={categorySaving || !inventoryEnabled}
-                        onClick={() => setPendingCategoryDelete(category)}
-                        title={
-                          usageCount > 0
-                            ? "Delete category (will be removed from products)"
-                            : "Delete category"
-                        }
-                      >
-                        <IconTrash aria-hidden="true" />
-                      </button>
+                      <div className="admin-category-card__actions">
+                        <button
+                          className="icon-btn"
+                          type="button"
+                          disabled={categorySaving || !inventoryEnabled}
+                          onClick={() => handleEditCategory(category)}
+                          title="Edit category"
+                        >
+                          <IconEdit aria-hidden="true" />
+                        </button>
+                        <button
+                          className="icon-btn icon-btn--danger"
+                          type="button"
+                          disabled={categorySaving || !inventoryEnabled}
+                          onClick={() => setPendingCategoryDelete(category)}
+                          title={
+                            usageCount > 0 ?
+                               "Delete category (will be removed from products)"
+                              : "Delete category"
+                          }
+                        >
+                          <IconTrash aria-hidden="true" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })
@@ -2544,7 +2727,7 @@ export function AdminProductsView() {
 
       <ConfirmDialog
         open={Boolean(pendingCategoryDelete)}
-        title="Delete category?"
+        title="Delete category"
         message={
           pendingCategoryDelete
             ? `${pendingCategoryDelete.name} will be removed from ${
@@ -2592,11 +2775,13 @@ export function AdminProductsView() {
                       status: product.stock_status,
                     });
                     const stockLabel =
-                      stockStatus.state === "preorder"
-                        ? "Preorder"
-                        : stockStatus.isForced
-                        ? "Out of stock (manual)"
+                      stockStatus.state === "preorder" ?
+                         "Preorder"
+                        : stockStatus.isForced ?
+                         "Out of stock (manual)"
                         : stockStatus.label;
+                    const preorderSendMonth = getProductPreorderSendMonth(product);
+                    const preorderSendMonthLabel = formatPreorderSendMonth(preorderSendMonth);
                     const imageCandidates = [
                       product.main_image,
                       ...(Array.isArray(product.gallery_images) ? product.gallery_images : []),
@@ -2621,7 +2806,7 @@ export function AdminProductsView() {
                       .filter(Boolean)
                       .forEach((value) => {
                         const resolved = resolveCategory(value);
-                        const label = resolved?.name || value;
+                        const label = resolved.name || value;
                         if (!categoryLabels.includes(label)) categoryLabels.push(label);
                       });
                     const primaryCategory = categoryLabels[0] || "—";
@@ -2643,8 +2828,7 @@ export function AdminProductsView() {
                               <img
                                 src={image}
                                 alt={product.title || product.name}
-                                className="admin-table__thumb"
-                              />
+                                className="admin-table__thumb" loading="lazy" decoding="async"/>
                             ) : (
                               <span className="admin-table__thumb admin-table__thumb--placeholder">
                                 <IconImage aria-hidden="true" />
@@ -2681,6 +2865,9 @@ export function AdminProductsView() {
                           <p className="modal__meta">
                             Qty: {stockStatus.quantity ?? "—"}
                           </p>
+                          {stockStatus.state === "preorder" && preorderSendMonthLabel && (
+                            <p className="modal__meta">Send month: {preorderSendMonthLabel}</p>
+                          )}
                         </td>
                         <td>
                           <button
@@ -2692,8 +2879,8 @@ export function AdminProductsView() {
                             onClick={() => handleToggleFeaturedProduct(product)}
                             disabled={!inventoryEnabled || featuredUpdatingId === product.id}
                             title={
-                              product.featured
-                                ? "Remove from home page features"
+                              product.featured ?
+                                 "Remove from home page features"
                                 : "Feature on home page"
                             }
                           >
@@ -2850,6 +3037,21 @@ export function AdminProductsView() {
                     <option value="out_of_stock">Out of stock</option>
                     <option value="preorder">Preorder</option>
                   </select>
+                </label>
+                <label className="admin-form__field">
+                  Preorder send month
+                  <input
+                    className="input"
+                    type="month"
+                    value={productForm.preorderSendMonth}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({
+                        ...prev,
+                        preorderSendMonth: normalizePreorderSendMonth(event.target.value),
+                      }))
+                    }
+                    disabled={productForm.stockStatus !== "preorder"}
+                  />
                 </label>
                 <label className="admin-form__field">
                   Stock quantity
@@ -3011,7 +3213,7 @@ export function AdminProductsView() {
                   </div>
                   {productMainImagePreview && (
                     <div className="admin-preview-grid">
-                      <img src={productMainImagePreview} alt="Main product preview" className="admin-preview" />
+                      <img src={productMainImagePreview} alt="Main product preview" className="admin-preview" loading="lazy" decoding="async"/>
                     </div>
                   )}
                 </div>
@@ -3045,8 +3247,7 @@ export function AdminProductsView() {
                           key={`${preview}-${index}`}
                           src={preview}
                           alt={`Product gallery preview ${index + 1}`}
-                          className="admin-preview"
-                        />
+                          className="admin-preview" loading="lazy" decoding="async"/>
                       ))}
                     </div>
                   )}
@@ -3060,7 +3261,7 @@ export function AdminProductsView() {
                     onChange={(event) =>
                       setProductForm((prev) => ({ ...prev, videoEmbed: event.target.value }))
                     }
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder="https://www.youtube.com/watchv=..."
                   />
                 </label>
               </div>
@@ -3274,13 +3475,13 @@ export function AdminProductsView() {
                             className="input"
                             type="number"
                             min="0"
-                            step="1"
+                            step="0.01"
                             id={`product-variant-price-${variant.id}`}
                             value={variant.price}
                             onChange={(event) =>
                               handleProductVariantChange(variant.id, "price", event.target.value)
                             }
-                            placeholder="0"
+                            placeholder="0.00"
                           />
                         </div>
                         <button
@@ -3376,10 +3577,10 @@ export function AdminProductsView() {
                 type="submit"
                 disabled={productSaving || !inventoryEnabled}
               >
-                {productSaving
-                  ? "Saving..."
-                  : editingProductId
-                  ? "Update Product"
+                {productSaving ?
+                   "Saving..."
+                  : editingProductId ?
+                   "Update Product"
                   : "Save Product"}
               </button>
             </div>
@@ -3405,17 +3606,17 @@ export function AdminProductsView() {
               &times;
             </button>
             <h3 className="modal__title" id="media-library-title">
-              {mediaLibraryMode === "main"
-                ? "Select main image"
-                : mediaLibraryMode === "category"
-                ? "Select category cover"
+              {mediaLibraryMode === "main" ?
+                 "Select main image"
+                : mediaLibraryMode === "category" ?
+                 "Select category cover"
                 : "Select gallery images"}
             </h3>
             <p className="modal__meta">
-              {mediaLibraryMode === "main"
-                ? "Tap an image to use it as the main product image."
-                : mediaLibraryMode === "category"
-                ? "Tap an image to use it as the category cover."
+              {mediaLibraryMode === "main" ?
+                 "Tap an image to use it as the main product image."
+                : mediaLibraryMode === "category" ?
+                 "Tap an image to use it as the category cover."
                 : `Select up to ${MAX_PRODUCT_IMAGES} images for the gallery.`}
             </p>
             {mediaItemsError && (
@@ -3430,8 +3631,8 @@ export function AdminProductsView() {
                   const imageUrl = (item.url || "").toString().trim();
                   const label = (item.name || item.filename || item.id || "Image").toString();
                   const isSelected =
-                    mediaLibraryMode === "main"
-                      ? imageUrl && productForm.mainImage === imageUrl
+                    mediaLibraryMode === "main" ?
+                       imageUrl && productForm.mainImage === imageUrl
                       : imageUrl && mediaLibrarySelection.includes(imageUrl);
                   return (
                     <button
@@ -3446,8 +3647,7 @@ export function AdminProductsView() {
                           className="admin-media__thumb"
                           src={imageUrl}
                           alt={label}
-                          loading="lazy"
-                        />
+                          loading="lazy" decoding="async"/>
                       ) : (
                         <div className="admin-media__thumb admin-media__thumb--empty">
                           <IconImage aria-hidden="true" />
@@ -3580,7 +3780,7 @@ export function AdminMediaLibraryView() {
   const handleCopyMediaUrl = async (url, id) => {
     if (!url) return;
     try {
-      if (navigator.clipboard?.writeText) {
+      if (navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(url);
       } else {
         const textArea = document.createElement("textarea");
@@ -3621,7 +3821,7 @@ export function AdminMediaLibraryView() {
           <button
             className="btn btn--secondary"
             type="button"
-            onClick={() => mediaUploadInputRef.current?.click()}
+            onClick={() => mediaUploadInputRef.current.click()}
             disabled={!inventoryEnabled || mediaUploading}
           >
             {mediaUploading ? "Uploading..." : "Upload images"}
@@ -3655,8 +3855,7 @@ export function AdminMediaLibraryView() {
                         className="admin-media__thumb"
                         src={imageUrl}
                         alt={label}
-                        loading="lazy"
-                      />
+                        loading="lazy" decoding="async"/>
                     ) : (
                       <div className="admin-media__thumb admin-media__thumb--empty">
                         <IconImage aria-hidden="true" />
@@ -3702,7 +3901,7 @@ export function AdminMediaLibraryView() {
 
       <ConfirmDialog
         open={mediaDeleteDialog.open}
-        title="Delete image?"
+        title="Delete image"
         message="This will remove the image from the library. Products using this link will no longer display the image."
         confirmLabel="Delete image"
         busy={mediaDeleting}
@@ -3837,8 +4036,8 @@ export function AdminWorkshopsView() {
     setWorkshopForm((prev) => ({
       ...prev,
       dateGroups: (prev.dateGroups || []).map((group) =>
-        group.id === groupId
-          ? { ...group, times: [...(group.times || []), createTimeSlot()] }
+        group.id === groupId ?
+           { ...group, times: [...(group.times || []), createTimeSlot()] }
           : group
       ),
     }));
@@ -3883,8 +4082,8 @@ export function AdminWorkshopsView() {
       description: workshop.description || "",
       scheduledFor: workshop.scheduledFor || "",
       price:
-        workshop.price === undefined || workshop.price === null
-          ? ""
+        workshop.price === undefined || workshop.price === null ?
+           ""
           : String(workshop.price),
       location: workshop.location || "",
       image: workshop.image || "",
@@ -3899,8 +4098,8 @@ export function AdminWorkshopsView() {
       ctaNote: workshop.ctaNote || "",
       repeatWeekdays: false,
       dateGroups: (() => {
-        const rawSessions = Array.isArray(workshop.sessions)
-          ? workshop.sessions
+        const rawSessions = Array.isArray(workshop.sessions) ?
+           workshop.sessions
           : [];
         if (rawSessions.length === 0) return [createDateGroup()];
         const grouped = new Map();
@@ -3917,8 +4116,8 @@ export function AdminWorkshopsView() {
             time: timeValue,
             label: session.label || session.name || "",
             capacity:
-              session.capacity === undefined || session.capacity === null
-                ? String(DEFAULT_SLOT_CAPACITY)
+              session.capacity === undefined || session.capacity === null ?
+                 String(DEFAULT_SLOT_CAPACITY)
                 : String(session.capacity),
           };
           const dateKey = dateValue || `unscheduled-${index}`;
@@ -3973,8 +4172,8 @@ export function AdminWorkshopsView() {
     }
 
     const addSessionFromSlot = (collection, dateValue, slot) => {
-      const trimmedDate = dateValue?.trim();
-      const trimmedTime = slot.time?.trim();
+      const trimmedDate = dateValue.trim();
+      const trimmedTime = slot.time.trim();
       if (!trimmedDate || !trimmedTime) {
         return;
       }
@@ -3990,22 +4189,22 @@ export function AdminWorkshopsView() {
         start: combinedDate.toISOString(),
         date: trimmedDate,
         time: trimmedTime,
-        label: slot.label?.trim() || bookingDateFormatter.format(combinedDate),
+        label: slot.label.trim() || bookingDateFormatter.format(combinedDate),
         capacity:
-          Number.isFinite(capacityNumber) && capacityNumber > 0
-            ? capacityNumber
+          Number.isFinite(capacityNumber) && capacityNumber > 0 ?
+             capacityNumber
             : DEFAULT_SLOT_CAPACITY,
       });
     };
 
-    const dateGroups = Array.isArray(workshopForm.dateGroups)
-      ? workshopForm.dateGroups
+    const dateGroups = Array.isArray(workshopForm.dateGroups) ?
+       workshopForm.dateGroups
       : [];
     const sanitizedSessions = [];
     const manualDates = new Set();
 
     dateGroups.forEach((group) => {
-      const dateValue = group.date?.trim();
+      const dateValue = group.date.trim();
       if (dateValue) manualDates.add(dateValue);
       (group.times || []).forEach((slot) =>
         addSessionFromSlot(sanitizedSessions, dateValue, slot)
@@ -4014,7 +4213,7 @@ export function AdminWorkshopsView() {
 
     if (workshopForm.repeatWeekdays) {
       const sortedGroups = dateGroups
-        .filter((group) => group.date?.trim())
+        .filter((group) => group.date.trim())
         .sort((a, b) => a.date.localeCompare(b.date));
       if (sortedGroups.length > 0) {
         const templateGroup = sortedGroups[0];
@@ -4050,8 +4249,8 @@ export function AdminWorkshopsView() {
 
     const primarySession = sanitizedSessions[0];
     const priceNumber = Number(workshopForm.price);
-    const priceValue = Number.isFinite(priceNumber)
-      ? priceNumber
+    const priceValue = Number.isFinite(priceNumber) ?
+       priceNumber
       : workshopForm.price.trim();
 
     try {
@@ -4159,8 +4358,7 @@ export function AdminWorkshopsView() {
                               <img
                                 src={workshop.image}
                                 alt={workshop.title}
-                                className="admin-table__thumb"
-                              />
+                                className="admin-table__thumb" loading="lazy" decoding="async"/>
                             ) : (
                               <span className="admin-table__thumb admin-table__thumb--placeholder">
                                 <IconImage aria-hidden="true" />
@@ -4178,7 +4376,7 @@ export function AdminWorkshopsView() {
                         </td>
                         <td>
                           <p>{sessionLabel}</p>
-                          {primarySession?.time && (
+                          {primarySession.time && (
                             <p className="modal__meta">{primarySession.time}</p>
                           )}
                         </td>
@@ -4343,8 +4541,7 @@ export function AdminWorkshopsView() {
                 <img
                   src={workshopImagePreview}
                   alt="Workshop preview"
-                  className="admin-preview"
-                />
+                  className="admin-preview" loading="lazy" decoding="async"/>
                 )}
             </div>
             <input
@@ -4670,10 +4867,10 @@ export function AdminWorkshopsView() {
                 type="submit"
                 disabled={!inventoryEnabled || workshopSaving}
               >
-                {workshopSaving
-                  ? "Saving…"
-                  : editingWorkshopId
-                  ? "Update Workshop"
+                {workshopSaving ?
+                   "Saving…"
+                  : editingWorkshopId ?
+                   "Update Workshop"
                   : "Save Workshop"}
               </button>
             </div>
@@ -5116,69 +5313,6 @@ export function AdminWorkshopsCalendarView() {
               <p className="modal__meta">No events scheduled for this date.</p>
             )}
           </div>
-          {quickEventOpen && (
-            <div className="admin-calendar__details-group">
-              <h5>Add calendar event</h5>
-              <form className="admin-form" onSubmit={handleQuickEventSave}>
-                <input
-                  className="input"
-                  placeholder="Event title"
-                  value={quickEventForm.title}
-                  onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, title: event.target.value }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  placeholder="Location (optional)"
-                  value={quickEventForm.location}
-                  onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, location: event.target.value }))
-                  }
-                />
-                <input
-                  className="input"
-                  type="date"
-                  value={quickEventForm.date}
-                  onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, date: event.target.value }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  type="time"
-                  value={quickEventForm.time}
-                  onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, time: event.target.value }))
-                  }
-                />
-                <textarea
-                  className="input textarea admin-form__full"
-                  placeholder="Notes (optional)"
-                  value={quickEventForm.notes}
-                  onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, notes: event.target.value }))
-                  }
-                />
-                <div className="admin-form__actions">
-                  <button className="btn btn--secondary" type="button" onClick={closeQuickEventForm}>
-                    Cancel
-                  </button>
-                  <button
-                    className="btn btn--primary"
-                    type="submit"
-                    disabled={quickEventSaving || !inventoryEnabled}
-                  >
-                    {quickEventSaving ? "Saving..." : "Save event"}
-                  </button>
-                </div>
-                {quickEventError && <p className="admin-panel__error">{quickEventError}</p>}
-                {quickEventStatus && <p className="admin-panel__status">{quickEventStatus}</p>}
-              </form>
-            </div>
-          )}
           {(undatedBookings.length > 0 ||
             undatedCutFlowerBookings.length > 0 ||
             undatedEvents.length > 0) && (
@@ -5242,8 +5376,113 @@ export function AdminWorkshopsCalendarView() {
               </ul>
             </div>
           )}
-        </div>
       </div>
+    </div>
+
+      {quickEventOpen && (
+        <div
+          className="modal is-active admin-modal"
+          role="dialog"
+          aria-modal="true"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeQuickEventForm();
+            }
+          }}
+        >
+          <div className="modal__content">
+            <button
+              className="modal__close"
+              type="button"
+              aria-label="Close"
+              onClick={closeQuickEventForm}
+            >
+              ×
+            </button>
+            <h3>Add calendar event</h3>
+            <p className="admin-panel__note">
+              Schedule quick events, reminders, or custom studio days without creating a full workshop listing.
+            </p>
+            <form className="admin-form" onSubmit={handleQuickEventSave}>
+              <div className="admin-form__field">
+                <label htmlFor="quick-event-title">Event title</label>
+                <input
+                  className="input"
+                  id="quick-event-title"
+                  placeholder="Event title"
+                  value={quickEventForm.title}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, title: event.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div className="admin-form__field">
+                <label htmlFor="quick-event-location">Location (optional)</label>
+                <input
+                  className="input"
+                  id="quick-event-location"
+                  placeholder="Location (optional)"
+                  value={quickEventForm.location}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, location: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="admin-form__field">
+                <label htmlFor="quick-event-date">Date</label>
+                <input
+                  className="input"
+                  id="quick-event-date"
+                  type="date"
+                  value={quickEventForm.date}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, date: event.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div className="admin-form__field">
+                <label htmlFor="quick-event-time">Time (optional)</label>
+                <input
+                  className="input"
+                  id="quick-event-time"
+                  type="time"
+                  value={quickEventForm.time}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, time: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="admin-form__field admin-form__field--description">
+                <label htmlFor="quick-event-notes">Notes (optional)</label>
+                <textarea
+                  className="input textarea admin-form__full"
+                  id="quick-event-notes"
+                  placeholder="Notes (optional)"
+                  value={quickEventForm.notes}
+                  onChange={(event) =>
+                    setQuickEventForm((prev) => ({ ...prev, notes: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="admin-form__actions">
+                <button className="btn btn--secondary" type="button" onClick={closeQuickEventForm}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  type="submit"
+                  disabled={quickEventSaving || !inventoryEnabled}
+                >
+                  {quickEventSaving ? "Saving..." : "Save event"}
+                </button>
+              </div>
+              {quickEventError && <p className="admin-panel__error">{quickEventError}</p>}
+            </form>
+          </div>
+        </div>
+      )}
 
       {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
     </div>
@@ -5303,10 +5542,10 @@ export function AdminUsersView() {
   };
 
   const friendlyStatus =
-    status === "loading"
-      ? "Loading users…"
-      : status === "error"
-      ? "Could not load users."
+    status === "loading" ?
+       "Loading users…"
+      : status === "error" ?
+       "Could not load users."
       : null;
 
   const resetUserForm = () => {
@@ -5343,7 +5582,7 @@ export function AdminUsersView() {
       resetUserForm();
       setUserModalOpen(false);
     } catch (err) {
-      const code = err?.code || err?.message || "";
+      const code = err.code || err.message || "";
       if (code.includes("permission-denied") || code.includes("unauthenticated")) {
         setError("You need an admin account with a Firestore user record to create users.");
       } else if (code.includes("invalid-argument")) {
@@ -5503,7 +5742,7 @@ export function AdminUsersView() {
       <ConfirmDialog
         open={deleteDialog.open}
         title="Delete User"
-        message="Are you sure you want to delete this user record? This does not delete their auth account."
+        message="Are you sure you want to delete this user record This does not delete their auth account."
         confirmLabel="Delete"
         busy={deleteBusy}
         onCancel={() => setDeleteDialog({ open: false, targetId: null })}
@@ -5674,8 +5913,8 @@ export function AdminEventsView() {
   const handleToggleRepeatDay = (dayValue) => {
     setEventForm((prev) => {
       const existing = Array.isArray(prev.repeatDays) ? prev.repeatDays : [];
-      const normalized = existing.includes(dayValue)
-        ? existing.filter((day) => day !== dayValue)
+      const normalized = existing.includes(dayValue) ?
+         existing.filter((day) => day !== dayValue)
         : [...existing, dayValue];
       return {
         ...prev,
@@ -5709,8 +5948,8 @@ export function AdminEventsView() {
   const handleEditEvent = (eventDoc) => {
     const eventDate = parseDateValue(eventDoc.eventDate);
     const fallbackTime =
-      eventDate && (eventDate.getHours() || eventDate.getMinutes())
-        ? formatTimeInput(eventDate)
+      eventDate && (eventDate.getHours() || eventDate.getMinutes()) ?
+         formatTimeInput(eventDate)
         : "";
     const rawTimeSlots = Array.isArray(eventDoc.timeSlots) ? eventDoc.timeSlots : [];
     const normalizedSlots =
@@ -5790,13 +6029,13 @@ export function AdminEventsView() {
       const sanitizedSlots = (eventForm.timeSlots || [])
         .map((slot) => ({
           id: slot.id || createEventTimeSlot().id,
-          time: slot.time?.trim() || "",
-          endTime: slot.endTime?.trim() || "",
-          label: slot.label?.trim() || "",
+          time: slot.time.trim() || "",
+          endTime: slot.endTime.trim() || "",
+          label: slot.label.trim() || "",
         }))
         .filter((slot) => slot.time);
       sanitizedSlots.sort((a, b) => a.time.localeCompare(b.time));
-      const primaryTime = sanitizedSlots[0]?.time ?? "";
+      const primaryTime = sanitizedSlots[0].time ?? "";
       const combinedDate = combineDateAndTime(eventForm.date, primaryTime);
       const linkedWorkshop = workshops.find(
         (workshop) => workshop.id === eventForm.workshopId
@@ -5818,8 +6057,8 @@ export function AdminEventsView() {
         repeatWeekly: Boolean(eventForm.repeatWeekly),
         repeatDays,
         image: imageUrl,
-        workshopId: linkedWorkshop?.id || null,
-        workshopTitle: linkedWorkshop?.title || linkedWorkshop?.name || null,
+        workshopId: linkedWorkshop.id || null,
+        workshopTitle: linkedWorkshop.title || linkedWorkshop.name || null,
         status: eventForm.status || "draft",
         updatedAt: serverTimestamp(),
       };
@@ -6077,8 +6316,7 @@ export function AdminEventsView() {
                     <img
                       src={eventImagePreview || eventForm.image}
                       alt="Event preview"
-                      className="admin-preview"
-                    />
+                      className="admin-preview" loading="lazy" decoding="async"/>
                   )}
                 </div>
                 <div className="admin-form__actions">
@@ -6095,10 +6333,10 @@ export function AdminEventsView() {
                     type="submit"
                     disabled={eventSaving || !inventoryEnabled}
                   >
-                    {eventSaving
-                      ? "Saving…"
-                      : editingEventId
-                      ? "Update Event"
+                    {eventSaving ?
+                       "Saving…"
+                      : editingEventId ?
+                       "Update Event"
                       : "Create Event"}
                   </button>
                 </div>
@@ -6163,7 +6401,7 @@ export function AdminEventsView() {
       <ConfirmDialog
         open={deleteDialog.open}
         title="Delete Event"
-        message="Are you sure you want to delete this event? This cannot be undone."
+        message="Are you sure you want to delete this event This cannot be undone."
         confirmLabel="Delete"
         busy={deleteBusy}
         onCancel={() => setDeleteDialog({ open: false, targetId: null, label: "" })}
@@ -6186,6 +6424,187 @@ export function AdminEventsView() {
         }}
       />
     </>
+  );
+}
+
+export function AdminEmailTestView() {
+  usePageMetadata({
+    title: "Admin ? Email tests",
+    description: "Send a Resend test email and confirm the content sent to customers.",
+  });
+  const { user, refreshRole } = useAuth();
+  const { inventoryEnabled } = useAdminData();
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+  const [formState, setFormState] = useState({
+    email: "",
+    templateType: "custom",
+    subject: "Bethany Blooms test email",
+    html: "<p>Hello from Bethany Blooms. This is a test email delivered via Resend.</p>",
+  });
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [error, setError] = useState(null);
+  const [sending, setSending] = useState(false);
+
+  const isCustomTemplate = formState.templateType === "custom";
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 5000);
+    return () => clearTimeout(timeout);
+  }, [statusMessage]);
+
+  const handleSendTestEmail = async (event) => {
+    event.preventDefault();
+    if (!functionsInstance) {
+      setError("Email functions are not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setError("Admin access is required to send emails.");
+      return;
+    }
+    const recipient = (formState.email || "").toString().trim();
+    if (!recipient) {
+      setError("Recipient email is required.");
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      const syncCallable = httpsCallable(functionsInstance, "syncUserClaims");
+      const syncResponse = await syncCallable({});
+      if (user.getIdToken) {
+        await user.getIdToken(true);
+      }
+      if (refreshRole) {
+        await refreshRole();
+      }
+      const syncedRole = syncResponse.data.role;
+      if (syncedRole && syncedRole !== "admin") {
+        throw new Error("Admin role required.");
+      }
+
+      const callable = httpsCallable(functionsInstance, "sendTestEmail");
+      const payload = {
+        email: recipient,
+        templateType: formState.templateType || "custom",
+      };
+      if (payload.templateType === "custom") {
+        payload.subject = (formState.subject || "").trim();
+        payload.html = formState.html;
+      }
+      const response = await callable(payload);
+      const preview = response.data.preview;
+      setStatusMessage(
+        `Test email sent.${preview ? ` Preview copy is also delivered to ${preview}.` : ""}`
+      );
+    } catch (sendError) {
+      setError(sendError.message || "Unable to send the test email.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="admin-panel admin-panel--narrow">
+      <Reveal as="div" className="admin-panel__header">
+        <div>
+          <h2>Email tests</h2>
+          <p className="admin-panel__note">
+            Trigger a test email via Resend and verify the preview copy stored in the configured preview inbox.
+          </p>
+        </div>
+      </Reveal>
+      <form className="admin-form" onSubmit={handleSendTestEmail}>
+        <div className="admin-form__field">
+          <label htmlFor="test-email-recipient">Recipient email</label>
+          <input
+            className="input"
+            id="test-email-recipient"
+            type="email"
+            placeholder="name@example.com"
+            value={formState.email}
+            onChange={(event) =>
+              setFormState((prev) => ({ ...prev, email: event.target.value }))
+            }
+            required
+          />
+        </div>
+        <div className="admin-form__field">
+          <label htmlFor="test-email-template">Template</label>
+          <select
+            className="input"
+            id="test-email-template"
+            value={formState.templateType}
+            onChange={(event) =>
+              setFormState((prev) => ({ ...prev, templateType: event.target.value }))
+            }
+          >
+            <option value="custom">Custom HTML</option>
+            <option value="order-confirmation">Order confirmation (customer)</option>
+            <option value="order-admin">Order notification (admin)</option>
+            <option value="order-status">Order status update (customer)</option>
+            <option value="pos-receipt">POS receipt (customer)</option>
+            <option value="pos-admin">POS receipt (admin copy)</option>
+            <option value="contact-admin">Contact enquiry (admin)</option>
+            <option value="contact-confirm">Contact confirmation (customer)</option>
+            <option value="cut-flower-admin">Cut flower booking (admin)</option>
+            <option value="cut-flower-customer">Cut flower booking (customer)</option>
+            <option value="workshop-admin">Workshop booking (admin)</option>
+            <option value="workshop-customer">Workshop booking (customer)</option>
+          </select>
+        </div>
+        <div className="admin-form__field">
+          <label htmlFor="test-email-subject">Subject</label>
+          <input
+            className="input"
+            id="test-email-subject"
+            value={formState.subject}
+            onChange={(event) =>
+              setFormState((prev) => ({ ...prev, subject: event.target.value }))
+            }
+            disabled={!isCustomTemplate}
+          />
+        </div>
+        <div className="admin-form__field admin-form__field--description">
+          <label htmlFor="test-email-html">HTML content</label>
+          <textarea
+            className="input textarea admin-form__full"
+            id="test-email-html"
+            rows="5"
+            placeholder="HTML body"
+            value={formState.html}
+            onChange={(event) =>
+              setFormState((prev) => ({ ...prev, html: event.target.value }))
+            }
+            disabled={!isCustomTemplate}
+          />
+          {!isCustomTemplate && (
+            <p className="admin-panel__note">This template uses the live email layout and sample data.</p>
+          )}
+        </div>
+        <div className="admin-form__actions">
+          <button
+            className="btn btn--primary"
+            type="submit"
+            disabled={sending || !inventoryEnabled || !functionsInstance}
+          >
+            {sending ? "Sending" : "Send test email"}
+          </button>
+        </div>
+        <p className="admin-panel__note">
+          Preview copies are delivered automatically to the preview inbox configured via <code>RESEND_PREVIEW_TO</code>.
+        </p>
+        {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+        {error && <p className="admin-panel__error">{error}</p>}
+      </form>
+    </div>
   );
 }
 
@@ -6373,8 +6792,8 @@ export function AdminCutFlowerClassesView() {
   const handleToggleClassRepeatDay = (dayValue) => {
     setClassForm((prev) => {
       const existing = Array.isArray(prev.repeatDays) ? prev.repeatDays : [];
-      const normalized = existing.includes(dayValue)
-        ? existing.filter((day) => day !== dayValue)
+      const normalized = existing.includes(dayValue) ?
+         existing.filter((day) => day !== dayValue)
         : [...existing, dayValue];
       return {
         ...prev,
@@ -6408,8 +6827,8 @@ export function AdminCutFlowerClassesView() {
   const handleEditClass = (classDoc) => {
     const eventDate = parseDateValue(classDoc.eventDate);
     const fallbackTime =
-      eventDate && (eventDate.getHours() || eventDate.getMinutes())
-        ? formatTimeInput(eventDate)
+      eventDate && (eventDate.getHours() || eventDate.getMinutes()) ?
+         formatTimeInput(eventDate)
         : "";
     const rawTimeSlots = Array.isArray(classDoc.timeSlots) ? classDoc.timeSlots : [];
     const normalizedSlots =
@@ -6433,12 +6852,12 @@ export function AdminCutFlowerClassesView() {
             id: option.id || `class-option-${index}-${classDoc.id}`,
             label: option.label || option.name || "",
             price:
-              option.price === undefined || option.price === null
-                ? ""
+              option.price === undefined || option.price === null ?
+                 ""
                 : String(option.price),
             minAttendees:
-              option.minAttendees === undefined || option.minAttendees === null
-                ? ""
+              option.minAttendees === undefined || option.minAttendees === null ?
+                 ""
                 : String(option.minAttendees),
             isExtra: Boolean(option.isExtra),
           }))
@@ -6449,8 +6868,8 @@ export function AdminCutFlowerClassesView() {
       rawCapacity !== null &&
       String(rawCapacity).trim() !== "";
     const capacityLimited =
-      classDoc.capacityLimited !== undefined
-        ? Boolean(classDoc.capacityLimited)
+      classDoc.capacityLimited !== undefined ?
+         Boolean(classDoc.capacityLimited)
         : hasCapacityValue;
     setClassForm({
       title: classDoc.title || "",
@@ -6531,13 +6950,13 @@ export function AdminCutFlowerClassesView() {
       const sanitizedSlots = (classForm.timeSlots || [])
         .map((slot) => ({
           id: slot.id || createEventTimeSlot().id,
-          time: slot.time?.trim() || "",
-          endTime: slot.endTime?.trim() || "",
-          label: slot.label?.trim() || "",
+          time: slot.time.trim() || "",
+          endTime: slot.endTime.trim() || "",
+          label: slot.label.trim() || "",
         }))
         .filter((slot) => slot.time);
       sanitizedSlots.sort((a, b) => a.time.localeCompare(b.time));
-      const primaryTime = sanitizedSlots[0]?.time ?? "";
+      const primaryTime = sanitizedSlots[0].time ?? "";
       const eventDate = combineDateAndTime(classForm.date, primaryTime);
       const repeatDays = classForm.repeatWeekly
         ? Array.isArray(classForm.repeatDays)
@@ -6548,17 +6967,17 @@ export function AdminCutFlowerClassesView() {
         : [];
       const sanitizedOptions = (classForm.options || [])
         .map((option) => {
-          const label = option.label?.trim() || "";
+          const label = option.label.trim() || "";
           if (!label) return null;
           const rawPrice = option.price;
           const priceNumber =
-            rawPrice === "" || rawPrice === null || rawPrice === undefined
-              ? null
+            rawPrice === "" || rawPrice === null || rawPrice === undefined ?
+               null
               : Number(rawPrice);
           const minAttendeesValue = Number.parseInt(option.minAttendees, 10);
           const minAttendees =
-            Number.isFinite(minAttendeesValue) && minAttendeesValue > 0
-              ? minAttendeesValue
+            Number.isFinite(minAttendeesValue) && minAttendeesValue > 0 ?
+               minAttendeesValue
               : null;
           return {
             id: option.id || createCutFlowerOption().id,
@@ -6998,8 +7417,7 @@ export function AdminCutFlowerClassesView() {
                 <img
                   src={classImagePreview || classForm.image}
                   alt="Cut flower class preview"
-                  className="admin-preview"
-                />
+                  className="admin-preview" loading="lazy" decoding="async"/>
               )}
             </div>
             <div className="admin-modal__actions admin-form__actions">
@@ -7017,7 +7435,7 @@ export function AdminCutFlowerClassesView() {
       <ConfirmDialog
         open={deleteDialog.open}
         title="Delete Cut Flower Class"
-        message="Are you sure you want to delete this class? This cannot be undone."
+        message="Are you sure you want to delete this class This cannot be undone."
         confirmLabel="Delete"
         busy={deleteBusy}
         onCancel={() => setDeleteDialog({ open: false, targetId: null })}
@@ -7183,7 +7601,7 @@ export function AdminCutFlowerBookingsView() {
     () => Math.max(1, Number.parseInt(formState.attendeeCount, 10) || 1),
     [formState.attendeeCount],
   );
-  const defaultSelectionValue = selectionOptions[0]?.value ?? "standard";
+  const defaultSelectionValue = selectionOptions[0].value ?? "standard";
   const cutFlowerOptionGroups = useMemo(() => {
     const base = selectionOptions.filter((option) => !option.isExtra);
     const extra = selectionOptions.filter((option) => option.isExtra);
@@ -7232,7 +7650,7 @@ export function AdminCutFlowerBookingsView() {
       optionValues.add(selectionOptions[0].value);
     }
     const fallbackValue =
-      availableCutFlowerOptions[0]?.value ?? selectionOptions[0]?.value ?? defaultSelectionValue;
+      availableCutFlowerOptions[0].value ?? selectionOptions[0].value ?? defaultSelectionValue;
     return buildAttendeeSelections(
       attendeeCountNumber,
       formState.attendeeSelections,
@@ -7278,12 +7696,12 @@ export function AdminCutFlowerBookingsView() {
     const eventDate = parseDateValue(booking.eventDate);
     const attendeeSelections = Array.isArray(booking.attendeeSelections)
       ? booking.attendeeSelections
-          .map((selection) => selection?.optionValue || selection?.optionLabel || selection?.value || "")
+          .map((selection) => selection.optionValue || selection.optionLabel || selection.value || "")
           .filter((value) => value)
       : [];
     const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
-    const attendeeCount = Number.isFinite(attendeeCountValue)
-      ? attendeeCountValue
+    const attendeeCount = Number.isFinite(attendeeCountValue) ?
+       attendeeCountValue
       : attendeeSelections.length || 1;
     setFormState({
       customerName: booking.customerName || "",
@@ -7324,20 +7742,20 @@ export function AdminCutFlowerBookingsView() {
   };
 
   const getBookingSummary = (booking) => {
-    const attendeeSelections = Array.isArray(booking.attendeeSelections)
-      ? booking.attendeeSelections
+    const attendeeSelections = Array.isArray(booking.attendeeSelections) ?
+       booking.attendeeSelections
       : [];
     const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
-    const attendeeCount = Number.isFinite(attendeeCountValue)
-      ? attendeeCountValue
+    const attendeeCount = Number.isFinite(attendeeCountValue) ?
+       attendeeCountValue
       : attendeeSelections.length || null;
     const hasEstimatedTotal =
       booking.estimatedTotal !== undefined &&
       booking.estimatedTotal !== null &&
       booking.estimatedTotal !== "";
     const estimatedTotalValue = hasEstimatedTotal ? Number(booking.estimatedTotal) : NaN;
-    const estimatedTotalLabel = Number.isFinite(estimatedTotalValue)
-      ? moneyFormatter.format(estimatedTotalValue)
+    const estimatedTotalLabel = Number.isFinite(estimatedTotalValue) ?
+       moneyFormatter.format(estimatedTotalValue)
       : null;
     const optionSummary = booking.optionLabel || booking.optionValue || "";
     let optionSummaryLabel = "Option: -";
@@ -7346,10 +7764,10 @@ export function AdminCutFlowerBookingsView() {
       optionSummaryLabel = "Options: Multiple";
     } else if (attendeeSelections.length === 1) {
       const selection = attendeeSelections[0];
-      const selectionLabel = selection?.optionLabel || selection?.optionValue || "Option";
-      const selectionPriceValue = Number(selection?.estimatedPrice);
-      const selectionPriceLabel = Number.isFinite(selectionPriceValue)
-        ? ` (est. ${moneyFormatter.format(selectionPriceValue)})`
+      const selectionLabel = selection.optionLabel || selection.optionValue || "Option";
+      const selectionPriceValue = Number(selection.estimatedPrice);
+      const selectionPriceLabel = Number.isFinite(selectionPriceValue) ?
+         ` (est. ${moneyFormatter.format(selectionPriceValue)})`
         : "";
       optionSummaryLabel = `Option: ${selectionLabel}${selectionPriceLabel}`;
     } else if (optionSummary) {
@@ -7359,14 +7777,14 @@ export function AdminCutFlowerBookingsView() {
     const optionLines =
       attendeeSelections.length > 0
         ? attendeeSelections.map((selection, index) => {
-            const selectionLabel = selection?.optionLabel || selection?.optionValue || "Option";
-            const selectionIndexValue = Number.parseInt(selection?.attendee, 10);
-            const selectionIndex = Number.isFinite(selectionIndexValue)
-              ? selectionIndexValue
+            const selectionLabel = selection.optionLabel || selection.optionValue || "Option";
+            const selectionIndexValue = Number.parseInt(selection.attendee, 10);
+            const selectionIndex = Number.isFinite(selectionIndexValue) ?
+               selectionIndexValue
               : index + 1;
-            const selectionPriceValue = Number(selection?.estimatedPrice);
-            const selectionPriceLabel = Number.isFinite(selectionPriceValue)
-              ? ` (est. ${moneyFormatter.format(selectionPriceValue)})`
+            const selectionPriceValue = Number(selection.estimatedPrice);
+            const selectionPriceLabel = Number.isFinite(selectionPriceValue) ?
+               ` (est. ${moneyFormatter.format(selectionPriceValue)})`
               : "";
             return {
               key: `attendee-${booking.id}-${selectionIndex}-${selectionLabel}`,
@@ -7439,8 +7857,8 @@ export function AdminCutFlowerBookingsView() {
       const hasEstimatedTotal = attendeeItems.some((item) =>
         Number.isFinite(Number(item.estimatedPrice)),
       );
-      const estimatedTotal = hasEstimatedTotal
-        ? attendeeItems.reduce((sum, item) => sum + (Number(item.estimatedPrice) || 0), 0)
+      const estimatedTotal = hasEstimatedTotal ?
+         attendeeItems.reduce((sum, item) => sum + (Number(item.estimatedPrice) || 0), 0)
         : null;
       const firstSelection = attendeeItems[0] || null;
       const payload = {
@@ -7489,12 +7907,12 @@ export function AdminCutFlowerBookingsView() {
     ? bookingDateFormatter.format(activeBooking.createdAt.toDate())
     : null;
   const emptyFilterLabel =
-    dateFilter === "today"
-      ? "No cut flower bookings scheduled for today."
-      : dateFilter === "upcoming"
-      ? "No upcoming cut flower bookings."
-      : dateFilter === "past"
-      ? "No past cut flower bookings."
+    dateFilter === "today" ?
+       "No cut flower bookings scheduled for today."
+      : dateFilter === "upcoming" ?
+       "No upcoming cut flower bookings."
+      : dateFilter === "past" ?
+       "No past cut flower bookings."
       : "No cut flower bookings match this view.";
 
   return (
@@ -7580,8 +7998,8 @@ export function AdminCutFlowerBookingsView() {
                             <tbody>
                               {sortedBookings.map((booking) => {
                                 const summary = getBookingSummary(booking);
-                                const statusLabel = booking.status
-                                  ? booking.status.replace(/-/g, " ")
+                                const statusLabel = booking.status ?
+                                   booking.status.replace(/-/g, " ")
                                   : "new";
                                 const rowLabel = booking.customerName || "Booking";
                                 return (
@@ -7674,8 +8092,8 @@ export function AdminCutFlowerBookingsView() {
                       <div className="admin-bookings-cards">
                         {sortedBookings.map((booking) => {
                           const summary = getBookingSummary(booking);
-                          const statusLabel = booking.status
-                            ? booking.status.replace(/-/g, " ")
+                          const statusLabel = booking.status ?
+                             booking.status.replace(/-/g, " ")
                             : "new";
                           const cardLabel = booking.customerName || "Booking";
                           return (
@@ -7978,16 +8396,16 @@ export function AdminCutFlowerBookingsView() {
               </div>
               <div className="admin-detail-card">
                 <h4>Options</h4>
-                {Number.isFinite(detailsSummary?.attendeeCount) &&
+                {Number.isFinite(detailsSummary.attendeeCount) &&
                   detailsSummary.attendeeCount > 0 && (
                     <p className="modal__meta">Attendees: {detailsSummary.attendeeCount}</p>
                   )}
-                {detailsSummary?.optionLines.map((line) => (
+                {detailsSummary.optionLines.map((line) => (
                   <p className="modal__meta" key={line.key}>
                     {line.text}
                   </p>
                 ))}
-                {detailsSummary?.estimatedTotalLabel && (
+                {detailsSummary.estimatedTotalLabel && (
                   <p className="modal__meta">
                     Estimate: {detailsSummary.estimatedTotalLabel} (estimate only)
                   </p>
@@ -8033,7 +8451,7 @@ export function AdminCutFlowerBookingsView() {
       <ConfirmDialog
         open={deleteDialog.open}
         title="Delete Booking"
-        message="Are you sure you want to delete this cut flower booking? This cannot be undone."
+        message="Are you sure you want to delete this cut flower booking This cannot be undone."
         confirmLabel="Delete"
         busy={deleteBusy}
         onCancel={() => setDeleteDialog({ open: false, targetId: null })}
@@ -8063,7 +8481,7 @@ export function AdminOrdersView() {
     title: "Admin · Orders",
     description: "Review cart checkouts and fulfilment status.",
   });
-  const { db, orders, inventoryLoading, inventoryError } = useAdminData();
+  const { db, orders, products, inventoryLoading, inventoryError } = useAdminData();
   const [statusMessage, setStatusMessage] = useState(null);
   const functionsInstance = useMemo(() => {
     try {
@@ -8082,6 +8500,9 @@ export function AdminOrdersView() {
   const [deliveryMethod, setDeliveryMethod] = useState("company");
   const [courierName, setCourierName] = useState("");
   const [deliverySaving, setDeliverySaving] = useState(false);
+  const [resendOrderEmailSending, setResendOrderEmailSending] = useState(false);
+  const [preorderNoticeMonth, setPreorderNoticeMonth] = useState("");
+  const [preorderNoticeSending, setPreorderNoticeSending] = useState(false);
   const [ordersPage, setOrdersPage] = useState(0);
 
   useEffect(() => {
@@ -8092,33 +8513,161 @@ export function AdminOrdersView() {
 
   useEffect(() => {
     if (pendingStatusUpdate) {
-      trackingInputRef.current?.focus({ preventScroll: true });
+      trackingInputRef.current.focus({ preventScroll: true });
     }
   }, [pendingStatusUpdate]);
 
-  const needsTrackingLink = (status) => ["ready", "fulfilled"].includes(status);
+  const needsTrackingLink = (status) => ["shipped"].includes(status);
 
   const normalizePaymentStatus = (order) =>
-    (order?.payfast?.paymentStatus || order?.paymentStatus || "").toLowerCase() || "unknown";
+    (order.payfast.paymentStatus || order.paymentStatus || "").toLowerCase() || "unknown";
 
   const normalizeDeliveryStatus = (order) => {
-    if (order?.trackingLink) return "assigned";
+    if (order.trackingLink) return "assigned";
     return "not-assigned";
   };
 
+  const productLookup = useMemo(() => {
+    const map = new Map();
+    (products || []).forEach((product) => {
+      if (!product) return;
+      if (product.id) map.set(String(product.id), product);
+      if (product.slug) map.set(String(product.slug), product);
+    });
+    return map;
+  }, [products]);
+
+  const isPreorderedOrder = (order) => {
+    if (!Array.isArray(order?.items) || !order.items.length) return false;
+    return order.items.some((item) => {
+      if (!item || item.metadata?.type !== "product") return false;
+      if (item.metadata?.preorderSendMonth || item.metadata?.preorder_send_month || item.metadata?.preorderSendMonthLabel) {
+        return true;
+      }
+      const metadataStockStatus = (item.metadata?.stockStatus || item.metadata?.stock_status || "")
+        .toString()
+        .trim()
+        .toLowerCase();
+      if (metadataStockStatus === "preorder") return true;
+
+      const productId =
+        item.metadata?.productId ||
+        item.metadata?.productID ||
+        item.metadata?.product ||
+        null;
+      if (!productId) return false;
+      const product = productLookup.get(String(productId));
+      const productStockStatus = (product?.stock_status || product?.stockStatus || "")
+        .toString()
+        .trim()
+        .toLowerCase();
+      return productStockStatus === "preorder";
+    });
+  };
+
+  const resolvePreorderSendMonthForOrder = (order) => {
+    if (!Array.isArray(order?.items)) return "";
+    for (const item of order.items) {
+      if (!item || item.metadata?.type !== "product") continue;
+      const fromMetadata = normalizePreorderSendMonth(
+        item.metadata?.preorderSendMonth || item.metadata?.preorder_send_month || "",
+      );
+      if (fromMetadata) return fromMetadata;
+      const productId =
+        item.metadata?.productId ||
+        item.metadata?.productID ||
+        item.metadata?.product ||
+        null;
+      if (!productId) continue;
+      const product = productLookup.get(String(productId));
+      const fromProduct = normalizePreorderSendMonth(
+        product?.preorder_send_month || product?.preorderSendMonth || "",
+      );
+      if (fromProduct) return fromProduct;
+    }
+    return "";
+  };
+
+  const getOrderStatusLabel = (order, statusValue = order?.status) => {
+    const normalized = normalizeOrderStatus(statusValue);
+    if (normalized === "order-placed" && isPreorderedOrder(order)) {
+      return "Preordered";
+    }
+    return formatOrderStatusLabel(normalized);
+  };
+
+  const handleSendPreorderNoticeEmail = async () => {
+    if (!functionsInstance || !selectedOrder) return;
+    if (!selectedOrder.customer?.email) {
+      setStatusMessage("Customer email is missing.");
+      return;
+    }
+    if (!isPreorderedOrder(selectedOrder)) {
+      setStatusMessage("This order does not contain pre-order products.");
+      return;
+    }
+
+    const normalizedMonth = normalizePreorderSendMonth(preorderNoticeMonth);
+    if (!normalizedMonth) {
+      setStatusMessage("Please select a send month before sending.");
+      return;
+    }
+
+    setPreorderNoticeSending(true);
+    try {
+      const sendPreorderListEmail = httpsCallable(functionsInstance, "sendPreorderListEmail");
+      await sendPreorderListEmail({
+        customer: selectedOrder.customer,
+        customerEmail: selectedOrder.customer?.email || "",
+        orderNumber: selectedOrder.orderNumber ?? null,
+        preorderSendMonth: normalizedMonth,
+        items: selectedOrder.items || [],
+      });
+      setStatusMessage("Pre-order notice email sent.");
+    } catch (error) {
+      setStatusMessage(error.message || "Unable to send pre-order notice email.");
+    } finally {
+      setPreorderNoticeSending(false);
+    }
+  };
+
+  const handleResendOrderConfirmationEmail = async () => {
+    if (!functionsInstance || !selectedOrder) return;
+    const customerEmail = (selectedOrder.customer?.email || "").toString().trim();
+    if (!customerEmail) {
+      setStatusMessage("Customer email is missing.");
+      return;
+    }
+
+    setResendOrderEmailSending(true);
+    try {
+      const resendOrderConfirmationEmail = httpsCallable(functionsInstance, "resendOrderConfirmationEmail");
+      await resendOrderConfirmationEmail({
+        orderId: selectedOrder.id,
+        orderNumber: selectedOrder.orderNumber ?? null,
+        customerEmail,
+      });
+      setStatusMessage("Order confirmation resent to customer.");
+    } catch (error) {
+      setStatusMessage(error.message || "Unable to resend order confirmation.");
+    } finally {
+      setResendOrderEmailSending(false);
+    }
+  };
+
   const handleMarkPaymentReceived = async (order) => {
-    if (!db || !order?.id) return;
+    if (!db || !order.id) return;
     setPaymentUpdating(true);
     try {
       await updateDoc(doc(db, "orders", order.id), {
         paymentStatus: "paid",
-        status: order.status === "pending" ? "processing" : order.status || "processing",
+        status: order.status === "pending" ? "order-placed" : normalizeOrderStatus(order.status) || "order-placed",
         paidAt: serverTimestamp(),
       });
 
       // Mark any linked bookings as paid
       const bookingRefs = [];
-      if (order.items?.some((item) => item.metadata?.type === "workshop")) {
+      if (order.items.some((item) => item.metadata.type === "workshop")) {
         const { getDocs, query, where } = await import("firebase/firestore");
         const bookingsQuery = query(collection(db, "bookings"), where("orderId", "==", order.id));
         const snapshot = await getDocs(bookingsQuery);
@@ -8160,15 +8709,17 @@ export function AdminOrdersView() {
         updatedAt: serverTimestamp(),
       });
 
-      if (functionsInstance && selectedOrder?.customer?.email) {
-        const sendOrderStatusEmail = httpsCallable(functionsInstance, "sendOrderStatusEmail");
-        await sendOrderStatusEmail({
-          customer: selectedOrder.customer,
-          orderNumber: selectedOrder.orderNumber,
-          status: selectedOrder.status || "updated",
-          trackingLink: trackingInput.trim(),
-        });
-      }
+        if (functionsInstance && selectedOrder.customer.email) {
+          const sendOrderStatusEmail = httpsCallable(functionsInstance, "sendOrderStatusEmail");
+          await sendOrderStatusEmail({
+            customer: selectedOrder.customer,
+            customerEmail: selectedOrder.customer?.email || "",
+            orderNumber: selectedOrder.orderNumber,
+            status: getOrderStatusLabel(selectedOrder, normalizeOrderStatus(selectedOrder.status) || "order-placed"),
+            trackingLink: trackingInput.trim(),
+            items: selectedOrder.items || [],
+          });
+        }
 
       setStatusMessage("Delivery updated");
     } catch (error) {
@@ -8190,7 +8741,7 @@ export function AdminOrdersView() {
     if (needsTrackingLink(nextStatus) && trackingLinkOverride === null) {
       setPendingStatusUpdate({
         orderId,
-        status: nextStatus,
+        status: formatOrderStatusLabel(nextStatus),
         existingLink: targetOrder.trackingLink || "",
       });
       setTrackingInput(targetOrder.trackingLink || "");
@@ -8198,32 +8749,34 @@ export function AdminOrdersView() {
     }
 
     const normalizedLink =
-      typeof trackingLinkOverride === "string"
-        ? trackingLinkOverride.trim()
+      typeof trackingLinkOverride === "string" ?
+         trackingLinkOverride.trim()
         : targetOrder.trackingLink || "";
     const fallbackLink = normalizedLink || targetOrder.trackingLink || "";
-    const finalTrackingLink = needsTrackingLink(nextStatus)
-      ? fallbackLink || null
+    const finalTrackingLink = needsTrackingLink(nextStatus) ?
+       fallbackLink || null
       : targetOrder.trackingLink || null;
 
     await updateDoc(doc(db, "orders", orderId), {
-      status: nextStatus,
+      status: formatOrderStatusLabel(nextStatus),
       updatedAt: serverTimestamp(),
       trackingLink: finalTrackingLink,
     });
     setStatusMessage("Order updated");
 
-    if (functionsInstance && targetOrder?.customer?.email) {
+    if (functionsInstance && targetOrder.customer.email) {
       try {
         const sendOrderStatusEmail = httpsCallable(
           functionsInstance,
           "sendOrderStatusEmail"
         );
         await sendOrderStatusEmail({
-          status: nextStatus,
+          status: getOrderStatusLabel(targetOrder, nextStatus),
           orderNumber: targetOrder.orderNumber ?? null,
           trackingLink: finalTrackingLink || "",
           customer: targetOrder.customer,
+          customerEmail: targetOrder.customer?.email || "",
+          items: targetOrder.items || [],
         });
       } catch (error) {
         console.warn("Failed to send order status email", error);
@@ -8238,15 +8791,15 @@ export function AdminOrdersView() {
   const filteredOrders = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return orders.filter((order) => {
-      const matchesStatus = statusFilter === "all" ? true : (order.status || "pending") === statusFilter;
+      const matchesStatus = statusFilter === "all" ? true : normalizeOrderStatus(order.status) === statusFilter;
       if (!matchesStatus) return false;
       if (!term) return true;
       const haystack = [
         order.id,
         order.orderNumber ? String(order.orderNumber) : "",
-        order.customer?.fullName || "",
-        order.customer?.email || "",
-        order.customer?.phone || "",
+        order.customer.fullName || "",
+        order.customer.email || "",
+        order.customer.phone || "",
       ]
         .join(" ")
         .toLowerCase();
@@ -8267,7 +8820,7 @@ export function AdminOrdersView() {
   const kpi = useMemo(() => {
     const today = new Date();
     const isToday = (ts) => {
-      if (!ts?.toDate) return false;
+      if (!ts.toDate) return false;
       const d = ts.toDate();
       return (
         d.getFullYear() === today.getFullYear() &&
@@ -8278,23 +8831,23 @@ export function AdminOrdersView() {
     const totalToday = orders.filter((o) => isToday(o.createdAt)).length;
     const statusCounts = orders.reduce(
       (acc, order) => {
-        const status = order.status || "pending";
+        const status = normalizeOrderStatus(order.status);
         acc[status] = (acc[status] || 0) + 1;
         return acc;
       },
-      { pending: 0, processing: 0, ready: 0, fulfilled: 0, cancelled: 0 }
+      { "order-placed": 0, "packing-order": 0, "order-ready-for-shipping": 0, shipped: 0, completed: 0, cancelled: 0 }
     );
     const paidCount = orders.filter((o) => normalizePaymentStatus(o) === "complete" || normalizePaymentStatus(o) === "paid").length;
     const failedPayments = orders.filter((o) => normalizePaymentStatus(o) === "failed").length;
     return { totalToday, statusCounts, paidCount, failedPayments };
   }, [orders]);
 
-  const selectedOrder = selectedOrderId
-    ? filteredOrders.find((order) => order.id === selectedOrderId) || null
+  const selectedOrder = selectedOrderId ?
+     filteredOrders.find((order) => order.id === selectedOrderId) || null
     : null;
   const shippingAddressLabel = selectedOrder
     ? formatShippingAddress(selectedOrder.shippingAddress) ||
-      selectedOrder.customer?.address ||
+      selectedOrder.customer.address ||
       ""
     : "";
 
@@ -8303,6 +8856,10 @@ export function AdminOrdersView() {
       setDeliveryMethod(selectedOrder.deliveryMethod || "company");
       setCourierName(selectedOrder.courierName || "");
       setTrackingInput(selectedOrder.trackingLink || "");
+      const fallbackMarchMonth = `${new Date().getFullYear()}-03`;
+      setPreorderNoticeMonth(resolvePreorderSendMonthForOrder(selectedOrder) || fallbackMarchMonth);
+    } else {
+      setPreorderNoticeMonth("");
     }
   }, [selectedOrder]);
 
@@ -8323,16 +8880,16 @@ export function AdminOrdersView() {
           <p className="admin-kpi__value">{kpi.totalToday}</p>
         </div>
         <div className="admin-kpi">
-          <p className="admin-kpi__label">Pending</p>
-          <p className="admin-kpi__value">{kpi.statusCounts.pending || 0}</p>
+          <p className="admin-kpi__label">Order placed</p>
+          <p className="admin-kpi__value">{kpi.statusCounts["order-placed"] || 0}</p>
         </div>
         <div className="admin-kpi">
-          <p className="admin-kpi__label">Processing</p>
-          <p className="admin-kpi__value">{kpi.statusCounts.processing || 0}</p>
+          <p className="admin-kpi__label">Packing</p>
+          <p className="admin-kpi__value">{kpi.statusCounts["packing-order"] || 0}</p>
         </div>
         <div className="admin-kpi">
-          <p className="admin-kpi__label">Ready / Fulfilled</p>
-          <p className="admin-kpi__value">{(kpi.statusCounts.ready || 0) + (kpi.statusCounts.fulfilled || 0)}</p>
+          <p className="admin-kpi__label">Ready / Completed</p>
+          <p className="admin-kpi__value">{(kpi.statusCounts["order-ready-for-shipping"] || 0) + (kpi.statusCounts.completed || 0)}</p>
         </div>
         <div className="admin-kpi">
           <p className="admin-kpi__label">Paid</p>
@@ -8366,7 +8923,7 @@ export function AdminOrdersView() {
               <option value="all">All</option>
               {ORDER_STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {status}
+                  {formatOrderStatusLabel(status)}
                 </option>
               ))}
             </select>
@@ -8394,12 +8951,13 @@ export function AdminOrdersView() {
                   ? bookingDateFormatter.format(order.createdAt.toDate())
                   : "Pending";
                 const total =
-                  typeof order.totalPrice === "number"
-                    ? order.totalPrice
+                  typeof order.totalPrice === "number" ?
+                     order.totalPrice
                     : Number(order.totalPrice) || 0;
-                const orderLabel = Number.isFinite(order.orderNumber)
-                  ? `Order #${order.orderNumber}`
+                const orderLabel = Number.isFinite(order.orderNumber) ?
+                   `Order #${order.orderNumber}`
                   : "Order";
+                const isPreordered = isPreorderedOrder(order);
                 const paymentStatus = normalizePaymentStatus(order);
                 const deliveryStatus = normalizeDeliveryStatus(order);
                 return (
@@ -8425,11 +8983,11 @@ export function AdminOrdersView() {
                       )}
                     </td>
                     <td>
-                      <p>{order.customer?.fullName || "—"}</p>
+                      <p>{order.customer.fullName || "—"}</p>
                       <p className="modal__meta">
-                        {order.customer?.email || "—"}
+                        {order.customer.email || "—"}
                       </p>
-                      {order.customer?.phone && (
+                      {order.customer.phone && (
                         <p className="modal__meta">{order.customer.phone}</p>
                       )}
                     </td>
@@ -8442,7 +9000,7 @@ export function AdminOrdersView() {
                     <td>
                       <select
                         className="input"
-                        value={order.status || "pending"}
+                        value={normalizeOrderStatus(order.status)}
                         onChange={(event) =>
                           handleUpdateOrderStatus(order.id, event.target.value)
                         }
@@ -8453,6 +9011,9 @@ export function AdminOrdersView() {
                           </option>
                         ))}
                       </select>
+                      {isPreordered && normalizeOrderStatus(order.status) === "order-placed" && (
+                        <p className="modal__meta">Preordered</p>
+                      )}
                     </td>
                     <td>
                       <span className="modal__meta">{deliveryStatus.replace(/-/g, " ")}</span>
@@ -8512,8 +9073,8 @@ export function AdminOrdersView() {
               <div>
                 <p className="modal__meta">Ref: {selectedOrder.id}</p>
                 <h3>
-                  {Number.isFinite(selectedOrder.orderNumber)
-                    ? `Order #${selectedOrder.orderNumber}`
+                  {Number.isFinite(selectedOrder.orderNumber) ?
+                     `Order #${selectedOrder.orderNumber}`
                     : "Order"}
                 </h3>
                 <p className="modal__meta">
@@ -8529,7 +9090,7 @@ export function AdminOrdersView() {
                 <span className="admin-status">
                   Delivery: {normalizeDeliveryStatus(selectedOrder).replace(/-/g, " ")}
                 </span>
-                <span className="admin-status">Status: {selectedOrder.status || "pending"}</span>
+                <span className="admin-status">Status: {getOrderStatusLabel(selectedOrder)}</span>
               </div>
             </div>
 
@@ -8538,9 +9099,9 @@ export function AdminOrdersView() {
                 <div className="admin-order-detail__grid">
                   <div>
                     <h4>Customer</h4>
-                    <p>{selectedOrder.customer?.fullName || "—"}</p>
-                    <p className="modal__meta">{selectedOrder.customer?.email || "—"}</p>
-                    {selectedOrder.customer?.phone && <p className="modal__meta">{selectedOrder.customer.phone}</p>}
+                    <p>{selectedOrder.customer.fullName || "—"}</p>
+                    <p className="modal__meta">{selectedOrder.customer.email || "—"}</p>
+                    {selectedOrder.customer.phone && <p className="modal__meta">{selectedOrder.customer.phone}</p>}
                     {shippingAddressLabel && <p className="modal__meta">{shippingAddressLabel}</p>}
                   </div>
                   <div>
@@ -8552,19 +9113,19 @@ export function AdminOrdersView() {
                       <p className="modal__meta">Shipping: {formatPriceLabel(selectedOrder.shippingCost)}</p>
                     )}
                     <p className="modal__meta">Total: {formatPriceLabel(selectedOrder.totalPrice)}</p>
-                    {selectedOrder.payfast?.paymentReference && (
+                    {selectedOrder.payfast.paymentReference && (
                       <p className="modal__meta">Ref: {selectedOrder.payfast.paymentReference}</p>
                     )}
-                    {selectedOrder.payfast?.paymentId && (
+                    {selectedOrder.payfast.paymentId && (
                       <p className="modal__meta">PayFast ID: {selectedOrder.payfast.paymentId}</p>
                     )}
                   </div>
                   <div>
                     <h4>Delivery</h4>
-                    {selectedOrder.shipping?.courierName && (
+                    {selectedOrder.shipping.courierName && (
                       <p className="modal__meta">Courier: {selectedOrder.shipping.courierName}</p>
                     )}
-                    {selectedOrder.shipping?.province && (
+                    {selectedOrder.shipping.province && (
                       <p className="modal__meta">Province: {selectedOrder.shipping.province}</p>
                     )}
                     {selectedOrder.trackingLink ? (
@@ -8588,11 +9149,11 @@ export function AdminOrdersView() {
                 <div>
                   <h4>Items</h4>
                   <ul className="order-items">
-                    {selectedOrder.items?.map((item) => (
+                    {selectedOrder.items.map((item) => (
                       <li key={`${selectedOrder.id}-${item.id}`}>
                         <strong>{item.name}</strong> ×{item.quantity || 1}
                         <span className="modal__meta">{formatPriceLabel(item.price)}</span>
-                        {item.metadata?.type === "workshop" && (
+                        {item.metadata.type === "workshop" && (
                           <span className="modal__meta">
                             {item.metadata.sessionDayLabel ||
                               item.metadata.sessionLabel ||
@@ -8600,11 +9161,20 @@ export function AdminOrdersView() {
                             · {item.metadata.attendeeCount || 1} attendee(s)
                           </span>
                         )}
-                        {item.metadata?.type === "product" && item.metadata.variantLabel && (
+                        {item.metadata.type === "product" && item.metadata.variantLabel && (
                           <span className="modal__meta">
                             Variant: {item.metadata.variantLabel}
                           </span>
                         )}
+                        {item.metadata.type === "product" &&
+                          (item.metadata.preorderSendMonth || item.metadata.preorderSendMonthLabel) && (
+                            <span className="modal__meta">
+                              Send month:{" "}
+                              {item.metadata.preorderSendMonthLabel ||
+                                formatPreorderSendMonth(item.metadata.preorderSendMonth) ||
+                                item.metadata.preorderSendMonth}
+                            </span>
+                          )}
                       </li>
                     ))}
                   </ul>
@@ -8618,7 +9188,7 @@ export function AdminOrdersView() {
                       Order Status
                       <select
                         className="input"
-                        value={selectedOrder.status || "pending"}
+                        value={normalizeOrderStatus(selectedOrder.status)}
                         onChange={(event) =>
                           handleUpdateOrderStatus(selectedOrder.id, event.target.value)
                         }
@@ -8636,7 +9206,7 @@ export function AdminOrdersView() {
                       onClick={() =>
                         setPendingStatusUpdate({
                           orderId: selectedOrder.id,
-                          status: selectedOrder.status || "pending",
+                          status: normalizeOrderStatus(selectedOrder.status),
                           existingLink: selectedOrder.trackingLink || "",
                         })
                       }
@@ -8718,8 +9288,37 @@ export function AdminOrdersView() {
                     >
                       {deliverySaving ? "Saving…" : "Save Delivery"}
                     </button>
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      disabled={resendOrderEmailSending}
+                      onClick={handleResendOrderConfirmationEmail}
+                    >
+                      {resendOrderEmailSending ? "Sending…" : "Resend Order Email"}
+                    </button>
                   </div>
-                  {selectedOrder.payfast?.gatewayResponse && (
+                  {isPreorderedOrder(selectedOrder) && (
+                    <div className="admin-order-detail__actions-row">
+                      <label>
+                        Pre-order send month
+                        <input
+                          className="input"
+                          type="month"
+                          value={preorderNoticeMonth}
+                          onChange={(event) => setPreorderNoticeMonth(event.target.value)}
+                        />
+                      </label>
+                      <button
+                        className="btn btn--secondary"
+                        type="button"
+                        disabled={preorderNoticeSending}
+                        onClick={handleSendPreorderNoticeEmail}
+                      >
+                        {preorderNoticeSending ? "Sending…" : "Send Pre-order Notice"}
+                      </button>
+                    </div>
+                  )}
+                  {selectedOrder.payfast.gatewayResponse && (
                     <p className="modal__meta">
                       Gateway: {selectedOrder.payfast.gatewayResponse} · Amount verified:{" "}
                       {selectedOrder.payfast.validatedWithGateway ? "yes" : "no"}
@@ -8873,9 +9472,9 @@ export function AdminShippingView() {
       [id]: {
         ...prev[id],
         provinces: {
-          ...(prev[id]?.provinces || {}),
+          ...(prev[id].provinces || {}),
           [province]: {
-            ...(prev[id]?.provinces?.[province] || {}),
+            ...(prev[id].provinces?.[province] || {}),
             [field]: value,
           },
         },
@@ -8887,7 +9486,7 @@ export function AdminShippingView() {
     const payload = {};
     const errors = [];
     SA_PROVINCES.forEach(({ value }) => {
-      const provinceDraft = draft?.provinces?.[value] || {};
+      const provinceDraft = draft.provinces?.[value] || {};
       const isAvailable = Boolean(provinceDraft.isAvailable);
       const priceValue = Number.parseFloat(provinceDraft.price);
       if (isAvailable && !Number.isFinite(priceValue)) {
@@ -8904,7 +9503,7 @@ export function AdminShippingView() {
   const handleSaveCourier = async (id) => {
     if (!db || !inventoryEnabled) return;
     const draft = drafts[id];
-    if (!draft?.name?.trim()) {
+    if (!draft.name.trim()) {
       setStatusMessage("Courier name is required.");
       return;
     }
@@ -9168,12 +9767,12 @@ export function AdminProfileView() {
     <div className="admin-panel admin-panel--narrow">
       <Reveal as="section" className="admin-panel" delay={30}>
         <h2>Profile</h2>
-        <p className="modal__meta">Signed in as {user?.email}</p>
+        <p className="modal__meta">Signed in as {user.email}</p>
         <p className="modal__meta">
           <strong>Role:</strong> {role}
         </p>
-        <p className="modal__meta">UID: {user?.uid}</p>
-        {user?.metadata?.lastSignInTime && (
+        <p className="modal__meta">UID: {user.uid}</p>
+        {user.metadata.lastSignInTime && (
           <p className="modal__meta">
             Last sign-in: {user.metadata.lastSignInTime}
           </p>

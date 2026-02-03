@@ -19,6 +19,7 @@ const POS_TABS = [
   { id: "pos-products", label: "POS-only" },
   { id: "workshops", label: "Workshops" },
   { id: "classes", label: "Classes" },
+  { id: "bookings", label: "Bookings" },
   { id: "events", label: "Events" },
 ];
 
@@ -56,6 +57,26 @@ const clampQuantity = (value) => {
 const formatCurrency = (value) => {
   const amount = parseNumber(value, 0);
   return moneyFormatter.format(amount);
+};
+
+const formatDateKey = (date) => {
+  if (!date) return "";
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const applyDateToDateTime = (dateValue, existingDate) => {
+  if (!dateValue) return existingDate ?? null;
+  const [year, month, day] = dateValue.split("-").map((value) => Number.parseInt(value, 10));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return existingDate ?? null;
+  }
+  const base = existingDate ? new Date(existingDate) : new Date();
+  base.setFullYear(year, month - 1, day);
+  base.setSeconds(0, 0);
+  return base;
 };
 
 const parseDateValue = (value) => {
@@ -125,7 +146,9 @@ function AdminPosPage() {
     products,
     productCategories,
     workshops,
+    bookings,
     events,
+    cutFlowerBookings,
     cutFlowerClasses,
     inventoryEnabled,
     inventoryLoading,
@@ -175,6 +198,11 @@ function AdminPosPage() {
   const [eventSelections, setEventSelections] = useState({});
   const [activeCategoryId, setActiveCategoryId] = useState("all");
   const [posCatalogOpen, setPosCatalogOpen] = useState(false);
+  const [bookingTab, setBookingTab] = useState("workshop");
+  const [bookingDateFilter, setBookingDateFilter] = useState(() => formatDateKey(new Date()));
+  const [bookingEdits, setBookingEdits] = useState({});
+  const [bookingSavingId, setBookingSavingId] = useState(null);
+  const [bookingError, setBookingError] = useState(null);
 
   const normalizedProducts = useMemo(() => {
     return (products || []).map((product) => {
@@ -263,6 +291,142 @@ function AdminPosPage() {
     });
   }, [sessionFormatter, workshops]);
 
+  const bookingDateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat("en-ZA", {
+        dateStyle: "medium",
+      }),
+    [],
+  );
+
+  const workshopLookup = useMemo(() => {
+    const map = new Map();
+    normalizedWorkshops.forEach((workshop) => {
+      if (workshop.id) map.set(workshop.id, workshop);
+    });
+    return map;
+  }, [normalizedWorkshops]);
+
+  const normalizePaymentStatus = (value) =>
+    (value || "").toString().trim().toLowerCase();
+
+  const isBookingCompleted = (booking, type) => {
+    const status = normalizePaymentStatus(booking?.status);
+    const paymentStatus = normalizePaymentStatus(
+      booking?.paymentStatus || booking?.payment_status,
+    );
+    const isPaid =
+      booking?.paid === true ||
+      paymentStatus === "paid" ||
+      paymentStatus === "complete" ||
+      paymentStatus === "completed";
+    if (type === "cut-flower") {
+      return (
+        status === "fulfilled" ||
+        status === "completed" ||
+        status === "cancelled" ||
+        isPaid
+      );
+    }
+    return status === "fulfilled" || status === "completed" || isPaid;
+  };
+
+  const normalizedWorkshopBookings = useMemo(() => {
+    return (bookings || []).map((booking) => {
+      const sessionDate = parseDateValue(
+        booking.sessionDate || booking.session_date || booking.date,
+      );
+      const dateKey = formatDateKey(sessionDate);
+      const workshop = workshopLookup.get(booking.workshopId);
+      const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
+      const attendeeCount = Number.isFinite(attendeeCountValue) ? attendeeCountValue : 1;
+      const priceNumber = parseNumber(
+        booking.price ?? workshop?.numericPrice ?? workshop?.price,
+        null,
+      );
+      return {
+        ...booking,
+        bookingType: "workshop",
+        sessionDate,
+        dateKey,
+        displayDate: sessionDate ? bookingDateFormatter.format(sessionDate) : "Date to be confirmed",
+        workshopTitle: workshop?.title || "Workshop",
+        numericPrice: priceNumber,
+        attendeeCount,
+        completed: isBookingCompleted(booking, "workshop"),
+      };
+    });
+  }, [bookings, bookingDateFormatter, workshopLookup]);
+
+  const normalizedCutFlowerBookings = useMemo(() => {
+    return (cutFlowerBookings || []).map((booking) => {
+      const eventDate = parseDateValue(booking.eventDate);
+      const dateKey = formatDateKey(eventDate);
+      const attendeeSelections = Array.isArray(booking.attendeeSelections)
+        ? booking.attendeeSelections
+        : [];
+      const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
+      const attendeeCount = Number.isFinite(attendeeCountValue)
+        ? attendeeCountValue
+        : attendeeSelections.length || 1;
+      const priceNumber = parseNumber(
+        booking.estimatedTotal ?? booking.budget ?? booking.total,
+        null,
+      );
+      return {
+        ...booking,
+        bookingType: "cut-flower",
+        eventDate,
+        dateKey,
+        displayDate: eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed",
+        numericPrice: priceNumber,
+        attendeeCount,
+        attendeeSelections,
+        completed: isBookingCompleted(booking, "cut-flower"),
+      };
+    });
+  }, [bookingDateFormatter, cutFlowerBookings]);
+
+  const filteredWorkshopBookings = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return normalizedWorkshopBookings.filter((booking) => {
+      if (booking.completed) return false;
+      if (bookingDateFilter && booking.dateKey !== bookingDateFilter) return false;
+      if (!term) return true;
+      const haystack = [
+        booking.name,
+        booking.email,
+        booking.phone,
+        booking.workshopTitle,
+        booking.sessionLabel,
+        booking.sessionDate,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [bookingDateFilter, normalizedWorkshopBookings, searchTerm]);
+
+  const filteredCutFlowerBookings = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return normalizedCutFlowerBookings.filter((booking) => {
+      if (booking.completed) return false;
+      if (bookingDateFilter && booking.dateKey !== bookingDateFilter) return false;
+      if (!term) return true;
+      const haystack = [
+        booking.customerName,
+        booking.email,
+        booking.phone,
+        booking.occasion,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [bookingDateFilter, normalizedCutFlowerBookings, searchTerm]);
+
   const normalizedClasses = useMemo(() => {
     return (cutFlowerClasses || []).map((classDoc) => {
       const priceNumber = parseNumber(classDoc.price, null);
@@ -305,6 +469,37 @@ function AdminPosPage() {
       };
     });
   }, [cutFlowerClasses, sessionFormatter]);
+
+  const classLookup = useMemo(() => {
+    const map = new Map();
+    normalizedClasses.forEach((classDoc) => {
+      if (classDoc.id) map.set(classDoc.id, classDoc);
+    });
+    return map;
+  }, [normalizedClasses]);
+
+  const cutFlowerOptions = useMemo(() => {
+    const seen = new Set();
+    const options = [];
+    normalizedClasses.forEach((classDoc) => {
+      (classDoc.options || []).forEach((option) => {
+        const key = option.id || option.label;
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        options.push({
+          id: option.id || key,
+          label: option.label || key,
+          price: option.price,
+        });
+      });
+    });
+    return options;
+  }, [normalizedClasses]);
+
+  const cutFlowerOptionPriceMap = useMemo(
+    () => new Map(cutFlowerOptions.map((option) => [option.id, option.price])),
+    [cutFlowerOptions],
+  );
 
   const normalizedEvents = useMemo(() => {
     return (events || []).map((event) => {
@@ -399,9 +594,24 @@ function AdminPosPage() {
     if (activeTab === "pos-products") return filteredPosProducts.length;
     if (activeTab === "workshops") return filteredWorkshops.length;
     if (activeTab === "classes") return filteredClasses.length;
+    if (activeTab === "bookings") {
+      return bookingTab === "workshop"
+        ? filteredWorkshopBookings.length
+        : filteredCutFlowerBookings.length;
+    }
     if (activeTab === "events") return filteredEvents.length;
     return 0;
-  }, [activeTab, filteredClasses, filteredEvents, filteredPosProducts, filteredProducts, filteredWorkshops]);
+  }, [
+    activeTab,
+    bookingTab,
+    filteredClasses,
+    filteredCutFlowerBookings.length,
+    filteredEvents,
+    filteredPosProducts,
+    filteredProducts,
+    filteredWorkshops,
+    filteredWorkshopBookings.length,
+  ]);
 
   const hasBookingItems = useMemo(
     () => cartItems.some((item) => item.type === "workshop" || item.type === "class"),
@@ -491,6 +701,227 @@ function AdminPosPage() {
         return { ...item, quantity: nextQuantity };
       }),
     );
+  };
+
+  const normalizeAttendeeOptions = (count, current = [], fallback) => {
+    const safeCount = Math.max(1, Number.parseInt(count, 10) || 1);
+    const next = Array.from({ length: safeCount }, (_, index) => current[index] || fallback || "");
+    return next;
+  };
+
+  const buildBookingEditState = (booking, type) => {
+    const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
+    const attendeeCount = Number.isFinite(attendeeCountValue)
+      ? attendeeCountValue
+      : booking.attendeeCount || 1;
+    if (type === "workshop") {
+      const workshop = workshopLookup.get(booking.workshopId);
+      const sessions = workshop?.sessions || [];
+      const matchedSession =
+        sessions.find((session) => session.id === booking.sessionId) ||
+        sessions.find((session) => session.label === booking.sessionLabel) ||
+        sessions.find((session) => session.date === booking.sessionDate) ||
+        sessions[0] ||
+        null;
+      return {
+        date: booking.dateKey || "",
+        attendeeCount: Math.max(1, Number.parseInt(attendeeCount, 10) || 1),
+        sessionId: matchedSession?.id || "",
+        optionId: "",
+      };
+    }
+    const attendeeSelections = Array.isArray(booking.attendeeSelections)
+      ? booking.attendeeSelections
+      : [];
+    const fallbackOption =
+      attendeeSelections[0]?.optionValue || attendeeSelections[0]?.optionLabel || "";
+    const options = cutFlowerOptions;
+    const matchedOption =
+      options.find((option) => option.id === booking.optionValue) ||
+      options.find((option) => option.label === booking.optionLabel) ||
+      options.find((option) => option.id === fallbackOption || option.label === fallbackOption) ||
+      options[0] ||
+      null;
+    const attendeeOptions = attendeeSelections.length
+      ? attendeeSelections.map(
+          (selection) =>
+            selection?.optionValue ||
+            selection?.optionLabel ||
+            matchedOption?.id ||
+            "",
+        )
+      : normalizeAttendeeOptions(
+          Math.max(1, Number.parseInt(attendeeCount, 10) || 1),
+          [],
+          matchedOption?.id || "",
+        );
+    return {
+      date: booking.dateKey || "",
+      attendeeCount: Math.max(1, Number.parseInt(attendeeCount, 10) || attendeeSelections.length || 1),
+      sessionId: "",
+      optionId: matchedOption?.id || "",
+      attendeeOptions,
+    };
+  };
+
+  const getBookingEditState = (booking, type) =>
+    bookingEdits[booking.id] || buildBookingEditState(booking, type);
+
+  const handleBookingEditChange = (booking, type, field, value) => {
+    setBookingEdits((prev) => {
+      const current = prev[booking.id] || buildBookingEditState(booking, type);
+      let next = { ...current, [field]: value };
+      if (type === "workshop" && field === "sessionId") {
+        const workshop = workshopLookup.get(booking.workshopId);
+        const session = workshop?.sessions?.find((entry) => entry.id === value);
+        if (session?.date) {
+          next.date = session.date;
+        }
+      }
+      if (type === "cut-flower" && field === "attendeeCount") {
+        next.attendeeOptions = normalizeAttendeeOptions(value, current.attendeeOptions, current.optionId);
+      }
+      if (type === "cut-flower" && field === "optionId") {
+        next.attendeeOptions = normalizeAttendeeOptions(
+          current.attendeeCount,
+          current.attendeeOptions,
+          value,
+        );
+      }
+      if (type === "cut-flower" && field === "attendeeOptionIndex") {
+        const { index, optionId } = value;
+        const options = Array.isArray(current.attendeeOptions) ? [...current.attendeeOptions] : [];
+        options[index] = optionId;
+        next.attendeeOptions = normalizeAttendeeOptions(current.attendeeCount, options, current.optionId);
+      }
+      return { ...prev, [booking.id]: next };
+    });
+  };
+
+  const handleSaveBookingChanges = async (booking, type) => {
+    if (!db || !inventoryEnabled) {
+      setBookingError("You do not have permission to update bookings.");
+      return;
+    }
+    const editState = getBookingEditState(booking, type);
+    if (!editState?.date) {
+      setBookingError("Select a date before saving.");
+      return;
+    }
+    setBookingSavingId(booking.id);
+    setBookingError(null);
+    try {
+      if (type === "workshop") {
+        const workshop = workshopLookup.get(booking.workshopId);
+        const selectedSession = workshop?.sessions?.find(
+          (session) => session.id === editState.sessionId,
+        );
+        await updateDoc(doc(db, "bookings", booking.id), {
+          sessionDate: editState.date,
+          sessionLabel: selectedSession?.label || booking.sessionLabel || null,
+          sessionId: selectedSession?.id || booking.sessionId || null,
+          attendeeCount: Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const selectedOption =
+          cutFlowerOptions.find((option) => option.id === editState.optionId) || null;
+        const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
+        const attendeeOptions = normalizeAttendeeOptions(
+          attendeeCount,
+          editState.attendeeOptions || [],
+          editState.optionId,
+        );
+        const optionLookup = new Map(cutFlowerOptions.map((option) => [option.id, option]));
+        const attendeeSelections = attendeeOptions.map((optionId, index) => {
+          const option = optionLookup.get(optionId);
+          return {
+            attendee: index + 1,
+            optionValue: option?.id || optionId || null,
+            optionLabel: option?.label || optionId || null,
+            estimatedPrice: option?.price ?? null,
+          };
+        });
+        const estimatedTotal = attendeeSelections.reduce((sum, selection) => {
+          const price = Number(selection.estimatedPrice);
+          return Number.isFinite(price) ? sum + price : sum;
+        }, 0);
+        const nextEventDate = applyDateToDateTime(editState.date, booking.eventDate);
+        await updateDoc(doc(db, "cutFlowerBookings", booking.id), {
+          eventDate: nextEventDate,
+          attendeeCount,
+          attendeeSelections,
+          optionValue: selectedOption?.id || editState.optionId || null,
+          optionLabel: selectedOption?.label || editState.optionId || null,
+          estimatedTotal: Number.isFinite(estimatedTotal) && estimatedTotal > 0 ? estimatedTotal : booking.estimatedTotal ?? null,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      setBookingError(error.message || "Unable to update booking.");
+    } finally {
+      setBookingSavingId(null);
+    }
+  };
+
+  const handleAddBookingToCart = (booking, type) => {
+    const editState = getBookingEditState(booking, type);
+    const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
+    let priceValue = Number.isFinite(booking.numericPrice) ? booking.numericPrice : 0;
+    let quantityValue = 1;
+    if (type === "workshop") {
+      const workshop = workshopLookup.get(booking.workshopId);
+      const workshopPrice = parseNumber(workshop?.numericPrice ?? workshop?.price, null);
+      if (Number.isFinite(workshopPrice)) {
+        priceValue = workshopPrice;
+        quantityValue = attendeeCount;
+      }
+    } else {
+      const attendeeOptions = normalizeAttendeeOptions(
+        attendeeCount,
+        editState.attendeeOptions || [],
+        editState.optionId,
+      );
+      const totalFromOptions = attendeeOptions.reduce((sum, optionId) => {
+        const price = Number(cutFlowerOptionPriceMap.get(optionId));
+        return Number.isFinite(price) ? sum + price : sum;
+      }, 0);
+      if (totalFromOptions > 0) {
+        priceValue = totalFromOptions;
+        quantityValue = 1;
+      } else {
+        const selectedOption =
+          cutFlowerOptions.find((option) => option.id === editState.optionId) || null;
+        if (Number.isFinite(selectedOption?.price)) {
+          priceValue = selectedOption.price;
+          quantityValue = attendeeCount;
+        }
+      }
+    }
+    const label =
+      type === "workshop"
+        ? `${booking.workshopTitle || "Workshop"} booking`
+        : `${booking.customerName || "Cut flower"} booking`;
+    const sessionLabel =
+      type === "workshop"
+        ? booking.sessionLabel || booking.displayDate
+        : booking.displayDate;
+    handleAddToCart({
+      key: buildCartKey({ type: `${type}-booking`, sourceId: booking.id }),
+      sourceId: booking.id,
+      type: `${type}-booking`,
+      name: label,
+      price: priceValue,
+      quantity: quantityValue,
+      metadata: {
+        bookingId: booking.id,
+        bookingType: type,
+        attendeeCount,
+        sessionLabel,
+        optionId: type === "cut-flower" ? editState.optionId || null : null,
+        attendeeOptions: type === "cut-flower" ? editState.attendeeOptions || [] : null,
+      },
+    });
   };
 
   const resetCheckout = () => {
@@ -777,10 +1208,29 @@ function AdminPosPage() {
           return addDoc(collection(db, "cutFlowerBookings"), payload);
         });
 
+      const bookingUpdatePromises = cartItems
+        .filter((item) => item.type === "workshop-booking" || item.type === "cut-flower-booking")
+        .map((item) => {
+          const isWorkshop = item.type === "workshop-booking";
+          const collectionName = isWorkshop ? "bookings" : "cutFlowerBookings";
+          const statusValue = isWorkshop ? "completed" : "fulfilled";
+          return updateDoc(doc(db, collectionName, item.sourceId), {
+            paid: true,
+            paymentStatus: "paid",
+            paymentMethod,
+            paidAt: serverTimestamp(),
+            completedAt: serverTimestamp(),
+            status: statusValue,
+            posSaleId: saleRef.id,
+            updatedAt: serverTimestamp(),
+          });
+        });
+
       await Promise.all([
         ...stockPromises.filter(Boolean),
         ...bookingPromises,
         ...classBookingPromises,
+        ...bookingUpdatePromises,
       ]);
 
       if (sendEmailReceipt && functionsInstance) {
@@ -905,6 +1355,42 @@ function AdminPosPage() {
               />
               <span className="modal__meta pos-toolbar__count">Showing {activeCount} items</span>
             </div>
+            {activeTab === "bookings" && (
+              <div className="pos-toolbar__row">
+                <div className="admin-tabs">
+                  <button
+                    type="button"
+                    className={`admin-tab ${bookingTab === "workshop" ? "is-active" : ""}`}
+                    onClick={() => setBookingTab("workshop")}
+                  >
+                    Workshops
+                  </button>
+                  <button
+                    type="button"
+                    className={`admin-tab ${bookingTab === "cut-flower" ? "is-active" : ""}`}
+                    onClick={() => setBookingTab("cut-flower")}
+                  >
+                    Cut flower
+                  </button>
+                </div>
+                <label className="modal__meta">
+                  Booking date
+                  <input
+                    className="input"
+                    type="date"
+                    value={bookingDateFilter}
+                    onChange={(event) => setBookingDateFilter(event.target.value)}
+                  />
+                </label>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={() => setBookingDateFilter(formatDateKey(new Date()))}
+                >
+                  Today
+                </button>
+              </div>
+            )}
             {activeTab === "products" && categoryOptions.length > 0 && (
               <div className="pos-toolbar__categories">
                 <button
@@ -1223,6 +1709,194 @@ function AdminPosPage() {
                 );
               })}
             </div>
+          )}
+
+          {activeTab === "bookings" && (
+            <>
+              {bookingError && <p className="admin-panel__error">{bookingError}</p>}
+              <div className="pos-grid">
+                {(bookingTab === "workshop"
+                  ? filteredWorkshopBookings
+                  : filteredCutFlowerBookings
+                ).map((booking) => {
+                  const type = bookingTab === "workshop" ? "workshop" : "cut-flower";
+                  const editState = getBookingEditState(booking, type);
+                  const classDoc = type === "cut-flower" ? cutFlowerOptions : null;
+                  const workshop = type === "workshop" ? workshopLookup.get(booking.workshopId) : null;
+                  const attendeeOptionsForRender =
+                    type === "cut-flower"
+                      ? normalizeAttendeeOptions(
+                          editState.attendeeCount,
+                          editState.attendeeOptions,
+                          editState.optionId,
+                        )
+                      : [];
+                  const totalFromOptions =
+                    type === "cut-flower"
+                      ? attendeeOptionsForRender.reduce((sum, optionId) => {
+                          const price = Number(cutFlowerOptionPriceMap.get(optionId));
+                          return Number.isFinite(price) ? sum + price : sum;
+                        }, 0)
+                      : null;
+                  const priceLabel = Number.isFinite(totalFromOptions) && totalFromOptions > 0
+                    ? formatCurrency(totalFromOptions)
+                    : Number.isFinite(booking.numericPrice)
+                      ? formatCurrency(booking.numericPrice)
+                      : "Price on request";
+                  return (
+                    <article className="pos-item-card" key={booking.id}>
+                      <div>
+                        <h4>
+                          {type === "workshop"
+                            ? booking.workshopTitle
+                            : booking.customerName || "Cut flower booking"}
+                        </h4>
+                        <p className="modal__meta">{booking.displayDate}</p>
+                        {type === "workshop" && booking.sessionLabel && (
+                          <p className="modal__meta">{booking.sessionLabel}</p>
+                        )}
+                        <p className="modal__meta">{priceLabel}</p>
+                        {type === "workshop" && workshop?.sessions?.length > 0 && (
+                          <label className="modal__meta pos-item-card__field">
+                            Session
+                            <select
+                              className="input"
+                              value={editState.sessionId}
+                              onChange={(event) =>
+                                handleBookingEditChange(
+                                  booking,
+                                  type,
+                                  "sessionId",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              {workshop.sessions.map((session) => (
+                                <option key={session.id} value={session.id}>
+                                  {session.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        <label className="modal__meta pos-item-card__field">
+                          Attendees
+                          <input
+                            className="input"
+                            type="number"
+                            min="1"
+                            value={editState.attendeeCount}
+                            onChange={(event) =>
+                              handleBookingEditChange(
+                                booking,
+                                type,
+                                "attendeeCount",
+                                event.target.value,
+                              )
+                            }
+                          />
+                        </label>
+                        {type === "cut-flower" &&
+                          classDoc?.length > 0 &&
+                          attendeeOptionsForRender.length === 0 && (
+                          <label className="modal__meta pos-item-card__field">
+                            Option
+                            <select
+                              className="input"
+                              value={editState.optionId}
+                              onChange={(event) =>
+                                handleBookingEditChange(
+                                  booking,
+                                  type,
+                                  "optionId",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              {classDoc.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                  {Number.isFinite(option.price)
+                                    ? ` - ${formatCurrency(option.price)}`
+                                    : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        {type === "cut-flower" &&
+                          classDoc?.length > 0 &&
+                          attendeeOptionsForRender.length > 0 && (
+                            <div className="pos-item-card__field">
+                              <span className="modal__meta">Attendee options</span>
+                              <div className="pos-attendee-options">
+                                {attendeeOptionsForRender.map((optionId, index) => (
+                                  <label className="modal__meta" key={`${booking.id}-attendee-${index + 1}`}>
+                                    Attendee {index + 1}
+                                    <select
+                                      className="input"
+                                      value={optionId}
+                                      onChange={(event) =>
+                                        handleBookingEditChange(booking, type, "attendeeOptionIndex", {
+                                          index,
+                                          optionId: event.target.value,
+                                        })
+                                      }
+                                    >
+                                      {classDoc.map((option) => (
+                                        <option key={option.id} value={option.id}>
+                                          {option.label}
+                                          {Number.isFinite(option.price)
+                                            ? ` - ${formatCurrency(option.price)}`
+                                            : ""}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        <label className="modal__meta pos-item-card__field">
+                          Update date
+                          <input
+                            className="input"
+                            type="date"
+                            value={editState.date}
+                            onChange={(event) =>
+                              handleBookingEditChange(booking, type, "date", event.target.value)
+                            }
+                          />
+                        </label>
+                      </div>
+                      <div className="admin-category-card__actions">
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          disabled={bookingSavingId === booking.id}
+                          onClick={() => handleSaveBookingChanges(booking, type)}
+                        >
+                          {bookingSavingId === booking.id ? "Saving..." : "Save changes"}
+                        </button>
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={() => handleAddBookingToCart(booking, type)}
+                        >
+                          Add to cart
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              {bookingTab === "workshop" && filteredWorkshopBookings.length === 0 && (
+                <p className="empty-state">No open workshop bookings for this date.</p>
+              )}
+              {bookingTab === "cut-flower" && filteredCutFlowerBookings.length === 0 && (
+                <p className="empty-state">No open cut flower bookings for this date.</p>
+              )}
+            </>
           )}
 
           {activeTab === "events" && (

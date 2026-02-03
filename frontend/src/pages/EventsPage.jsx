@@ -184,7 +184,7 @@ function EventsPage() {
     <>
       <section className="section section--tight">
         <div className="section__inner">
-          <Hero variant="gallery" background={heroBackground} media={<img src={galleryHero} alt="Bethany Blooms events" />}>
+          <Hero variant="gallery" background={heroBackground} media={<img src={galleryHero} alt="Bethany Blooms events" loading="lazy" decoding="async"/>}>
             <h1>Studio Events & Pop-ups</h1>
             <p>
               Join Bethany Blooms on the road and in the studio for collaborative creative sessions, floral pop-ups, and
@@ -216,7 +216,7 @@ function EventsPage() {
                       onClick={() => openLightbox(event)}
                       aria-label={`Open ${event.title} image`}
                     >
-                      <img src={event.image} alt={`${event.title} event banner`} loading="lazy" />
+                      <img src={event.image} alt={`${event.title} event banner`} loading="lazy" decoding="async"/>
                     </button>
                   )}
                   <div className="event-card__body">
@@ -260,7 +260,7 @@ function EventsPage() {
             <button className="lightbox__close" type="button" onClick={() => setLightboxImage(null)}>
               Close
             </button>
-            <img className="lightbox__image" src={lightboxImage.src} alt={lightboxImage.alt} />
+            <img className="lightbox__image" src={lightboxImage.src} alt={lightboxImage.alt} loading="lazy" decoding="async"/>
           </div>
         </div>
       )}

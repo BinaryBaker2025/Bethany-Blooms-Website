@@ -70,7 +70,7 @@ function Header() {
   useEffect(() => {
     setMenuOpen(false);
     setOpenDropdown(null);
-  }, [location.pathname]);
+  }, [location.pathname, location.search, location.hash]);
 
   useEffect(() => {
     return () => {
@@ -85,6 +85,10 @@ function Header() {
   };
 
   const closeDropdown = () => setOpenDropdown(null);
+  const closeAllMenus = () => {
+    setMenuOpen(false);
+    setOpenDropdown(null);
+  };
 
   const handleEnter = (label) => {
     if (closeTimer.current) {
@@ -110,8 +114,7 @@ function Header() {
             className="brand__logo"
             loading="lazy"
             width="120"
-            height="60"
-          />
+            height="60" decoding="async"/>
         </NavLink>
         <button
           className={`nav__overlay ${menuOpen ? "is-open" : ""}`}
@@ -134,7 +137,13 @@ function Header() {
             if (item.type === "link") {
               const { to, label, end } = item;
               return (
-                <NavLink key={to} to={to} end={end} className={({ isActive }) => (isActive ? "active" : "")}>
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  className={({ isActive }) => (isActive ? "active" : "")}
+                  onClick={closeAllMenus}
+                >
                   {label}
                 </NavLink>
               );
@@ -191,7 +200,7 @@ function Header() {
                           }
                           return isActive ? "active" : "";
                         }}
-                        onClick={closeDropdown}
+                        onClick={closeAllMenus}
                       >
                         {link.label}
                       </NavLink>

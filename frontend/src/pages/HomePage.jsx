@@ -213,6 +213,64 @@ function HomePage() {
         </div>
       </section>
 
+      <section className="section section--tight">
+        <div className="section__inner">
+          <Reveal as="div">
+            <span className="badge">What We Create</span>
+            <h2>Cut Flowers & Pressed Flowers</h2>
+            <p>
+              From fresh floral styling for special moments to preserved keepsakes you can treasure for years, Bethany
+              Blooms offers both worlds beautifully.
+            </p>
+          </Reveal>
+          <div className="home-offerings-grid">
+            <Reveal as="article" className="home-offering-card" delay={60}>
+              <figure className="home-offering-card__media">
+                <img
+                  src={workshopTableLongClose}
+                  alt="Lush cut flowers styled along a long celebration table"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </figure>
+              <div className="home-offering-card__body">
+                <span className="home-offering-card__eyebrow">Cut Flowers</span>
+                <h3>Pick-Your-Own Flower Farm Experience</h3>
+                <p>
+                  Visit the flower farm, walk through the rows, and cut your own blooms straight from the bush to take
+                  home in your own handpicked mix.
+                </p>
+                <Link className="btn btn--secondary" to="/cut-flowers">
+                  Ask About The Flower Farm
+                </Link>
+              </div>
+            </Reveal>
+
+            <Reveal as="article" className="home-offering-card" delay={140}>
+              <figure className="home-offering-card__media">
+                <img
+                  src={homePhotoOne}
+                  alt="Pressed flower artwork in a frame held outdoors"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </figure>
+              <div className="home-offering-card__body">
+                <span className="home-offering-card__eyebrow">Pressed Flowers</span>
+                <h3>Hands-On Pressed Flower Workshop</h3>
+                <p>
+                  Join a guided workshop where you receive a frame and create your own floral artwork by placing dried
+                  flowers into a design you love.
+                </p>
+                <Link className="btn btn--secondary" to="/workshops">
+                  Book A Pressed Flower Session
+                </Link>
+              </div>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
       <section className="section">
         <div className="section__inner">
           <Reveal as="div">
@@ -228,7 +286,7 @@ function HomePage() {
               { src: homePhotoFour, alt: "Long Bethany Blooms workshop table styled with blooms" },
             ].map((item, index) => (
               <Reveal as="figure" className="home-photo-grid__item" key={item.src} delay={index * 90}>
-                <img src={item.src} alt={item.alt} />
+                <img src={item.src} alt={item.alt} loading="lazy" decoding="async"/>
               </Reveal>
             ))}
           </div>
@@ -265,8 +323,7 @@ function HomePage() {
                       className="product-card__image"
                       src={product.image}
                       alt=""
-                      loading="lazy"
-                    />
+                      loading="lazy" decoding="async"/>
                     {product.stockBadgeLabel && (
                       <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
                         {product.stockBadgeLabel}

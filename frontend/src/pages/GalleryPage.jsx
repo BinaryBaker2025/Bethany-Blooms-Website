@@ -54,7 +54,7 @@ function GalleryPage() {
                   className="gallery__button"
                   aria-label={`Open ${item.caption}`}
                 >
-                  <img src={item.src} alt={item.alt} />
+                  <img src={item.src} alt={item.alt} loading="lazy" decoding="async"/>
                   <div className="gallery__overlay" aria-hidden="true" />
                 </button>
               </Reveal>
@@ -83,7 +83,7 @@ function GalleryPage() {
             >
               &times;
             </button>
-            <img className="lightbox__image" src={selected.src} alt={selected.alt} />
+            <img className="lightbox__image" src={selected.src} alt={selected.alt} loading="lazy" decoding="async"/>
           </div>
         )}
       </div>

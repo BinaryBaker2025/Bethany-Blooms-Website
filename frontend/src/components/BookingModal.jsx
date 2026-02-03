@@ -69,6 +69,12 @@ const INITIAL_BOOKING_FORM = {
 };
 
 const REQUIRED_FIELDS = ["fullName", "email", "phone", "address"];
+const REQUIRED_FIELD_LABELS = {
+  fullName: "Full name",
+  email: "Email",
+  phone: "Phone",
+  address: "Address",
+};
 
 function BookingModal() {
   const { isBookingOpen, closeBooking, notifyCart, bookingContext } = useModal();
@@ -77,6 +83,7 @@ function BookingModal() {
   const [formState, setFormState] = useState(INITIAL_BOOKING_FORM);
   const [formStatus, setFormStatus] = useState("idle");
   const [submitError, setSubmitError] = useState(null);
+  const [missingFields, setMissingFields] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
   const [showExtraOptions, setShowExtraOptions] = useState(false);
@@ -354,6 +361,7 @@ function BookingModal() {
       setFormState(INITIAL_BOOKING_FORM);
       setFormStatus("idle");
       setSubmitError(null);
+      setMissingFields([]);
       setSelectedSessionId(null);
       setShowExtraOptions(false);
       return;
@@ -437,6 +445,7 @@ function BookingModal() {
 
   const handleFieldChange = (field) => (event) => {
     const value = event.target.value;
+    setMissingFields((prev) => prev.filter((missingField) => missingField !== field));
     setFormState((prev) => ({
       ...prev,
       [field]: field === "attendeeCount" ? value.replace(/[^\d]/g, "") : value,
@@ -514,6 +523,7 @@ function BookingModal() {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setSubmitError(null);
+    setMissingFields([]);
 
     if (!workshop) {
       setFormStatus("error");
@@ -550,8 +560,14 @@ function BookingModal() {
     const requiredFields = isCutFlower ? ["fullName", "email", "phone"] : REQUIRED_FIELDS;
     const missing = requiredFields.filter((field) => !trimmed[field]);
     if (missing.length > 0) {
+      const missingLabels = missing
+        .map((field) => REQUIRED_FIELD_LABELS[field] || field)
+        .filter(Boolean);
       setFormStatus("error");
-      setSubmitError("Please complete all contact fields before continuing.");
+      setMissingFields(missing);
+      setSubmitError(
+        `Please complete the following field${missingLabels.length === 1 ? "" : "s"}: ${missingLabels.join(", ")}.`,
+      );
       return;
     }
 
@@ -920,7 +936,7 @@ function BookingModal() {
               No time slots remain for the selected day. Please choose another date.
             </p>
           )}
-          <div>
+          <div className={`booking-field${missingFields.includes("fullName") ? " booking-field--error" : ""}`}>
             <label htmlFor="guest-fullName">Full Name</label>
             <input
               className="input"
@@ -930,10 +946,12 @@ function BookingModal() {
               placeholder="Full name"
               value={formState.fullName}
               onChange={handleFieldChange("fullName")}
+              aria-invalid={missingFields.includes("fullName") ? "true" : "false"}
               required
             />
+            {missingFields.includes("fullName") && <p className="booking-field__error">Full name is required.</p>}
           </div>
-          <div>
+          <div className={`booking-field${missingFields.includes("email") ? " booking-field--error" : ""}`}>
             <label htmlFor="guest-email">Email</label>
             <input
               className="input"
@@ -943,10 +961,12 @@ function BookingModal() {
               placeholder="Email address"
               value={formState.email}
               onChange={handleFieldChange("email")}
+              aria-invalid={missingFields.includes("email") ? "true" : "false"}
               required
             />
+            {missingFields.includes("email") && <p className="booking-field__error">Email is required.</p>}
           </div>
-          <div>
+          <div className={`booking-field${missingFields.includes("phone") ? " booking-field--error" : ""}`}>
             <label htmlFor="guest-phone">Phone</label>
             <input
               className="input"
@@ -956,11 +976,13 @@ function BookingModal() {
               placeholder="Contact number"
               value={formState.phone}
               onChange={handleFieldChange("phone")}
+              aria-invalid={missingFields.includes("phone") ? "true" : "false"}
               required
             />
+            {missingFields.includes("phone") && <p className="booking-field__error">Phone is required.</p>}
           </div>
           {!isCutFlower && (
-            <div>
+            <div className={`booking-field${missingFields.includes("address") ? " booking-field--error" : ""}`}>
               <label htmlFor="guest-address">Address</label>
               <textarea
                 className="input textarea"
@@ -969,8 +991,10 @@ function BookingModal() {
                 placeholder="Delivery or correspondence address"
                 value={formState.address}
                 onChange={handleFieldChange("address")}
+                aria-invalid={missingFields.includes("address") ? "true" : "false"}
                 required
               />
+              {missingFields.includes("address") && <p className="booking-field__error">Address is required.</p>}
             </div>
           )}
           <div>

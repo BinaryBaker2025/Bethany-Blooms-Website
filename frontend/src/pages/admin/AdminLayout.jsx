@@ -5,16 +5,45 @@ import Reveal from "../../components/Reveal.jsx";
 import { AdminDataProvider } from "../../context/AdminDataContext.jsx";
 import logo from "../../assets/BethanyBloomsLogo.png";
 
+const EyeIcon = ({ open = false }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+    {!open && (
+      <path
+        d="M4 20 20 4"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    )}
+  </svg>
+);
+
 const NAV_LINKS = [
   { to: "/admin", label: "Dashboard", end: true },
   { to: "/admin/products", label: "Products" },
   { to: "/admin/media", label: "Image Library" },
-  { to: "/admin/workshops", label: "Workshops & Bookings" },
+  { to: "/admin/workshops", label: "Workshops & Bookings", end: true },
   { to: "/admin/workshops/calendar", label: "Calendar" },
   { to: "/admin/cut-flowers/classes", label: "Cut Flower Classes" },
   { to: "/admin/cut-flowers/bookings", label: "Cut Flower Bookings" },
   { to: "/admin/events", label: "Events" },
-  { to: "/admin/pos", label: "POS" },
+  { to: "/admin/pos", label: "POS", end: true },
   { to: "/admin/pos/cash-up", label: "POS Cash Up" },
   { to: "/admin/reports", label: "Reports" },
   { to: "/admin/orders", label: "Orders" },
@@ -36,13 +65,14 @@ function AdminLayout() {
   } = useAuth();
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [authError, setAuthError] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
     setDrawerOpen(false);
-  }, [location.pathname]);
+  }, [location.pathname, location.search, location.hash]);
 
   const handleSignIn = async (event) => {
     event.preventDefault();
@@ -50,6 +80,7 @@ function AdminLayout() {
     try {
       await signIn(loginForm.email, loginForm.password);
       setLoginForm({ email: "", password: "" });
+      setShowPassword(false);
       navigate("/admin");
     } catch (error) {
       setAuthError(error.message);
@@ -62,7 +93,7 @@ function AdminLayout() {
         <div className="section__inner admin-auth__inner">
           <Reveal as="div" className="admin-auth__card">
             <div className="admin-auth__header">
-              <img className="admin-auth__logo" src={logo} alt="Bethany Blooms logo" />
+              <img className="admin-auth__logo" src={logo} alt="Bethany Blooms logo" loading="lazy" decoding="async"/>
               <h2>Admin Sign In</h2>
               <p>Secure access to orders, workshops, and the full product catalog.</p>
             </div>
@@ -89,18 +120,28 @@ function AdminLayout() {
               </label>
               <label className="admin-auth__field" htmlFor="admin-password">
                 <span>Password</span>
-                <input
-                  className="input"
-                  id="admin-password"
-                  type="password"
-                  value={loginForm.password}
-                  onChange={(event) =>
-                    setLoginForm((prev) => ({ ...prev, password: event.target.value }))
-                  }
-                  placeholder="Password"
-                  autoComplete="current-password"
-                  required
-                />
+                <div className="admin-auth__password-wrap">
+                  <input
+                    className="input"
+                    id="admin-password"
+                    type={showPassword ? "text" : "password"}
+                    value={loginForm.password}
+                    onChange={(event) =>
+                      setLoginForm((prev) => ({ ...prev, password: event.target.value }))
+                    }
+                    placeholder="Password"
+                    autoComplete="current-password"
+                    required
+                  />
+                  <button
+                    className="admin-auth__password-toggle"
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    <EyeIcon open={showPassword} />
+                  </button>
+                </div>
               </label>
               <button
                 className="btn btn--primary admin-auth__submit"
@@ -137,7 +178,7 @@ function AdminLayout() {
           </div>
           <nav className="admin-sidebar__nav">
             {NAV_LINKS.map(({ to, label, end }) => (
-              <NavLink key={to} to={to} end={end}>
+              <NavLink key={to} to={to} end={end} onClick={() => setDrawerOpen(false)}>
                 {label}
               </NavLink>
             ))}
@@ -146,6 +187,14 @@ function AdminLayout() {
             Sign Out
           </button>
         </aside>
+        <button
+          className={`admin-sidebar__overlay ${drawerOpen ? "is-open" : ""}`}
+          type="button"
+          aria-label="Close menu"
+          aria-hidden={!drawerOpen}
+          onClick={() => setDrawerOpen(false)}
+          tabIndex={drawerOpen ? 0 : -1}
+        />
 
         <div className="admin-shell__main">
           <header className="admin-shell__header">

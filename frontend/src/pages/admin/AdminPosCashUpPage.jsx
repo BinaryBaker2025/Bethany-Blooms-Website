@@ -248,7 +248,7 @@ const buildCashupReportHtml = ({ cashup, sales, logoUrl }) => {
         <div class="page">
           <header class="header">
             <div>
-              ${logoUrl ? `<img src="${logoUrl}" alt="Bethany Blooms" />` : ""}
+              ${logoUrl ? `<img src="${logoUrl}" alt="Bethany Blooms" loading="lazy" decoding="async"/>` : ""}
             </div>
             <div class="meta">
               <h1>POS Cash Up</h1>

@@ -69,7 +69,7 @@ function DesignSystemPage() {
         <div className="design-system__grid">
           <section className="design-system__panel design-system__panel--wide">
             <h2>Hero</h2>
-            <Hero variant="home" background={heroBackground} media={<img src={workshopBanner} alt="Workshop banner" />}>
+            <Hero variant="home" background={heroBackground} media={<img src={workshopBanner} alt="Workshop banner" loading="lazy" decoding="async"/>}>
               <span className="badge">Seasonal Spotlight</span>
               <h1>Pressed Flower Workshops</h1>
               <p>Bring the Bethany Blooms studio experience to your next celebration.</p>
@@ -221,7 +221,7 @@ function DesignSystemPage() {
               <article className="card product-card product-card--link">
                 <span className="product-card__category">Pressed Florals</span>
                 <div className="product-card__media" aria-hidden="true">
-                  <img className="product-card__image" src={workshopTable} alt="" />
+                  <img className="product-card__image" src={workshopTable} alt="" loading="lazy" decoding="async"/>
                   <span className="badge badge--stock-in product-card__badge">In Stock</span>
                 </div>
                 <p className="card__title">Floral Keepsake</p>
@@ -241,7 +241,7 @@ function DesignSystemPage() {
 
               <article className="card cut-flower-card">
                 <div className="cut-flower-card__media">
-                  <img src={workshopTable} alt="Cut flower class" />
+                  <img src={workshopTable} alt="Cut flower class" loading="lazy" decoding="async"/>
                   <span className="cut-flower-card__badge">14 Feb</span>
                   <span className="cut-flower-card__price-tag">R 650</span>
                 </div>
@@ -292,7 +292,7 @@ function DesignSystemPage() {
             <h2>Process + Editorial Blocks</h2>
             <div className="cut-flowers-process">
               <div className="cut-flowers-process__media">
-                <img src={workshopDetails} alt="Workshop table details" />
+                <img src={workshopDetails} alt="Workshop table details" loading="lazy" decoding="async"/>
               </div>
               <div className="cut-flowers-process__steps">
                 <span className="badge">The Process</span>
@@ -321,7 +321,7 @@ function DesignSystemPage() {
               {[workshopTable, workshopGuests, workshopDetails].map((src) => (
                 <div className="gallery__item" key={src}>
                   <button className="gallery__button" type="button">
-                    <img src={src} alt="Gallery preview" />
+                    <img src={src} alt="Gallery preview" loading="lazy" decoding="async"/>
                     <span className="gallery__overlay">View</span>
                   </button>
                 </div>
@@ -562,7 +562,7 @@ function DesignSystemPage() {
               <div className="admin-media__grid">
                 {[workshopTable, workshopGuests].map((src) => (
                   <article className="admin-media__card" key={src}>
-                    <img className="admin-media__thumb" src={src} alt="Media item" loading="lazy" />
+                    <img className="admin-media__thumb" src={src} alt="Media item" loading="lazy" decoding="async"/>
                     <div className="admin-media__body">
                       <strong className="admin-media__filename">workshop-image.jpg</strong>
                       <div className="admin-media__buttons">

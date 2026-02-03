@@ -111,7 +111,7 @@ function CutFlowersPage() {
   usePageMetadata({
     title: "Cut Flowers | Bethany Blooms",
     description:
-      "Order lush cut flower arrangements, editorial styling, and botanical installations from the Bethany Blooms studio.",
+      "Visit the Bethany Blooms flower farm to cut your own fresh flowers and take home handpicked seasonal stems.",
   });
   const { openBooking } = useModal();
   const { items: remoteClasses, status: classesStatus } = useFirestoreCollection("cutFlowerClasses", {
@@ -210,16 +210,19 @@ function CutFlowersPage() {
 
   const offerings = [
     {
-      title: "Editorial & Brand Styling",
-      description: "Custom concepts for shoots, campaigns, and branded experiences with an emphasis on colour play.",
+      title: "Pick-Your-Own Flower Rows",
+      description:
+        "Walk through the farm beds, choose your favourites, and cut stems yourself for a personal bunch.",
     },
     {
-      title: "Celebration Installations",
-      description: "Statement tables, arches, and floral backdrops for intimate celebrations and gatherings.",
+      title: "Build Your Own Bucket",
+      description:
+        "Mix colours and flower varieties at your own pace, then take home a bucket of blooms you selected.",
     },
     {
-      title: "Weekly Studio Drops",
-      description: "Limited seasonal bunches and vase-ready florals available for pick-up from the studio.",
+      title: "Relaxed Farm Sessions",
+      description:
+        "Book a time slot for a calm, hands-on flower experience at the farm rather than off-site event styling.",
     },
   ];
 
@@ -324,16 +327,16 @@ function CutFlowersPage() {
 
   const processSteps = [
     {
-      title: "1. Share Your Brief",
-      description: "Tell us about the occasion, palette, and any inspiration so we can prepare a tailored quote.",
+      title: "1. Choose Your Session",
+      description: "Pick a date and time that suits you, then reserve your farm visit.",
     },
     {
-      title: "2. Approve the Proposal",
-      description: "We’ll confirm mechanics, mood boards, and logistics for delivery or on-site styling.",
+      title: "2. Arrive At The Farm",
+      description: "We'll welcome you, share the picking guidelines, and help you get started.",
     },
     {
-      title: "3. Bloom Day",
-      description: "Our team handles sourcing, arranging, and setup so you can enjoy the flowers stress-free.",
+      title: "3. Cut & Take Home",
+      description: "Cut your own stems from the flower bushes and head home with your handpicked blooms.",
     },
   ];
 
@@ -344,20 +347,20 @@ function CutFlowersPage() {
           <Hero
             variant="cut"
             background={heroBackground}
-            media={<img src={cutFlowersTable} alt="Bethany Blooms cut flower styling" />}
+            media={<img src={cutFlowersTable} alt="Visitors cutting flowers at the Bethany Blooms farm" loading="lazy" decoding="async"/>}
           >
             <span className="badge">Cut Flowers</span>
-            <h1>Seasonal Florals, Styled For You</h1>
+            <h1>Visit The Farm & Cut Your Own Flowers</h1>
             <p>
-              From elevated dinner tables and pop-up installs to thoughtful weekly deliveries, Bethany Blooms curates
-              cut flowers that feel personal, textural, and artfully wild.
+              Bethany Blooms cut flowers are a flower-farm experience: come to the farm, walk the rows, cut from the
+              bushes yourself, and take home a bunch you chose by hand.
             </p>
             <div className="cta-group">
               <button className="btn btn--primary" type="button" onClick={handleStartBookingClick}>
-                Start a Booking
+                Book A Farm Session
               </button>
-              <Link className="btn btn--secondary" to="/events">
-                See Upcoming Events
+              <Link className="btn btn--secondary" to="/contact">
+                Ask About Farm Visits
               </Link>
             </div>
           </Hero>
@@ -368,10 +371,10 @@ function CutFlowersPage() {
         <div className="section__inner">
           <Reveal as="div">
             <span className="badge">Offerings</span>
-            <h2>How We Bloom</h2>
+            <h2>What To Expect At The Farm</h2>
             <p>
-              Whether you’re planning a gallery table, cafe takeover, or heartfelt gifting moment, we build florals that
-              travel beautifully and feel intentional.
+              This is a hands-on flower farm experience where you do the cutting yourself. We do not provide off-site
+              event styling from this page.
             </p>
           </Reveal>
           <div className="cards-grid">
@@ -389,8 +392,8 @@ function CutFlowersPage() {
         <div className="section__inner">
           <Reveal as="div">
             <span className="badge">Upcoming Sessions</span>
-            <h2>Book a Cut Flower Class</h2>
-            <p>Reserve a spot at one of our small group floral builds, bouquet bars, or styling masterclasses.</p>
+            <h2>Book A Cut Flower Farm Session</h2>
+            <p>Reserve your spot, visit the farm, and enjoy cutting your own fresh flowers.</p>
           </Reveal>
           {upcomingClasses.length > 0 ? (
             <div className="cards-grid">
@@ -399,8 +402,7 @@ function CutFlowersPage() {
                   <div className="cut-flower-card__media">
                     <img
                       src={classItem.image || cutFlowersTable}
-                      alt={`${classItem.title} class`}
-                    />
+                      alt={`${classItem.title} class`} loading="lazy" decoding="async"/>
                     <span className="cut-flower-card__badge">{classItem.displayDate}</span>
                     {classItem.priceLabel && (
                       <span className="cut-flower-card__price-tag">{classItem.priceLabel}</span>
@@ -416,7 +418,7 @@ function CutFlowersPage() {
                     <p className="cut-flower-card__summary">{classItem.description}</p>
                     <div className="cut-flower-card__details">
                       <div className="cut-flower-card__detail">
-                        <span className="cut-flower-card__detail-label">Booking</span>
+                        <span className="cut-flower-card__detail-label">Spots</span>
                         <span className="cut-flower-card__detail-value">
                           {classItem.capacity
                             ? `${classItem.capacity} seats per time slot`
@@ -433,14 +435,14 @@ function CutFlowersPage() {
                         <div className="cut-flower-card__detail">
                           <span className="cut-flower-card__detail-label">Options</span>
                           <span className="cut-flower-card__detail-value">
-                            {classItem.options.length} bouquet option{classItem.options.length === 1 ? "" : "s"}
+                            {classItem.options.length} bucket option{classItem.options.length === 1 ? "" : "s"}
                           </span>
                         </div>
                       )}
                     </div>
                     <div className="card__actions">
                       <button className="btn btn--primary" type="button" onClick={() => handleBookClass(classItem)}>
-                        Book This Session
+                        Book Farm Session
                       </button>
                     </div>
                   </div>
@@ -449,7 +451,7 @@ function CutFlowersPage() {
             </div>
           ) : (
             <p className="empty-state">
-              {classesStatus === "loading" ? "Loading sessions…" : "No cut flower classes are open right now."}
+              {classesStatus === "loading" ? "Loading sessions…" : "No farm sessions are open right now."}
             </p>
           )}
         </div>
@@ -458,12 +460,12 @@ function CutFlowersPage() {
       <section className="section section--tight">
         <div className="section__inner cut-flowers-process">
           <div className="cut-flowers-process__media">
-            <img src={cutFlowersDetails} alt="Cut flowers styled on a Bethany Blooms table" />
+            <img src={cutFlowersDetails} alt="Cut flowers styled on a Bethany Blooms table" loading="lazy" decoding="async"/>
           </div>
           <div className="cut-flowers-process__steps">
             <Reveal as="div">
               <span className="badge">The Process</span>
-              <h2>Bookings, Simplified</h2>
+              <h2>Your Farm Visit, Simplified</h2>
             </Reveal>
             <ol>
               {processSteps.map((step) => (
@@ -474,7 +476,7 @@ function CutFlowersPage() {
               ))}
             </ol>
             <Link className="btn btn--primary" to="/contact">
-              Request Availability
+              Request Farm Availability
             </Link>
           </div>
         </div>

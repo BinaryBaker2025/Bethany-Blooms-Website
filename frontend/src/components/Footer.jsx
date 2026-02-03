@@ -22,8 +22,7 @@ function Footer() {
               className="brand__logo"
               loading="lazy"
               width="120"
-              height="60"
-            />
+              height="60" decoding="async"/>
           </NavLink>
           <p className="footer__scripture">
             “You will be like a well-watered garden…” – Isaiah 58:11

@@ -459,7 +459,7 @@ function WorkshopDetailPage() {
           <Hero
             variant="workshops"
             background={workshop.image || heroBackground}
-            media={workshop.image ? <img src={workshop.image} alt={`${workshop.title} workshop`} /> : null}
+            media={workshop.image ? <img src={workshop.image} alt={`${workshop.title} workshop`} loading="lazy" decoding="async"/> : null}
           >
             <h1>{workshop.title}</h1>
             <p>{workshop.description}</p>

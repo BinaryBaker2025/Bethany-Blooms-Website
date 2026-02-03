@@ -5,6 +5,7 @@ import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
+import { formatPreorderSendMonth, getProductPreorderSendMonth } from "../lib/preorder.js";
 import { getStockBadgeLabel, getStockStatus } from "../lib/stockStatus.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 
@@ -166,6 +167,8 @@ function ProductDetailPage() {
       status: productRecord.stock_status,
     });
     const stockBadgeLabel = getStockBadgeLabel(stockStatus);
+    const preorderSendMonth = getProductPreorderSendMonth(productRecord);
+    const preorderSendMonthLabel = formatPreorderSendMonth(preorderSendMonth);
 
     const imageCandidates = [
       productRecord.main_image,
@@ -249,6 +252,8 @@ function ProductDetailPage() {
       image: primaryImage,
       stockStatus,
       stockBadgeLabel,
+      preorderSendMonth,
+      preorderSendMonthLabel,
       categoryLabels,
       tagLabels,
       videoEmbed: productRecord.video_embed || productRecord.videoEmbed || "",
@@ -326,7 +331,9 @@ function ProductDetailPage() {
     if (!product?.stockStatus) return "";
     const { state, quantity } = product.stockStatus;
     if (state === "preorder") {
-      return "Preorder now to reserve this item.";
+      return product.preorderSendMonthLabel
+        ? `Preorder now. Shipping starts ${product.preorderSendMonthLabel}.`
+        : "Preorder now to reserve this item.";
     }
     if (state === "low" && Number.isFinite(quantity)) {
       return `Only ${quantity} left in stock.`;
@@ -443,6 +450,9 @@ function ProductDetailPage() {
         variantId: selectedVariant?.id ?? null,
         variantLabel: selectedVariant?.label ?? null,
         variantPrice,
+        preorderSendMonth: product.stockStatus?.state === "preorder" ? product.preorderSendMonth || null : null,
+        preorderSendMonthLabel:
+          product.stockStatus?.state === "preorder" ? product.preorderSendMonthLabel || null : null,
       },
     });
     notifyCart("Item added to cart");
@@ -493,7 +503,7 @@ function ProductDetailPage() {
             <div className="product-detail__grid">
               <Reveal as="div" className="product-gallery">
                 <div className="product-gallery__main">
-                  <img src={product.images[activeImageIndex] || product.image} alt={product.title} />
+                  <img src={product.images[activeImageIndex] || product.image} alt={product.title} loading="lazy" decoding="async"/>
                 </div>
                 {product.images.length > 1 && (
                   <div className="product-gallery__thumbs">
@@ -505,7 +515,7 @@ function ProductDetailPage() {
                         onClick={() => setActiveImageIndex(index)}
                         aria-label={`View image ${index + 1}`}
                       >
-                        <img src={image} alt={`${product.title} preview ${index + 1}`} />
+                        <img src={image} alt={`${product.title} preview ${index + 1}`} loading="lazy" decoding="async"/>
                       </button>
                     ))}
                   </div>
@@ -678,8 +688,7 @@ function ProductDetailPage() {
                               className="product-card__image"
                               src={item.image}
                               alt=""
-                              loading="lazy"
-                            />
+                              loading="lazy" decoding="async"/>
                             {item.stockBadgeLabel && (
                               <span
                                 className={`badge badge--stock-${item.stockStatus?.state || "in"} product-card__badge`}

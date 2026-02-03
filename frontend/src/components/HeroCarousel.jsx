@@ -30,7 +30,7 @@ function HeroCarousel({ slides = [], autoAdvanceMs = AUTO_ADVANCE_INTERVAL }) {
         const mediaNode =
           slide.media ??
           (slide.mediaImage ? (
-            <img src={slide.mediaImage} alt={slide.mediaAlt ?? fallbackTitle} loading="lazy" />
+            <img src={slide.mediaImage} alt={slide.mediaAlt ?? fallbackTitle} loading="lazy" decoding="async"/>
           ) : null);
 
         return {
@@ -128,7 +128,9 @@ function HeroCarousel({ slides = [], autoAdvanceMs = AUTO_ADVANCE_INTERVAL }) {
             aria-controls={slide.id}
             onClick={() => setActiveIndex(index)}
           >
-            <span className="sr-only">{slide.title ?? `Slide ${index + 1}`}</span>
+            <span className="hero-carousel__control-label">
+              {slide.badge || slide.title || `Slide ${index + 1}`}
+            </span>
           </button>
         ))}
       </div>

@@ -5,6 +5,7 @@ import Reveal from "../components/Reveal.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
+import { formatPreorderSendMonth, getProductPreorderSendMonth } from "../lib/preorder.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 import { getStockBadgeLabel, getStockStatus } from "../lib/stockStatus.js";
 
@@ -39,7 +40,26 @@ function ProductsPage() {
           const description = (category.description || category.short_description || category.shortDescription || "")
             .toString()
             .trim();
-          return { id: category.id || slug, name, slug, coverImage, description };
+          const subHeading = (
+            category.subHeading ||
+            category.subheading ||
+            category.collectionHeading ||
+            category.collection_heading ||
+            category.collectionTitle ||
+            category.collection_title ||
+            ""
+          )
+            .toString()
+            .trim();
+          const productDescription = (
+            category.productDescription ||
+            category.collectionDescription ||
+            category.collection_description ||
+            ""
+          )
+            .toString()
+            .trim();
+          return { id: category.id || slug, name, slug, coverImage, description, subHeading, productDescription };
         })
         .filter(Boolean),
     [categoryItems],
@@ -81,6 +101,8 @@ function ProductsPage() {
       status: product.stock_status,
     });
     const stockBadgeLabel = getStockBadgeLabel(stockStatus);
+    const preorderSendMonth = getProductPreorderSendMonth(product);
+    const preorderSendMonthLabel = formatPreorderSendMonth(preorderSendMonth);
     const variants = Array.isArray(product.variants)
       ? product.variants
           .map((variant) => {
@@ -169,6 +191,8 @@ function ProductsPage() {
       isPurchasable,
       stockStatus,
       stockBadgeLabel,
+      preorderSendMonth,
+      preorderSendMonthLabel,
       variants,
     };
   });
@@ -227,6 +251,11 @@ function ProductsPage() {
   const heroDescription =
     activeCategory?.description ||
     "Bring the studio experience home. Explore framed pressed art, gifting collections, ready-to-style blooms, and premium DIY options handcrafted by Bethany Blooms.";
+  const collectionHeading = activeCategory?.subHeading || "The Studio Collection";
+  const collectionDescription =
+    activeCategory?.productDescription ||
+    activeCategory?.description ||
+    "Discover limited releases, seasonal blooms, and bespoke keepsakes designed to celebrate meaningful moments.";
 
   return (
     <>
@@ -235,7 +264,7 @@ function ProductsPage() {
           <Hero
             variant="kits"
             background={heroImage || heroBackground}
-            media={<img src={heroImage} alt={heroTitle} />}
+            media={<img src={heroImage} alt={heroTitle} loading="lazy" decoding="async"/>}
           >
             <h1>{heroTitle}</h1>
             <p>{heroDescription}</p>
@@ -255,8 +284,8 @@ function ProductsPage() {
         <div className="section__inner">
           <Reveal as="div">
             <span className="badge">Curated by Bethany Blooms</span>
-            <h2>The Studio Collection</h2>
-            <p>Discover limited releases, seasonal blooms, and bespoke keepsakes designed to celebrate meaningful moments.</p>
+            <h2>{collectionHeading}</h2>
+            <p>{collectionDescription}</p>
           </Reveal>
           {hasCategoryFilter && (
             <p className="modal__meta">
@@ -282,7 +311,7 @@ function ProductsPage() {
                 >
                   <span className="product-card__category">{categoryLabel}</span>
                   <div className="product-card__media" aria-hidden="true">
-                    <img className="product-card__image" src={product.image} alt="" />
+                    <img className="product-card__image" src={product.image} alt="" loading="lazy" decoding="async"/>
                     {product.stockBadgeLabel && (
                       <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
                         {product.stockBadgeLabel}
@@ -291,6 +320,9 @@ function ProductsPage() {
                   </div>
                   <h3 className="card__title">{product.title}</h3>
                   <p className="product-card__description">{product.description}</p>
+                  {product.stockStatus?.state === "preorder" && product.preorderSendMonthLabel && (
+                    <p className="modal__meta">Ships from {product.preorderSendMonthLabel}</p>
+                  )}
                   <p className="card__price">
                     <span className="price-stack">
                       <span className="price-stack__current">{displayPrice}</span>
