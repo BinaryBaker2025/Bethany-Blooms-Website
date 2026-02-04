@@ -43,6 +43,7 @@ const NAV_LINKS = [
   { to: "/admin/cut-flowers/classes", label: "Cut Flower Classes" },
   { to: "/admin/cut-flowers/bookings", label: "Cut Flower Bookings" },
   { to: "/admin/events", label: "Events" },
+  { to: "/admin/emails", label: "Email Preview" },
   { to: "/admin/pos", label: "POS", end: true },
   { to: "/admin/pos/cash-up", label: "POS Cash Up" },
   { to: "/admin/reports", label: "Reports" },

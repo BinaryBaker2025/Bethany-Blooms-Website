@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
-import heroBackground from "../assets/photos/workshop-flowers-trays.jpg";
+import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
 import { galleryItems } from "../data/gallery.js";
 
 function GalleryPage() {
   usePageMetadata({
-    title: "Bethany Blooms Gallery | Pressed Flower Art Showcase",
-    description: "Browse the Bethany Blooms gallery for pressed flower art created by workshop guests and clients.",
+    title: "Bethany Blooms Gallery | Cut & Pressed Flower Showcase",
+    description:
+      "Browse the Bethany Blooms gallery for cut flower moments and pressed flower art created in-studio and on the farm.",
   });
 
   const [selected, setSelected] = useState(null);
@@ -28,11 +29,11 @@ function GalleryPage() {
     <>
       <section className="section section--tight">
         <div className="section__inner">
-          <Hero variant="gallery" background={heroBackground}>
+          <Hero variant="gallery" background={CUT_FLOWER_PAGE_IMAGES.galleryHero}>
             <h1>Gallery of Blooming Stories</h1>
             <p>
-              Discover frames crafted by our workshop guests and custom commission clients. From weddings and birthdays
-              to everyday gratitude, each piece carries a story.
+              Explore both pressed flower keepsakes and cut flower moments from the farm. From workshops and custom
+              commissions to fresh seasonal blooms, each image carries a story.
             </p>
           </Hero>
         </div>
@@ -42,8 +43,8 @@ function GalleryPage() {
         <div className="section__inner">
           <Reveal as="div">
             <span className="badge">Community Creations</span>
-            <h2>Pressed Florals by You</h2>
-            <p>Select an artwork to view larger in the lightbox.</p>
+            <h2>Cut Flowers & Pressed Florals</h2>
+            <p>Select an image to view it larger in the lightbox.</p>
           </Reveal>
           <div className="gallery">
             {galleryItems.map((item, index) => (

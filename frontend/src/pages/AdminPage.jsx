@@ -27,6 +27,12 @@ import {
   getProductPreorderSendMonth,
   normalizePreorderSendMonth,
 } from "../lib/preorder.js";
+import {
+  PAYMENT_APPROVAL_STATUSES,
+  PAYMENT_METHODS,
+  normalizePaymentApprovalStatus as normalizeOrderPaymentApprovalStatus,
+  normalizePaymentMethod as normalizeOrderPaymentMethod,
+} from "../lib/paymentMethods.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
 import { getStockStatus, STOCK_LOW_THRESHOLD } from "../lib/stockStatus.js";
 import {
@@ -217,6 +223,8 @@ const INITIAL_CUT_FLOWER_CLASS_FORM = {
   repeatDays: [],
 };
 const ORDER_STATUSES = [
+  "pending-payment-approval",
+  "payment-rejected",
   "order-placed",
   "packing-order",
   "order-ready-for-shipping",
@@ -224,15 +232,35 @@ const ORDER_STATUSES = [
   "completed",
   "cancelled",
 ];
+const CREATE_ORDER_FILTER_DEFAULTS = Object.freeze({
+  categoryId: "all",
+  stock: "all",
+  minPrice: "",
+  maxPrice: "",
+  sort: "name-asc",
+});
+
+const parseNumber = (value, fallback = null) => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const buildAdminOrderCartKey = ({ sourceId, variantId }) =>
+  ["admin-order", sourceId, variantId || "base"].join(":");
 
 const normalizeOrderStatus = (status) => {
-  const normalized = (status || "").toString().trim().toLowerCase();
+  const normalized = (status || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
   if (!normalized) return "order-placed";
   const legacyMap = {
     pending: "order-placed",
     processing: "packing-order",
     ready: "order-ready-for-shipping",
     fulfilled: "completed",
+    "pending-payment": "pending-payment-approval",
   };
   return legacyMap[normalized] || normalized;
 };
@@ -242,7 +270,7 @@ const formatOrderStatusLabel = (status) =>
     .toString()
     .trim()
     .replace(/-/g, " ")
-    .replace(/\w/g, (char) => char.toUpperCase());
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const DELIVERY_METHODS = ["company", "courier"];
 const COURIER_OPTIONS = [
@@ -561,6 +589,16 @@ const slugifyId = (value = "") =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+
+const normalizeCreateOrderCategoryToken = (value = "") =>
+  value.toString().trim().toLowerCase();
+
+const buildCreateOrderCategoryTokens = (value = "") => {
+  const normalized = normalizeCreateOrderCategoryToken(value);
+  if (!normalized) return [];
+  const slug = slugifyId(normalized);
+  return Array.from(new Set([normalized, slug].filter(Boolean)));
+};
 
 const generateSku = (title = "", slug = "") => {
   const base = slugifyId(title || slug);
@@ -6035,7 +6073,7 @@ export function AdminEventsView() {
         }))
         .filter((slot) => slot.time);
       sanitizedSlots.sort((a, b) => a.time.localeCompare(b.time));
-      const primaryTime = sanitizedSlots[0].time ?? "";
+      const primaryTime = sanitizedSlots[0]?.time ?? "";
       const combinedDate = combineDateAndTime(eventForm.date, primaryTime);
       const linkedWorkshop = workshops.find(
         (workshop) => workshop.id === eventForm.workshopId
@@ -6429,10 +6467,9 @@ export function AdminEventsView() {
 
 export function AdminEmailTestView() {
   usePageMetadata({
-    title: "Admin ? Email tests",
-    description: "Send a Resend test email and confirm the content sent to customers.",
+    title: "Admin · Email preview",
+    description: "Preview email HTML with dummy data without sending any emails.",
   });
-  const { user, refreshRole } = useAuth();
   const { inventoryEnabled } = useAdminData();
   const functionsInstance = useMemo(() => {
     try {
@@ -6441,169 +6478,216 @@ export function AdminEmailTestView() {
       return null;
     }
   }, []);
+
   const [formState, setFormState] = useState({
-    email: "",
-    templateType: "custom",
+    templateType: "eft-pending-customer",
     subject: "Bethany Blooms test email",
-    html: "<p>Hello from Bethany Blooms. This is a test email delivered via Resend.</p>",
+    html: "<p>Hello from Bethany Blooms. This is a test email preview.</p>",
+  });
+  const [previewData, setPreviewData] = useState({
+    subject: "",
+    html: "",
+    generatedAt: "",
   });
   const [statusMessage, setStatusMessage] = useState(null);
   const [error, setError] = useState(null);
-  const [sending, setSending] = useState(false);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [showRawHtml, setShowRawHtml] = useState(false);
 
   const isCustomTemplate = formState.templateType === "custom";
 
   useEffect(() => {
     if (!statusMessage) return undefined;
-    const timeout = setTimeout(() => setStatusMessage(null), 5000);
+    const timeout = setTimeout(() => setStatusMessage(null), 4000);
     return () => clearTimeout(timeout);
   }, [statusMessage]);
 
-  const handleSendTestEmail = async (event) => {
-    event.preventDefault();
+  const requestPreview = async (payloadOverride = null) => {
     if (!functionsInstance) {
       setError("Email functions are not available.");
       return;
     }
     if (!inventoryEnabled) {
-      setError("Admin access is required to send emails.");
+      setError("Admin access is required to preview emails.");
       return;
     }
-    const recipient = (formState.email || "").toString().trim();
-    if (!recipient) {
-      setError("Recipient email is required.");
-      return;
-    }
-    setSending(true);
+
+    const payload = payloadOverride || {
+      templateType: formState.templateType || "custom",
+      subject: formState.subject,
+      html: formState.html,
+    };
+
+    setLoadingPreview(true);
     setError(null);
     try {
-      const syncCallable = httpsCallable(functionsInstance, "syncUserClaims");
-      const syncResponse = await syncCallable({});
-      if (user.getIdToken) {
-        await user.getIdToken(true);
-      }
-      if (refreshRole) {
-        await refreshRole();
-      }
-      const syncedRole = syncResponse.data.role;
-      if (syncedRole && syncedRole !== "admin") {
-        throw new Error("Admin role required.");
-      }
-
-      const callable = httpsCallable(functionsInstance, "sendTestEmail");
-      const payload = {
-        email: recipient,
-        templateType: formState.templateType || "custom",
+      const callable = httpsCallable(functionsInstance, "previewTestEmailTemplate");
+      const response = await callable({
+        templateType: payload.templateType || "custom",
+        subject: (payload.subject || "").toString(),
+        html: (payload.html || "").toString(),
+      });
+      const nextPreview = {
+        subject: (response?.data?.subject || "").toString(),
+        html: (response?.data?.html || "").toString(),
+        generatedAt: (response?.data?.generatedAt || "").toString(),
       };
-      if (payload.templateType === "custom") {
-        payload.subject = (formState.subject || "").trim();
-        payload.html = formState.html;
-      }
-      const response = await callable(payload);
-      const preview = response.data.preview;
-      setStatusMessage(
-        `Test email sent.${preview ? ` Preview copy is also delivered to ${preview}.` : ""}`
-      );
-    } catch (sendError) {
-      setError(sendError.message || "Unable to send the test email.");
+      setPreviewData(nextPreview);
+      const generatedLabel = nextPreview.generatedAt ?
+        new Date(nextPreview.generatedAt).toLocaleString("en-ZA") :
+        "";
+      setStatusMessage(generatedLabel ? `Preview refreshed at ${generatedLabel}.` : "Preview refreshed.");
+    } catch (previewError) {
+      setError(previewError.message || "Unable to load email preview.");
     } finally {
-      setSending(false);
+      setLoadingPreview(false);
     }
   };
 
+  useEffect(() => {
+    if (!functionsInstance || !inventoryEnabled) return;
+    requestPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [functionsInstance, inventoryEnabled]);
+
+  const handleRefreshPreview = async (event) => {
+    if (event) event.preventDefault();
+    await requestPreview();
+  };
+
   return (
-    <div className="admin-panel admin-panel--narrow">
+    <div className="admin-panel admin-panel--full admin-email-preview">
       <Reveal as="div" className="admin-panel__header">
         <div>
-          <h2>Email tests</h2>
+          <h2>Email Preview</h2>
           <p className="admin-panel__note">
-            Trigger a test email via Resend and verify the preview copy stored in the configured preview inbox.
+            Preview real email templates with dummy data. No emails are sent from this page.
           </p>
         </div>
       </Reveal>
-      <form className="admin-form" onSubmit={handleSendTestEmail}>
-        <div className="admin-form__field">
-          <label htmlFor="test-email-recipient">Recipient email</label>
-          <input
-            className="input"
-            id="test-email-recipient"
-            type="email"
-            placeholder="name@example.com"
-            value={formState.email}
-            onChange={(event) =>
-              setFormState((prev) => ({ ...prev, email: event.target.value }))
-            }
-            required
-          />
-        </div>
-        <div className="admin-form__field">
-          <label htmlFor="test-email-template">Template</label>
-          <select
-            className="input"
-            id="test-email-template"
-            value={formState.templateType}
-            onChange={(event) =>
-              setFormState((prev) => ({ ...prev, templateType: event.target.value }))
-            }
-          >
-            <option value="custom">Custom HTML</option>
-            <option value="order-confirmation">Order confirmation (customer)</option>
-            <option value="order-admin">Order notification (admin)</option>
-            <option value="order-status">Order status update (customer)</option>
-            <option value="pos-receipt">POS receipt (customer)</option>
-            <option value="pos-admin">POS receipt (admin copy)</option>
-            <option value="contact-admin">Contact enquiry (admin)</option>
-            <option value="contact-confirm">Contact confirmation (customer)</option>
-            <option value="cut-flower-admin">Cut flower booking (admin)</option>
-            <option value="cut-flower-customer">Cut flower booking (customer)</option>
-            <option value="workshop-admin">Workshop booking (admin)</option>
-            <option value="workshop-customer">Workshop booking (customer)</option>
-          </select>
-        </div>
-        <div className="admin-form__field">
-          <label htmlFor="test-email-subject">Subject</label>
-          <input
-            className="input"
-            id="test-email-subject"
-            value={formState.subject}
-            onChange={(event) =>
-              setFormState((prev) => ({ ...prev, subject: event.target.value }))
-            }
-            disabled={!isCustomTemplate}
-          />
-        </div>
-        <div className="admin-form__field admin-form__field--description">
-          <label htmlFor="test-email-html">HTML content</label>
-          <textarea
-            className="input textarea admin-form__full"
-            id="test-email-html"
-            rows="5"
-            placeholder="HTML body"
-            value={formState.html}
-            onChange={(event) =>
-              setFormState((prev) => ({ ...prev, html: event.target.value }))
-            }
-            disabled={!isCustomTemplate}
-          />
+
+      <div className="admin-email-preview__layout">
+        <form className="admin-email-preview__controls" onSubmit={handleRefreshPreview}>
+          <label className="admin-form__field" htmlFor="email-preview-template">
+            <span>Template</span>
+            <select
+              className="input"
+              id="email-preview-template"
+              value={formState.templateType}
+              onChange={(event) => {
+                const nextTemplateType = event.target.value;
+                setFormState((prev) => ({ ...prev, templateType: nextTemplateType }));
+                if (nextTemplateType !== "custom") {
+                  requestPreview({
+                    templateType: nextTemplateType,
+                    subject: formState.subject,
+                    html: formState.html,
+                  });
+                }
+              }}
+            >
+              <option value="eft-pending-customer">EFT pending (customer)</option>
+              <option value="eft-pending-admin">EFT pending (admin)</option>
+              <option value="eft-approved-customer">EFT approved (customer)</option>
+              <option value="eft-approved-admin">EFT approved (admin)</option>
+              <option value="eft-rejected-customer">EFT rejected (customer)</option>
+              <option value="eft-rejected-admin">EFT rejected (admin)</option>
+              <option value="order-confirmation">Order confirmation (customer)</option>
+              <option value="order-admin">Order notification (admin)</option>
+              <option value="order-status">Order status update (customer)</option>
+              <option value="pos-receipt">POS receipt (customer)</option>
+              <option value="pos-admin">POS receipt (admin copy)</option>
+              <option value="contact-admin">Contact enquiry (admin)</option>
+              <option value="contact-confirm">Contact confirmation (customer)</option>
+              <option value="cut-flower-admin">Cut flower booking (admin)</option>
+              <option value="cut-flower-customer">Cut flower booking (customer)</option>
+              <option value="workshop-admin">Workshop booking (admin)</option>
+              <option value="workshop-customer">Workshop booking (customer)</option>
+              <option value="custom">Custom HTML</option>
+            </select>
+          </label>
+
+          {isCustomTemplate && (
+            <>
+              <label className="admin-form__field" htmlFor="email-preview-subject">
+                <span>Custom subject</span>
+                <input
+                  className="input"
+                  id="email-preview-subject"
+                  value={formState.subject}
+                  onChange={(event) =>
+                    setFormState((prev) => ({ ...prev, subject: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="admin-form__field" htmlFor="email-preview-html">
+                <span>Custom HTML body</span>
+                <textarea
+                  className="input textarea"
+                  id="email-preview-html"
+                  rows="9"
+                  value={formState.html}
+                  onChange={(event) =>
+                    setFormState((prev) => ({ ...prev, html: event.target.value }))
+                  }
+                />
+              </label>
+            </>
+          )}
+
           {!isCustomTemplate && (
-            <p className="admin-panel__note">This template uses the live email layout and sample data.</p>
+            <p className="admin-panel__note">
+              This template uses backend-rendered email HTML and dummy data from Cloud Functions.
+            </p>
+          )}
+
+          <div className="admin-form__actions">
+            <button
+              className="btn btn--primary"
+              type="submit"
+              disabled={loadingPreview || !inventoryEnabled || !functionsInstance}
+            >
+              {loadingPreview ? "Refreshing..." : "Refresh Preview"}
+            </button>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={() => setShowRawHtml((prev) => !prev)}
+              disabled={!previewData.html}
+            >
+              {showRawHtml ? "Hide Raw HTML" : "Show Raw HTML"}
+            </button>
+          </div>
+          {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+          {error && <p className="admin-panel__error">{error}</p>}
+        </form>
+
+        <div className="admin-email-preview__panel">
+          <div className="admin-email-preview__meta">
+            <p className="modal__meta">
+              <strong>Subject:</strong> {previewData.subject || "—"}
+            </p>
+            {previewData.generatedAt && (
+              <p className="modal__meta">
+                Generated: {new Date(previewData.generatedAt).toLocaleString("en-ZA")}
+              </p>
+            )}
+          </div>
+          <div className="admin-email-preview__frame-wrap">
+            <iframe
+              className="admin-email-preview__frame"
+              title="Email HTML preview"
+              srcDoc={previewData.html || "<p style='padding:1rem;'>No preview available yet.</p>"}
+            />
+          </div>
+          {showRawHtml && (
+            <div className="admin-email-preview__raw">
+              <p className="modal__meta"><strong>Raw HTML</strong></p>
+              <pre>{previewData.html || "No HTML available."}</pre>
+            </div>
           )}
         </div>
-        <div className="admin-form__actions">
-          <button
-            className="btn btn--primary"
-            type="submit"
-            disabled={sending || !inventoryEnabled || !functionsInstance}
-          >
-            {sending ? "Sending" : "Send test email"}
-          </button>
-        </div>
-        <p className="admin-panel__note">
-          Preview copies are delivered automatically to the preview inbox configured via <code>RESEND_PREVIEW_TO</code>.
-        </p>
-        {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
-        {error && <p className="admin-panel__error">{error}</p>}
-      </form>
+      </div>
     </div>
   );
 }
@@ -6956,7 +7040,7 @@ export function AdminCutFlowerClassesView() {
         }))
         .filter((slot) => slot.time);
       sanitizedSlots.sort((a, b) => a.time.localeCompare(b.time));
-      const primaryTime = sanitizedSlots[0].time ?? "";
+      const primaryTime = sanitizedSlots[0]?.time ?? "";
       const eventDate = combineDateAndTime(classForm.date, primaryTime);
       const repeatDays = classForm.repeatWeekly
         ? Array.isArray(classForm.repeatDays)
@@ -7025,7 +7109,15 @@ export function AdminCutFlowerClassesView() {
       closeClassModal();
     } catch (saveError) {
       console.error(saveError);
-      setClassError("We couldn't save the class. Please try again.");
+      const detail =
+        typeof saveError?.message === "string" && saveError.message.trim()
+          ? saveError.message.trim()
+          : "";
+      setClassError(
+        detail
+          ? `We couldn't save the class. ${detail}`
+          : "We couldn't save the class. Please try again.",
+      );
     } finally {
       setClassSaving(false);
     }
@@ -8481,7 +8573,7 @@ export function AdminOrdersView() {
     title: "Admin · Orders",
     description: "Review cart checkouts and fulfilment status.",
   });
-  const { db, orders, products, inventoryLoading, inventoryError } = useAdminData();
+  const { db, storage, orders, products, productCategories, inventoryLoading, inventoryError } = useAdminData();
   const [statusMessage, setStatusMessage] = useState(null);
   const functionsInstance = useMemo(() => {
     try {
@@ -8503,6 +8595,39 @@ export function AdminOrdersView() {
   const [resendOrderEmailSending, setResendOrderEmailSending] = useState(false);
   const [preorderNoticeMonth, setPreorderNoticeMonth] = useState("");
   const [preorderNoticeSending, setPreorderNoticeSending] = useState(false);
+  const [eftReviewLoading, setEftReviewLoading] = useState(false);
+  const [paymentProofUrl, setPaymentProofUrl] = useState("");
+  const [paymentProofUrlLoading, setPaymentProofUrlLoading] = useState(false);
+  const [createOrderOpen, setCreateOrderOpen] = useState(false);
+  const [createOrderSaving, setCreateOrderSaving] = useState(false);
+  const [createOrderError, setCreateOrderError] = useState(null);
+  const [createOrderProductSearch, setCreateOrderProductSearch] = useState("");
+  const [createOrderFilters, setCreateOrderFilters] = useState(() => ({
+    ...CREATE_ORDER_FILTER_DEFAULTS,
+  }));
+  const [createOrderVariantSelections, setCreateOrderVariantSelections] = useState({});
+  const [createOrderSelectedCourierId, setCreateOrderSelectedCourierId] = useState("");
+  const [createOrderForm, setCreateOrderForm] = useState({
+    customer: {
+      fullName: "",
+      email: "",
+      phone: "",
+    },
+    shippingAddress: {
+      street: "",
+      suburb: "",
+      city: "",
+      province: "",
+      postalCode: "",
+    },
+    items: [],
+  });
+  const { items: createOrderCourierOptions = [], status: createOrderCourierStatus } =
+    useFirestoreCollection("courierOptions", {
+      orderByField: "createdAt",
+      orderDirection: "desc",
+      fallback: [],
+    });
   const [ordersPage, setOrdersPage] = useState(0);
 
   useEffect(() => {
@@ -8519,8 +8644,40 @@ export function AdminOrdersView() {
 
   const needsTrackingLink = (status) => ["shipped"].includes(status);
 
-  const normalizePaymentStatus = (order) =>
-    (order.payfast.paymentStatus || order.paymentStatus || "").toLowerCase() || "unknown";
+  const normalizePaymentMethod = (order) =>
+    normalizeOrderPaymentMethod(order?.paymentMethod || (order?.payfast ? PAYMENT_METHODS.PAYFAST : ""));
+
+  const normalizePaymentApprovalStatus = (order) =>
+    normalizeOrderPaymentApprovalStatus(order || {});
+
+  const isEftOrder = (order) => normalizePaymentMethod(order) === PAYMENT_METHODS.EFT;
+  const isEftApproved = (order) =>
+    isEftOrder(order) &&
+    normalizePaymentApprovalStatus(order) === PAYMENT_APPROVAL_STATUSES.APPROVED;
+  const isEftRejected = (order) =>
+    isEftOrder(order) &&
+    normalizePaymentApprovalStatus(order) === PAYMENT_APPROVAL_STATUSES.REJECTED;
+  const isEftBlocked = (order) => isEftOrder(order) && !isEftApproved(order);
+
+  const normalizePaymentStatus = (order) => {
+    const method = normalizePaymentMethod(order);
+    if (method === PAYMENT_METHODS.EFT) {
+      const approvalStatus = normalizePaymentApprovalStatus(order);
+      if (approvalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED) return "approved";
+      if (approvalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED) return "rejected";
+      return (order?.paymentStatus || "awaiting-approval").toString().toLowerCase() || "awaiting-approval";
+    }
+    return (
+      (order?.payfast?.paymentStatus || order?.paymentStatus || "").toString().toLowerCase() || "unknown"
+    );
+  };
+
+  const getAllowedOrderStatuses = (order) => {
+    if (!isEftOrder(order)) return ORDER_STATUSES.filter((status) => !["pending-payment-approval", "payment-rejected"].includes(status));
+    if (isEftApproved(order)) return ORDER_STATUSES.filter((status) => !["pending-payment-approval", "payment-rejected"].includes(status));
+    if (isEftRejected(order)) return ["payment-rejected", "cancelled"];
+    return ["pending-payment-approval", "cancelled"];
+  };
 
   const normalizeDeliveryStatus = (order) => {
     if (order.trackingLink) return "assigned";
@@ -8642,12 +8799,17 @@ export function AdminOrdersView() {
     setResendOrderEmailSending(true);
     try {
       const resendOrderConfirmationEmail = httpsCallable(functionsInstance, "resendOrderConfirmationEmail");
-      await resendOrderConfirmationEmail({
+      const result = await resendOrderConfirmationEmail({
         orderId: selectedOrder.id,
         orderNumber: selectedOrder.orderNumber ?? null,
         customerEmail,
       });
-      setStatusMessage("Order confirmation resent to customer.");
+      const templateUsed = (result?.data?.templateUsed || "").toString().trim().toLowerCase();
+      if (templateUsed === "eft-pending") {
+        setStatusMessage("EFT pending payment email resent to customer.");
+      } else {
+        setStatusMessage("Order confirmation resent to customer.");
+      }
     } catch (error) {
       setStatusMessage(error.message || "Unable to resend order confirmation.");
     } finally {
@@ -8657,11 +8819,27 @@ export function AdminOrdersView() {
 
   const handleMarkPaymentReceived = async (order) => {
     if (!db || !order.id) return;
+    if (isEftOrder(order)) {
+      setStatusMessage("Use Approve Payment or Reject Payment for EFT orders.");
+      return;
+    }
     setPaymentUpdating(true);
     try {
       await updateDoc(doc(db, "orders", order.id), {
         paymentStatus: "paid",
-        status: order.status === "pending" ? "order-placed" : normalizeOrderStatus(order.status) || "order-placed",
+        status: normalizeOrderStatus(order.status) === "pending-payment-approval"
+          ? "order-placed"
+          : normalizeOrderStatus(order.status) || "order-placed",
+        paymentMethod: PAYMENT_METHODS.PAYFAST,
+        paymentApprovalStatus: PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED,
+        paymentApproval: {
+          required: false,
+          decision: PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED,
+          decidedAt: null,
+          decidedByUid: null,
+          decidedByEmail: null,
+          note: null,
+        },
         paidAt: serverTimestamp(),
       });
 
@@ -8694,6 +8872,581 @@ export function AdminOrdersView() {
     }
   };
 
+  const handleReviewEftPayment = async (order, decision) => {
+    if (!functionsInstance || !order?.id || !isEftOrder(order)) return;
+    setEftReviewLoading(true);
+    try {
+      const reviewEftPayment = httpsCallable(functionsInstance, "reviewEftPayment");
+      const result = await reviewEftPayment({
+        orderId: order.id,
+        decision,
+      });
+      const nextStatus = result?.data?.status || (decision === "approve" ? "order-placed" : "payment-rejected");
+      setStatusMessage(
+        decision === "approve"
+          ? `EFT payment approved. Order moved to ${formatOrderStatusLabel(nextStatus)}.`
+          : "EFT payment rejected. Order remains blocked from fulfilment.",
+      );
+    } catch (error) {
+      setStatusMessage(error.message || "Unable to review EFT payment.");
+    } finally {
+      setEftReviewLoading(false);
+    }
+  };
+
+  const resetCreateOrderFilters = () =>
+    setCreateOrderFilters({
+      ...CREATE_ORDER_FILTER_DEFAULTS,
+    });
+
+  const resetCreateOrderForm = () => {
+    setCreateOrderForm({
+      customer: {
+        fullName: "",
+        email: "",
+        phone: "",
+      },
+      shippingAddress: {
+        street: "",
+        suburb: "",
+        city: "",
+        province: "",
+        postalCode: "",
+      },
+      items: [],
+    });
+    setCreateOrderSelectedCourierId("");
+    setCreateOrderProductSearch("");
+    resetCreateOrderFilters();
+    setCreateOrderVariantSelections({});
+    setCreateOrderError(null);
+  };
+
+  const handleCreateOrderCustomerChange = (field) => (event) => {
+    const value = event.target.value;
+    setCreateOrderForm((prev) => ({
+      ...prev,
+      customer: {
+        ...prev.customer,
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleCreateOrderShippingAddressChange = (field) => (event) => {
+    const value = event.target.value;
+    setCreateOrderForm((prev) => ({
+      ...prev,
+      shippingAddress: {
+        ...prev.shippingAddress,
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleCreateOrderFilterChange = (field) => (event) => {
+    const value = event.target.value;
+    setCreateOrderFilters((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const createOrderPostalCode = (createOrderForm.shippingAddress?.postalCode || "").toString().trim();
+  const createOrderPostalCodeValid = /^\d{4}$/.test(createOrderPostalCode);
+
+  const createOrderAvailableCouriers = useMemo(() => {
+    const province = (createOrderForm.shippingAddress?.province || "").toString().trim();
+    if (!province) return [];
+    return createOrderCourierOptions
+      .filter((option) => option?.isActive !== false)
+      .map((option) => {
+        const provinceConfig = option?.provinces?.[province] || {};
+        const price = Number(provinceConfig.price);
+        return {
+          id: option.id,
+          name: option.name || "Courier",
+          price,
+          isAvailable: provinceConfig.isAvailable === true,
+        };
+      })
+      .filter((option) => option.isAvailable && Number.isFinite(option.price))
+      .sort((a, b) => a.price - b.price);
+  }, [createOrderCourierOptions, createOrderForm.shippingAddress?.province]);
+
+  const createOrderSelectedCourier =
+    createOrderAvailableCouriers.find((option) => option.id === createOrderSelectedCourierId) || null;
+  const createOrderShippingCost = createOrderSelectedCourier ? createOrderSelectedCourier.price : 0;
+
+  useEffect(() => {
+    const province = (createOrderForm.shippingAddress?.province || "").toString().trim();
+    if (!province) {
+      setCreateOrderSelectedCourierId("");
+      return;
+    }
+    const stillAvailable = createOrderAvailableCouriers.some(
+      (option) => option.id === createOrderSelectedCourierId,
+    );
+    if (stillAvailable) return;
+    setCreateOrderSelectedCourierId(createOrderAvailableCouriers[0]?.id || "");
+  }, [
+    createOrderAvailableCouriers,
+    createOrderForm.shippingAddress?.province,
+    createOrderSelectedCourierId,
+  ]);
+
+  const createOrderCategoryLookup = useMemo(() => {
+    const lookup = new Map();
+    (productCategories || []).forEach((category, index) => {
+      if (!category) return;
+      const label = (category.name || category.title || category.label || "").toString().trim();
+      const canonicalId =
+        normalizeCreateOrderCategoryToken(category.id) ||
+        normalizeCreateOrderCategoryToken(category.slug) ||
+        normalizeCreateOrderCategoryToken(slugifyId(label)) ||
+        `category-${index}`;
+      const entry = {
+        id: canonicalId,
+        label: label || canonicalId,
+      };
+      const tokens = new Set([canonicalId]);
+      [category.id, category.slug, label].forEach((value) => {
+        buildCreateOrderCategoryTokens(value).forEach((token) => tokens.add(token));
+      });
+      tokens.forEach((token) => lookup.set(token, entry));
+    });
+    return lookup;
+  }, [productCategories]);
+
+  const createOrderCatalogProducts = useMemo(() => {
+    return (products || [])
+      .map((product) => {
+        if (!product?.id) return null;
+        const name = (product.name || product.title || "").toString().trim();
+        if (!name) return null;
+
+        const numericPrice = parseNumber(product.price, null);
+        const variants = Array.isArray(product.variants)
+          ? product.variants
+              .map((variant, index) => {
+                const label = (variant?.label || variant?.name || "").toString().trim();
+                if (!label) return null;
+                return {
+                  id: variant.id || `${product.id}-variant-${index}`,
+                  label,
+                  price: parseNumber(variant.price, null),
+                };
+              })
+              .filter(Boolean)
+          : [];
+        const variantPrices = variants
+          .map((variant) => parseNumber(variant.price, null))
+          .filter((price) => Number.isFinite(price));
+        const filterPrice = variantPrices.length
+          ? Math.min(...variantPrices)
+          : Number.isFinite(numericPrice) ?
+             numericPrice
+            : null;
+        const stockStatus = getStockStatus({
+          quantity: product.stock_quantity ?? product.quantity,
+          forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
+          status: product.stock_status,
+        });
+        const stockStatusKey = (product.stock_status || product.stockStatus || "")
+          .toString()
+          .trim()
+          .toLowerCase();
+        const preorderSendMonth = normalizePreorderSendMonth(
+          product.preorder_send_month || product.preorderSendMonth || "",
+        );
+        const rawCategoryValues = [];
+        if (Array.isArray(product.category_ids)) {
+          rawCategoryValues.push(...product.category_ids);
+        } else if (Array.isArray(product.categoryIds)) {
+          rawCategoryValues.push(...product.categoryIds);
+        } else if (product.categoryId) {
+          rawCategoryValues.push(product.categoryId);
+        }
+        if (product.categorySlug) rawCategoryValues.push(product.categorySlug);
+        if (product.category) rawCategoryValues.push(product.category);
+
+        const categoryTokens = Array.from(
+          new Set(
+            rawCategoryValues
+              .flatMap((value) => buildCreateOrderCategoryTokens(value))
+              .filter(Boolean),
+          ),
+        );
+        let resolvedCategory = null;
+        for (const token of categoryTokens) {
+          const matched = createOrderCategoryLookup.get(token);
+          if (matched) {
+            resolvedCategory = matched;
+            break;
+          }
+        }
+
+        const fallbackCategoryLabel = (product.category || product.categoryName || "")
+          .toString()
+          .trim();
+        const categoryLabel = resolvedCategory?.label || fallbackCategoryLabel || "";
+        const categoryId =
+          resolvedCategory?.id ||
+          normalizeCreateOrderCategoryToken(slugifyId(categoryLabel)) ||
+          categoryTokens[0] ||
+          "";
+        if (categoryId && !categoryTokens.includes(categoryId)) {
+          categoryTokens.push(categoryId);
+        }
+
+        return {
+          id: product.id,
+          slug: product.slug || "",
+          sku: (product.sku || "").toString().trim(),
+          name,
+          numericPrice,
+          displayPrice: Number.isFinite(numericPrice) ? formatPriceLabel(numericPrice) : "Price on request",
+          variants,
+          stockStatus,
+          stockStatusKey,
+          preorderSendMonth,
+          filterPrice,
+          categoryId,
+          categoryLabel,
+          categoryTokens,
+        };
+      })
+      .filter(Boolean);
+  }, [products, createOrderCategoryLookup]);
+
+  const createOrderCategoryOptions = useMemo(() => {
+    const options = new Map();
+    (productCategories || []).forEach((category, index) => {
+      const label = (category?.name || category?.title || category?.label || "")
+        .toString()
+        .trim();
+      const id =
+        normalizeCreateOrderCategoryToken(category?.id) ||
+        normalizeCreateOrderCategoryToken(category?.slug) ||
+        normalizeCreateOrderCategoryToken(slugifyId(label)) ||
+        `category-${index}`;
+      if (!options.has(id)) {
+        options.set(id, {
+          id,
+          label: label || id,
+        });
+      }
+    });
+    createOrderCatalogProducts.forEach((product) => {
+      const id =
+        normalizeCreateOrderCategoryToken(product.categoryId) ||
+        normalizeCreateOrderCategoryToken(slugifyId(product.categoryLabel || ""));
+      if (!id) return;
+      if (!options.has(id)) {
+        options.set(id, {
+          id,
+          label: product.categoryLabel || id,
+        });
+      }
+    });
+    return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [productCategories, createOrderCatalogProducts]);
+
+  const filteredCreateOrderProducts = useMemo(() => {
+    const term = createOrderProductSearch.trim().toLowerCase();
+    const selectedCategoryId = normalizeCreateOrderCategoryToken(createOrderFilters.categoryId);
+    const selectedStock = normalizeCreateOrderCategoryToken(createOrderFilters.stock);
+    const minPrice = parseOptionalNumber((createOrderFilters.minPrice || "").toString().trim());
+    const maxPrice = parseOptionalNumber((createOrderFilters.maxPrice || "").toString().trim());
+    const hasMinPrice = Number.isFinite(minPrice);
+    const hasMaxPrice = Number.isFinite(maxPrice);
+
+    let filtered = [...createOrderCatalogProducts];
+    if (term) {
+      filtered = filtered.filter((product) =>
+        [product.name, product.sku, product.id, product.categoryLabel]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(term),
+      );
+    }
+    if (selectedCategoryId && selectedCategoryId !== "all") {
+      filtered = filtered.filter((product) => product.categoryTokens.includes(selectedCategoryId));
+    }
+    if (selectedStock && selectedStock !== "all") {
+      filtered = filtered.filter((product) => (product.stockStatus?.state || "").toLowerCase() === selectedStock);
+    }
+    if (hasMinPrice || hasMaxPrice) {
+      filtered = filtered.filter((product) => {
+        const price = product.filterPrice;
+        if (!Number.isFinite(price)) return false;
+        if (hasMinPrice && price < minPrice) return false;
+        if (hasMaxPrice && price > maxPrice) return false;
+        return true;
+      });
+    }
+
+    if (createOrderFilters.sort === "price-asc" || createOrderFilters.sort === "price-desc") {
+      const priceDirection = createOrderFilters.sort === "price-asc" ? 1 : -1;
+      filtered.sort((a, b) => {
+        const aPrice = Number.isFinite(a.filterPrice) ? a.filterPrice : null;
+        const bPrice = Number.isFinite(b.filterPrice) ? b.filterPrice : null;
+        if (aPrice === null && bPrice === null) return a.name.localeCompare(b.name);
+        if (aPrice === null) return 1;
+        if (bPrice === null) return -1;
+        const diff = (aPrice - bPrice) * priceDirection;
+        return diff === 0 ? a.name.localeCompare(b.name) : diff;
+      });
+    } else {
+      filtered.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    return filtered;
+  }, [createOrderCatalogProducts, createOrderFilters, createOrderProductSearch]);
+
+  const hasActiveCreateOrderFilters = useMemo(
+    () =>
+      createOrderFilters.categoryId !== CREATE_ORDER_FILTER_DEFAULTS.categoryId ||
+      createOrderFilters.stock !== CREATE_ORDER_FILTER_DEFAULTS.stock ||
+      (createOrderFilters.minPrice || "").toString().trim() !== CREATE_ORDER_FILTER_DEFAULTS.minPrice ||
+      (createOrderFilters.maxPrice || "").toString().trim() !== CREATE_ORDER_FILTER_DEFAULTS.maxPrice ||
+      createOrderFilters.sort !== CREATE_ORDER_FILTER_DEFAULTS.sort,
+    [createOrderFilters],
+  );
+  const hasActiveCreateOrderSearch = createOrderProductSearch.trim().length > 0;
+  const createOrderEmptyMessage = hasActiveCreateOrderFilters
+    ? "No products match current filters."
+    : hasActiveCreateOrderSearch ?
+       "No products match this search."
+      : "No products available in your catalog.";
+
+  const handleAddCatalogProductToOrder = (product) => {
+    const selectedVariantId = createOrderVariantSelections[product.id] || "";
+    const selectedVariant = product.variants.find((variant) => variant.id === selectedVariantId) || null;
+    if (product.variants.length > 0 && !selectedVariant) {
+      setCreateOrderError(`Select a variant for ${product.name} before adding it.`);
+      return;
+    }
+
+    const unitPrice = Number.isFinite(selectedVariant?.price) ? selectedVariant.price : product.numericPrice;
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+      setCreateOrderError(`Unable to add ${product.name}. Please check that a valid price is set.`);
+      return;
+    }
+
+    const itemKey = buildAdminOrderCartKey({
+      sourceId: product.id,
+      variantId: selectedVariant?.id || "",
+    });
+    const metadata = {
+      type: "product",
+      source: "admin-created-order",
+      productId: product.id,
+      productSlug: product.slug || null,
+      variantId: selectedVariant?.id || null,
+      variantLabel: selectedVariant?.label || null,
+      stockStatus: product.stockStatusKey || null,
+      preorderSendMonth: product.preorderSendMonth || null,
+    };
+
+    setCreateOrderForm((prev) => {
+      const existingIndex = prev.items.findIndex((item) => item.key === itemKey);
+      if (existingIndex === -1) {
+        return {
+          ...prev,
+          items: [
+            ...prev.items,
+            {
+              key: itemKey,
+              id: itemKey,
+              sourceId: product.id,
+              name: product.name,
+              price: unitPrice,
+              quantity: 1,
+              metadata,
+            },
+          ],
+        };
+      }
+
+      const nextItems = [...prev.items];
+      const existing = nextItems[existingIndex];
+      nextItems[existingIndex] = {
+        ...existing,
+        quantity: Math.max(1, (Number(existing.quantity) || 1) + 1),
+        price: unitPrice,
+        metadata: {
+          ...(existing.metadata || {}),
+          ...metadata,
+        },
+      };
+      return {
+        ...prev,
+        items: nextItems,
+      };
+    });
+
+    setCreateOrderError(null);
+  };
+
+  const handleCreateOrderCartQuantityChange = (itemKey, value) => {
+    const nextQuantity = Math.max(1, Number.parseInt(value, 10) || 1);
+    setCreateOrderForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item) =>
+        item.key === itemKey
+          ? { ...item, quantity: nextQuantity }
+          : item,
+      ),
+    }));
+  };
+
+  const adjustCreateOrderCartQuantity = (itemKey, delta) => {
+    setCreateOrderForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item) => {
+        if (item.key !== itemKey) return item;
+        const nextQuantity = Math.max(1, (Number(item.quantity) || 1) + delta);
+        return { ...item, quantity: nextQuantity };
+      }),
+    }));
+  };
+
+  const removeCreateOrderCartItem = (itemKey) => {
+    setCreateOrderForm((prev) => ({
+      ...prev,
+      items: prev.items.filter((item) => item.key !== itemKey),
+    }));
+  };
+
+  const createOrderPricing = useMemo(() => {
+    const validItems = (createOrderForm.items || []).reduce((acc, item) => {
+      const name = (item.name || "").toString().trim();
+      const quantity = Number.parseInt(item.quantity, 10);
+      const price = parseNumber(item.price, null);
+      if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price < 0) {
+        return acc;
+      }
+      acc.push({
+        id: item.id || item.key,
+        key: item.key || item.id || "",
+        sourceId: item.sourceId || null,
+        name,
+        quantity: Math.floor(quantity),
+        price,
+        metadata: item.metadata || {
+          type: "product",
+          source: "admin-created-order",
+        },
+      });
+      return acc;
+    }, []);
+
+    const subtotal = validItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const shippingCost = Number.isFinite(createOrderShippingCost) && createOrderShippingCost >= 0
+      ? createOrderShippingCost
+      : 0;
+    return {
+      validItems,
+      subtotal,
+      shippingCost,
+      totalPrice: subtotal + shippingCost,
+    };
+  }, [createOrderForm.items, createOrderShippingCost]);
+
+  const handleCreateAdminOrder = async () => {
+    if (!functionsInstance) return;
+    const customer = {
+      fullName: (createOrderForm.customer.fullName || "").toString().trim(),
+      email: (createOrderForm.customer.email || "").toString().trim(),
+      phone: (createOrderForm.customer.phone || "").toString().trim(),
+      address: "",
+    };
+    const normalizedShippingAddress = {
+      street: (createOrderForm.shippingAddress?.street || "").toString().trim(),
+      suburb: (createOrderForm.shippingAddress?.suburb || "").toString().trim(),
+      city: (createOrderForm.shippingAddress?.city || "").toString().trim(),
+      province: (createOrderForm.shippingAddress?.province || "").toString().trim(),
+      postalCode: createOrderPostalCode,
+    };
+    customer.address = formatShippingAddress(normalizedShippingAddress);
+
+    const requiredCustomer = ["fullName", "email", "phone"];
+    const missingCustomer = requiredCustomer.filter((field) => !customer[field]);
+    if (missingCustomer.length) {
+      setCreateOrderError("Please complete customer details before creating the order.");
+      return;
+    }
+
+    const requiredShipping = ["street", "suburb", "city", "province", "postalCode"];
+    const missingShipping = requiredShipping.filter((field) => !normalizedShippingAddress[field]);
+    if (missingShipping.length) {
+      setCreateOrderError("Please complete shipping address details before creating the order.");
+      return;
+    }
+    if (!createOrderPostalCodeValid) {
+      setCreateOrderError("Postal code should be 4 digits.");
+      return;
+    }
+    if (normalizedShippingAddress.province && createOrderAvailableCouriers.length === 0) {
+      setCreateOrderError(`No courier options are available for ${normalizedShippingAddress.province}.`);
+      return;
+    }
+    if (!createOrderSelectedCourier) {
+      setCreateOrderError("Please select a courier before creating the order.");
+      return;
+    }
+
+    if (!createOrderPricing.validItems.length) {
+      setCreateOrderError("Add at least one product to the order.");
+      return;
+    }
+
+    setCreateOrderSaving(true);
+    setCreateOrderError(null);
+    try {
+      const createAdminEftOrder = httpsCallable(functionsInstance, "createAdminEftOrder");
+      const result = await createAdminEftOrder({
+        customer,
+        items: createOrderPricing.validItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          metadata: item.metadata || { type: "product", source: "admin-created-order" },
+        })),
+        subtotal: createOrderPricing.subtotal,
+        shippingCost: createOrderPricing.shippingCost,
+        totalPrice: createOrderPricing.totalPrice,
+        shipping: {
+          courierId: createOrderSelectedCourier.id,
+          courierName: createOrderSelectedCourier.name,
+          courierPrice: createOrderSelectedCourier.price,
+          province: normalizedShippingAddress.province,
+        },
+        shippingAddress: normalizedShippingAddress,
+      });
+
+      const orderId = result?.data?.orderId || null;
+      const orderNumber = result?.data?.orderNumber || null;
+      setStatusMessage(
+        orderNumber
+          ? `Order #${orderNumber} created as EFT and awaiting admin payment approval.`
+          : "Order created as EFT and awaiting admin payment approval.",
+      );
+      setCreateOrderOpen(false);
+      resetCreateOrderForm();
+      if (orderId) {
+        setSelectedOrderId(orderId);
+      }
+    } catch (error) {
+      setCreateOrderError(error.message || "Unable to create order.");
+    } finally {
+      setCreateOrderSaving(false);
+    }
+  };
+
   const handleSaveDelivery = async () => {
     if (!db || !selectedOrder) return;
     if (deliveryMethod === "courier" && !courierName.trim()) {
@@ -8709,7 +9462,7 @@ export function AdminOrdersView() {
         updatedAt: serverTimestamp(),
       });
 
-        if (functionsInstance && selectedOrder.customer.email) {
+        if (functionsInstance && selectedOrder.customer?.email) {
           const sendOrderStatusEmail = httpsCallable(functionsInstance, "sendOrderStatusEmail");
           await sendOrderStatusEmail({
             customer: selectedOrder.customer,
@@ -8737,11 +9490,18 @@ export function AdminOrdersView() {
     if (!db) return;
     const targetOrder = orders.find((order) => order.id === orderId);
     if (!targetOrder) return;
+    const normalizedNextStatus = normalizeOrderStatus(nextStatus);
+    const allowedStatuses = getAllowedOrderStatuses(targetOrder);
 
-    if (needsTrackingLink(nextStatus) && trackingLinkOverride === null) {
+    if (!allowedStatuses.includes(normalizedNextStatus)) {
+      setStatusMessage("EFT payment must be approved before fulfilment.");
+      return;
+    }
+
+    if (needsTrackingLink(normalizedNextStatus) && trackingLinkOverride === null) {
       setPendingStatusUpdate({
         orderId,
-        status: formatOrderStatusLabel(nextStatus),
+        status: normalizedNextStatus,
         existingLink: targetOrder.trackingLink || "",
       });
       setTrackingInput(targetOrder.trackingLink || "");
@@ -8753,25 +9513,25 @@ export function AdminOrdersView() {
          trackingLinkOverride.trim()
         : targetOrder.trackingLink || "";
     const fallbackLink = normalizedLink || targetOrder.trackingLink || "";
-    const finalTrackingLink = needsTrackingLink(nextStatus) ?
+    const finalTrackingLink = needsTrackingLink(normalizedNextStatus) ?
        fallbackLink || null
       : targetOrder.trackingLink || null;
 
     await updateDoc(doc(db, "orders", orderId), {
-      status: formatOrderStatusLabel(nextStatus),
+      status: normalizedNextStatus,
       updatedAt: serverTimestamp(),
       trackingLink: finalTrackingLink,
     });
     setStatusMessage("Order updated");
 
-    if (functionsInstance && targetOrder.customer.email) {
+    if (functionsInstance && targetOrder.customer?.email) {
       try {
         const sendOrderStatusEmail = httpsCallable(
           functionsInstance,
           "sendOrderStatusEmail"
         );
         await sendOrderStatusEmail({
-          status: getOrderStatusLabel(targetOrder, nextStatus),
+          status: getOrderStatusLabel(targetOrder, normalizedNextStatus),
           orderNumber: targetOrder.orderNumber ?? null,
           trackingLink: finalTrackingLink || "",
           customer: targetOrder.customer,
@@ -8797,9 +9557,9 @@ export function AdminOrdersView() {
       const haystack = [
         order.id,
         order.orderNumber ? String(order.orderNumber) : "",
-        order.customer.fullName || "",
-        order.customer.email || "",
-        order.customer.phone || "",
+        order.customer?.fullName || "",
+        order.customer?.email || "",
+        order.customer?.phone || "",
       ]
         .join(" ")
         .toLowerCase();
@@ -8837,7 +9597,7 @@ export function AdminOrdersView() {
       },
       { "order-placed": 0, "packing-order": 0, "order-ready-for-shipping": 0, shipped: 0, completed: 0, cancelled: 0 }
     );
-    const paidCount = orders.filter((o) => normalizePaymentStatus(o) === "complete" || normalizePaymentStatus(o) === "paid").length;
+    const paidCount = orders.filter((o) => ["complete", "paid", "approved"].includes(normalizePaymentStatus(o))).length;
     const failedPayments = orders.filter((o) => normalizePaymentStatus(o) === "failed").length;
     return { totalToday, statusCounts, paidCount, failedPayments };
   }, [orders]);
@@ -8847,9 +9607,44 @@ export function AdminOrdersView() {
     : null;
   const shippingAddressLabel = selectedOrder
     ? formatShippingAddress(selectedOrder.shippingAddress) ||
-      selectedOrder.customer.address ||
+      selectedOrder.customer?.address ||
       ""
     : "";
+  const selectedPaymentMethod = selectedOrder ? normalizePaymentMethod(selectedOrder) : PAYMENT_METHODS.PAYFAST;
+  const selectedPaymentApprovalStatus = selectedOrder
+    ? normalizePaymentApprovalStatus(selectedOrder)
+    : PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
+  const selectedPaymentStatus = selectedOrder ? normalizePaymentStatus(selectedOrder) : "unknown";
+  const selectedStatusOptions = selectedOrder ? getAllowedOrderStatuses(selectedOrder) : ORDER_STATUSES;
+  const selectedStatusLocked = selectedOrder ? isEftBlocked(selectedOrder) : false;
+  const selectedPayfast = selectedOrder?.payfast || {};
+  const selectedShipping = selectedOrder?.shipping || {};
+  const selectedOrderEmailNotification = selectedOrder?.notifications?.orderCreated?.customer || null;
+  const selectedOrderEmailStatusRaw = (selectedOrderEmailNotification?.status || "").toString().trim().toLowerCase();
+  const selectedOrderEmailStatus = ["sent", "failed", "skipped"].includes(selectedOrderEmailStatusRaw)
+    ? selectedOrderEmailStatusRaw
+    : "unknown";
+  const selectedOrderEmailStatusLabel = selectedOrderEmailStatus === "unknown"
+    ? "No attempt recorded"
+    : selectedOrderEmailStatus.charAt(0).toUpperCase() + selectedOrderEmailStatus.slice(1);
+  const selectedOrderEmailTemplate = (selectedOrderEmailNotification?.template || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+  const selectedOrderEmailTemplateLabel = selectedOrderEmailTemplate === "eft-pending"
+    ? "EFT pending"
+    : selectedOrderEmailTemplate === "standard"
+      ? "Standard confirmation"
+      : "N/A";
+  const selectedOrderEmailAttemptedAtLabel = selectedOrderEmailNotification?.attemptedAt?.toDate?.()
+    ? bookingDateFormatter.format(selectedOrderEmailNotification.attemptedAt.toDate())
+    : "";
+  const selectedOrderEmailLastAttemptSource = (selectedOrderEmailNotification?.lastAttemptSource || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+  const selectedOrderEmailError = (selectedOrderEmailNotification?.error || "").toString().trim();
+  const selectedOrderEmailNeedsRetry = selectedOrderEmailStatus === "failed" || selectedOrderEmailStatus === "skipped";
 
   useEffect(() => {
     if (selectedOrder) {
@@ -8863,6 +9658,35 @@ export function AdminOrdersView() {
     }
   }, [selectedOrder]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const proofPath = selectedOrder?.paymentProof?.storagePath || "";
+    if (!proofPath || !storage) {
+      setPaymentProofUrl("");
+      setPaymentProofUrlLoading(false);
+      return undefined;
+    }
+
+    setPaymentProofUrlLoading(true);
+    getDownloadURL(ref(storage, proofPath))
+      .then((url) => {
+        if (cancelled) return;
+        setPaymentProofUrl(url);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPaymentProofUrl("");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setPaymentProofUrlLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOrder?.id, selectedOrder?.paymentProof?.storagePath, storage]);
+
   return (
     <div className="admin-panel admin-panel--full">
       <Reveal as="div" className="admin-panel__header">
@@ -8872,6 +9696,16 @@ export function AdminOrdersView() {
             Track everything added to cart, including workshop metadata.
           </p>
         </div>
+        <button
+          className="btn btn--primary"
+          type="button"
+          onClick={() => {
+            setCreateOrderOpen(true);
+            setCreateOrderError(null);
+          }}
+        >
+          Create Order
+        </button>
       </Reveal>
 
       <Reveal as="div" className="admin-kpi-grid" delay={20}>
@@ -8959,6 +9793,10 @@ export function AdminOrdersView() {
                   : "Order";
                 const isPreordered = isPreorderedOrder(order);
                 const paymentStatus = normalizePaymentStatus(order);
+                const paymentMethod = normalizePaymentMethod(order);
+                const paymentApprovalStatus = normalizePaymentApprovalStatus(order);
+                const statusOptions = getAllowedOrderStatuses(order);
+                const statusLocked = isEftBlocked(order);
                 const deliveryStatus = normalizeDeliveryStatus(order);
                 return (
                   <tr
@@ -8983,34 +9821,46 @@ export function AdminOrdersView() {
                       )}
                     </td>
                     <td>
-                      <p>{order.customer.fullName || "—"}</p>
+                      <p>{order.customer?.fullName || "—"}</p>
                       <p className="modal__meta">
-                        {order.customer.email || "—"}
+                        {order.customer?.email || "—"}
                       </p>
-                      {order.customer.phone && (
+                      {order.customer?.phone && (
                         <p className="modal__meta">{order.customer.phone}</p>
                       )}
                     </td>
                     <td>{formatPriceLabel(total)}</td>
                     <td>
+                      <span className={`admin-status admin-status--${paymentMethod}`}>
+                        {paymentMethod}
+                      </span>
                       <span className={`admin-status admin-status--${paymentStatus}`}>
                         {paymentStatus}
                       </span>
+                      {paymentMethod === PAYMENT_METHODS.EFT && (
+                        <span className={`admin-status admin-status--${paymentApprovalStatus}`}>
+                          approval: {paymentApprovalStatus}
+                        </span>
+                      )}
                     </td>
                     <td>
                       <select
                         className="input"
                         value={normalizeOrderStatus(order.status)}
+                        disabled={statusLocked}
                         onChange={(event) =>
                           handleUpdateOrderStatus(order.id, event.target.value)
                         }
                       >
-                        {ORDER_STATUSES.map((status) => (
+                        {statusOptions.map((status) => (
                           <option key={status} value={status}>
-                            {status}
+                            {formatOrderStatusLabel(status)}
                           </option>
                         ))}
                       </select>
+                      {statusLocked && (
+                        <p className="modal__meta">Awaiting EFT payment approval</p>
+                      )}
                       {isPreordered && normalizeOrderStatus(order.status) === "order-placed" && (
                         <p className="modal__meta">Preordered</p>
                       )}
@@ -9049,6 +9899,519 @@ export function AdminOrdersView() {
       </Reveal>
 
       <div
+        className={`modal admin-modal admin-create-order-modal ${createOrderOpen ? "is-active" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={createOrderOpen ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget && !createOrderSaving) {
+            setCreateOrderOpen(false);
+            resetCreateOrderForm();
+          }
+        }}
+      >
+        <div className="modal__content admin-order-create-modal">
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close create order dialog"
+            onClick={() => {
+              if (createOrderSaving) return;
+              setCreateOrderOpen(false);
+              resetCreateOrderForm();
+            }}
+          >
+            &times;
+          </button>
+          <h3 className="modal__title">Create Order On Behalf Of Customer</h3>
+          <p className="modal__meta admin-order-create-lead">
+            Admin-created orders default to EFT and remain pending until payment is approved by an admin.
+          </p>
+
+          <div className="admin-order-create-section">
+            <div className="admin-order-create-section__head">
+              <h4>Customer Details</h4>
+              <p className="modal__meta">Who this order is for and where it should be delivered.</p>
+            </div>
+            <div className="admin-order-create-grid">
+              <label>
+                Full Name
+                <input
+                  className="input"
+                  type="text"
+                  autoComplete="name"
+                  value={createOrderForm.customer.fullName}
+                  onChange={handleCreateOrderCustomerChange("fullName")}
+                  placeholder="Customer full name"
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  className="input"
+                  type="email"
+                  autoComplete="email"
+                  value={createOrderForm.customer.email}
+                  onChange={handleCreateOrderCustomerChange("email")}
+                  placeholder="customer@email.com"
+                />
+              </label>
+              <label>
+                Phone
+                <input
+                  className="input"
+                  type="tel"
+                  autoComplete="tel"
+                  value={createOrderForm.customer.phone}
+                  onChange={handleCreateOrderCustomerChange("phone")}
+                  placeholder="+27 ..."
+                />
+              </label>
+              <label className="admin-order-create-grid__wide">
+                Street Address
+                <input
+                  className="input"
+                  type="text"
+                  autoComplete="street-address"
+                  value={createOrderForm.shippingAddress.street}
+                  onChange={handleCreateOrderShippingAddressChange("street")}
+                  placeholder="Street address"
+                />
+              </label>
+              <div className="admin-order-create-grid__wide admin-order-create-address-grid checkout-address-grid">
+                <label>
+                  Suburb
+                  <input
+                    className="input"
+                    type="text"
+                    autoComplete="address-level3"
+                    value={createOrderForm.shippingAddress.suburb}
+                    onChange={handleCreateOrderShippingAddressChange("suburb")}
+                    placeholder="Suburb"
+                  />
+                </label>
+                <label>
+                  City
+                  <input
+                    className="input"
+                    type="text"
+                    autoComplete="address-level2"
+                    value={createOrderForm.shippingAddress.city}
+                    onChange={handleCreateOrderShippingAddressChange("city")}
+                    placeholder="City"
+                  />
+                </label>
+                <label>
+                  Province
+                  <select
+                    className="input"
+                    autoComplete="address-level1"
+                    value={createOrderForm.shippingAddress.province}
+                    onChange={handleCreateOrderShippingAddressChange("province")}
+                  >
+                    <option value="">Select province</option>
+                    {SA_PROVINCES.map((province) => (
+                      <option key={province.value} value={province.value}>
+                        {province.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Postal Code
+                  <input
+                    className="input"
+                    type="text"
+                    autoComplete="postal-code"
+                    value={createOrderForm.shippingAddress.postalCode}
+                    onChange={handleCreateOrderShippingAddressChange("postalCode")}
+                    placeholder="0000"
+                    pattern="\\d{4}"
+                  />
+                </label>
+              </div>
+              {!createOrderPostalCodeValid && createOrderForm.shippingAddress.postalCode && (
+                <p className="admin-panel__error admin-order-create-grid__wide">Postal code should be 4 digits.</p>
+              )}
+              <div className="admin-order-create-grid__wide admin-order-create-courier">
+                <h4>Courier options</h4>
+                {!createOrderForm.shippingAddress.province && (
+                  <p className="modal__meta">Select a province to view available couriers.</p>
+                )}
+                {createOrderForm.shippingAddress.province && createOrderCourierStatus === "loading" && (
+                  <p className="modal__meta">Loading courier options…</p>
+                )}
+                {createOrderForm.shippingAddress.province &&
+                  createOrderCourierStatus !== "loading" &&
+                  createOrderAvailableCouriers.length === 0 && (
+                  <p className="admin-panel__error">
+                    No courier options are available for {createOrderForm.shippingAddress.province}.
+                  </p>
+                )}
+                {createOrderAvailableCouriers.length > 0 && (
+                  <div className="admin-order-create-courier-options checkout-courier-options">
+                    {createOrderAvailableCouriers.map((option) => (
+                      <label
+                        key={option.id}
+                        className={`admin-order-create-courier-option checkout-courier__option ${
+                          createOrderSelectedCourierId === option.id ? "is-selected" : ""
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="admin-create-order-courier"
+                          value={option.id}
+                          checked={createOrderSelectedCourierId === option.id}
+                          onChange={(event) => setCreateOrderSelectedCourierId(event.target.value)}
+                        />
+                        <span>{option.name}</span>
+                        <strong>{formatPriceLabel(option.price)}</strong>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-order-create-layout">
+            <div className="admin-order-create-catalog">
+              <div className="admin-order-create-toolbar">
+                <div className="admin-order-create-toolbar__text">
+                  <h4>Add Products</h4>
+                  <p className="modal__meta">Search and add items from your product catalog.</p>
+                </div>
+                <span className="admin-order-create-count">
+                  Showing {filteredCreateOrderProducts.length} of {createOrderCatalogProducts.length}
+                </span>
+              </div>
+              <input
+                className="input pos-search admin-order-create-search"
+                type="search"
+                placeholder="Search products by name, SKU, or ID"
+                value={createOrderProductSearch}
+                onChange={(event) => setCreateOrderProductSearch(event.target.value)}
+              />
+              <div className="admin-order-create-filters">
+                <div className="admin-order-create-filters__grid">
+                  <label className="admin-order-create-filter-field">
+                    Category
+                    <select
+                      className="input"
+                      value={createOrderFilters.categoryId}
+                      onChange={handleCreateOrderFilterChange("categoryId")}
+                    >
+                      <option value="all">All categories</option>
+                      {createOrderCategoryOptions.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="admin-order-create-filter-field">
+                    Stock
+                    <select
+                      className="input"
+                      value={createOrderFilters.stock}
+                      onChange={handleCreateOrderFilterChange("stock")}
+                    >
+                      <option value="all">All stock</option>
+                      <option value="in">In stock</option>
+                      <option value="low">Low stock</option>
+                      <option value="preorder">Preorder</option>
+                      <option value="out">Out of stock</option>
+                    </select>
+                  </label>
+                  <label className="admin-order-create-filter-field">
+                    Min price
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={createOrderFilters.minPrice}
+                      onChange={handleCreateOrderFilterChange("minPrice")}
+                    />
+                  </label>
+                  <label className="admin-order-create-filter-field">
+                    Max price
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="999.00"
+                      value={createOrderFilters.maxPrice}
+                      onChange={handleCreateOrderFilterChange("maxPrice")}
+                    />
+                  </label>
+                  <label className="admin-order-create-filter-field">
+                    Sort
+                    <select
+                      className="input"
+                      value={createOrderFilters.sort}
+                      onChange={handleCreateOrderFilterChange("sort")}
+                    >
+                      <option value="name-asc">Name (A-Z)</option>
+                      <option value="price-asc">Price (low-high)</option>
+                      <option value="price-desc">Price (high-low)</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="admin-order-create-filters__actions">
+                  <button
+                    className="btn btn--secondary btn--small"
+                    type="button"
+                    disabled={!hasActiveCreateOrderFilters}
+                    onClick={resetCreateOrderFilters}
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              </div>
+              {inventoryLoading && <p className="modal__meta">Loading inventory...</p>}
+              {!inventoryLoading && filteredCreateOrderProducts.length === 0 && (
+                <div className="empty-state admin-order-create-empty-state">
+                  <p>{createOrderEmptyMessage}</p>
+                  {hasActiveCreateOrderFilters && (
+                    <button
+                      className="btn btn--secondary btn--small"
+                      type="button"
+                      onClick={resetCreateOrderFilters}
+                    >
+                      Clear filters
+                    </button>
+                  )}
+                </div>
+              )}
+              {!inventoryLoading && filteredCreateOrderProducts.length > 0 && (
+                <div className="pos-grid admin-order-create-products">
+                  {filteredCreateOrderProducts.map((product) => {
+                    const selection = createOrderVariantSelections[product.id] || "";
+                    const selectedVariant = product.variants.find((variant) => variant.id === selection) || null;
+                    const unitPrice = Number.isFinite(selectedVariant?.price) ? selectedVariant.price : product.numericPrice;
+                    const priceLabel = Number.isFinite(unitPrice) ? formatPriceLabel(unitPrice) : "Price on request";
+                    const isOutOfStock = product.stockStatus?.state === "out";
+                    const requiresVariant = product.variants.length > 0;
+                    const missingVariant = requiresVariant && !selection;
+                    const addDisabled = isOutOfStock || missingVariant;
+                    let disabledHint = null;
+                    if (isOutOfStock) disabledHint = "Out of stock";
+                    else if (missingVariant) disabledHint = "Select a variant first";
+                    const cardClassName = addDisabled
+                      ? "pos-item-card admin-order-create-product-card admin-order-create-product-card--disabled"
+                      : "pos-item-card admin-order-create-product-card admin-order-create-product-card--interactive";
+                    const isInteractiveCardTarget = (target) =>
+                      !!target &&
+                      typeof target.closest === "function" &&
+                      Boolean(target.closest("button, input, select, textarea, label, a"));
+                    return (
+                      <article
+                        className={cardClassName}
+                        key={product.id}
+                        onClick={(event) => {
+                          if (addDisabled || isInteractiveCardTarget(event.target)) return;
+                          handleAddCatalogProductToOrder(product);
+                        }}
+                        onKeyDown={(event) => {
+                          if (addDisabled || isInteractiveCardTarget(event.target)) return;
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleAddCatalogProductToOrder(product);
+                          }
+                        }}
+                        role={addDisabled ? undefined : "button"}
+                        tabIndex={addDisabled ? undefined : 0}
+                        aria-disabled={addDisabled ? "true" : undefined}
+                        aria-label={addDisabled ? undefined : `Add ${product.name} to order`}
+                      >
+                        <div>
+                          <h4>{product.name}</h4>
+                          <p className="modal__meta">{priceLabel}</p>
+                          {product.sku && <p className="modal__meta">SKU: {product.sku}</p>}
+                          {product.stockStatus && (
+                            <span className={`badge badge--stock-${product.stockStatus.state}`}>
+                              {product.stockStatus.label}
+                            </span>
+                          )}
+                          {product.variants.length > 0 && (
+                            <label className="modal__meta pos-item-card__field">
+                              Variant
+                              <select
+                                className="input"
+                                value={selection}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) =>
+                                  setCreateOrderVariantSelections((prev) => ({
+                                    ...prev,
+                                    [product.id]: event.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="">Select variant</option>
+                                {product.variants.map((variant) => (
+                                  <option key={variant.id} value={variant.id}>
+                                    {variant.label}
+                                    {Number.isFinite(variant.price) ? ` - ${formatPriceLabel(variant.price)}` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                        </div>
+                        <div className="admin-order-create-product-actions">
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            disabled={addDisabled}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleAddCatalogProductToOrder(product);
+                            }}
+                          >
+                            Add
+                          </button>
+                          {disabledHint && <p className="modal__meta admin-order-create-product-hint">{disabledHint}</p>}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="admin-order-create-summary">
+              <div className="pos-cart__panel admin-order-create-cart">
+                <div className="admin-order-create-toolbar">
+                  <div className="admin-order-create-toolbar__text">
+                    <h4>Order Items</h4>
+                    <p className="modal__meta">Review quantities before creating the order.</p>
+                  </div>
+                  <span className="admin-order-create-count">
+                    {(createOrderForm.items || []).length} line
+                    {(createOrderForm.items || []).length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                {(createOrderForm.items || []).length === 0 ? (
+                  <p className="empty-state">Add products to start this order.</p>
+                ) : (
+                  <ul className="pos-cart__list admin-order-create-cart-list">
+                    {(createOrderForm.items || []).map((item) => {
+                      const itemKey = item.key || item.id;
+                      return (
+                        <li key={itemKey} className="pos-cart__item">
+                          <div className="pos-cart__row">
+                            <div className="pos-cart__info">
+                              <p className="pos-cart__name">{item.name}</p>
+                              <div className="pos-cart__meta">
+                                {item.metadata?.variantLabel && (
+                                  <span>Variant: {item.metadata.variantLabel}</span>
+                                )}
+                                <span>Unit: {formatPriceLabel(item.price)}</span>
+                              </div>
+                            </div>
+                            <div className="pos-cart__line-total">
+                              {formatPriceLabel((Number(item.price) || 0) * (Number(item.quantity) || 0))}
+                            </div>
+                          </div>
+                          <div className="pos-cart__controls">
+                            <div className="pos-cart__field">
+                              <span className="pos-cart__label">Qty</span>
+                              <div className="pos-cart__stepper">
+                                <button
+                                  className="pos-cart__stepper-btn"
+                                  type="button"
+                                  onClick={() => adjustCreateOrderCartQuantity(itemKey, -1)}
+                                  aria-label={`Decrease ${item.name} quantity`}
+                                >
+                                  -
+                                </button>
+                                <input
+                                  className="input pos-cart__input"
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(event) =>
+                                    handleCreateOrderCartQuantityChange(itemKey, event.target.value)
+                                  }
+                                />
+                                <button
+                                  className="pos-cart__stepper-btn"
+                                  type="button"
+                                  onClick={() => adjustCreateOrderCartQuantity(itemKey, 1)}
+                                  aria-label={`Increase ${item.name} quantity`}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                            <button
+                              className="btn btn--secondary btn--small"
+                              type="button"
+                              onClick={() => removeCreateOrderCartItem(itemKey)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+
+              <div className="admin-order-create__totals">
+                <p className="modal__meta admin-order-create-total-row">
+                  <span>Courier</span>
+                  <strong>{createOrderSelectedCourier ? createOrderSelectedCourier.name : "Select a courier"}</strong>
+                </p>
+                <p className="modal__meta admin-order-create-total-row">
+                  <span>Subtotal</span>
+                  <strong>{formatPriceLabel(createOrderPricing.subtotal)}</strong>
+                </p>
+                <p className="modal__meta admin-order-create-total-row">
+                  <span>Shipping</span>
+                  <strong>
+                    {createOrderSelectedCourier ? formatPriceLabel(createOrderPricing.shippingCost) : "Select a courier"}
+                  </strong>
+                </p>
+                <p className="modal__meta admin-order-create-total-row admin-order-create-total-row--final">
+                  <span>Total</span>
+                  <strong>{formatPriceLabel(createOrderPricing.totalPrice)}</strong>
+                </p>
+                <p className="modal__meta">Payment method: EFT (pending admin approval)</p>
+              </div>
+
+              {createOrderError && <p className="admin-panel__error">{createOrderError}</p>}
+
+              <div className="admin-modal__actions admin-order-create-actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  disabled={createOrderSaving}
+                  onClick={() => {
+                    setCreateOrderOpen(false);
+                    resetCreateOrderForm();
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  disabled={createOrderSaving}
+                  onClick={handleCreateAdminOrder}
+                >
+                  {createOrderSaving ? "Creating..." : "Create EFT Order"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
         className={`modal order-detail-modal ${selectedOrder ? "is-active" : ""}`}
         role="dialog"
         aria-modal="true"
@@ -9084,9 +10447,17 @@ export function AdminOrdersView() {
                 </p>
               </div>
               <div className="admin-order-detail__chips">
-                <span className={`admin-status admin-status--${normalizePaymentStatus(selectedOrder)}`}>
-                  Payment: {normalizePaymentStatus(selectedOrder)}
+                <span className={`admin-status admin-status--${selectedPaymentMethod}`}>
+                  Method: {selectedPaymentMethod}
                 </span>
+                <span className={`admin-status admin-status--${selectedPaymentStatus}`}>
+                  Payment: {selectedPaymentStatus}
+                </span>
+                {selectedPaymentMethod === PAYMENT_METHODS.EFT && (
+                  <span className={`admin-status admin-status--${selectedPaymentApprovalStatus}`}>
+                    Approval: {selectedPaymentApprovalStatus}
+                  </span>
+                )}
                 <span className="admin-status">
                   Delivery: {normalizeDeliveryStatus(selectedOrder).replace(/-/g, " ")}
                 </span>
@@ -9099,9 +10470,9 @@ export function AdminOrdersView() {
                 <div className="admin-order-detail__grid">
                   <div>
                     <h4>Customer</h4>
-                    <p>{selectedOrder.customer.fullName || "—"}</p>
-                    <p className="modal__meta">{selectedOrder.customer.email || "—"}</p>
-                    {selectedOrder.customer.phone && <p className="modal__meta">{selectedOrder.customer.phone}</p>}
+                    <p>{selectedOrder.customer?.fullName || "—"}</p>
+                    <p className="modal__meta">{selectedOrder.customer?.email || "—"}</p>
+                    {selectedOrder.customer?.phone && <p className="modal__meta">{selectedOrder.customer.phone}</p>}
                     {shippingAddressLabel && <p className="modal__meta">{shippingAddressLabel}</p>}
                   </div>
                   <div>
@@ -9113,20 +10484,34 @@ export function AdminOrdersView() {
                       <p className="modal__meta">Shipping: {formatPriceLabel(selectedOrder.shippingCost)}</p>
                     )}
                     <p className="modal__meta">Total: {formatPriceLabel(selectedOrder.totalPrice)}</p>
-                    {selectedOrder.payfast.paymentReference && (
-                      <p className="modal__meta">Ref: {selectedOrder.payfast.paymentReference}</p>
+                    {selectedPayfast.paymentReference && (
+                      <p className="modal__meta">Ref: {selectedPayfast.paymentReference}</p>
                     )}
-                    {selectedOrder.payfast.paymentId && (
-                      <p className="modal__meta">PayFast ID: {selectedOrder.payfast.paymentId}</p>
+                    {selectedPayfast.paymentId && (
+                      <p className="modal__meta">PayFast ID: {selectedPayfast.paymentId}</p>
+                    )}
+                    {selectedOrder.paymentProof?.storagePath && (
+                      <p className="modal__meta">
+                        Proof:{" "}
+                        {paymentProofUrlLoading ? (
+                          "Loading..."
+                        ) : paymentProofUrl ? (
+                          <a href={paymentProofUrl} target="_blank" rel="noopener noreferrer">
+                            View proof
+                          </a>
+                        ) : (
+                          "Unavailable"
+                        )}
+                      </p>
                     )}
                   </div>
                   <div>
                     <h4>Delivery</h4>
-                    {selectedOrder.shipping.courierName && (
-                      <p className="modal__meta">Courier: {selectedOrder.shipping.courierName}</p>
+                    {selectedShipping.courierName && (
+                      <p className="modal__meta">Courier: {selectedShipping.courierName}</p>
                     )}
-                    {selectedOrder.shipping.province && (
-                      <p className="modal__meta">Province: {selectedOrder.shipping.province}</p>
+                    {selectedShipping.province && (
+                      <p className="modal__meta">Province: {selectedShipping.province}</p>
                     )}
                     {selectedOrder.trackingLink ? (
                       <a
@@ -9149,25 +10534,25 @@ export function AdminOrdersView() {
                 <div>
                   <h4>Items</h4>
                   <ul className="order-items">
-                    {selectedOrder.items.map((item) => (
+                    {(selectedOrder.items || []).map((item) => (
                       <li key={`${selectedOrder.id}-${item.id}`}>
                         <strong>{item.name}</strong> ×{item.quantity || 1}
                         <span className="modal__meta">{formatPriceLabel(item.price)}</span>
-                        {item.metadata.type === "workshop" && (
+                        {item.metadata?.type === "workshop" && (
                           <span className="modal__meta">
-                            {item.metadata.sessionDayLabel ||
-                              item.metadata.sessionLabel ||
+                            {item.metadata?.sessionDayLabel ||
+                              item.metadata?.sessionLabel ||
                               "Session"}{" "}
-                            · {item.metadata.attendeeCount || 1} attendee(s)
+                            · {item.metadata?.attendeeCount || 1} attendee(s)
                           </span>
                         )}
-                        {item.metadata.type === "product" && item.metadata.variantLabel && (
+                        {item.metadata?.type === "product" && item.metadata?.variantLabel && (
                           <span className="modal__meta">
                             Variant: {item.metadata.variantLabel}
                           </span>
                         )}
-                        {item.metadata.type === "product" &&
-                          (item.metadata.preorderSendMonth || item.metadata.preorderSendMonthLabel) && (
+                        {item.metadata?.type === "product" &&
+                          (item.metadata?.preorderSendMonth || item.metadata?.preorderSendMonthLabel) && (
                             <span className="modal__meta">
                               Send month:{" "}
                               {item.metadata.preorderSendMonthLabel ||
@@ -9189,17 +10574,21 @@ export function AdminOrdersView() {
                       <select
                         className="input"
                         value={normalizeOrderStatus(selectedOrder.status)}
+                        disabled={selectedStatusLocked}
                         onChange={(event) =>
                           handleUpdateOrderStatus(selectedOrder.id, event.target.value)
                         }
                       >
-                        {ORDER_STATUSES.map((status) => (
+                        {selectedStatusOptions.map((status) => (
                           <option key={status} value={status}>
-                            {status}
+                            {formatOrderStatusLabel(status)}
                           </option>
                         ))}
                       </select>
                     </label>
+                    {selectedStatusLocked && (
+                      <p className="modal__meta">EFT payment must be approved before fulfilment.</p>
+                    )}
                     <button
                       className="btn btn--secondary"
                       type="button"
@@ -9213,14 +10602,45 @@ export function AdminOrdersView() {
                     >
                       {selectedOrder.trackingLink ? "Update Tracking" : "Add Tracking"}
                     </button>
-                    <button
-                      className="btn btn--primary"
-                      type="button"
-                      disabled={paymentUpdating}
-                      onClick={() => handleMarkPaymentReceived(selectedOrder)}
-                    >
-                      {paymentUpdating ? "Updating…" : "Mark Payment Received"}
-                    </button>
+                    {selectedPaymentMethod === PAYMENT_METHODS.EFT ? (
+                      <>
+                        {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.PENDING && (
+                          <>
+                            <button
+                              className="btn btn--primary"
+                              type="button"
+                              disabled={eftReviewLoading}
+                              onClick={() => handleReviewEftPayment(selectedOrder, "approve")}
+                            >
+                              {eftReviewLoading ? "Working..." : "Approve Payment"}
+                            </button>
+                            <button
+                              className="btn btn--secondary"
+                              type="button"
+                              disabled={eftReviewLoading}
+                              onClick={() => handleReviewEftPayment(selectedOrder, "reject")}
+                            >
+                              {eftReviewLoading ? "Working..." : "Reject Payment"}
+                            </button>
+                          </>
+                        )}
+                        {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED && (
+                          <span className="admin-status admin-status--approved">Payment approved</span>
+                        )}
+                        {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED && (
+                          <span className="admin-status admin-status--rejected">Payment rejected</span>
+                        )}
+                      </>
+                    ) : (
+                      <button
+                        className="btn btn--primary"
+                        type="button"
+                        disabled={paymentUpdating}
+                        onClick={() => handleMarkPaymentReceived(selectedOrder)}
+                      >
+                        {paymentUpdating ? "Updating..." : "Mark Payment Received"}
+                      </button>
+                    )}
                   </div>
                   <div className="admin-order-detail__actions-grid">
                     <label>
@@ -9297,6 +10717,29 @@ export function AdminOrdersView() {
                       {resendOrderEmailSending ? "Sending…" : "Resend Order Email"}
                     </button>
                   </div>
+                  <div className="admin-order-email-status">
+                    <p className="modal__meta">
+                      <strong>Order email:</strong>{" "}
+                      {selectedOrderEmailStatusLabel}
+                      {selectedOrderEmailStatus !== "unknown" ? ` (${selectedOrderEmailTemplateLabel})` : ""}
+                    </p>
+                    {selectedOrderEmailAttemptedAtLabel && (
+                      <p className="modal__meta">
+                        Last attempt: {selectedOrderEmailAttemptedAtLabel}
+                        {selectedOrderEmailLastAttemptSource ? ` via ${selectedOrderEmailLastAttemptSource}` : ""}
+                      </p>
+                    )}
+                    {selectedOrderEmailError && (
+                      <p className="modal__meta admin-order-email-status__error">
+                        Details: {selectedOrderEmailError}
+                      </p>
+                    )}
+                    {selectedOrderEmailNeedsRetry && (
+                      <p className="modal__meta admin-order-email-status__warning">
+                        Customer may not have received the order email yet. Use "Resend Order Email".
+                      </p>
+                    )}
+                  </div>
                   {isPreorderedOrder(selectedOrder) && (
                     <div className="admin-order-detail__actions-row">
                       <label>
@@ -9318,10 +10761,10 @@ export function AdminOrdersView() {
                       </button>
                     </div>
                   )}
-                  {selectedOrder.payfast.gatewayResponse && (
+                  {selectedPayfast.gatewayResponse && (
                     <p className="modal__meta">
-                      Gateway: {selectedOrder.payfast.gatewayResponse} · Amount verified:{" "}
-                      {selectedOrder.payfast.validatedWithGateway ? "yes" : "no"}
+                      Gateway: {selectedPayfast.gatewayResponse} · Amount verified:{" "}
+                      {selectedPayfast.validatedWithGateway ? "yes" : "no"}
                     </p>
                   )}
                 </div>

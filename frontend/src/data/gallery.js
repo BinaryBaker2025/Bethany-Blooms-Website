@@ -13,6 +13,7 @@ import galleryOutdoor from "../assets/photos/workshop-outdoor-venue.jpg";
 import galleryDetailOne from "../assets/photos/workshop-table-details-1.png";
 import galleryDetailTwo from "../assets/photos/workshop-table-details-2.png";
 import galleryParticipant from "../assets/photos/workshop-participants-round.png";
+import { CUT_FLOWER_GALLERY_ITEMS } from "../lib/cutFlowerImages.js";
 
 export const galleryItems = [
   {
@@ -105,4 +106,5 @@ export const galleryItems = [
     alt: "Workshop participants gathered around a table",
     caption: "Community moments captured mid-creation",
   },
+  ...CUT_FLOWER_GALLERY_ITEMS,
 ];

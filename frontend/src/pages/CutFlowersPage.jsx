@@ -5,9 +5,7 @@ import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useModal } from "../context/ModalContext.jsx";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
-import heroBackground from "../assets/photos/workshop-outdoor-venue.jpg";
-import cutFlowersTable from "../assets/photos/workshop-table-long.jpg";
-import cutFlowersDetails from "../assets/photos/workshop-table-details-2.png";
+import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
 
 const classDateFormatter = new Intl.DateTimeFormat("en-ZA", {
   dateStyle: "long",
@@ -276,17 +274,25 @@ function CutFlowersPage() {
       const start = new Date(baseDate);
       start.setHours(0, 0, 0, 0);
       const cursor = start > today ? start : today;
-      const windowDays = 90;
-      for (let offset = 0; offset <= windowDays; offset += 1) {
-        const nextDate = new Date(cursor);
-        nextDate.setDate(cursor.getDate() + offset);
-        if (!repeatDays.includes(nextDate.getDay())) continue;
+      const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      monthEnd.setHours(23, 59, 59, 999);
+      if (cursor.getTime() > monthEnd.getTime()) {
+        return sessions;
+      }
+
+      const nextDate = new Date(cursor);
+      while (nextDate.getTime() <= monthEnd.getTime()) {
+        if (!repeatDays.includes(nextDate.getDay())) {
+          nextDate.setDate(nextDate.getDate() + 1);
+          continue;
+        }
         const dateKey = nextDate.toISOString().slice(0, 10);
         slots.forEach((slot, index) => {
           const sessionDate = combineDateAndTime(nextDate, slot.time);
           if (!sessionDate) return;
           sessions.push(buildSession(sessionDate, slot, index, dateKey));
         });
+        nextDate.setDate(nextDate.getDate() + 1);
       }
       return sessions;
     }
@@ -312,7 +318,7 @@ function CutFlowersPage() {
         description: classItem.description,
         location: classItem.location,
         unitPrice: classItem.priceNumber ?? null,
-        image: classItem.image || cutFlowersTable,
+        image: classItem.image || CUT_FLOWER_PAGE_IMAGES.cutFlowersClassFallback,
         sessions,
         options: classItem.options || [],
       },
@@ -346,8 +352,15 @@ function CutFlowersPage() {
         <div className="section__inner">
           <Hero
             variant="cut"
-            background={heroBackground}
-            media={<img src={cutFlowersTable} alt="Visitors cutting flowers at the Bethany Blooms farm" loading="lazy" decoding="async"/>}
+            background={CUT_FLOWER_PAGE_IMAGES.cutFlowersHeroBackground}
+            media={
+              <img
+                src={CUT_FLOWER_PAGE_IMAGES.cutFlowersHeroMedia}
+                alt="Visitors cutting flowers at the Bethany Blooms farm"
+                loading="lazy"
+                decoding="async"
+              />
+            }
           >
             <span className="badge">Cut Flowers</span>
             <h1>Visit The Farm & Cut Your Own Flowers</h1>
@@ -401,7 +414,7 @@ function CutFlowersPage() {
                 <article className="card cut-flower-card" key={classItem.id}>
                   <div className="cut-flower-card__media">
                     <img
-                      src={classItem.image || cutFlowersTable}
+                      src={classItem.image || CUT_FLOWER_PAGE_IMAGES.cutFlowersClassFallback}
                       alt={`${classItem.title} class`} loading="lazy" decoding="async"/>
                     <span className="cut-flower-card__badge">{classItem.displayDate}</span>
                     {classItem.priceLabel && (
@@ -460,7 +473,12 @@ function CutFlowersPage() {
       <section className="section section--tight">
         <div className="section__inner cut-flowers-process">
           <div className="cut-flowers-process__media">
-            <img src={cutFlowersDetails} alt="Cut flowers styled on a Bethany Blooms table" loading="lazy" decoding="async"/>
+            <img
+              src={CUT_FLOWER_PAGE_IMAGES.cutFlowersProcess}
+              alt="Cut flowers styled on a Bethany Blooms table"
+              loading="lazy"
+              decoding="async"
+            />
           </div>
           <div className="cut-flowers-process__steps">
             <Reveal as="div">

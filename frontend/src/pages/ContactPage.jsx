@@ -5,6 +5,11 @@ import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import heroBackground from "../assets/hero-flowers.svg";
 import { getFirebaseFunctions } from "../lib/firebase.js";
+import {
+  COMPANY_PHONE_LOCAL_DISPLAY,
+  COMPANY_PHONE_TEL_HREF,
+  buildWhatsAppLink,
+} from "../lib/contactInfo.js";
 
 const INITIAL_FORM = {
   name: "",
@@ -135,7 +140,7 @@ function ContactPage() {
                       type="tel"
                       value={formData.phone}
                       onChange={updateField("phone")}
-                      placeholder="+27 74 455 5590"
+                      placeholder={COMPANY_PHONE_LOCAL_DISPLAY}
                     />
                   </div>
                   <div className="contact-form__field">
@@ -215,8 +220,8 @@ function ContactPage() {
               </div>
               <div className="contact-detail-card">
                 <p className="contact-detail-card__label">Phone</p>
-                <a className="contact-detail-card__value" href="tel:+27744555590">
-                  +27 74 455 5590
+                <a className="contact-detail-card__value" href={COMPANY_PHONE_TEL_HREF}>
+                  {COMPANY_PHONE_LOCAL_DISPLAY}
                 </a>
                 <p className="contact-detail-card__meta">Tuesday – Saturday, 09:00 – 16:00 (SAST)</p>
               </div>
@@ -225,7 +230,12 @@ function ContactPage() {
                 <p className="contact-detail-card__value">Vereeniging, South Africa</p>
                 <p className="contact-detail-card__meta">Visits by appointment so we can prep blooms just for you.</p>
               </div>
-              <a className="contact-panel__cta" href="https://wa.me/27744555590" target="_blank" rel="noopener">
+              <a
+                className="contact-panel__cta"
+                href={buildWhatsAppLink("Hi Bethany Blooms, I would like help with an enquiry.")}
+                target="_blank"
+                rel="noopener"
+              >
                 Chat via WhatsApp
               </a>
             </Reveal>
@@ -253,7 +263,7 @@ function ContactPage() {
             <Reveal as="article" className="card" delay={120}>
               <h3 className="card__title">Phone</h3>
               <p>
-                <a href="tel:+27744555590">+27 74 455 5590</a>
+                <a href={COMPANY_PHONE_TEL_HREF}>{COMPANY_PHONE_LOCAL_DISPLAY}</a>
               </p>
             </Reveal>
             <Reveal as="article" className="card" delay={240}>

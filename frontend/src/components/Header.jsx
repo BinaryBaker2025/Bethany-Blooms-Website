@@ -15,6 +15,7 @@ function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState(null);
   const closeTimer = useRef(null);
+  const headerRef = useRef(null);
   const location = useLocation();
   const categoryLinks = useMemo(
     () =>
@@ -80,6 +81,28 @@ function Header() {
     };
   }, []);
 
+  useEffect(() => {
+    const syncHeaderHeight = () => {
+      if (!headerRef.current) return;
+      const headerHeight = Math.ceil(headerRef.current.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--site-header-height", `${headerHeight}px`);
+    };
+
+    syncHeaderHeight();
+    window.addEventListener("resize", syncHeaderHeight);
+
+    let resizeObserver = null;
+    if (typeof ResizeObserver !== "undefined" && headerRef.current) {
+      resizeObserver = new ResizeObserver(syncHeaderHeight);
+      resizeObserver.observe(headerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener("resize", syncHeaderHeight);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, []);
+
   const toggleDropdown = (label) => {
     setOpenDropdown((current) => (current === label ? null : label));
   };
@@ -105,7 +128,7 @@ function Header() {
   };
 
   return (
-    <header>
+    <header ref={headerRef} className="site-header">
       <nav className="nav" onMouseLeave={handleLeave}>
         <NavLink to="/" className="brand" aria-label="Bethany Blooms home">
           <img

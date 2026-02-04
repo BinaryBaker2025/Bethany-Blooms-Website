@@ -1,14 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useCart } from "../context/CartContext.jsx";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
+import {
+  EFT_BANK_DETAILS,
+  PAYMENT_METHODS,
+} from "../lib/paymentMethods.js";
+import {
+  clearPayfastPendingSession,
+  setPayfastPendingSession,
+} from "../lib/payfastSession.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
 import { getStockStatus } from "../lib/stockStatus.js";
 
 const currency = (value) => `R${value.toFixed(2)}`;
 const PAYFAST_FUNCTION_URL =
   "https://us-central1-bethanyblooms-89dcc.cloudfunctions.net/createPayfastPaymentHttp";
+const EFT_FUNCTION_URL =
+  "https://us-central1-bethanyblooms-89dcc.cloudfunctions.net/createEftOrderHttp";
 const STEP_ORDER = ["contact", "shipping", "payment", "review"];
 const STEP_LABELS = {
   contact: "Contact",
@@ -18,6 +28,7 @@ const STEP_LABELS = {
 };
 
 function CartPage() {
+  const navigate = useNavigate();
   usePageMetadata({
     title: "Your Cart | Bethany Blooms",
     description: "Review your Bethany Blooms items, add your details, and complete checkout.",
@@ -47,6 +58,7 @@ function CartPage() {
     postalCode: "",
   });
   const [selectedCourierId, setSelectedCourierId] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS.PAYFAST);
   const [payfastConsent, setPayfastConsent] = useState(false);
   const [activeStep, setActiveStep] = useState(STEP_ORDER[0]);
   const [placingOrder, setPlacingOrder] = useState(false);
@@ -137,7 +149,8 @@ function CartPage() {
       postalCodeValid &&
       selectedCourierId,
   );
-  const isPaymentComplete = payfastConsent;
+  const isPaymentComplete =
+    paymentMethod === PAYMENT_METHODS.PAYFAST ? payfastConsent : true;
   const stepCompletion = {
     contact: isContactComplete,
     shipping: isShippingComplete,
@@ -175,7 +188,12 @@ function CartPage() {
   const nextStep = STEP_ORDER[activeIndex + 1];
   const primaryActionLabel = (() => {
     if (activeStep === "review") {
-      return placingOrder ? "Placing Order..." : "Place Order";
+      if (placingOrder) {
+        return paymentMethod === PAYMENT_METHODS.EFT
+          ? "Submitting EFT Order..."
+          : "Placing Order...";
+      }
+      return "Place Order";
     }
     if (activeStep === "contact" && !isContactComplete) {
       return "Continue with checkout";
@@ -272,7 +290,13 @@ function CartPage() {
       return { ok: false, message: "Please complete your delivery address and courier selection to continue." };
     }
     if (step === "payment" && !isPaymentComplete) {
-      return { ok: false, message: "Please confirm the PayFast payment step to continue." };
+      return {
+        ok: false,
+        message:
+          paymentMethod === PAYMENT_METHODS.PAYFAST
+            ? "Please confirm the PayFast payment step to continue."
+            : "Please choose your payment method to continue.",
+      };
     }
     return { ok: true };
   };
@@ -334,7 +358,13 @@ function CartPage() {
         };
       }
       if (!isPaymentComplete) {
-        return { step: "payment", message: "Please confirm the PayFast payment step before checkout." };
+        return {
+          step: "payment",
+          message:
+            paymentMethod === PAYMENT_METHODS.PAYFAST
+              ? "Please confirm the PayFast payment step before checkout."
+              : "Please choose your payment method before checkout.",
+        };
       }
       return null;
     })();
@@ -384,48 +414,109 @@ function CartPage() {
     const finalTotal = orderTotal + shippingCost;
 
     try {
-      const response = await fetch(PAYFAST_FUNCTION_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const checkoutPayload = {
+        customer: {
+          fullName: customer.fullName.trim(),
+          email: customer.email.trim(),
+          phone: customer.phone.trim(),
+          address: customer.address.trim(),
         },
-        body: JSON.stringify({
-          customer: {
-            fullName: customer.fullName.trim(),
-            email: customer.email.trim(),
-            phone: customer.phone.trim(),
-            address: customer.address.trim(),
+        items: orderItems,
+        subtotal: orderTotal,
+        shippingCost,
+        shippingAddress: normalizedShippingAddress,
+        shipping: selectedCourier
+          ? {
+              courierId: selectedCourier.id,
+              courierName: selectedCourier.name,
+              courierPrice: selectedCourier.price,
+              province: normalizedShippingAddress.province,
+            }
+          : null,
+        totalPrice: finalTotal,
+      };
+
+      if (paymentMethod === PAYMENT_METHODS.EFT) {
+        const response = await fetch(EFT_FUNCTION_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
           },
-          items: orderItems,
-          subtotal: orderTotal,
-          shippingCost,
-          shippingAddress: normalizedShippingAddress,
-          shipping: selectedCourier
-            ? {
-                courierId: selectedCourier.id,
-                courierName: selectedCourier.name,
-                courierPrice: selectedCourier.price,
-                province: normalizedShippingAddress.province,
-              }
-            : null,
-          totalPrice: finalTotal,
-          returnUrl: `${window.location.origin}/payment/success`,
-          cancelUrl: `${window.location.origin}/payment/cancel`,
-        }),
-      });
+          body: JSON.stringify({
+            ...checkoutPayload,
+            paymentMethod: PAYMENT_METHODS.EFT,
+          }),
+        });
 
-      const payfastData = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(payfastData?.error || "Unable to reach PayFast gateway.");
+        const eftData = await response.json().catch(() => null);
+        if (!response.ok || !eftData?.ok) {
+          throw new Error(eftData?.error || "Unable to create EFT order.");
+        }
+
+        const orderNumber = eftData.orderNumber || null;
+        const proofUploadToken = (eftData.proofUploadToken || "").toString().trim() || null;
+        const proofUploadExpiresAt =
+          (eftData.proofUploadExpiresAt || "").toString().trim() || null;
+        const orderQuery = new URLSearchParams();
+        if (eftData.orderId) orderQuery.set("orderId", eftData.orderId);
+        if (Number.isFinite(Number(orderNumber))) {
+          orderQuery.set("orderNumber", String(orderNumber));
+        }
+        if (proofUploadToken) orderQuery.set("proofUploadToken", proofUploadToken);
+        if (proofUploadExpiresAt) orderQuery.set("proofUploadExpiresAt", proofUploadExpiresAt);
+        const orderSearch = orderQuery.toString() ? `?${orderQuery.toString()}` : "";
+        setOrderSuccess("EFT order submitted. Awaiting admin payment approval.");
+        clearCart();
+        navigate(`/payment/eft-submitted${orderSearch}`, {
+          state: {
+            orderId: eftData.orderId || null,
+            orderNumber,
+            status: eftData.status || "pending-payment-approval",
+            paymentApprovalStatus: eftData.paymentApprovalStatus || "pending",
+            bankDetails: eftData.bankDetails || EFT_BANK_DETAILS,
+            proofUploadToken,
+            proofUploadExpiresAt,
+          },
+        });
+      } else {
+        clearPayfastPendingSession();
+        const response = await fetch(PAYFAST_FUNCTION_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...checkoutPayload,
+            paymentMethod: PAYMENT_METHODS.PAYFAST,
+            returnUrl: `${window.location.origin}/payment/success`,
+            cancelUrl: `${window.location.origin}/payment/cancel`,
+          }),
+        });
+
+        const payfastData = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(payfastData?.error || "Unable to reach PayFast gateway.");
+        }
+
+        if (!payfastData?.url || !payfastData?.fields) {
+          throw new Error("PayFast gateway returned an invalid response.");
+        }
+
+        const paymentReference = (
+          payfastData?.fields?.m_payment_id ||
+          payfastData?.fields?.custom_str1 ||
+          ""
+        )
+          .toString()
+          .trim();
+        setPayfastPendingSession({
+          paymentReference: paymentReference || null,
+          createdAt: new Date().toISOString(),
+        });
+
+        setOrderSuccess("Redirecting to PayFast...");
+        submitPayfastForm(payfastData.url, payfastData.fields);
       }
-
-      if (!payfastData?.url || !payfastData?.fields) {
-        throw new Error("PayFast gateway returned an invalid response.");
-      }
-
-      setOrderSuccess("Redirecting to PayFast...");
-      clearCart();
-      submitPayfastForm(payfastData.url, payfastData.fields);
     } catch (error) {
       setOrderError(error.message);
     } finally {
@@ -864,20 +955,76 @@ function CartPage() {
 
                       {step === "payment" && (
                         <div className="checkout-step__fields">
-                          <p className="modal__meta">
-                            Payments are securely processed by PayFast. You'll be redirected to complete payment.
-                          </p>
-                          <label className="checkbox">
-                            <input
-                              type="checkbox"
-                              checked={payfastConsent}
-                              onChange={(event) => setPayfastConsent(event.target.checked)}
-                            />
-                            <span>I understand I'll be redirected to PayFast to complete payment.</span>
-                          </label>
-                          <p className="modal__meta">
-                            Supported cards and EFT options will appear on the PayFast payment screen.
-                          </p>
+                          <p className="modal__meta">Choose how you want to pay for this order.</p>
+                          <div className="checkout-payment-methods">
+                            <label
+                              className={`checkout-payment-method ${
+                                paymentMethod === PAYMENT_METHODS.PAYFAST ? "is-selected" : ""
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="payment-method"
+                                value={PAYMENT_METHODS.PAYFAST}
+                                checked={paymentMethod === PAYMENT_METHODS.PAYFAST}
+                                onChange={() => {
+                                  setPaymentMethod(PAYMENT_METHODS.PAYFAST);
+                                  setOrderError(null);
+                                }}
+                              />
+                              <span>PayFast (Card / Instant EFT)</span>
+                            </label>
+                            <label
+                              className={`checkout-payment-method ${
+                                paymentMethod === PAYMENT_METHODS.EFT ? "is-selected" : ""
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="payment-method"
+                                value={PAYMENT_METHODS.EFT}
+                                checked={paymentMethod === PAYMENT_METHODS.EFT}
+                                onChange={() => {
+                                  setPaymentMethod(PAYMENT_METHODS.EFT);
+                                  setPayfastConsent(false);
+                                  setOrderError(null);
+                                }}
+                              />
+                              <span>EFT (Manual admin approval required)</span>
+                            </label>
+                          </div>
+
+                          {paymentMethod === PAYMENT_METHODS.PAYFAST && (
+                            <>
+                              <p className="modal__meta">
+                                Payments are securely processed by PayFast. You&apos;ll be redirected to complete
+                                payment.
+                              </p>
+                              <label className="checkbox">
+                                <input
+                                  type="checkbox"
+                                  checked={payfastConsent}
+                                  onChange={(event) => setPayfastConsent(event.target.checked)}
+                                />
+                                <span>I understand I&apos;ll be redirected to PayFast to complete payment.</span>
+                              </label>
+                              <p className="modal__meta">
+                                Supported cards and instant EFT options will appear on the PayFast screen.
+                              </p>
+                            </>
+                          )}
+
+                          {paymentMethod === PAYMENT_METHODS.EFT && (
+                            <div className="checkout-eft">
+                              <p className="modal__meta">
+                                Admin must verify and approve EFT payment before your order can be fulfilled.
+                              </p>
+                              <p className="modal__meta">
+                                Banking details and your exact order reference are shown after you place the EFT
+                                order.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -906,8 +1053,18 @@ function CartPage() {
                             </div>
                             <div className="checkout-review__card">
                               <h3>Payment</h3>
-                              <p>{payfastConsent ? "PayFast redirect confirmed" : "Confirm payment step"}</p>
-                              <p className="modal__meta">Secure PayFast checkout.</p>
+                              <p>
+                                {paymentMethod === PAYMENT_METHODS.EFT
+                                  ? "EFT with admin approval"
+                                  : payfastConsent
+                                    ? "PayFast redirect confirmed"
+                                    : "Confirm PayFast step"}
+                              </p>
+                              <p className="modal__meta">
+                                {paymentMethod === PAYMENT_METHODS.EFT
+                                  ? "After order placement, you will receive exact EFT transfer details and reference."
+                                  : "Secure PayFast checkout."}
+                              </p>
                             </div>
                           </div>
                         </div>

@@ -11,10 +11,9 @@ import homePhotoOne from "../assets/photos/workshop-frame-hand-pink.jpeg";
 import homePhotoTwo from "../assets/photos/workshop-frame-hand-neutral.jpeg";
 import homePhotoThree from "../assets/photos/workshop-flowers-trays.jpg";
 import homePhotoFour from "../assets/photos/workshop-table-long.jpg";
-import workshopOutdoorVenue from "../assets/photos/workshop-outdoor-venue.jpg";
 import workshopGuestsSmiling from "../assets/photos/workshop-guests-smiling.jpg";
-import workshopTableLongClose from "../assets/photos/workshop-table-long-close.jpg";
 import workshopTableDetailsOne from "../assets/photos/workshop-table-details-1.png";
+import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
 import { testimonials } from "../data/testimonials.js";
 
 const FALLBACK_PRODUCTS = [
@@ -33,7 +32,7 @@ const FALLBACK_PRODUCTS = [
     description: "Fresh stems in coordinating palettes, ready for styling or gifting.",
     price: "From R600",
     category: "cut-flower",
-    image: workshopOutdoorVenue,
+    image: CUT_FLOWER_PAGE_IMAGES.homeFallbackMarketBucket,
     status: "live",
   },
   {
@@ -42,7 +41,7 @@ const FALLBACK_PRODUCTS = [
     description: "Hand-tied bouquet featuring the best blooms of the week.",
     price: "From R350",
     category: "cut-flower",
-    image: homePhotoTwo,
+    image: CUT_FLOWER_PAGE_IMAGES.homeFallbackBouquet,
     status: "live",
   },
   {
@@ -163,6 +162,19 @@ function HomePage() {
   const heroSlides = useMemo(
     () => [
       {
+        id: "hero-cut-flowers",
+        variant: "cut",
+        badge: "Cut Flowers",
+        title: "Cut Flowers Styled For Celebrations",
+        description:
+          "Order lush seasonal arrangements, event styling, and on-site florals designed to suit intimate gatherings, editorials, or heartfelt gifting moments.",
+        background: CUT_FLOWER_PAGE_IMAGES.homeHeroBackground,
+        mediaImage: CUT_FLOWER_PAGE_IMAGES.homeHeroMedia,
+        mediaAlt: "Bethany Blooms long floral styling table outdoors",
+        primaryCta: { label: "Plan Your Florals", href: "/contact", variant: "primary" },
+        secondaryCta: { label: "View Gallery", href: "/gallery", variant: "secondary" },
+      },
+      {
         id: "hero-pressed-flowers",
         variant: "pressed",
         badge: "Pressed Flowers",
@@ -174,19 +186,6 @@ function HomePage() {
         mediaAlt: "Bethany Blooms workshop experience",
         primaryCta: { label: "Book a Workshop", href: "/workshops", variant: "primary" },
         secondaryCta: { label: "Explore Products", href: "/products", variant: "secondary" },
-      },
-      {
-        id: "hero-cut-flowers",
-        variant: "cut",
-        badge: "Cut Flowers",
-        title: "Cut Flowers Styled For Celebrations",
-        description:
-          "Order lush seasonal arrangements, event styling, and on-site florals designed to suit intimate gatherings, editorials, or heartfelt gifting moments.",
-        background: workshopOutdoorVenue,
-        mediaImage: workshopTableLongClose,
-        mediaAlt: "Bethany Blooms long floral styling table outdoors",
-        primaryCta: { label: "Plan Your Florals", href: "/contact", variant: "primary" },
-        secondaryCta: { label: "View Gallery", href: "/gallery", variant: "secondary" },
       },
       {
         id: "hero-studio-products",
@@ -227,8 +226,8 @@ function HomePage() {
             <Reveal as="article" className="home-offering-card" delay={60}>
               <figure className="home-offering-card__media">
                 <img
-                  src={workshopTableLongClose}
-                  alt="Lush cut flowers styled along a long celebration table"
+                  src={CUT_FLOWER_PAGE_IMAGES.homeOfferCard}
+                  alt="Fresh cut flowers from the Bethany Blooms farm"
                   loading="lazy"
                   decoding="async"
                 />
@@ -276,14 +275,20 @@ function HomePage() {
           <Reveal as="div">
             <span className="badge">Inside the Studio</span>
             <h2>Where Memories Take Shape</h2>
-            <p>Every workshop blends joyful community with colourful blooms. Here’s a peek at recent sessions.</p>
+            <p>From pressed keepsakes to fresh farm cuts, here is a peek at recent Bethany Blooms creations.</p>
           </Reveal>
           <div className="home-photo-grid">
             {[
               { src: homePhotoOne, alt: "Pressed floral frame with pink blooms held outside" },
               { src: homePhotoTwo, alt: "Pressed floral art in soft neutral tones" },
-              { src: homePhotoThree, alt: "Colourful trays of dried flowers ready for a workshop" },
-              { src: homePhotoFour, alt: "Long Bethany Blooms workshop table styled with blooms" },
+              {
+                src: CUT_FLOWER_PAGE_IMAGES.homeFallbackMarketBucket,
+                alt: "Fresh cut flower stems arranged in bright seasonal colours",
+              },
+              {
+                src: CUT_FLOWER_PAGE_IMAGES.homeFallbackBouquet,
+                alt: "Hand-tied cut flower bouquet prepared from farm blooms",
+              },
             ].map((item, index) => (
               <Reveal as="figure" className="home-photo-grid__item" key={item.src} delay={index * 90}>
                 <img src={item.src} alt={item.alt} loading="lazy" decoding="async"/>

@@ -74,6 +74,15 @@ service cloud.firestore {
           "orderNumber",
           "trackingLink",
           "paymentStatus",
+          "paymentMethod",
+          "paymentApprovalStatus",
+          "paymentApproval",
+          "paymentProof",
+          "payfast",
+          "paidAt",
+          "updatedAt",
+          "deliveryMethod",
+          "courierName",
         ])
         && data.customer.keys().hasOnly(["fullName", "email", "phone", "address"])
         && data.customer.fullName is string && data.customer.fullName.size() > 0
@@ -98,9 +107,63 @@ service cloud.firestore {
         && data.totalPrice is number && data.totalPrice >= 0
         && data.status is string
         && data.paymentStatus is string
+        && (!("paymentMethod" in data) || data.paymentMethod is string)
+        && (!("paymentApprovalStatus" in data) || data.paymentApprovalStatus is string)
+        && (!("deliveryMethod" in data) || data.deliveryMethod is string)
+        && (!("courierName" in data) || data.courierName is string)
+        && (!("updatedAt" in data) || data.updatedAt == null || data.updatedAt is timestamp)
+        && (!("paidAt" in data) || data.paidAt == null || data.paidAt is timestamp)
+        && (!("payfast" in data) || data.payfast == null || data.payfast is map)
+        && (!("paymentApproval" in data) || data.paymentApproval == null || data.paymentApproval.keys().hasOnly([
+            "required",
+            "decision",
+            "decidedAt",
+            "decidedByUid",
+            "decidedByEmail",
+            "note",
+          ]))
+        && (!("paymentApproval" in data) || data.paymentApproval == null || data.paymentApproval.required is bool)
+        && (!("paymentApproval" in data) || data.paymentApproval == null || data.paymentApproval.decision is string)
+        && (!("paymentApproval" in data) || data.paymentApproval == null || data.paymentApproval.decidedAt == null || data.paymentApproval.decidedAt is timestamp)
+        && (!("paymentApproval" in data) || data.paymentApproval == null || data.paymentApproval.decidedByUid == null || data.paymentApproval.decidedByUid is string)
+        && (!("paymentApproval" in data) || data.paymentApproval == null || data.paymentApproval.decidedByEmail == null || data.paymentApproval.decidedByEmail is string)
+        && (!("paymentApproval" in data) || data.paymentApproval == null || data.paymentApproval.note == null || data.paymentApproval.note is string)
+        && (!("paymentProof" in data) || data.paymentProof == null || data.paymentProof.keys().hasOnly([
+            "storagePath",
+            "fileName",
+            "contentType",
+            "size",
+            "uploadedAt",
+          ]))
+        && (!("paymentProof" in data) || data.paymentProof == null || data.paymentProof.storagePath is string)
+        && (!("paymentProof" in data) || data.paymentProof == null || data.paymentProof.fileName is string)
+        && (!("paymentProof" in data) || data.paymentProof == null || data.paymentProof.contentType is string)
+        && (!("paymentProof" in data) || data.paymentProof == null || (data.paymentProof.size is number && data.paymentProof.size > 0 && data.paymentProof.size <= 10485760))
+        && (!("paymentProof" in data) || data.paymentProof == null || data.paymentProof.uploadedAt == null || data.paymentProof.uploadedAt is timestamp)
         && (("orderNumber" in data) ? (data.orderNumber is number && data.orderNumber >= 1000) : true)
         && (("trackingLink" in data) ? (data.trackingLink is string || data.trackingLink == null) : true)
         && request.resource.data.createdAt == request.time;
+    }
+
+    function paymentApprovalDecision(data) {
+      return ("paymentApprovalStatus" in data)
+        ? data.paymentApprovalStatus
+        : (
+          ("paymentApproval" in data)
+            && data.paymentApproval != null
+            && ("decision" in data.paymentApproval)
+              ? data.paymentApproval.decision
+              : "pending"
+        );
+    }
+
+    function eftStatusAllowed(data) {
+      return !(
+          ("paymentMethod" in data)
+          && data.paymentMethod == "eft"
+          && paymentApprovalDecision(data) != "approved"
+        )
+        || ["pending-payment-approval", "payment-rejected", "cancelled"].hasAny([data.status]);
     }
 
     match /users/{userId} {
@@ -155,7 +218,8 @@ service cloud.firestore {
 
     match /orders/{orderId} {
       allow create: if validOrder(request.resource.data);
-      allow read, update, delete: if isAdmin();
+      allow read, delete: if isAdmin();
+      allow update: if isAdmin() && eftStatusAllowed(request.resource.data);
     }
 
     match /config/{document=**} {

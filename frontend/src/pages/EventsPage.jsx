@@ -4,6 +4,7 @@ import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
+import { buildWhatsAppLink } from "../lib/contactInfo.js";
 import heroBackground from "../assets/photos/workshop-outdoor-venue.jpg";
 import galleryHero from "../assets/photos/workshop-table-long-close.jpg";
 
@@ -26,7 +27,6 @@ const weekdayLabels = [
   "Friday",
   "Saturday",
 ];
-const whatsappNumber = "27744555590";
 
 function formatRepeatLabel(repeatDays) {
   const days = Array.isArray(repeatDays) ? repeatDays : [];
@@ -59,14 +59,14 @@ function formatTimeRange(startTime, endTime) {
   return `${startLabel} – ${endLabel}`;
 }
 
-function buildWhatsAppLink(event) {
+function buildEventWhatsAppLink(event) {
   const hasDate = event?.displayDate && event.displayDate !== "Date coming soon";
   const title = event?.title ? `"${event.title}"` : "your events";
   const datePart = hasDate ? ` for ${event.displayDate}` : "";
   const timePart = event?.timeText ? ` (${event.timeText})` : "";
   const locationPart = event?.location ? ` at ${event.location}` : "";
   const message = `Hi Bethany Blooms, I'm interested in ${title}${datePart}${timePart}${locationPart}. Please share more details.`;
-  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+  return buildWhatsAppLink(message);
 }
 
 function parseDateValue(value) {
@@ -235,7 +235,7 @@ function EventsPage() {
                       )}
                       <a
                         className="btn btn--secondary"
-                        href={buildWhatsAppLink(event)}
+                        href={buildEventWhatsAppLink(event)}
                         target="_blank"
                         rel="noopener"
                       >

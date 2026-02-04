@@ -7,6 +7,7 @@ import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { formatPreorderSendMonth, getProductPreorderSendMonth } from "../lib/preorder.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
+import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
 import { getStockBadgeLabel, getStockStatus } from "../lib/stockStatus.js";
 
 const stripHtml = (value = "") =>
@@ -15,6 +16,13 @@ const stripHtml = (value = "") =>
     .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+const normalizeCategoryToken = (value = "") =>
+  value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
 
 function ProductsPage() {
   const { openCart } = useModal();
@@ -242,8 +250,25 @@ function ProductsPage() {
   const displayProducts = filteredProducts;
 
   const hasCategoryFilter = Boolean(activeCategoryParam);
+  const isCutFlowerCategory = useMemo(() => {
+    if (!hasCategoryFilter) return false;
+    const tokens = new Set([
+      normalizeCategoryToken(activeCategoryParam),
+      normalizeCategoryToken(activeCategory?.id),
+      normalizeCategoryToken(activeCategory?.slug),
+      normalizeCategoryToken(activeCategory?.name),
+    ].filter(Boolean));
+    return Array.from(tokens).some((token) =>
+      token === "cut-flower" ||
+      token === "cutflower" ||
+      token.includes("cut-flower") ||
+      token.includes("cutflower"),
+    );
+  }, [activeCategory?.id, activeCategory?.name, activeCategory?.slug, activeCategoryParam, hasCategoryFilter]);
+
+  const categoryCoverImage = (activeCategory?.coverImage && activeCategory.coverImage.trim()) || "";
   const heroImage =
-    (activeCategory?.coverImage && activeCategory.coverImage.trim()) ||
+    (isCutFlowerCategory ? CUT_FLOWER_PAGE_IMAGES.productsCutFlowerHero : categoryCoverImage) ||
     displayProducts[0]?.image ||
     normalizedProducts[0]?.image ||
     heroBackground;

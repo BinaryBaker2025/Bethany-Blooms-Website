@@ -4,6 +4,7 @@ import { useModal } from "../context/ModalContext.jsx";
 import Header from "./Header.jsx";
 import Footer from "./Footer.jsx";
 import BookingModal from "./BookingModal.jsx";
+import WhatsAppFloatingButton from "./WhatsAppFloatingButton.jsx";
 
 function Layout() {
   const location = useLocation();
@@ -44,6 +45,7 @@ function Layout() {
           </div>
         </div>
       )}
+      <WhatsAppFloatingButton hasCartNotice={Boolean(cartNotice)} />
       <BookingModal />
     </div>
   );

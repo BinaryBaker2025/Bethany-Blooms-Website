@@ -2,6 +2,12 @@ import { useMemo, useState } from "react";
 import { useAdminData } from "../../context/AdminDataContext.jsx";
 import { useFirestoreCollection } from "../../hooks/useFirestoreCollection.js";
 import { usePageMetadata } from "../../hooks/usePageMetadata.js";
+import {
+  PAYMENT_APPROVAL_STATUSES,
+  PAYMENT_METHODS,
+  normalizePaymentApprovalStatus,
+  normalizePaymentMethod,
+} from "../../lib/paymentMethods.js";
 
 const moneyFormatter = new Intl.NumberFormat("en-ZA", {
   style: "currency",
@@ -99,11 +105,25 @@ function AdminReportsPage() {
     return normalizedOrders.filter((order) => inRange(order.createdAt));
   }, [normalizedOrders, rangeBounds]);
 
+  const recognizedRevenueOrders = useMemo(() => {
+    return filteredOrders.filter((order) => {
+      const paymentMethod = normalizePaymentMethod(order?.paymentMethod);
+      if (paymentMethod !== PAYMENT_METHODS.EFT) return true;
+      return (
+        normalizePaymentApprovalStatus(order) ===
+        PAYMENT_APPROVAL_STATUSES.APPROVED
+      );
+    });
+  }, [filteredOrders]);
+
   const filteredSales = useMemo(() => {
     return normalizedSales.filter((sale) => inRange(sale.createdAt));
   }, [normalizedSales, rangeBounds]);
 
-  const onlineRevenue = filteredOrders.reduce((sum, order) => sum + parseNumber(order.totalPrice, 0), 0);
+  const onlineRevenue = recognizedRevenueOrders.reduce(
+    (sum, order) => sum + parseNumber(order.totalPrice, 0),
+    0,
+  );
   const posRevenue = filteredSales.reduce((sum, sale) => sum + parseNumber(sale.total, 0), 0);
   const combinedRevenue = onlineRevenue + posRevenue;
 

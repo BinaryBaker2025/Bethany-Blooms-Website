@@ -5,9 +5,45 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function isImageFile() {
+      return request.resource != null
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches("image/.*");
+    }
+
+    match /eftProofs/{proofPath=**} {
+      allow read: if signedIn();
+      allow write: if request.resource != null
+        && request.resource.size <= 10 * 1024 * 1024
+        && (
+          request.resource.contentType == "application/pdf"
+          || request.resource.contentType.matches("image/.*")
+        );
+    }
+
+    match /product-media/{filePath=**} {
+      allow read: if true;
+      allow write: if signedIn() && (request.resource == null || isImageFile());
+    }
+
+    match /workshops/{filePath=**} {
+      allow read: if true;
+      allow write: if signedIn() && (request.resource == null || isImageFile());
+    }
+
+    match /events/{filePath=**} {
+      allow read: if true;
+      allow write: if signedIn() && (request.resource == null || isImageFile());
+    }
+
+    match /cut-flower-classes/{filePath=**} {
+      allow read: if true;
+      allow write: if signedIn() && (request.resource == null || isImageFile());
+    }
+
     match /{allPaths=**} {
       allow read: if true;
-      allow write: if signedIn();
+      allow write: if false;
     }
   }
 }

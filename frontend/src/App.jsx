@@ -12,6 +12,7 @@ import EventsPage from "./pages/EventsPage.jsx";
 import CutFlowersPage from "./pages/CutFlowersPage.jsx";
 import PaymentSuccessPage from "./pages/PaymentSuccessPage.jsx";
 import PaymentCancelPage from "./pages/PaymentCancelPage.jsx";
+import EftSubmittedPage from "./pages/EftSubmittedPage.jsx";
 import DesignSystemPage from "./pages/DesignSystemPage.jsx";
 import {
   AdminDashboardView,
@@ -58,6 +59,7 @@ function App() {
               <Route path="/contact" element={<ContactPage />} />
               <Route path="/payment/success" element={<PaymentSuccessPage />} />
               <Route path="/payment/cancel" element={<PaymentCancelPage />} />
+              <Route path="/payment/eft-submitted" element={<EftSubmittedPage />} />
               <Route path="/design" element={<DesignSystemPage />} />
               <Route path="*" element={<HomePage />} />
             </Route>
