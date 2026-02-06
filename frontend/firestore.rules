@@ -60,6 +60,55 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time;
     }
 
+    function validCutFlowerBooking(data) {
+      return data.keys().hasOnly([
+          "customerName",
+          "email",
+          "phone",
+          "occasion",
+          "location",
+          "status",
+          "eventDate",
+          "createdAt",
+          "updatedAt",
+          "classId",
+          "sessionId",
+          "sessionLabel",
+          "attendeeCount",
+          "optionLabel",
+          "optionValue",
+          "attendeeSelections",
+          "estimatedTotal",
+          "estimatedPerAttendee",
+          "notes",
+        ])
+        && data.customerName is string && data.customerName.size() > 0 && data.customerName.size() <= 120
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 160
+        && data.phone is string && data.phone.size() > 0 && data.phone.size() <= 40
+        && data.occasion is string && data.occasion.size() <= 160
+        && data.location is string && data.location.size() <= 200
+        && data.status is string && data.status == "new"
+        && (!("eventDate" in data) || data.eventDate == null || data.eventDate is timestamp)
+        && data.classId is string && data.classId.size() > 0
+        && data.sessionId is string && data.sessionId.size() > 0
+        && (!("sessionLabel" in data)
+          || data.sessionLabel == null
+          || (data.sessionLabel is string && data.sessionLabel.size() <= 160))
+        && data.attendeeCount is number && data.attendeeCount >= 1 && data.attendeeCount <= 50
+        && (!("optionLabel" in data)
+          || data.optionLabel == null
+          || (data.optionLabel is string && data.optionLabel.size() <= 160))
+        && (!("optionValue" in data)
+          || data.optionValue == null
+          || (data.optionValue is string && data.optionValue.size() <= 160))
+        && data.attendeeSelections is list && data.attendeeSelections.size() <= 50
+        && data.estimatedTotal is number && data.estimatedTotal >= 0
+        && data.estimatedPerAttendee is number && data.estimatedPerAttendee >= 0
+        && (!("notes" in data) || (data.notes is string && data.notes.size() <= 1000))
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
     function validOrder(data) {
       return data.keys().hasOnly([
           "customer",
@@ -203,7 +252,8 @@ service cloud.firestore {
     }
 
     match /cutFlowerBookings/{document=**} {
-      allow read, write: if isAdmin();
+      allow create: if isAdmin() || validCutFlowerBooking(request.resource.data);
+      allow read, update, delete: if isAdmin();
     }
 
     match /cutFlowerClasses/{document=**} {

@@ -1,4 +1,4 @@
-﻿
+
 import Hero from "../components/Hero.jsx";
 import HeroCarousel from "../components/HeroCarousel.jsx";
 import TestimonialCarousel from "../components/TestimonialCarousel.jsx";
@@ -156,7 +156,7 @@ function DesignSystemPage() {
                     </div>
                     <div className="contact-form__field">
                       <label htmlFor="design-email">Email</label>
-                      <input className="input" id="design-email" type="email" placeholder="hello@bethanyblooms.co.za" />
+                      <input className="input" id="design-email" type="email" placeholder="admin@bethanyblooms.co.za" />
                     </div>
                   </div>
                   <div className="contact-form__field">
@@ -184,7 +184,7 @@ function DesignSystemPage() {
                 </label>
                 <label className="admin-form__field">
                   Email address
-                  <input className="input" type="email" placeholder="hello@bethanyblooms.co.za" />
+                  <input className="input" type="email" placeholder="admin@bethanyblooms.co.za" />
                 </label>
                 <label className="admin-form__field">
                   Category

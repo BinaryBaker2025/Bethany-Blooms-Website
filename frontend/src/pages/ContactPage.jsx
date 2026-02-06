@@ -101,7 +101,7 @@ function ContactPage() {
               <h3>Send a detailed enquiry</h3>
               <p className="contact-panel__subtitle">
                 Share your details and we’ll respond from{" "}
-                <a href="mailto:hello@bethanyblooms.co.za">hello@bethanyblooms.co.za</a>.
+                <a href="mailto:admin@bethanyblooms.co.za">admin@bethanyblooms.co.za</a>.
               </p>
               <form className="contact-form contact-form--card" onSubmit={handleSubmit}>
                 <div className="contact-form__row">
@@ -213,8 +213,8 @@ function ContactPage() {
             <Reveal as="aside" className="contact-panel contact-panel--details" delay={120}>
               <div className="contact-detail-card">
                 <p className="contact-detail-card__label">Email</p>
-                <a className="contact-detail-card__value" href="mailto:hello@bethanyblooms.co.za">
-                  hello@bethanyblooms.co.za
+                <a className="contact-detail-card__value" href="mailto:admin@bethanyblooms.co.za">
+                  admin@bethanyblooms.co.za
                 </a>
                 <p className="contact-detail-card__meta">We respond within two business days.</p>
               </div>
@@ -257,7 +257,7 @@ function ContactPage() {
             <Reveal as="article" className="card">
               <h3 className="card__title">Email</h3>
               <p>
-                <a href="mailto:hello@bethanyblooms.co.za">hello@bethanyblooms.co.za</a>
+                <a href="mailto:admin@bethanyblooms.co.za">admin@bethanyblooms.co.za</a>
               </p>
             </Reveal>
             <Reveal as="article" className="card" delay={120}>

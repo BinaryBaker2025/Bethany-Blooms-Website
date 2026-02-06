@@ -941,6 +941,8 @@ export function AdminProductsView() {
   const [productPage, setProductPage] = useState(0);
   const productMainPreviewUrlRef = useRef(null);
   const productGalleryPreviewUrlRef = useRef([]);
+  const productMainImageInputRef = useRef(null);
+  const productGalleryImageInputRef = useRef(null);
   const productImportInputRef = useRef(null);
   const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
   const [mediaLibraryMode, setMediaLibraryMode] = useState("main");
@@ -1047,6 +1049,18 @@ export function AdminProductsView() {
     forceOutOfStock: productForm.stockStatus === "out_of_stock",
     status: productForm.stockStatus,
   });
+  const getProductGalleryUrls = (source = productForm.galleryImages) =>
+    (Array.isArray(source) ? source : [])
+      .map((value) => (value || "").toString().trim())
+      .filter(Boolean);
+  const syncProductGalleryPreviews = (
+    galleryUrls = productForm.galleryImages,
+    filePreviewUrls = productGalleryPreviewUrlRef.current
+  ) => {
+    const normalizedGalleryUrls = getProductGalleryUrls(galleryUrls);
+    const normalizedFilePreviews = Array.isArray(filePreviewUrls) ? filePreviewUrls.filter(Boolean) : [];
+    setProductGalleryPreviews([...normalizedGalleryUrls, ...normalizedFilePreviews]);
+  };
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -1102,6 +1116,12 @@ export function AdminProductsView() {
     setProductGalleryPreviews([]);
     setEditingProductId(null);
     setProductError(null);
+    if (productMainImageInputRef.current) {
+      productMainImageInputRef.current.value = "";
+    }
+    if (productGalleryImageInputRef.current) {
+      productGalleryImageInputRef.current.value = "";
+    }
     setProductModalOpen(true);
   };
 
@@ -1122,6 +1142,12 @@ export function AdminProductsView() {
     setEditingProductId(null);
     setProductError(null);
     setProductSaving(false);
+    if (productMainImageInputRef.current) {
+      productMainImageInputRef.current.value = "";
+    }
+    if (productGalleryImageInputRef.current) {
+      productGalleryImageInputRef.current.value = "";
+    }
   };
 
   const handleMainImageChange = (event) => {
@@ -1147,19 +1173,32 @@ export function AdminProductsView() {
     setProductForm((prev) => ({ ...prev, mainImage: "" }));
   };
 
+  const handleRemoveMainImage = () => {
+    if (productMainPreviewUrlRef.current) {
+      URL.revokeObjectURL(productMainPreviewUrlRef.current);
+      productMainPreviewUrlRef.current = null;
+    }
+    setProductMainImageFile(null);
+    setProductMainImagePreview("");
+    setProductForm((prev) => ({ ...prev, mainImage: "" }));
+    if (productMainImageInputRef.current) {
+      productMainImageInputRef.current.value = "";
+    }
+  };
+
   const handleGalleryImagesChange = (event) => {
     const files = Array.from(event.target.files ?? []);
     if (Array.isArray(productGalleryPreviewUrlRef.current)) {
       productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
       productGalleryPreviewUrlRef.current = [];
     }
+    setProductGalleryFiles([]);
 
-    const existingUrls = Array.isArray(productForm.galleryImages) ?
-       productForm.galleryImages.filter(Boolean)
-      : [];
+    const existingUrls = getProductGalleryUrls();
     if (existingUrls.length + files.length > MAX_PRODUCT_IMAGES) {
       setProductError(`Please select up to ${MAX_PRODUCT_IMAGES} images total.`);
       event.target.value = "";
+      syncProductGalleryPreviews(existingUrls, []);
       return;
     }
 
@@ -1167,6 +1206,7 @@ export function AdminProductsView() {
     if (oversized) {
       setProductError("Please choose images smaller than 3MB.");
       event.target.value = "";
+      syncProductGalleryPreviews(existingUrls, []);
       return;
     }
 
@@ -1174,10 +1214,42 @@ export function AdminProductsView() {
       const previews = files.map((file) => URL.createObjectURL(file));
       productGalleryPreviewUrlRef.current = previews;
       setProductGalleryFiles(files);
-      setProductGalleryPreviews([...existingUrls, ...previews]);
+      syncProductGalleryPreviews(existingUrls, previews);
     } else {
       setProductGalleryFiles([]);
-      setProductGalleryPreviews(existingUrls);
+      syncProductGalleryPreviews(existingUrls, []);
+      if (productGalleryImageInputRef.current) {
+        productGalleryImageInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleRemoveGalleryImage = (index) => {
+    if (!Number.isInteger(index) || index < 0) return;
+    const galleryUrls = getProductGalleryUrls();
+    const localPreviewUrls = Array.isArray(productGalleryPreviewUrlRef.current) ?
+       productGalleryPreviewUrlRef.current.filter(Boolean)
+      : [];
+
+    if (index < galleryUrls.length) {
+      const nextGalleryUrls = galleryUrls.filter((_, galleryIndex) => galleryIndex !== index);
+      setProductForm((prev) => ({ ...prev, galleryImages: nextGalleryUrls }));
+      syncProductGalleryPreviews(nextGalleryUrls, localPreviewUrls);
+      return;
+    }
+
+    const fileIndex = index - galleryUrls.length;
+    if (fileIndex < 0 || fileIndex >= localPreviewUrls.length) return;
+    const removedPreview = localPreviewUrls[fileIndex];
+    if (removedPreview) {
+      URL.revokeObjectURL(removedPreview);
+    }
+    const nextLocalPreviewUrls = localPreviewUrls.filter((_, previewIndex) => previewIndex !== fileIndex);
+    productGalleryPreviewUrlRef.current = nextLocalPreviewUrls;
+    setProductGalleryFiles((prev) => prev.filter((_, galleryFileIndex) => galleryFileIndex !== fileIndex));
+    syncProductGalleryPreviews(galleryUrls, nextLocalPreviewUrls);
+    if (productGalleryImageInputRef.current) {
+      productGalleryImageInputRef.current.value = "";
     }
   };
 
@@ -1269,9 +1341,7 @@ export function AdminProductsView() {
   const openMediaLibrary = (mode) => {
     setMediaLibraryMode(mode);
     if (mode === "gallery") {
-      const existingUrls = Array.isArray(productForm.galleryImages) ?
-         productForm.galleryImages.filter(Boolean)
-        : [];
+      const existingUrls = getProductGalleryUrls();
       setMediaLibrarySelection(existingUrls);
     } else if (mode === "category") {
       setMediaLibrarySelection(categoryForm.coverImage ? [categoryForm.coverImage] : []);
@@ -1323,20 +1393,20 @@ export function AdminProductsView() {
       setMediaLibraryOpen(false);
       return;
     }
-    const existingUrls = Array.isArray(productForm.galleryImages) ?
-       productForm.galleryImages.filter(Boolean)
-      : [];
-    const merged = Array.from(new Set([...existingUrls, ...mediaLibrarySelection])).filter(Boolean);
+    const selectedUrls = Array.from(
+      new Set(
+        (Array.isArray(mediaLibrarySelection) ? mediaLibrarySelection : [])
+          .map((value) => (value || "").toString().trim())
+          .filter(Boolean)
+      )
+    );
     const maxUrls = Math.max(0, MAX_PRODUCT_IMAGES - productGalleryFiles.length);
-    const limited = merged.slice(0, maxUrls);
-    if (merged.length > maxUrls) {
+    const limited = selectedUrls.slice(0, maxUrls);
+    if (selectedUrls.length > maxUrls) {
       setProductError(`You can add up to ${MAX_PRODUCT_IMAGES} images total.`);
     }
     setProductForm((prev) => ({ ...prev, galleryImages: limited }));
-    const filePreviews = Array.isArray(productGalleryPreviewUrlRef.current) ?
-       productGalleryPreviewUrlRef.current
-      : [];
-    setProductGalleryPreviews([...limited, ...filePreviews]);
+    syncProductGalleryPreviews(limited);
     setMediaLibraryOpen(false);
   };
 
@@ -1531,7 +1601,13 @@ export function AdminProductsView() {
     setProductMainImageFile(null);
     setProductMainImagePreview(mainImage);
     setProductGalleryFiles([]);
-    setProductGalleryPreviews(galleryImages);
+    syncProductGalleryPreviews(galleryImages, []);
+    if (productMainImageInputRef.current) {
+      productMainImageInputRef.current.value = "";
+    }
+    if (productGalleryImageInputRef.current) {
+      productGalleryImageInputRef.current.value = "";
+    }
     setEditingProductId(product.id);
     setProductError(null);
     setProductModalOpen(true);
@@ -3238,6 +3314,7 @@ export function AdminProductsView() {
                     id="product-main-image"
                     type="file"
                     accept="image/*"
+                    ref={productMainImageInputRef}
                     onChange={handleMainImageChange}
                   />
                   <div className="admin-media-picker">
@@ -3251,7 +3328,17 @@ export function AdminProductsView() {
                   </div>
                   {productMainImagePreview && (
                     <div className="admin-preview-grid">
-                      <img src={productMainImagePreview} alt="Main product preview" className="admin-preview" loading="lazy" decoding="async"/>
+                      <div className="admin-preview-card">
+                        <img src={productMainImagePreview} alt="Main product preview" className="admin-preview" loading="lazy" decoding="async"/>
+                        <button
+                          className="icon-btn icon-btn--danger admin-preview-remove"
+                          type="button"
+                          onClick={handleRemoveMainImage}
+                          aria-label="Remove main image"
+                        >
+                          <IconTrash aria-hidden="true" />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3264,6 +3351,7 @@ export function AdminProductsView() {
                     type="file"
                     accept="image/*"
                     multiple
+                    ref={productGalleryImageInputRef}
                     onChange={handleGalleryImagesChange}
                   />
                   <div className="admin-media-picker">
@@ -3281,11 +3369,20 @@ export function AdminProductsView() {
                   {productGalleryPreviews.length > 0 && (
                     <div className="admin-preview-grid">
                       {productGalleryPreviews.map((preview, index) => (
-                        <img
-                          key={`${preview}-${index}`}
-                          src={preview}
-                          alt={`Product gallery preview ${index + 1}`}
-                          className="admin-preview" loading="lazy" decoding="async"/>
+                        <div className="admin-preview-card" key={`${preview}-${index}`}>
+                          <img
+                            src={preview}
+                            alt={`Product gallery preview ${index + 1}`}
+                            className="admin-preview" loading="lazy" decoding="async"/>
+                          <button
+                            className="icon-btn icon-btn--danger admin-preview-remove"
+                            type="button"
+                            onClick={() => handleRemoveGalleryImage(index)}
+                            aria-label={`Remove gallery image ${index + 1}`}
+                          >
+                            <IconTrash aria-hidden="true" />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -3707,7 +3804,7 @@ export function AdminProductsView() {
                   Cancel
                 </button>
                 <button className="btn btn--primary" type="button" onClick={applyMediaLibrarySelection}>
-                  Add selected
+                  Use selection
                 </button>
               </div>
             )}
@@ -10866,6 +10963,8 @@ export function AdminShippingView() {
   });
   const [drafts, setDrafts] = useState({});
   const [newCourier, setNewCourier] = useState({ name: "", isActive: true });
+  const [isCreateCourierDialogOpen, setCreateCourierDialogOpen] = useState(false);
+  const [expandedCourierIds, setExpandedCourierIds] = useState({});
   const [statusMessage, setStatusMessage] = useState(null);
   const [savingId, setSavingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -10899,6 +10998,20 @@ export function AdminShippingView() {
     });
   }, [courierOptions]);
 
+  useEffect(() => {
+    setExpandedCourierIds((prev) => {
+      const next = {};
+      courierOptions.forEach((option, index) => {
+        if (Object.prototype.hasOwnProperty.call(prev, option.id)) {
+          next[option.id] = Boolean(prev[option.id]);
+        } else {
+          next[option.id] = index === 0;
+        }
+      });
+      return next;
+    });
+  }, [courierOptions]);
+
   const handleDraftChange = (id, field, value) => {
     setDrafts((prev) => ({
       ...prev,
@@ -10922,6 +11035,13 @@ export function AdminShippingView() {
           },
         },
       },
+    }));
+  };
+
+  const handleToggleCourierExpanded = (id) => {
+    setExpandedCourierIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
     }));
   };
 
@@ -10972,7 +11092,7 @@ export function AdminShippingView() {
   };
 
   const handleCreateCourier = async (event) => {
-    event.preventDefault();
+    event?.preventDefault?.();
     if (!db || !inventoryEnabled) return;
     if (!newCourier.name.trim()) {
       setStatusMessage("Courier name is required.");
@@ -10993,6 +11113,7 @@ export function AdminShippingView() {
       });
       setNewCourier({ name: "", isActive: true });
       setStatusMessage("Courier option created.");
+      setCreateCourierDialogOpen(false);
     } catch (saveError) {
       setStatusMessage(saveError.message);
     } finally {
@@ -11024,14 +11145,204 @@ export function AdminShippingView() {
               Configure courier options with province-specific pricing and availability.
             </p>
           </div>
+          <div className="admin-panel__header-actions">
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={() => {
+                setNewCourier({ name: "", isActive: true });
+                setCreateCourierDialogOpen(true);
+              }}
+              disabled={!inventoryEnabled || savingId === "new"}
+            >
+              Create new shipping method
+            </button>
+          </div>
         </div>
 
-        <form className="admin-form" onSubmit={handleCreateCourier}>
-          <div className="admin-form__section">
-            <div className="admin-form__section-header">
-              <h4>Add courier option</h4>
+        <div className="admin-session-panel">
+          <h3>Courier options</h3>
+          {status === "loading" && <p className="modal__meta">Loading courier options…</p>}
+          {error && <p className="admin-panel__error">{error.message}</p>}
+          {courierOptions.length === 0 ? (
+            <p className="admin-panel__notice">No courier options configured yet.</p>
+          ) : (
+            <div className="admin-shipping-grid">
+              {courierOptions.map((option) => {
+                const draft = drafts[option.id];
+                if (!draft) return null;
+                const isExpanded = expandedCourierIds[option.id] ?? true;
+                const activeProvinceCount = SA_PROVINCES.filter(
+                  (province) => draft.provinces?.[province.value]?.isAvailable
+                ).length;
+                return (
+                  <div key={option.id} className="admin-detail-card">
+                    <div className="admin-form__section-header admin-shipping-card__header">
+                      <div>
+                        <h4>{option.name || "Courier option"}</h4>
+                        {!isExpanded && (
+                          <p className="modal__meta admin-shipping-card__summary">
+                            {activeProvinceCount} province{activeProvinceCount === 1 ? "" : "s"} available
+                          </p>
+                        )}
+                      </div>
+                      <div className="admin-shipping-card__header-actions">
+                        <button
+                          className="btn btn--secondary btn--small"
+                          type="button"
+                          onClick={() => handleToggleCourierExpanded(option.id)}
+                        >
+                          {isExpanded ? "Collapse" : "Expand"}
+                        </button>
+                        <label className="admin-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(draft.isActive)}
+                            onChange={(event) =>
+                              handleDraftChange(option.id, "isActive", event.target.checked)
+                            }
+                          />
+                          Active
+                        </label>
+                      </div>
+                    </div>
+                    {isExpanded && (
+                      <>
+                        <label className="admin-form__field">
+                          Display name
+                          <input
+                            className="input"
+                            type="text"
+                            value={draft.name}
+                            onChange={(event) =>
+                              handleDraftChange(option.id, "name", event.target.value)
+                            }
+                          />
+                        </label>
+                        <div className="admin-shipping-provinces">
+                          {SA_PROVINCES.map((province) => {
+                            const provinceDraft = draft.provinces?.[province.value] || {};
+                            return (
+                              <div key={`${option.id}-${province.value}`} className="admin-shipping-row">
+                                <span>{province.label}</span>
+                                <label className="admin-checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(provinceDraft.isAvailable)}
+                                    onChange={(event) =>
+                                      handleProvinceChange(
+                                        option.id,
+                                        province.value,
+                                        "isAvailable",
+                                        event.target.checked,
+                                      )
+                                    }
+                                  />
+                                  Available
+                                </label>
+                                <label className="admin-form__field admin-form__field--price">
+                                  Price (ZAR)
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={provinceDraft.price}
+                                    onChange={(event) =>
+                                      handleProvinceChange(
+                                        option.id,
+                                        province.value,
+                                        "price",
+                                        event.target.value,
+                                      )
+                                    }
+                                    placeholder="0.00"
+                                  />
+                                </label>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="admin-form__actions">
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            onClick={() => setDeleteTarget(option.id)}
+                            disabled={savingId === option.id}
+                          >
+                            Remove
+                          </button>
+                          <button
+                            className="btn btn--primary"
+                            type="button"
+                            onClick={() => handleSaveCourier(option.id)}
+                            disabled={savingId === option.id}
+                          >
+                            {savingId === option.id ? "Saving…" : "Save changes"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {!isExpanded && (
+                      <div className="admin-form__actions">
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={() => setDeleteTarget(option.id)}
+                          disabled={savingId === option.id}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            <div className="admin-form__section-grid">
+          )}
+        </div>
+        {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+      </Reveal>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete courier option"
+        message="This removes the courier option and all configured province rates."
+        confirmLabel="Delete"
+        busy={savingId === deleteTarget}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteCourier}
+      />
+
+      {isCreateCourierDialogOpen && (
+        <div
+          className="modal is-active admin-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-shipping-method-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && savingId !== "new") {
+              setCreateCourierDialogOpen(false);
+            }
+          }}
+        >
+          <div className="modal__content" style={{ maxWidth: "520px" }}>
+            <button
+              className="modal__close"
+              type="button"
+              onClick={() => setCreateCourierDialogOpen(false)}
+              aria-label="Close create shipping method dialog"
+              disabled={savingId === "new"}
+            >
+              &times;
+            </button>
+            <h3 className="modal__title" id="create-shipping-method-title">
+              Create new shipping method
+            </h3>
+            <p className="modal__meta">
+              Add the method name here, then configure province pricing in the courier list.
+            </p>
+            <form className="admin-form" onSubmit={handleCreateCourier}>
               <label className="admin-form__field">
                 Display name
                 <input
@@ -11055,132 +11366,23 @@ export function AdminShippingView() {
                 />
                 Active for checkout
               </label>
-            </div>
-            <div className="admin-form__actions">
-              <button className="btn btn--primary" type="submit" disabled={savingId === "new"}>
-                {savingId === "new" ? "Saving…" : "Create courier"}
-              </button>
-            </div>
+              <div className="admin-modal__actions admin-form__actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={() => setCreateCourierDialogOpen(false)}
+                  disabled={savingId === "new"}
+                >
+                  Cancel
+                </button>
+                <button className="btn btn--primary" type="submit" disabled={savingId === "new"}>
+                  {savingId === "new" ? "Saving…" : "Create method"}
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
-
-        <div className="admin-session-panel">
-          <h3>Courier options</h3>
-          {status === "loading" && <p className="modal__meta">Loading courier options…</p>}
-          {error && <p className="admin-panel__error">{error.message}</p>}
-          {courierOptions.length === 0 ? (
-            <p className="admin-panel__notice">No courier options configured yet.</p>
-          ) : (
-            <div className="admin-shipping-grid">
-              {courierOptions.map((option) => {
-                const draft = drafts[option.id];
-                if (!draft) return null;
-                return (
-                  <div key={option.id} className="admin-detail-card">
-                    <div className="admin-form__section-header">
-                      <h4>{option.name || "Courier option"}</h4>
-                      <label className="admin-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(draft.isActive)}
-                          onChange={(event) =>
-                            handleDraftChange(option.id, "isActive", event.target.checked)
-                          }
-                        />
-                        Active
-                      </label>
-                    </div>
-                    <label className="admin-form__field">
-                      Display name
-                      <input
-                        className="input"
-                        type="text"
-                        value={draft.name}
-                        onChange={(event) =>
-                          handleDraftChange(option.id, "name", event.target.value)
-                        }
-                      />
-                    </label>
-                    <div className="admin-shipping-provinces">
-                      {SA_PROVINCES.map((province) => {
-                        const provinceDraft = draft.provinces?.[province.value] || {};
-                        return (
-                          <div key={`${option.id}-${province.value}`} className="admin-shipping-row">
-                            <span>{province.label}</span>
-                            <label className="admin-checkbox">
-                              <input
-                                type="checkbox"
-                                checked={Boolean(provinceDraft.isAvailable)}
-                                onChange={(event) =>
-                                  handleProvinceChange(
-                                    option.id,
-                                    province.value,
-                                    "isAvailable",
-                                    event.target.checked,
-                                  )
-                                }
-                              />
-                              Available
-                            </label>
-                            <label className="admin-form__field admin-form__field--price">
-                              Price (ZAR)
-                              <input
-                                className="input"
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={provinceDraft.price}
-                                onChange={(event) =>
-                                  handleProvinceChange(
-                                    option.id,
-                                    province.value,
-                                    "price",
-                                    event.target.value,
-                                  )
-                                }
-                                placeholder="0.00"
-                              />
-                            </label>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="admin-form__actions">
-                      <button
-                        className="btn btn--secondary"
-                        type="button"
-                        onClick={() => setDeleteTarget(option.id)}
-                        disabled={savingId === option.id}
-                      >
-                        Remove
-                      </button>
-                      <button
-                        className="btn btn--primary"
-                        type="button"
-                        onClick={() => handleSaveCourier(option.id)}
-                        disabled={savingId === option.id}
-                      >
-                        {savingId === option.id ? "Saving…" : "Save changes"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
-        {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
-      </Reveal>
-
-      <ConfirmDialog
-        open={Boolean(deleteTarget)}
-        title="Delete courier option"
-        message="This removes the courier option and all configured province rates."
-        confirmLabel="Delete"
-        busy={savingId === deleteTarget}
-        onCancel={() => setDeleteTarget(null)}
-        onConfirm={handleDeleteCourier}
-      />
+      )}
     </div>
   );
 }
