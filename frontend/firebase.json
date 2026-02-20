@@ -28,6 +28,18 @@
     ],
     "rewrites": [
       {
+        "source": "/robot.txt",
+        "function": "robotsTxt"
+      },
+      {
+        "source": "/sitemap.xml",
+        "function": "sitemapXml"
+      },
+      {
+        "source": "/robots.txt",
+        "function": "robotsTxt"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

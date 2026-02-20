@@ -25,6 +25,34 @@ Checkout calls use a shared endpoint resolver in `src/lib/functionEndpoints.js`.
   - `VITE_FUNCTIONS_BASE_URL` forces an explicit base URL.
   - `VITE_USE_LOCAL_FUNCTIONS=true|false` forces local emulator or cloud behavior.
 
+## SEO metadata + indexing
+
+- Canonical domain defaults to `https://bethanyblooms.co.za`.
+- Optional frontend override: set `VITE_SITE_URL` in `.env` or `.env.local`.
+- The SPA metadata hook (`usePageMetadata`) now manages:
+  - `title`, `description`, `keywords`
+  - canonical URL (`canonicalPath` / `canonicalUrl`)
+  - robots directives
+  - Open Graph tags
+  - Twitter card tags
+- Public pages are indexable by default; private pages (`/admin/**`, `/account/**`, `/payment/**`, `/gift-cards/:giftCardId`, `/cart`, `/design`) are marked `noindex,nofollow`.
+
+## Dynamic sitemap and robots
+
+- `GET /sitemap.xml` is served by the Cloud Function `sitemapXml` via Hosting rewrite.
+- `GET /robots.txt` is served by the Cloud Function `robotsTxt` via Hosting rewrite.
+- Functions use `SITE_URL` as canonical absolute URL source when configured, otherwise they fall back to `https://bethanyblooms.co.za`.
+- `sitemap.xml` includes:
+  - static public routes
+  - dynamic live `products` and `workshops` URLs from Firestore
+- If Firestore reads fail, sitemap still returns static routes instead of an error.
+- `robots.txt` allows public crawling and disallows private app areas; it includes the sitemap URL.
+
+### Deployment note
+
+- Deploy Hosting and Functions together so rewrites and endpoints stay in sync:
+  - `firebase deploy --only functions,hosting`
+
 ## Admin order delivery edits
 
 - Admins can update delivery details on placed orders from the admin Orders view:

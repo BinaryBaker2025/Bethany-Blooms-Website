@@ -24,6 +24,7 @@ function GiftCardPage() {
   usePageMetadata({
     title: pageTitle,
     description: "View, download, and print your Bethany Blooms gift card.",
+    noIndex: true,
   });
 
   useEffect(() => {

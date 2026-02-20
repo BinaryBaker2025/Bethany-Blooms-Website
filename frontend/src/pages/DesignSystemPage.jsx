@@ -52,6 +52,7 @@ function DesignSystemPage() {
   usePageMetadata({
     title: "Design System | Bethany Blooms",
     description: "Design system reference for shared UI components and admin layouts.",
+    noIndex: true,
   });
 
   return (

@@ -678,11 +678,16 @@ function ProductDetailPage() {
     stripHtml(pageDescriptionSource) ||
     "Browse the Bethany Blooms product collection and discover curated pressed flower keepsakes.";
   const pageKeywords = product?.metaKeywords || "";
+  const canonicalProductSlug = (product?.slug || product?.id || productId || "").toString().trim();
+  const canonicalProductPath = canonicalProductSlug
+    ? `/products/${encodeURIComponent(canonicalProductSlug)}`
+    : "/products";
 
   usePageMetadata({
     title: pageTitle,
     description: pageDescription,
     keywords: pageKeywords,
+    canonicalPath: canonicalProductPath,
   });
 
   const isLoading = productsStatus === "loading";

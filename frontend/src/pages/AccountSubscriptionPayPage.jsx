@@ -26,6 +26,7 @@ function AccountSubscriptionPayPage() {
   usePageMetadata({
     title: "Subscription Payment | Bethany Blooms",
     description: "Continue to PayFast to complete your flower subscription payment.",
+    noIndex: true,
   });
 
   const { invoiceId = "" } = useParams();

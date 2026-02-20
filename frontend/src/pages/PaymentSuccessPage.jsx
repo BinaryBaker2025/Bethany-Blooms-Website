@@ -15,6 +15,7 @@ function PaymentSuccessPage() {
   usePageMetadata({
     title: "Payment Successful | Bethany Blooms",
     description: "Your PayFast payment was received and your order is being prepared.",
+    noIndex: true,
   });
 
   useEffect(() => {

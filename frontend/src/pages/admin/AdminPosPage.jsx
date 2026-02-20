@@ -144,7 +144,7 @@ const normalizeCategoryValue = (value) =>
 
 function AdminPosPage() {
   usePageMetadata({
-    title: "Admin · POS",
+    title: "Admin - POS",
     description: "Process in-person sales for products, workshops, events, and classes.",
   });
 

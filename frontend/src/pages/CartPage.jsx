@@ -47,6 +47,7 @@ function CartPage() {
   usePageMetadata({
     title: "Your Cart | Bethany Blooms",
     description: "Review your Bethany Blooms items, add your details, and complete checkout.",
+    noIndex: true,
   });
 
   const { items, removeItem, updateItemQuantity, clearCart, totalPrice, totalCount } = useCart();

@@ -7,6 +7,7 @@ function PaymentCancelPage() {
   usePageMetadata({
     title: "Payment Cancelled | Bethany Blooms",
     description: "Your PayFast payment was not completed. You can retry or switch to EFT checkout.",
+    noIndex: true,
   });
 
   useEffect(() => {

@@ -10,7 +10,7 @@ function WorkshopsPage() {
   usePageMetadata({
     title: "Bethany Blooms Workshops | Pressed Flower Experiences in Vereeniging",
     description:
-      "Reserve your seat at a Bethany Blooms pressed flower workshop. Explore dates, pricing, and what’s included.",
+      "Reserve your seat at a Bethany Blooms pressed flower workshop. Explore dates, pricing, and what's included.",
   });
 
   const eventFormatter = new Intl.DateTimeFormat("en-ZA", {

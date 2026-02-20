@@ -136,6 +136,7 @@ function AccountOrderDetailPage() {
   usePageMetadata({
     title: `${getOrderLabel(order)} | Bethany Blooms`,
     description: "View your order breakdown, payment details, and delivery information.",
+    noIndex: true,
   });
 
   useEffect(() => {

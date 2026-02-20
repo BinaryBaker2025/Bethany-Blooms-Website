@@ -33,6 +33,7 @@ const SUBSCRIPTION_MONDAY_SLOTS = Object.freeze([
   { value: "fourth", label: "4th Monday" },
   { value: "last", label: "Last Monday" },
 ]);
+const SUBSCRIPTION_SLOT_PARAM_SEPARATOR = ",";
 
 const SUBSCRIPTION_PAYMENT_METHOD_OPTIONS = Object.freeze([
   {
@@ -51,6 +52,23 @@ const normalizeMondaySlot = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
   return SUBSCRIPTION_MONDAY_SLOTS.some((entry) => entry.value === normalized) ? normalized : "";
 };
+
+const parseMondaySlotsParam = (value = "") => {
+  const seen = new Set();
+  return (value || "")
+    .toString()
+    .split(SUBSCRIPTION_SLOT_PARAM_SEPARATOR)
+    .map((entry) => normalizeMondaySlot(entry))
+    .filter((entry) => {
+      if (!entry || seen.has(entry)) return false;
+      seen.add(entry);
+      return true;
+    });
+};
+
+const serializeMondaySlotsParam = (values = []) =>
+  parseMondaySlotsParam(Array.isArray(values) ? values.join(SUBSCRIPTION_SLOT_PARAM_SEPARATOR) : "")
+    .join(SUBSCRIPTION_SLOT_PARAM_SEPARATOR);
 
 const resolveRequiredMondaySlotCount = (tier = "") => {
   const normalizedTier = normalizeSubscriptionTier(tier);
@@ -383,6 +401,11 @@ function SubscriptionCheckoutPage() {
   const { profile, loading: profileLoading, saveProfile, saving: profileSaving } = useCustomerProfile();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedPlanId = (searchParams.get("planId") || "").toString().trim();
+  const requestedSlotsParam = (searchParams.get("slots") || "").toString().trim();
+  const requestedSlots = useMemo(
+    () => parseMondaySlotsParam(requestedSlotsParam),
+    [requestedSlotsParam],
+  );
 
   const [plans, setPlans] = useState([]);
   const [plansLoading, setPlansLoading] = useState(false);
@@ -402,6 +425,7 @@ function SubscriptionCheckoutPage() {
   const [checkoutStatus, setCheckoutStatus] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
   const [successDialog, setSuccessDialog] = useState(null);
+  const [blockedSubmitReason, setBlockedSubmitReason] = useState("");
 
   const db = useMemo(() => {
     try {
@@ -431,6 +455,9 @@ function SubscriptionCheckoutPage() {
     const query = searchParams.toString();
     return `/subscriptions/checkout${query ? `?${query}` : ""}`;
   }, [searchParams]);
+  const isGuest = !user;
+  const isAdminUser = role === "admin";
+  const canCreateSubscription = Boolean(user) && !isAdminUser;
 
   const accountSignInUrl = `/account?next=${encodeURIComponent(checkoutPath)}`;
   const accountSignUpUrl = `/account?mode=signup&next=${encodeURIComponent(checkoutPath)}`;
@@ -551,8 +578,40 @@ function SubscriptionCheckoutPage() {
       setMondaySlots([]);
       return;
     }
-    setMondaySlots((prev) => normalizeMondaySlotsForTier(normalizedTier, prev));
-  }, [selectedPlan?.id, selectedPlan?.tier]);
+    const requestedNormalized = normalizeMondaySlotsForTier(
+      normalizedTier,
+      requestedSlots,
+    );
+    setMondaySlots((prev) => {
+      const prevNormalized = normalizeMondaySlotsForTier(normalizedTier, prev);
+      if (!requestedSlotsParam) {
+        return prevNormalized;
+      }
+      const requestedKey = serializeMondaySlotsParam(requestedNormalized);
+      const prevKey = serializeMondaySlotsParam(prevNormalized);
+      if (requestedKey !== prevKey) {
+        return requestedNormalized;
+      }
+      return prevNormalized;
+    });
+  }, [requestedSlots, requestedSlotsParam, selectedPlan?.id, selectedPlan?.tier]);
+
+  useEffect(() => {
+    if (!selectedPlan) return;
+    const normalizedTier = normalizeSubscriptionTier(selectedPlan.tier);
+    if (!normalizedTier) return;
+    const currentSlotsParam = (searchParams.get("slots") || "").toString().trim();
+    const normalizedSlots = normalizeMondaySlotsForTier(normalizedTier, mondaySlots);
+    const nextSlotsParam = serializeMondaySlotsParam(normalizedSlots);
+    if (currentSlotsParam === nextSlotsParam) return;
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextSlotsParam) {
+      nextParams.set("slots", nextSlotsParam);
+    } else {
+      nextParams.delete("slots");
+    }
+    setSearchParams(nextParams, { replace: true });
+  }, [mondaySlots, searchParams, selectedPlan, setSearchParams]);
 
   useEffect(() => {
     if (!db || !user?.uid) {
@@ -606,10 +665,15 @@ function SubscriptionCheckoutPage() {
     });
   }, [addressOptions, profile]);
 
+  useEffect(() => {
+    if (canCreateSubscription) setBlockedSubmitReason("");
+  }, [canCreateSubscription]);
+
   const handlePlanChange = (event) => {
     const nextId = (event.target.value || "").toString().trim();
     setSelectedPlanId(nextId);
     setSuccessDialog(null);
+    setBlockedSubmitReason("");
     const nextParams = new URLSearchParams(searchParams);
     if (nextId) {
       nextParams.set("planId", nextId);
@@ -621,6 +685,7 @@ function SubscriptionCheckoutPage() {
 
   const handleToggleMondaySlot = (slotValue) => {
     if (!selectedPlan) return;
+    setBlockedSubmitReason("");
     const normalizedSlot = normalizeMondaySlot(slotValue);
     if (!normalizedSlot) return;
     const normalizedTier = normalizeSubscriptionTier(selectedPlan.tier);
@@ -646,14 +711,13 @@ function SubscriptionCheckoutPage() {
   const handleCreateSubscription = async (event) => {
     event.preventDefault();
     if (checkoutBusy || profileSaving) return;
-    if (!user) {
-      setCheckoutError("Sign in before creating a subscription.");
+    if (!canCreateSubscription) {
+      setCheckoutError("");
+      setCheckoutStatus("");
+      setBlockedSubmitReason(isGuest ? "guest" : "admin");
       return;
     }
-    if (role === "admin") {
-      setCheckoutError("Subscriptions can only be created from customer accounts.");
-      return;
-    }
+    setBlockedSubmitReason("");
     if (!createCustomerSubscription) {
       setCheckoutError("Subscription checkout is not configured yet.");
       return;
@@ -799,57 +863,6 @@ function SubscriptionCheckoutPage() {
     );
   }
 
-  if (!user) {
-    return (
-      <section className="section section--tight subscription-checkout-page">
-        <div className="section__inner">
-          <article className="admin-panel subscription-checkout-locked">
-            <span className="badge">Subscription checkout</span>
-            <h1>Sign in to continue</h1>
-            <p className="modal__meta">
-              You must have a customer account to subscribe, manage billing, and track deliveries.
-            </p>
-            <div className="cta-group">
-              <Link className="btn btn--primary" to={accountSignInUrl}>
-                Sign in
-              </Link>
-              <Link className="btn btn--secondary" to={accountSignUpUrl}>
-                Create account
-              </Link>
-            </div>
-            <p className="modal__meta">
-              Already signed in on another tab? <Link to={checkoutPath}>Refresh this page</Link>.
-            </p>
-          </article>
-        </div>
-      </section>
-    );
-  }
-
-  if (role === "admin") {
-    return (
-      <section className="section section--tight subscription-checkout-page">
-        <div className="section__inner">
-          <article className="admin-panel subscription-checkout-locked">
-            <span className="badge">Subscription checkout</span>
-            <h1>Customer accounts only</h1>
-            <p className="modal__meta">
-              Subscription checkout is only available for customer logins.
-            </p>
-            <div className="cta-group">
-              <Link className="btn btn--secondary" to="/admin">
-                Back to admin
-              </Link>
-              <Link className="btn btn--secondary" to="/products">
-                Browse products
-              </Link>
-            </div>
-          </article>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <section className="section section--tight subscription-checkout-page">
       <div className="section__inner subscription-checkout">
@@ -857,9 +870,8 @@ function SubscriptionCheckoutPage() {
           <span className="badge">Subscription checkout</span>
           <h1>Start your flower subscription</h1>
           <p className="modal__meta">
-            Review your plan, choose Monday delivery slots, and create your first invoice.
+            Review your plan and Monday delivery slots first, then sign in when you are ready to subscribe.
             PayFast sends a pay-now link by email, while EFT sends manual bank details email after admin approval.
-            Future recurring invoices are sent in the last 5 days of each month for the next cycle.
           </p>
         </div>
 
@@ -936,100 +948,120 @@ function SubscriptionCheckoutPage() {
               <p className="modal__meta">Select a plan to configure Monday deliveries.</p>
             )}
 
-            <h2>3. Contact details</h2>
-            <div className="grid-form">
-              <label>
-                Full name
-                <input
-                  className="input"
-                  type="text"
-                  value={fullName}
-                  onChange={(event) => setFullName(event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Phone
-                <input
-                  className="input"
-                  type="tel"
-                  value={phone}
-                  onChange={(event) => setPhone(event.target.value)}
-                  required
-                />
-              </label>
-            </div>
-
-            <h2>4. Delivery address</h2>
-            <label>
-              Saved address
-              <select
-                className="input"
-                value={addressId}
-                onChange={(event) => setAddressId(event.target.value)}
-                disabled={checkoutBusy}
-                required
-              >
-                <option value="">
-                  {profileLoading ? "Loading addresses..." : addressOptions.length ? "Select saved address" : "No saved addresses"}
-                </option>
-                {addressOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label} - {option.value}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {addressOptions.length === 0 && (
-              <p className="admin-panel__error">
-                Add a delivery address in <Link to="/account">your account</Link> before continuing.
-              </p>
-            )}
-
-            <h2>5. Payment method</h2>
-            <div className="subscription-payment-options">
-              {SUBSCRIPTION_PAYMENT_METHOD_OPTIONS.map((option) => {
-                const isSelected = selectedPaymentMethod === option.value;
-                const isDisabled =
-                  checkoutBusy ||
-                  profileSaving ||
-                  (option.value === PAYMENT_METHODS.EFT && !eftApproved);
-                return (
-                  <label
-                    key={option.value}
-                    className={`subscription-payment-option${isSelected ? " is-selected" : ""}${isDisabled ? " is-disabled" : ""}`}
-                  >
+            {canCreateSubscription ? (
+              <>
+                <h2>3. Contact details</h2>
+                <div className="grid-form">
+                  <label>
+                    Full name
                     <input
-                      type="radio"
-                      name="subscription-payment-method"
-                      checked={isSelected}
-                      disabled={isDisabled}
-                      onChange={() => setPaymentMethod(option.value)}
+                      className="input"
+                      type="text"
+                      value={fullName}
+                      onChange={(event) => setFullName(event.target.value)}
+                      required
                     />
-                    <span>
-                      <strong>{option.label}</strong>
-                      <small>{option.description}</small>
-                    </span>
                   </label>
-                );
-              })}
-            </div>
-            <div className="subscription-checkout__eft-guidance">
-              <p>
-                EFT is admin-approved only. Contact us on{" "}
-                <a href={eftApprovalWhatsappUrl} target="_blank" rel="noreferrer">
-                  WhatsApp
-                </a>{" "}
-                to enable EFT for your account.
-              </p>
-              {!eftApproved && (
-                <p className="modal__meta">
-                  EFT is currently disabled for this account.
-                </p>
-              )}
-              {eftSettingsLoading && <p className="modal__meta">Checking EFT approval...</p>}
-              {eftSettingsError && <p className="admin-panel__error">{eftSettingsError}</p>}
-            </div>
+                  <label>
+                    Phone
+                    <input
+                      className="input"
+                      type="tel"
+                      value={phone}
+                      onChange={(event) => setPhone(event.target.value)}
+                      required
+                    />
+                  </label>
+                </div>
+
+                <h2>4. Delivery address</h2>
+                <label>
+                  Saved address
+                  <select
+                    className="input"
+                    value={addressId}
+                    onChange={(event) => setAddressId(event.target.value)}
+                    disabled={checkoutBusy}
+                    required
+                  >
+                    <option value="">
+                      {profileLoading ? "Loading addresses..." : addressOptions.length ? "Select saved address" : "No saved addresses"}
+                    </option>
+                    {addressOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label} - {option.value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {addressOptions.length === 0 && (
+                  <p className="admin-panel__error">
+                    Add a delivery address in <Link to="/account">your account</Link> before continuing.
+                  </p>
+                )}
+
+                <h2>5. Payment method</h2>
+                <div className="subscription-payment-options">
+                  {SUBSCRIPTION_PAYMENT_METHOD_OPTIONS.map((option) => {
+                    const isSelected = selectedPaymentMethod === option.value;
+                    const isDisabled =
+                      checkoutBusy ||
+                      profileSaving ||
+                      (option.value === PAYMENT_METHODS.EFT && !eftApproved);
+                    return (
+                      <label
+                        key={option.value}
+                        className={`subscription-payment-option${isSelected ? " is-selected" : ""}${isDisabled ? " is-disabled" : ""}`}
+                      >
+                        <input
+                          type="radio"
+                          name="subscription-payment-method"
+                          checked={isSelected}
+                          disabled={isDisabled}
+                          onChange={() => setPaymentMethod(option.value)}
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>{option.description}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="subscription-checkout__eft-guidance">
+                  <p>
+                    EFT is admin-approved only. Contact us on{" "}
+                    <a href={eftApprovalWhatsappUrl} target="_blank" rel="noreferrer">
+                      WhatsApp
+                    </a>{" "}
+                    to enable EFT for your account.
+                  </p>
+                  {!eftApproved && (
+                    <p className="modal__meta">
+                      EFT is currently disabled for this account.
+                    </p>
+                  )}
+                  {eftSettingsLoading && <p className="modal__meta">Checking EFT approval...</p>}
+                  {eftSettingsError && <p className="admin-panel__error">{eftSettingsError}</p>}
+                </div>
+              </>
+            ) : (
+              <>
+                <h2>3. Account required</h2>
+                <div className="subscription-checkout__guest-lock">
+                  <p className="modal__meta">
+                    {isGuest
+                      ? "Sign in to add contact details, choose a delivery address, and select payment method."
+                      : "Use a customer account to add contact details, choose a delivery address, and select payment method."}
+                  </p>
+                  <p className="modal__meta">
+                    {isGuest
+                      ? "You can still review plan details and Monday delivery slots before signing in."
+                      : "You can still review plan details and Monday delivery slots in this preview."}
+                  </p>
+                </div>
+              </>
+            )}
 
             <h2>6. Confirm subscription</h2>
             <p className="modal__meta">
@@ -1041,19 +1073,54 @@ function SubscriptionCheckoutPage() {
               className="btn btn--primary"
               type="submit"
               disabled={
-                checkoutBusy ||
-                profileSaving ||
-                plansLoading ||
-                !selectedPlan ||
-                !addressId ||
-                (selectedPaymentMethod === PAYMENT_METHODS.EFT && !eftApproved) ||
-                (normalizeSubscriptionTier(selectedPlan?.tier) !== "weekly" &&
-                  mondaySlots.length !== requiredMondaySlots) ||
-                !addressOptions.length
+                !canCreateSubscription
+                  ? checkoutBusy || plansLoading || !selectedPlan
+                  : checkoutBusy ||
+                    profileSaving ||
+                    plansLoading ||
+                    !selectedPlan ||
+                    !addressId ||
+                    (selectedPaymentMethod === PAYMENT_METHODS.EFT && !eftApproved) ||
+                    (normalizeSubscriptionTier(selectedPlan?.tier) !== "weekly" &&
+                      mondaySlots.length !== requiredMondaySlots) ||
+                    !addressOptions.length
               }
             >
-              {checkoutBusy ? "Subscribing..." : "Subscribe"}
+              {!canCreateSubscription
+                ? isGuest
+                  ? "Continue to sign in"
+                  : "Customer account required"
+                : checkoutBusy
+                  ? "Subscribing..."
+                  : "Subscribe"}
             </button>
+            {blockedSubmitReason === "guest" && (
+              <div className="subscription-checkout__guest-prompt">
+                <p className="modal__meta">
+                  Sign in or create an account to complete your subscription.
+                </p>
+                <div className="subscription-checkout__guest-prompt-actions">
+                  <Link className="btn btn--primary" to={accountSignInUrl}>
+                    Sign in
+                  </Link>
+                  <Link className="btn btn--secondary" to={accountSignUpUrl}>
+                    Create account
+                  </Link>
+                </div>
+              </div>
+            )}
+            {blockedSubmitReason === "admin" && (
+              <div className="subscription-checkout__guest-prompt subscription-checkout__guest-prompt--admin">
+                <p className="modal__meta">
+                  Subscription sign-up is customer-only. Use a customer account to continue.
+                </p>
+                <div className="subscription-checkout__guest-prompt-actions">
+                  <Link className="btn btn--secondary" to="/admin">
+                    Back to admin
+                  </Link>
+                </div>
+              </div>
+            )}
 
             {checkoutError && <p className="admin-panel__error">{checkoutError}</p>}
             {checkoutStatus && <p className="admin-panel__status">{checkoutStatus}</p>}
@@ -1076,7 +1143,13 @@ function SubscriptionCheckoutPage() {
                 </p>
                 <p>
                   Payment method:{" "}
-                  <strong>{selectedPaymentMethod === PAYMENT_METHODS.EFT ? "EFT (admin approval)" : "PayFast"}</strong>
+                  <strong>
+                    {canCreateSubscription
+                      ? selectedPaymentMethod === PAYMENT_METHODS.EFT
+                        ? "EFT (admin approval)"
+                        : "PayFast"
+                      : "Select after sign in"}
+                  </strong>
                 </p>
                 {invoicePreview && (
                   <>
@@ -1118,13 +1191,23 @@ function SubscriptionCheckoutPage() {
             )}
 
             <h3>Account</h3>
-            <p className="modal__meta">{user?.email || "No email found"}</p>
+            <p className="modal__meta">
+              {isGuest
+                ? "Sign in when you are ready to continue with subscription checkout."
+                : isAdminUser
+                  ? "Admin preview mode. Use a customer account to subscribe."
+                  : user?.email || "No email found"}
+            </p>
 
             <h3>Delivery</h3>
-            {selectedAddress ? (
+            {canCreateSubscription && selectedAddress ? (
               <p className="modal__meta">{selectedAddress.value}</p>
             ) : (
-              <p className="modal__meta">Select a saved address.</p>
+              <p className="modal__meta">
+                {!canCreateSubscription
+                  ? "Sign in with a customer account to choose a saved delivery address."
+                  : "Select a saved address."}
+              </p>
             )}
 
             <div className="cta-group subscription-checkout__actions">

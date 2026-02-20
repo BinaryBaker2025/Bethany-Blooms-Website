@@ -143,6 +143,9 @@ function WorkshopDetailPage() {
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
   const { openBooking } = useModal();
+  const canonicalWorkshopPath = workshopId
+    ? `/workshops/${encodeURIComponent(workshopId)}`
+    : "/workshops";
   const sessionFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat("en-ZA", {
@@ -157,6 +160,7 @@ function WorkshopDetailPage() {
     description:
       workshop?.description ??
       "Explore Bethany Blooms workshop details, what to expect, pricing, and policies before you reserve your seat.",
+    canonicalPath: canonicalWorkshopPath,
   });
 
   useEffect(() => {

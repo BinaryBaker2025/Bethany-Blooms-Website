@@ -420,6 +420,7 @@ function AccountPage() {
   usePageMetadata({
     title: "Account | Bethany Blooms",
     description: "Manage your profile, saved addresses, subscriptions, and order history.",
+    noIndex: true,
   });
 
   const { user, loading: authLoading, role, initError, signIn, signUp, signOut, resetPassword } = useAuth();

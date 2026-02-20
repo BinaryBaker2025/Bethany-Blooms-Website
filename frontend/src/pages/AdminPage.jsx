@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   addDoc,
@@ -58,7 +58,7 @@ function ConfirmDialog({
     <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
       <div className="modal__content">
         <button className="modal__close" type="button" onClick={onCancel} aria-label="Close">
-          Ã—
+          x
         </button>
         <h3 className="modal__title" id="confirm-title">
           {title}
@@ -69,7 +69,7 @@ function ConfirmDialog({
             {cancelLabel}
           </button>
           <button className="btn btn--primary" type="button" onClick={onConfirm} disabled={busy}>
-            {busy ? "Workingâ€¦" : confirmLabel}
+            {busy ? "Working..." : confirmLabel}
           </button>
         </div>
       </div>
@@ -258,6 +258,7 @@ const ORDER_STATUSES = [
   "completed",
   "cancelled",
 ];
+const ORDER_PAGE_SIZE_OPTIONS = Object.freeze([10, 25, 50]);
 const CREATE_ORDER_FILTER_DEFAULTS = Object.freeze({
   categoryId: "all",
   stock: "all",
@@ -557,6 +558,61 @@ const IconCheck = ({ title = "Success", ...props }) => (
   </svg>
 );
 
+const IconClose = ({ title = "Close", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="M6 6l12 12" />
+    <path d="M18 6 6 18" />
+  </svg>
+);
+
+const IconChevronLeft = ({ title = "Previous", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="m14.5 18-6-6 6-6" />
+  </svg>
+);
+
+const IconChevronRight = ({ title = "Next", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="m9.5 18 6-6-6-6" />
+  </svg>
+);
+
 const parseDateValue = (value) => {
   if (!value) return null;
   if (value instanceof Date) {
@@ -611,7 +667,7 @@ const parseIsExtra = (option, label) => {
 
 const formatOptionLabel = (label, price) => {
   if (typeof label !== "string" || !label.trim()) return "Option";
-  if (Number.isFinite(price)) return `${label} Â· R${price}`;
+  if (Number.isFinite(price)) return `${label} - R${price}`;
   return label;
 };
 
@@ -673,7 +729,7 @@ const formatTimeRange = (startTime, endTime) => {
   if (!startLabel) return "";
   const endLabel = formatTimeValue(endTime);
   if (!endLabel) return startLabel;
-  return `${startLabel} â€“ ${endLabel}`;
+  return `${startLabel} - ${endLabel}`;
 };
 
 const formatRepeatLabel = (repeatDays) => {
@@ -696,7 +752,7 @@ const buildTimeSummary = (timeSlots) => {
       return slot.label ? `${slot.label} (${formattedTime})` : formattedTime;
     })
     .filter(Boolean);
-  return labels.length ? labels.join(" Â· ") : "";
+  return labels.length ? labels.join(" - ") : "";
 };
 
 const formatPriceLabel = (value) => {
@@ -1140,7 +1196,7 @@ function useUploadAsset(storage) {
 
 export function AdminDashboardView() {
   usePageMetadata({
-    title: "Admin Â· Dashboard",
+    title: "Admin - Dashboard",
     description:
       "Quick stats for Bethany Blooms inventory, workshops, and orders.",
   });
@@ -1299,7 +1355,7 @@ export function AdminDashboardView() {
           <div className="admin-panel__header">
             <h3>Upcoming sessions</h3>
             {inventoryLoading && (
-              <span className="badge badge--muted">Syncingâ€¦</span>
+              <span className="badge badge--muted">Syncing...</span>
             )}
           </div>
           {upcomingSessions.length > 0 ? (
@@ -1313,7 +1369,7 @@ export function AdminDashboardView() {
                     </span>
                   </p>
                   <p className="modal__meta">
-                    Capacity {entry.session.capacity || DEFAULT_SLOT_CAPACITY} Â·{" "}
+                    Capacity {entry.session.capacity || DEFAULT_SLOT_CAPACITY}  - {" "}
                     {entry.workshop.location || "Studio"}
                   </p>
                 </li>
@@ -1328,7 +1384,7 @@ export function AdminDashboardView() {
           <div className="admin-panel__header">
             <h3>Recent orders</h3>
             {inventoryLoading && (
-              <span className="badge badge--muted">Syncingâ€¦</span>
+              <span className="badge badge--muted">Syncing...</span>
             )}
           </div>
           {recentOrders.length > 0 ? (
@@ -1340,7 +1396,7 @@ export function AdminDashboardView() {
                       <strong>{order.customer.fullName || "Guest"}</strong>
                     </p>
                     <p className="modal__meta">
-                      {order.customer.email || "â€”"}
+                      {order.customer.email || "-"}
                     </p>
                   </div>
                   <div>
@@ -1392,7 +1448,7 @@ export function AdminProductsView() {
         ? "Manage subscription plans separately from standard products."
         : "Build your storefront inventory directly from Firestore.";
   usePageMetadata({
-    title: activeTab === "subscriptions" ? "Admin Â· Subscriptions" : "Admin Â· Products",
+    title: activeTab === "subscriptions" ? "Admin - Subscriptions" : "Admin - Products",
     description:
       activeTab === "subscriptions"
         ? "Manage subscription plan products shown to customers."
@@ -1440,20 +1496,6 @@ export function AdminProductsView() {
   const [productImportMessage, setProductImportMessage] = useState(null);
   const [productImportError, setProductImportError] = useState(null);
   const [featuredUpdatingId, setFeaturedUpdatingId] = useState(null);
-  const functionsInstance = useMemo(() => {
-    try {
-      return getFirebaseFunctions();
-    } catch {
-      return null;
-    }
-  }, []);
-  const [testGiftCardEmail, setTestGiftCardEmail] = useState("admin@bethanyblooms.co.za");
-  const [testGiftCardPurchaserName, setTestGiftCardPurchaserName] = useState("");
-  const [testGiftCardRecipientName, setTestGiftCardRecipientName] = useState("");
-  const [testGiftCardMessage, setTestGiftCardMessage] = useState("");
-  const [testGiftCardSending, setTestGiftCardSending] = useState(false);
-  const [testGiftCardResult, setTestGiftCardResult] = useState(null);
-  const [testGiftCardError, setTestGiftCardError] = useState(null);
   const {
     items: mediaItems,
     status: mediaStatus,
@@ -1665,9 +1707,6 @@ export function AdminProductsView() {
     setProductGalleryPreviews([]);
     setEditingProductId(null);
     setProductError(null);
-    setTestGiftCardEmail("admin@bethanyblooms.co.za");
-    setTestGiftCardResult(null);
-    setTestGiftCardError(null);
     if (productMainImageInputRef.current) {
       productMainImageInputRef.current.value = "";
     }
@@ -1694,9 +1733,6 @@ export function AdminProductsView() {
     setEditingProductId(null);
     setProductError(null);
     setProductSaving(false);
-    setTestGiftCardSending(false);
-    setTestGiftCardResult(null);
-    setTestGiftCardError(null);
     if (productMainImageInputRef.current) {
       productMainImageInputRef.current.value = "";
     }
@@ -2004,8 +2040,6 @@ export function AdminProductsView() {
   };
 
   const handleToggleGiftCardProduct = (enabled) => {
-    setTestGiftCardResult(null);
-    setTestGiftCardError(null);
     setProductForm((prev) => {
       if (!enabled) {
         return {
@@ -2052,50 +2086,6 @@ export function AdminProductsView() {
       if (productGalleryImageInputRef.current) {
         productGalleryImageInputRef.current.value = "";
       }
-    }
-  };
-
-  const handleSendTestGiftCard = async () => {
-    if (!functionsInstance) {
-      setTestGiftCardError("Gift card test function is not available.");
-      return;
-    }
-    if (!inventoryEnabled) {
-      setTestGiftCardError("Admin access is required to send a test gift card.");
-      return;
-    }
-    const recipientEmail = (testGiftCardEmail || "").toString().trim();
-    const purchaserName = (testGiftCardPurchaserName || "").toString().trim();
-    const recipientName = (testGiftCardRecipientName || "").toString().trim();
-    const message = (testGiftCardMessage || "").toString().trim();
-    if (!recipientEmail) {
-      setTestGiftCardError("Enter the email address that should receive the test gift card.");
-      return;
-    }
-    if (!productForm.title.trim()) {
-      setTestGiftCardError("Add a title first so the test gift card uses the right product name.");
-      return;
-    }
-
-    setTestGiftCardSending(true);
-    setTestGiftCardError(null);
-    setTestGiftCardResult(null);
-    try {
-      const sendTestGiftCard = httpsCallable(functionsInstance, "sendTestGiftCard");
-      const payload = {
-        recipientEmail,
-        productId: editingProductId || null,
-        productTitle: productForm.title.trim(),
-      };
-      if (purchaserName) payload.purchaserName = purchaserName;
-      if (recipientName) payload.recipientName = recipientName;
-      if (message) payload.message = message;
-      const response = await sendTestGiftCard(payload);
-      setTestGiftCardResult(response?.data || {});
-    } catch (error) {
-      setTestGiftCardError(error.message || "Unable to send the test gift card.");
-    } finally {
-      setTestGiftCardSending(false);
     }
   };
 
@@ -2308,8 +2298,6 @@ export function AdminProductsView() {
     }
     setEditingProductId(product.id);
     setProductError(null);
-    setTestGiftCardResult(null);
-    setTestGiftCardError(null);
     setProductModalOpen(true);
     } catch (error) {
       console.error("Unable to load product for editing", error);
@@ -2715,7 +2703,7 @@ export function AdminProductsView() {
     } catch (importError) {
       console.error(importError);
       setProductImportError(
-        importError.message || "We couldnâ€™t import products from the selected spreadsheet.",
+        importError.message || "We couldn't import products from the selected spreadsheet.",
       );
       setProductImportMessage(null);
     } finally {
@@ -3686,7 +3674,7 @@ export function AdminProductsView() {
                   {paginatedProducts.map((product) => {
                     const updatedAt = product.updatedAt?.toDate?.()
                       ? bookingDateFormatter.format(product.updatedAt.toDate())
-                      : "â€”";
+                      : "-";
                     const stockStatus = getStockStatus({
                       quantity: product.stock_quantity ?? product.quantity,
                       forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
@@ -3727,7 +3715,7 @@ export function AdminProductsView() {
                         const label = resolved?.name || value;
                         if (!categoryLabels.includes(label)) categoryLabels.push(label);
                       });
-                    const primaryCategory = categoryLabels[0] || "â€”";
+                    const primaryCategory = categoryLabels[0] || "-";
                     const extraCategoryCount = Math.max(0, categoryLabels.length - 1);
                     const descriptionText = stripHtml(
                       product.short_description ||
@@ -3781,7 +3769,7 @@ export function AdminProductsView() {
                             {stockLabel}
                           </span>
                           <p className="modal__meta">
-                            Qty: {stockStatus.quantity ?? "â€”"}
+                            Qty: {stockStatus.quantity ?? "-"}
                           </p>
                           {stockStatus.state === "preorder" && preorderSendMonthLabel && (
                             <p className="modal__meta">Send month: {preorderSendMonthLabel}</p>
@@ -4113,119 +4101,6 @@ export function AdminProductsView() {
                 </div>
               </div>
             </div>
-
-            {productForm.isGiftCard && (
-              <div className="admin-form__section admin-form__full">
-                <div className="admin-form__section-header">
-                  <h4>Gift Card Test</h4>
-                </div>
-                <div className="admin-form__section-grid">
-                  <label className="admin-form__field admin-form__full">
-                    Test recipient email
-                    <input
-                      className="input"
-                      type="email"
-                      value={testGiftCardEmail}
-                      onChange={(event) => setTestGiftCardEmail(event.target.value)}
-                      placeholder="admin@bethanyblooms.co.za"
-                    />
-                  </label>
-                  <label className="admin-form__field admin-form__full">
-                    Purchaser name (optional)
-                    <input
-                      className="input"
-                      type="text"
-                      maxLength={120}
-                      value={testGiftCardPurchaserName}
-                      onChange={(event) => setTestGiftCardPurchaserName(event.target.value)}
-                      placeholder="Name of purchaser"
-                    />
-                  </label>
-                  <label className="admin-form__field admin-form__full">
-                    Recipient name (optional)
-                    <input
-                      className="input"
-                      type="text"
-                      maxLength={120}
-                      value={testGiftCardRecipientName}
-                      onChange={(event) => setTestGiftCardRecipientName(event.target.value)}
-                      placeholder="Name on the gift card"
-                    />
-                  </label>
-                  <label className="admin-form__field admin-form__full">
-                    Test message (optional)
-                    <textarea
-                      className="input textarea"
-                      rows="3"
-                      maxLength={320}
-                      value={testGiftCardMessage}
-                      onChange={(event) => setTestGiftCardMessage(event.target.value)}
-                      placeholder="Short message for the card"
-                    />
-                  </label>
-                  <div className="admin-form__field admin-form__full">
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      onClick={handleSendTestGiftCard}
-                      disabled={testGiftCardSending || !inventoryEnabled || !functionsInstance}
-                    >
-                      {testGiftCardSending ? "Sending test..." : "Send test gift card"}
-                    </button>
-                    <p className="admin-panel__note">
-                      This sends a test gift card email and generates a live gift card page + PDF without using PayFast
-                      or EFT checkout.
-                    </p>
-                  </div>
-                  {testGiftCardResult?.giftCard?.accessUrl && (
-                    <div className="admin-form__field admin-form__full">
-                      <p className="admin-panel__status">
-                        Test gift card created.
-                        {testGiftCardResult.emailStatus === "sent" ?
-                           ` Email sent to ${testGiftCardResult.recipientEmail || testGiftCardEmail}.`
-                          : testGiftCardResult.emailStatus === "failed" ?
-                           ` Email failed: ${testGiftCardResult.emailError || "Unknown error"}.`
-                          : " Email was not sent, but preview links are ready."}
-                      </p>
-                      {testGiftCardResult?.giftCard?.code && (
-                        <p className="admin-panel__note">
-                          <strong>Card code:</strong> {testGiftCardResult.giftCard.code}
-                        </p>
-                      )}
-                      <div className="admin-form__actions">
-                        <a
-                          className="btn btn--secondary btn--small"
-                          href={testGiftCardResult.giftCard.accessUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open gift card page
-                        </a>
-                        <a
-                          className="btn btn--secondary btn--small"
-                          href={testGiftCardResult.giftCard.downloadUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Download test PDF
-                        </a>
-                        <a
-                          className="btn btn--secondary btn--small"
-                          href={testGiftCardResult.giftCard.printUrl || testGiftCardResult.giftCard.downloadUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open print view
-                        </a>
-                      </div>
-                    </div>
-                  )}
-                  {testGiftCardError && (
-                    <p className="admin-panel__error admin-form__full">{testGiftCardError}</p>
-                  )}
-                </div>
-              </div>
-            )}
 
             <div className="admin-form__section admin-form__full">
               <div className="admin-form__section-header">
@@ -4811,7 +4686,7 @@ export function AdminProductsView() {
 
 export function AdminSubscriptionsView() {
   usePageMetadata({
-    title: "Admin Â· Subscriptions",
+    title: "Admin - Subscriptions",
     description: "Create and manage flower subscription plans.",
   });
 
@@ -5071,9 +4946,9 @@ export function AdminSubscriptionsView() {
                 {subscriptionPlans.map((plan) => {
                   const updatedAt = plan.updatedAt?.toDate?.()
                     ? bookingDateFormatter.format(plan.updatedAt.toDate())
-                    : "â€”";
+                    : "-";
                   const categoryName =
-                    (plan?.categoryName || categoryLookup.get((plan?.categoryId || "").toString().trim())?.name || "â€”")
+                    (plan?.categoryName || categoryLookup.get((plan?.categoryId || "").toString().trim())?.name || "-")
                       .toString()
                       .trim();
                   const tierLabel = formatSubscriptionPlanTierLabel(plan?.tier);
@@ -5104,9 +4979,9 @@ export function AdminSubscriptionsView() {
                           </div>
                         </div>
                       </td>
-                      <td>{categoryName || "â€”"}</td>
+                      <td>{categoryName || "-"}</td>
                       <td>{tierLabel}</td>
-                      <td>{stemsValue || "â€”"}</td>
+                      <td>{stemsValue || "-"}</td>
                       <td>{formatPriceLabel(monthlyAmount)}</td>
                       <td>
                         <span className="admin-status">
@@ -6587,15 +6462,15 @@ export function AdminSubscriptionOpsView() {
                 }}
                 aria-label="Close"
               >
-                ×
+                x
               </button>
 
               <header className="admin-subscription-ops-manage__header">
                 <h3 className="modal__title" id="subscription-ops-manage-title">
                   Manage {manageRow.customerName || "subscription"}
                 </h3>
-                <p className="modal__meta">
-                  {selectedCycleLabel} · {manageRow.subscriptionId}
+                <p className="modal__meta admin-subscription-ops-manage__meta">
+                  {selectedCycleLabel} - {manageRow.subscriptionId}
                 </p>
                 <div className="admin-subscription-ops-manage__badges">
                   <span className={`badge badge--stock-${manageRow.readyToSend ? "in" : "out"}`}>
@@ -6642,45 +6517,134 @@ export function AdminSubscriptionOpsView() {
                 >
                   <article className="admin-subscription-ops-manage__card">
                     <h4>Customer</h4>
-                    <p className="modal__meta"><strong>{manageRow.customerName || "Customer"}</strong></p>
-                    <p className="modal__meta">{manageRow.customerEmail || "No email"}</p>
-                    <p className="modal__meta">{manageRow.customerPhone || "No phone"}</p>
+                    <dl className="admin-subscription-ops-manage__card-body">
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Name</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                          {manageRow.customerName || "Customer"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Email</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.customerEmail || "No email"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Phone</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.customerPhone || "No phone"}
+                        </dd>
+                      </div>
+                    </dl>
                   </article>
 
                   <article className="admin-subscription-ops-manage__card">
                     <h4>Delivery</h4>
-                    <p className="modal__meta">{manageRow.addressLabel || "No delivery address"}</p>
-                    <p className="modal__meta">{manageRow.city || "-"} | {manageRow.province || "-"}</p>
-                    <p className="modal__meta">Mondays this cycle: {manageRow.cycleDeliveryLabel || "None"}</p>
-                    <p className="modal__meta">Included in invoice: {manageRow.includedDeliveryLabel || "None"}</p>
+                    <dl className="admin-subscription-ops-manage__card-body">
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Address</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.addressLabel || "No delivery address"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Area</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.city || "-"} | {manageRow.province || "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Mondays this cycle</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.cycleDeliveryLabel || "None"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Included in invoice</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.includedDeliveryLabel || "None"}
+                        </dd>
+                      </div>
+                    </dl>
                   </article>
 
                   <article className="admin-subscription-ops-manage__card">
                     <h4>Plan</h4>
-                    <p className="modal__meta"><strong>{manageRow.planName}</strong></p>
-                    <p className="modal__meta">
-                      {formatSubscriptionPlanTierLabel(manageRow.tier)} | {manageRow.expectedDeliveries} deliveries
-                    </p>
-                    <p className="modal__meta">Monday slots: {manageRow.mondaySlotLabel || "-"}</p>
-                    <p className="modal__meta">Recurring charges: {manageRow.recurringCharges.length || 0}</p>
+                    <dl className="admin-subscription-ops-manage__card-body">
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Plan</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                          {manageRow.planName}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Tier & deliveries</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {formatSubscriptionPlanTierLabel(manageRow.tier)} | {manageRow.expectedDeliveries} deliveries
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Monday slots</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.mondaySlotLabel || "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Recurring charges</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.recurringCharges.length || 0}
+                        </dd>
+                      </div>
+                    </dl>
                   </article>
 
                   <article className="admin-subscription-ops-manage__card">
                     <h4>Cycle invoice</h4>
-                    <p className="modal__meta">Invoice: {manageRow.invoiceNumber ? `INV-${manageRow.invoiceNumber}` : "-"}</p>
-                    <p className="modal__meta">Status: {invoiceStatusLabel}</p>
-                    <p className="modal__meta">Type: {manageRow.invoice ? formatSubscriptionInvoiceTypeLabel(manageRow.invoiceType) : "-"}</p>
-                    <p className="modal__meta">Amount: {manageRow.invoice ? formatPriceLabel(manageRow.invoiceAmount) : "-"}</p>
-                    <p className="modal__meta">
-                      Base {manageRow.invoice ? formatPriceLabel(manageRow.invoiceBaseAmount) : "-"} | Adjustments{" "}
-                      {manageRow.invoice ? formatPriceLabel(manageRow.invoiceAdjustmentsTotal) : "-"}
-                    </p>
-                    <p className="modal__meta">
-                      Top-ups: {manageRow.topupCount} | Pending {formatPriceLabel(manageRow.topupPendingAmount)}
-                    </p>
-                    <p className="modal__meta">
-                      Approval: {formatSubscriptionPaymentApprovalLabel(manageRow.paymentApprovalStatus, manageRow.paymentMethod)}
-                    </p>
+                    <dl className="admin-subscription-ops-manage__card-body">
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Invoice</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.invoiceNumber ? `INV-${manageRow.invoiceNumber}` : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Status</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {invoiceStatusLabel}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Type</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.invoice ? formatSubscriptionInvoiceTypeLabel(manageRow.invoiceType) : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Amount</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                          {manageRow.invoice ? formatPriceLabel(manageRow.invoiceAmount) : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Base / Adjustments</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.invoice ? formatPriceLabel(manageRow.invoiceBaseAmount) : "-"} | {manageRow.invoice ? formatPriceLabel(manageRow.invoiceAdjustmentsTotal) : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Top-ups</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.topupCount} | Pending {formatPriceLabel(manageRow.topupPendingAmount)}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Approval</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {formatSubscriptionPaymentApprovalLabel(manageRow.paymentApprovalStatus, manageRow.paymentMethod)}
+                        </dd>
+                      </div>
+                    </dl>
                   </article>
                 </section>
                 )}
@@ -6695,8 +6659,12 @@ export function AdminSubscriptionOpsView() {
                   <div className="admin-subscription-ops__actions">
                     {activeManageTab === "billing" && (
                       <>
-                        <p className="modal__meta"><strong>Billing controls</strong></p>
-                        <p className="modal__meta">Manage status, invoice state, and payment method for this cycle.</p>
+                        <div className="admin-subscription-ops-manage__section-intro">
+                          <p className="admin-subscription-ops-manage__section-title">Billing controls</p>
+                          <p className="modal__meta admin-subscription-ops-manage__section-note">
+                            Manage status, invoice state, and payment method for this cycle.
+                          </p>
+                        </div>
                         <label className="admin-form__field">
                           Subscription status
                           <select
@@ -6817,8 +6785,12 @@ export function AdminSubscriptionOpsView() {
 
                     {activeManageTab === "plan-charges" && (
                       <>
-                        <p className="modal__meta"><strong>Plan and charge controls</strong></p>
-                        <p className="modal__meta">Use this section for plan reassignment and invoice surcharges.</p>
+                        <div className="admin-subscription-ops-manage__section-intro">
+                          <p className="admin-subscription-ops-manage__section-title">Plan and charge controls</p>
+                          <p className="modal__meta admin-subscription-ops-manage__section-note">
+                            Use this section for plan reassignment and invoice surcharges.
+                          </p>
+                        </div>
                         <label className="admin-form__field">
                           Reassign plan
                           <select
@@ -6985,7 +6957,7 @@ export function AdminSubscriptionOpsView() {
 
 export function AdminMediaLibraryView() {
   usePageMetadata({
-    title: "Admin Â· Image Library",
+    title: "Admin - Image Library",
     description: "Upload and manage product images for bulk imports.",
   });
   const { db, storage, inventoryEnabled, inventoryError } = useAdminData();
@@ -7217,7 +7189,7 @@ export function AdminMediaLibraryView() {
 
 export function AdminWorkshopsView() {
   usePageMetadata({
-    title: "Admin Â· Workshops",
+    title: "Admin - Workshops",
     description: "Manage Bethany Blooms workshops, sessions, and bookings.",
   });
   const {
@@ -7559,7 +7531,7 @@ export function AdminWorkshopsView() {
     try {
       setWorkshopSaving(true);
       setStatusMessage(
-        editingWorkshopId ? "Updating workshopâ€¦" : "Saving workshopâ€¦"
+        editingWorkshopId ? "Updating workshop..." : "Saving workshop..."
       );
       let imageUrl = workshopForm.image.trim();
       if (workshopImageFile) {
@@ -7633,7 +7605,7 @@ export function AdminWorkshopsView() {
           <div className="admin-panel__header">
             <h3>Workshops</h3>
             {inventoryLoading && (
-              <span className="badge badge--muted">Syncingâ€¦</span>
+              <span className="badge badge--muted">Syncing...</span>
             )}
           </div>
           {workshops.length > 0 ? (
@@ -7721,7 +7693,7 @@ export function AdminWorkshopsView() {
           <div className="admin-panel__header">
             <h3>Bookings</h3>
             {inventoryLoading && (
-              <span className="badge badge--muted">Syncingâ€¦</span>
+              <span className="badge badge--muted">Syncing...</span>
             )}
           </div>
           {bookings.length > 0 ? (
@@ -7747,14 +7719,14 @@ export function AdminWorkshopsView() {
                       : "Pending";
                     return (
                       <tr key={bookingEntry.id}>
-                        <td>{bookingEntry.name || "â€”"}</td>
+                        <td>{bookingEntry.name || "-"}</td>
                         <td>
                           {bookingEntry.email ? (
                             <a href={`mailto:${bookingEntry.email}`}>
                               {bookingEntry.email}
                             </a>
                           ) : (
-                            "â€”"
+                            "-"
                           )}
                           {bookingEntry.phone && (
                             <p className="modal__meta">{bookingEntry.phone}</p>
@@ -8060,10 +8032,10 @@ export function AdminWorkshopsView() {
                     }))
                   }
                 />
-                <span>Auto-schedule future dates (Monâ€“Sat)</span>
+                <span>Auto-schedule future dates (Mon-Sat)</span>
               </label>
               <p className="admin-panel__note">
-                When enabled, the first dateâ€™s time slots repeat for the next 90
+                When enabled, the first date's time slots repeat for the next 90
                 days, skipping Sundays.
               </p>
             </div>
@@ -8171,7 +8143,7 @@ export function AdminWorkshopsView() {
                 disabled={!inventoryEnabled || workshopSaving}
               >
                 {workshopSaving ?
-                   "Savingâ€¦"
+                   "Saving..."
                   : editingWorkshopId ?
                    "Update Workshop"
                   : "Save Workshop"}
@@ -8189,7 +8161,7 @@ export function AdminWorkshopsView() {
 
 export function AdminWorkshopsCalendarView() {
   usePageMetadata({
-    title: "Admin Â· Calendar",
+    title: "Admin - Calendar",
     description: "Overview of scheduled workshops, bookings, and events by date.",
   });
   const {
@@ -8220,6 +8192,8 @@ export function AdminWorkshopsCalendarView() {
   const [quickEventError, setQuickEventError] = useState(null);
   const [quickEventStatus, setQuickEventStatus] = useState(null);
   const [quickEventSaving, setQuickEventSaving] = useState(false);
+  const [quickEventEditingId, setQuickEventEditingId] = useState(null);
+  const [quickEventDeletingId, setQuickEventDeletingId] = useState(null);
 
   const handleMonthChange = (offset) => {
     setVisibleMonth((prev) => {
@@ -8345,12 +8319,70 @@ export function AdminWorkshopsCalendarView() {
       notes: "",
     });
     setQuickEventError(null);
+    setQuickEventEditingId(null);
     setQuickEventOpen(true);
   };
 
   const closeQuickEventForm = () => {
     setQuickEventOpen(false);
     setQuickEventError(null);
+    setQuickEventEditingId(null);
+  };
+
+  const startQuickEventEdit = (eventDoc) => {
+    const eventDate = parseDateValue(eventDoc?.eventDate);
+    const slotTime =
+      Array.isArray(eventDoc?.timeSlots)
+        ? eventDoc.timeSlots
+            .map((slot) => (slot?.time || "").toString().trim())
+            .find(Boolean) || ""
+        : "";
+    setQuickEventForm({
+      title: (eventDoc?.title || "").toString(),
+      location: (eventDoc?.location || "").toString(),
+      date:
+        eventDate
+          ? formatDateInput(eventDate)
+          : selectedDate || formatDateInput(new Date()),
+      time: slotTime || (eventDate ? formatTimeInput(eventDate) : ""),
+      notes: (eventDoc?.description || "").toString(),
+    });
+    setQuickEventError(null);
+    setQuickEventEditingId(eventDoc?.id || null);
+    setQuickEventOpen(true);
+  };
+
+  const handleQuickEventDelete = async (eventDoc) => {
+    if (!db || !inventoryEnabled || !eventDoc?.id) {
+      setQuickEventError("You do not have permission to manage events.");
+      return;
+    }
+
+    const eventLabel = (eventDoc.title || "event").toString().trim();
+    const confirmed = window.confirm(`Delete "${eventLabel}" from calendar? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    setQuickEventDeletingId(eventDoc.id);
+    setQuickEventError(null);
+    try {
+      await deleteDoc(doc(db, "events", eventDoc.id));
+      if (quickEventEditingId === eventDoc.id) {
+        closeQuickEventForm();
+      }
+      setQuickEventStatus("Event deleted.");
+    } catch (deleteError) {
+      console.error(deleteError);
+      const errorCode = String(deleteError?.code || deleteError?.message || "");
+      if (errorCode.includes("permission-denied") || errorCode.includes("unauthenticated")) {
+        setQuickEventError(
+          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.'
+        );
+      } else {
+        setQuickEventError(deleteError?.message || "We couldn't delete the event. Please try again.");
+      }
+    } finally {
+      setQuickEventDeletingId(null);
+    }
   };
 
   const handleQuickEventSave = async (event) => {
@@ -8375,6 +8407,16 @@ export function AdminWorkshopsCalendarView() {
     setQuickEventError(null);
 
     try {
+      const existingEvent =
+        quickEventEditingId
+          ? events.find((eventDoc) => eventDoc.id === quickEventEditingId) || null
+          : null;
+      if (quickEventEditingId && !existingEvent) {
+        setQuickEventError("This event no longer exists. Refresh and try again.");
+        setQuickEventSaving(false);
+        return;
+      }
+
       const timeValue = quickEventForm.time.trim();
       const combinedDate = combineDateAndTime(quickEventForm.date, timeValue);
       const timeSlots = timeValue
@@ -8393,29 +8435,44 @@ export function AdminWorkshopsCalendarView() {
         location: quickEventForm.location.trim(),
         eventDate: combinedDate ?? null,
         timeSlots,
-        repeatWeekly: false,
-        repeatDays: [],
-        image: "",
-        workshopId: null,
-        workshopTitle: null,
-        status: "draft",
+        repeatWeekly: Boolean(existingEvent?.repeatWeekly),
+        repeatDays: Array.isArray(existingEvent?.repeatDays) ? existingEvent.repeatDays : [],
+        image: typeof existingEvent?.image === "string" ? existingEvent.image : "",
+        workshopId: existingEvent?.workshopId || null,
+        workshopTitle: existingEvent?.workshopTitle || null,
+        status:
+          typeof existingEvent?.status === "string" && existingEvent.status.trim()
+            ? existingEvent.status
+            : "draft",
         updatedAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, "events"), {
-        ...payload,
-        createdAt: serverTimestamp(),
-      });
+      if (quickEventEditingId) {
+        await updateDoc(doc(db, "events", quickEventEditingId), payload);
+        setQuickEventStatus("Event updated.");
+        closeQuickEventForm();
+      } else {
+        await addDoc(collection(db, "events"), {
+          ...payload,
+          repeatWeekly: false,
+          repeatDays: [],
+          image: "",
+          workshopId: null,
+          workshopTitle: null,
+          status: "draft",
+          createdAt: serverTimestamp(),
+        });
 
-      setQuickEventStatus("Event added to calendar.");
-      setQuickEventForm((prev) => ({
-        ...prev,
-        title: "",
-        location: "",
-        time: "",
-        notes: "",
-        date: selectedDate || prev.date,
-      }));
+        setQuickEventStatus("Event added to calendar.");
+        setQuickEventForm((prev) => ({
+          ...prev,
+          title: "",
+          location: "",
+          time: "",
+          notes: "",
+          date: selectedDate || prev.date,
+        }));
+      }
     } catch (saveError) {
       console.error(saveError);
       const errorCode = String(saveError?.code || saveError?.message || "");
@@ -8437,37 +8494,43 @@ export function AdminWorkshopsCalendarView() {
         <div>
           <h2>Studio Calendar</h2>
           <p className="admin-panel__note">
-            Track workshops, private bookings, and cut flower installs in a single glance.
+            Track workshop bookings, cut flower bookings, and events in one timeline.
           </p>
         </div>
       </Reveal>
 
       {inventoryLoading && (
-        <p className="modal__meta">Syncing latest workshopsâ€¦</p>
+        <p className="modal__meta">Syncing latest bookings and events...</p>
       )}
 
       <div className="admin-calendar">
         <div className="card admin-calendar__panel">
           <div className="admin-calendar__header">
             <button
-              className="btn btn--secondary admin-calendar__nav"
+              className="btn btn--secondary btn--icon admin-calendar__nav"
               type="button"
               onClick={() => handleMonthChange(-1)}
               aria-label="Previous month"
+              title="Previous month"
             >
-              â€¹
+              <IconChevronLeft className="btn__icon" title="Previous month" />
+              <span className="sr-only">Previous month</span>
             </button>
             <div>
               <h3>{monthLabel}</h3>
-              <p className="modal__meta">Showing workshop + cut flower bookings and events for this month</p>
+              <p className="modal__meta">
+                Showing all workshop bookings, cut flower bookings, and events for this month.
+              </p>
             </div>
             <button
-              className="btn btn--secondary admin-calendar__nav"
+              className="btn btn--secondary btn--icon admin-calendar__nav"
               type="button"
               onClick={() => handleMonthChange(1)}
               aria-label="Next month"
+              title="Next month"
             >
-              â€º
+              <IconChevronRight className="btn__icon" title="Next month" />
+              <span className="sr-only">Next month</span>
             </button>
           </div>
 
@@ -8520,14 +8583,26 @@ export function AdminWorkshopsCalendarView() {
               </p>
             </div>
             <button
-              className="btn btn--secondary btn--small"
+              className="btn btn--secondary btn--icon admin-calendar__icon-btn"
               type="button"
               onClick={quickEventOpen ? closeQuickEventForm : openQuickEventForm}
               disabled={!inventoryEnabled}
+              aria-label={quickEventOpen ? "Close quick event form" : "Add calendar event"}
+              title={quickEventOpen ? "Close quick event form" : "Add calendar event"}
             >
-              {quickEventOpen ? "Close" : "Add calendar event"}
+              {quickEventOpen ? (
+                <IconClose className="btn__icon" title="Close quick event form" />
+              ) : (
+                <IconPlus className="btn__icon" title="Add calendar event" />
+              )}
+              <span className="sr-only">
+                {quickEventOpen ? "Close quick event form" : "Add calendar event"}
+              </span>
             </button>
           </div>
+          {quickEventError && !quickEventOpen && (
+            <p className="admin-panel__error">{quickEventError}</p>
+          )}
           <div className="admin-calendar__details-group">
             <h5>Workshop bookings</h5>
             {activeWorkshopBookings.length > 0 ? (
@@ -8537,7 +8612,7 @@ export function AdminWorkshopsCalendarView() {
                     <div>
                       <strong>{booking.name}</strong>
                       <p className="modal__meta">
-                        {booking.sessionLabel || "Session"} Â·{" "}
+                        {booking.sessionLabel || "Session"}  - {" "}
                         {booking.frame || "Workshop"}
                       </p>
                     </div>
@@ -8615,6 +8690,36 @@ export function AdminWorkshopsCalendarView() {
                           View workshop
                         </Link>
                       )}
+                      <div className="admin-calendar__icon-actions">
+                        <button
+                          className="btn btn--secondary btn--icon admin-calendar__icon-btn"
+                          type="button"
+                          onClick={() => startQuickEventEdit(eventDoc)}
+                          disabled={!inventoryEnabled || quickEventSaving || quickEventDeletingId === eventDoc.id}
+                          aria-label={`Edit event ${eventDoc.title || ""}`.trim()}
+                          title="Edit event"
+                        >
+                          <IconEdit className="btn__icon" title="Edit event" />
+                          <span className="sr-only">Edit event</span>
+                        </button>
+                        <button
+                          className="btn btn--secondary btn--icon admin-calendar__icon-btn admin-calendar__action-delete"
+                          type="button"
+                          onClick={() => handleQuickEventDelete(eventDoc)}
+                          disabled={!inventoryEnabled || quickEventSaving || quickEventDeletingId === eventDoc.id}
+                          aria-label={
+                            quickEventDeletingId === eventDoc.id
+                              ? "Deleting event"
+                              : `Delete event ${eventDoc.title || ""}`.trim()
+                          }
+                          title={quickEventDeletingId === eventDoc.id ? "Deleting event" : "Delete event"}
+                        >
+                          <IconTrash className="btn__icon" title="Delete event" />
+                          <span className="sr-only">
+                            {quickEventDeletingId === eventDoc.id ? "Deleting event" : "Delete event"}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   </li>
                 ))}
@@ -8680,6 +8785,36 @@ export function AdminWorkshopsCalendarView() {
                     </div>
                     <div className="admin-calendar__details-actions">
                       <p className="modal__meta">Date required</p>
+                      <div className="admin-calendar__icon-actions">
+                        <button
+                          className="btn btn--secondary btn--icon admin-calendar__icon-btn"
+                          type="button"
+                          onClick={() => startQuickEventEdit(eventDoc)}
+                          disabled={!inventoryEnabled || quickEventSaving || quickEventDeletingId === eventDoc.id}
+                          aria-label={`Edit event ${eventDoc.title || ""}`.trim()}
+                          title="Edit event"
+                        >
+                          <IconEdit className="btn__icon" title="Edit event" />
+                          <span className="sr-only">Edit event</span>
+                        </button>
+                        <button
+                          className="btn btn--secondary btn--icon admin-calendar__icon-btn admin-calendar__action-delete"
+                          type="button"
+                          onClick={() => handleQuickEventDelete(eventDoc)}
+                          disabled={!inventoryEnabled || quickEventSaving || quickEventDeletingId === eventDoc.id}
+                          aria-label={
+                            quickEventDeletingId === eventDoc.id
+                              ? "Deleting event"
+                              : `Delete event ${eventDoc.title || ""}`.trim()
+                          }
+                          title={quickEventDeletingId === eventDoc.id ? "Deleting event" : "Delete event"}
+                        >
+                          <IconTrash className="btn__icon" title="Delete event" />
+                          <span className="sr-only">
+                            {quickEventDeletingId === eventDoc.id ? "Deleting event" : "Delete event"}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   </li>
                 ))}
@@ -8707,11 +8842,13 @@ export function AdminWorkshopsCalendarView() {
               aria-label="Close"
               onClick={closeQuickEventForm}
             >
-              Ã—
+              x
             </button>
-            <h3>Add calendar event</h3>
+            <h3>{quickEventEditingId ? "Edit calendar event" : "Add calendar event"}</h3>
             <p className="admin-panel__note">
-              Schedule quick events, reminders, or custom studio days without creating a full workshop listing.
+              {quickEventEditingId
+                ? "Update this event directly from the calendar."
+                : "Schedule quick events, reminders, or custom studio days without creating a full workshop listing."}
             </p>
             <form className="admin-form" onSubmit={handleQuickEventSave}>
               <div className="admin-form__field">
@@ -8785,7 +8922,11 @@ export function AdminWorkshopsCalendarView() {
                   type="submit"
                   disabled={quickEventSaving || !inventoryEnabled}
                 >
-                  {quickEventSaving ? "Saving..." : "Save event"}
+                  {quickEventSaving
+                    ? "Saving..."
+                    : quickEventEditingId
+                      ? "Save changes"
+                      : "Save event"}
                 </button>
               </div>
               {quickEventError && <p className="admin-panel__error">{quickEventError}</p>}
@@ -8801,7 +8942,7 @@ export function AdminWorkshopsCalendarView() {
 
 export function AdminEventsView() {
   usePageMetadata({
-    title: "Admin Â· Events",
+    title: "Admin - Events",
     description: "Publish Bethany Blooms events and connect them to workshops.",
   });
   const {
@@ -9374,7 +9515,7 @@ export function AdminEventsView() {
                     disabled={eventSaving || !inventoryEnabled}
                   >
                     {eventSaving ?
-                       "Savingâ€¦"
+                       "Saving..."
                       : editingEventId ?
                        "Update Event"
                       : "Create Event"}
@@ -9386,7 +9527,7 @@ export function AdminEventsView() {
             <div>
               <h3>Scheduled Events</h3>
               {inventoryLoading && !events.length ? (
-                <p className="admin-panel__note">Loading eventsâ€¦</p>
+                <p className="admin-panel__note">Loading events...</p>
                 ) : (
                 <div className="admin-panel__list">
                   {normalizedEvents.length === 0 ? (
@@ -9469,7 +9610,7 @@ export function AdminEventsView() {
 
 export function AdminEmailTestView() {
   usePageMetadata({
-    title: "Admin Â· Email preview",
+    title: "Admin - Email preview",
     description: "Preview email HTML with dummy data without sending any emails.",
   });
   const { inventoryEnabled } = useAdminData();
@@ -9669,7 +9810,7 @@ export function AdminEmailTestView() {
         <div className="admin-email-preview__panel">
           <div className="admin-email-preview__meta">
             <p className="modal__meta">
-              <strong>Subject:</strong> {previewData.subject || "â€”"}
+              <strong>Subject:</strong> {previewData.subject || "-"}
             </p>
             {previewData.generatedAt && (
               <p className="modal__meta">
@@ -9698,7 +9839,7 @@ export function AdminEmailTestView() {
 
 export function AdminInvoicePreviewView() {
   usePageMetadata({
-    title: "Admin Â· Invoice preview",
+    title: "Admin - Invoice preview",
     description:
       "Preview subscription invoice PDF design without sending customer emails.",
   });
@@ -9755,7 +9896,7 @@ export function AdminInvoicePreviewView() {
           .trim();
         return {
           id,
-          label: `${cycleMonth} Â· ${formatPriceLabel(amount)} Â· ${planName}`,
+          label: `${cycleMonth} - ${formatPriceLabel(amount)} - ${planName}`,
         };
       })
       .filter(Boolean)
@@ -10005,7 +10146,7 @@ export function AdminInvoicePreviewView() {
 
 export function AdminCutFlowerClassesView() {
   usePageMetadata({
-    title: "Admin Â· Cut Flower Classes",
+    title: "Admin - Cut Flower Classes",
     description: "Create bookable cut flower sessions for customers.",
   });
   const {
@@ -10866,7 +11007,7 @@ export function AdminCutFlowerClassesView() {
 
 export function AdminCutFlowerBookingsView() {
   usePageMetadata({
-    title: "Admin Â· Cut Flowers",
+    title: "Admin - Cut Flowers",
     description: "Track bespoke cut flower bookings separately from workshops.",
   });
   const {
@@ -11881,7 +12022,7 @@ export function AdminCutFlowerBookingsView() {
 }
 export function AdminOrdersView() {
   usePageMetadata({
-    title: "Admin Â· Orders",
+    title: "Admin - Orders",
     description: "Review cart checkouts and fulfilment status.",
   });
   const { db, storage, orders, products, productCategories, inventoryLoading, inventoryError } = useAdminData();
@@ -11943,7 +12084,7 @@ export function AdminOrdersView() {
       fallback: [],
     });
   const [ordersPage, setOrdersPage] = useState(0);
-  const ordersPageSize = 5;
+  const [ordersPageSize, setOrdersPageSize] = useState(ORDER_PAGE_SIZE_OPTIONS[0]);
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -13282,6 +13423,24 @@ export function AdminOrdersView() {
               ))}
             </select>
           </label>
+          <label className="admin-filters__field admin-filters__field--compact">
+            <span>Per page</span>
+            <select
+              className="input"
+              value={ordersPageSize}
+              onChange={(event) => {
+                const nextPageSize = Number(event.target.value);
+                setOrdersPageSize(Number.isFinite(nextPageSize) ? nextPageSize : ORDER_PAGE_SIZE_OPTIONS[0]);
+                setOrdersPage(0);
+              }}
+            >
+              {ORDER_PAGE_SIZE_OPTIONS.map((sizeOption) => (
+                <option key={sizeOption} value={sizeOption}>
+                  {sizeOption}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
       </Reveal>
 
@@ -13342,9 +13501,9 @@ export function AdminOrdersView() {
                       )}
                     </td>
                     <td className="admin-orders-table__customer" data-label="Customer">
-                      <p>{order.customer?.fullName || "â€”"}</p>
+                      <p>{order.customer?.fullName || "-"}</p>
                       <p className="modal__meta admin-orders-table__contact">
-                        {order.customer?.email || "â€”"}
+                        {order.customer?.email || "-"}
                       </p>
                       {order.customer?.phone && (
                         <p className="modal__meta admin-orders-table__contact">{order.customer.phone}</p>
@@ -13423,7 +13582,7 @@ export function AdminOrdersView() {
           onPageChange={setOrdersPage}
           pageSize={ordersPageSize}
         />
-        {inventoryLoading && <p className="modal__meta">Syncing ordersâ€¦</p>}
+        {inventoryLoading && <p className="modal__meta">Syncing orders...</p>}
         {inventoryError && (
           <p className="admin-panel__error">{inventoryError}</p>
         )}
@@ -13573,7 +13732,7 @@ export function AdminOrdersView() {
                   <p className="modal__meta">Select a province to view available couriers.</p>
                 )}
                 {createOrderForm.shippingAddress.province && createOrderCourierStatus === "loading" && (
-                  <p className="modal__meta">Loading courier optionsâ€¦</p>
+                  <p className="modal__meta">Loading courier options...</p>
                 )}
                 {createOrderForm.shippingAddress.province &&
                   createOrderCourierStatus !== "loading" &&
@@ -14716,7 +14875,7 @@ export function AdminOrdersView() {
 
 export function AdminShippingView() {
   usePageMetadata({
-    title: "Admin Â· Shipping & Courier",
+    title: "Admin - Shipping & Courier",
     description: "Configure courier options and province-based delivery costs.",
   });
   const { inventoryEnabled } = useAdminData();
@@ -14933,7 +15092,7 @@ export function AdminShippingView() {
 
         <div className="admin-session-panel">
           <h3>Courier options</h3>
-          {status === "loading" && <p className="modal__meta">Loading courier optionsâ€¦</p>}
+          {status === "loading" && <p className="modal__meta">Loading courier options...</p>}
           {error && <p className="admin-panel__error">{error.message}</p>}
           {courierOptions.length === 0 ? (
             <p className="admin-panel__notice">No courier options configured yet.</p>
@@ -15049,7 +15208,7 @@ export function AdminShippingView() {
                             onClick={() => handleSaveCourier(option.id)}
                             disabled={savingId === option.id}
                           >
-                            {savingId === option.id ? "Savingâ€¦" : "Save changes"}
+                            {savingId === option.id ? "Saving..." : "Save changes"}
                           </button>
                         </div>
                       </>
@@ -15147,7 +15306,7 @@ export function AdminShippingView() {
                   Cancel
                 </button>
                 <button className="btn btn--primary" type="submit" disabled={savingId === "new"}>
-                  {savingId === "new" ? "Savingâ€¦" : "Create method"}
+                  {savingId === "new" ? "Saving..." : "Create method"}
                 </button>
               </div>
             </form>
@@ -15160,7 +15319,7 @@ export function AdminShippingView() {
 
 export function AdminProfileView() {
   usePageMetadata({
-    title: "Admin Â· Profile",
+    title: "Admin - Profile",
     description: "Manage your admin authentication info.",
   });
   const { user, role, signOut, refreshRole } = useAuth();
@@ -15209,7 +15368,7 @@ export function AdminProfileView() {
             onClick={handleRefreshRole}
             disabled={roleLoading}
           >
-            {roleLoading ? "Refreshingâ€¦" : "Refresh Role"}
+            {roleLoading ? "Refreshing..." : "Refresh Role"}
           </button>
           <button className="btn btn--primary" type="button" onClick={handleSignOut}>
             Sign Out
@@ -15233,7 +15392,7 @@ function AdminPagination({ page, total, onPageChange, pageSize = ADMIN_PAGE_SIZE
   return (
     <div className="admin-pagination">
       <span className="admin-pagination__info">
-        Showing {start}â€“{end} of {total}
+        Showing {start}-{end} of {total}
       </span>
       <div className="admin-pagination__controls">
         <button
@@ -15259,6 +15418,7 @@ function AdminPagination({ page, total, onPageChange, pageSize = ADMIN_PAGE_SIZE
     </div>
   );
 }
+
 
 
 

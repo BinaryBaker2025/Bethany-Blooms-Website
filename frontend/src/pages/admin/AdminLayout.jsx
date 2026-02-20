@@ -79,7 +79,6 @@ const NAV_SECTIONS = [
         end: true,
         children: [
           { to: "/admin/workshops", label: "Workshops & Bookings", end: true },
-          { to: "/admin/workshops/calendar", label: "Calendar" },
         ],
       },
       {
@@ -110,6 +109,7 @@ const NAV_SECTIONS = [
           { to: "/admin/pos/cash-up", label: "Cash Up" },
         ],
       },
+      { type: "link", id: "calendar", to: "/admin/calendar", label: "Calendar" },
       { type: "link", id: "reports", to: "/admin/reports", label: "Reports" },
     ],
   },
@@ -530,3 +530,4 @@ function AdminLayout() {
 }
 
 export default AdminLayout;
+

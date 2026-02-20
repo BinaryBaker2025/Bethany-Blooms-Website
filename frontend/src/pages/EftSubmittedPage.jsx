@@ -17,6 +17,7 @@ function EftSubmittedPage() {
   usePageMetadata({
     title: "EFT Submitted | Bethany Blooms",
     description: "Your EFT order is pending admin payment approval.",
+    noIndex: true,
   });
 
   const location = useLocation();

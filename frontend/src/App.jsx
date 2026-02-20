@@ -136,7 +136,7 @@ function App() {
                 <Route path="products/categories" element={<AdminProductsView />} />
                 <Route path="workshops" element={<AdminWorkshopsView />} />
                 <Route
-                  path="workshops/calendar"
+                  path="calendar"
                   element={<AdminWorkshopsCalendarView />}
                 />
                 <Route path="cut-flowers/classes" element={<AdminCutFlowerClassesView />} />
@@ -161,3 +161,4 @@ function App() {
 }
 
 export default App;
+

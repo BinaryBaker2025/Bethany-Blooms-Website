@@ -223,6 +223,20 @@ const GIFT_CARD_MAX_MESSAGE_LENGTH = 320;
 const GIFT_CARD_MAX_NAME_LENGTH = 120;
 const GIFT_CARD_MAX_TERMS_LENGTH = 1400;
 const DEFAULT_TRUNCATE_TEXT_LENGTH = 240;
+const SITEMAP_STATIC_PUBLIC_PATHS = Object.freeze([
+  "/",
+  "/workshops",
+  "/cut-flowers",
+  "/events",
+  "/products",
+  "/gallery",
+  "/contact",
+  "/subscriptions/checkout",
+]);
+const SITEMAP_CACHE_CONTROL = "public, max-age=900";
+const ROBOTS_CACHE_CONTROL = "public, max-age=3600";
+const SITEMAP_CONTENT_TYPE = "application/xml; charset=utf-8";
+const ROBOTS_CONTENT_TYPE = "text/plain; charset=utf-8";
 let giftCardDesignAssetsCache = null;
 
 const FIELD_VALUE = admin.firestore.FieldValue;
@@ -567,6 +581,192 @@ function coerceTimestampToDate(value) {
   }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeSeoPathname(pathValue = "/") {
+  const raw = (pathValue || "").toString().trim();
+  if (!raw) return "/";
+
+  let pathname = raw;
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      pathname = new URL(raw).pathname || "/";
+    } catch {
+      pathname = "/";
+    }
+  }
+
+  const queryIndex = pathname.indexOf("?");
+  const hashIndex = pathname.indexOf("#");
+  const cutoffIndex = [queryIndex, hashIndex]
+    .filter((index) => index >= 0)
+    .reduce((min, index) => Math.min(min, index), pathname.length);
+  pathname = pathname.slice(0, cutoffIndex);
+
+  if (!pathname.startsWith("/")) {
+    pathname = `/${pathname}`;
+  }
+  pathname = pathname.replace(/\/{2,}/g, "/");
+  if (pathname.length > 1) {
+    pathname = pathname.replace(/\/+$/, "");
+  }
+  return pathname || "/";
+}
+
+function buildCanonicalAbsoluteUrl(pathValue = "/") {
+  const canonical = (getCanonicalSiteUrl() || "").toString().trim();
+  const baseUrl = canonical || "https://bethanyblooms.co.za";
+  try {
+    const parsed = new URL(baseUrl);
+    const basePath = normalizeSeoPathname(parsed.pathname);
+    const normalizedPath = normalizeSeoPathname(pathValue);
+    const mergedPath = normalizeSeoPathname(
+      `${basePath === "/" ? "" : basePath}/${normalizedPath.replace(/^\/+/, "")}`,
+    );
+    return mergedPath === "/" ? parsed.origin : `${parsed.origin}${mergedPath}`;
+  } catch {
+    const fallbackBase = "https://bethanyblooms.co.za";
+    const normalizedPath = normalizeSeoPathname(pathValue);
+    return normalizedPath === "/" ? fallbackBase : `${fallbackBase}${normalizedPath}`;
+  }
+}
+
+function escapeXml(value = "") {
+  return (value || "")
+    .toString()
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function formatSitemapLastmod(value) {
+  const parsed = coerceTimestampToDate(value);
+  if (!parsed) return "";
+  return parsed.toISOString();
+}
+
+function isSeoLiveStatus(value) {
+  if (value === undefined || value === null) return true;
+  const normalized = value.toString().trim().toLowerCase();
+  if (!normalized) return true;
+  return normalized === "live";
+}
+
+function buildSitemapXml(entries = []) {
+  const deduped = new Map();
+  entries.forEach((entry) => {
+    const loc = (entry?.loc || "").toString().trim();
+    if (!loc) return;
+    const lastmod = (entry?.lastmod || "").toString().trim();
+    if (!deduped.has(loc)) {
+      deduped.set(loc, { loc, lastmod });
+      return;
+    }
+    if (lastmod) {
+      deduped.set(loc, { loc, lastmod });
+    }
+  });
+
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+  ];
+
+  deduped.forEach((entry) => {
+    lines.push("  <url>");
+    lines.push(`    <loc>${escapeXml(entry.loc)}</loc>`);
+    if (entry.lastmod) {
+      lines.push(`    <lastmod>${escapeXml(entry.lastmod)}</lastmod>`);
+    }
+    lines.push("  </url>");
+  });
+
+  lines.push("</urlset>");
+  return lines.join("\n");
+}
+
+function buildStaticSitemapEntries() {
+  return SITEMAP_STATIC_PUBLIC_PATHS.map((pathValue) => ({
+    loc: buildCanonicalAbsoluteUrl(pathValue),
+    lastmod: "",
+  }));
+}
+
+async function loadDynamicSitemapEntries() {
+  const results = await Promise.allSettled([
+    db.collection("products").get(),
+    db.collection("workshops").get(),
+  ]);
+
+  const dynamicEntries = [];
+
+  const productsResult = results[0];
+  if (productsResult.status === "fulfilled") {
+    productsResult.value.docs.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      if (!isSeoLiveStatus(data.status)) return;
+      const slugOrId = (data.slug || docSnap.id || "").toString().trim();
+      if (!slugOrId) return;
+      const lastmod =
+        formatSitemapLastmod(data.updatedAt) ||
+        formatSitemapLastmod(data.createdAt);
+      dynamicEntries.push({
+        loc: buildCanonicalAbsoluteUrl(`/products/${encodeURIComponent(slugOrId)}`),
+        lastmod,
+      });
+    });
+  } else {
+    functions.logger.error("Unable to fetch products for sitemap.xml", productsResult.reason);
+  }
+
+  const workshopsResult = results[1];
+  if (workshopsResult.status === "fulfilled") {
+    workshopsResult.value.docs.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      if (!isSeoLiveStatus(data.status)) return;
+      const workshopId = (docSnap.id || "").toString().trim();
+      if (!workshopId) return;
+      const lastmod =
+        formatSitemapLastmod(data.updatedAt) ||
+        formatSitemapLastmod(data.createdAt);
+      dynamicEntries.push({
+        loc: buildCanonicalAbsoluteUrl(`/workshops/${encodeURIComponent(workshopId)}`),
+        lastmod,
+      });
+    });
+  } else {
+    functions.logger.error("Unable to fetch workshops for sitemap.xml", workshopsResult.reason);
+  }
+
+  return dynamicEntries;
+}
+
+function buildRobotsTxt() {
+  const sitemapBaseUrl = buildCanonicalAbsoluteUrl("/").replace(/\/+$/, "");
+  const sitemapUrl = `${sitemapBaseUrl}/sitemap.xml`;
+  return [
+    "User-agent: *",
+    "Allow: /",
+    "Disallow: /admin",
+    "Disallow: /account",
+    "Disallow: /payment",
+    "Disallow: /gift-cards/",
+    "Disallow: /cart",
+    "Disallow: /design",
+    `Sitemap: ${sitemapUrl}`,
+    "",
+  ].join("\n");
+}
+
+function handleSeoMethodGuard(req, res) {
+  if (req.method === "GET" || req.method === "HEAD") {
+    return true;
+  }
+  res.set("Allow", "GET, HEAD");
+  res.status(405).send("Method Not Allowed");
+  return false;
 }
 
 function normalizePreorderSendMonth(value = "") {
@@ -9621,6 +9821,44 @@ async function resolveSubscriptionInvoiceForAdminPreview(invoiceId = "") {
     invoice: normalizedInvoice,
   };
 }
+
+exports.sitemapXml = onRequest(async (req, res) => {
+  if (!handleSeoMethodGuard(req, res)) return;
+
+  const staticEntries = buildStaticSitemapEntries();
+  let dynamicEntries = [];
+  try {
+    dynamicEntries = await loadDynamicSitemapEntries();
+  } catch (error) {
+    functions.logger.error("Unable to load dynamic entries for sitemap.xml", error);
+  }
+
+  const sitemapXml = buildSitemapXml([
+    ...staticEntries,
+    ...dynamicEntries,
+  ]);
+
+  res.set("Content-Type", SITEMAP_CONTENT_TYPE);
+  res.set("Cache-Control", SITEMAP_CACHE_CONTROL);
+  if (req.method === "HEAD") {
+    res.status(200).send();
+    return;
+  }
+  res.status(200).send(sitemapXml);
+});
+
+exports.robotsTxt = onRequest((req, res) => {
+  if (!handleSeoMethodGuard(req, res)) return;
+
+  const robotsBody = buildRobotsTxt();
+  res.set("Content-Type", ROBOTS_CONTENT_TYPE);
+  res.set("Cache-Control", ROBOTS_CACHE_CONTROL);
+  if (req.method === "HEAD") {
+    res.status(200).send();
+    return;
+  }
+  res.status(200).send(robotsBody);
+});
 
 exports.createPayfastPayment = onCall(() => {
   throw new HttpsError(

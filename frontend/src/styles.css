@@ -2687,9 +2687,10 @@ main {
 }
 
 .admin-calendar__nav {
-  min-width: 46px;
-  padding: 0.4rem 0.85rem;
-  font-size: 1.2rem;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  flex-shrink: 0;
   box-shadow: none;
   transition: none;
 }
@@ -2848,16 +2849,44 @@ main {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0.25rem;
+  gap: 0.4rem;
   min-width: 160px;
 }
 
-.admin-calendar__details-actions {
+.admin-calendar__icon-actions {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.25rem;
-  min-width: 160px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.admin-calendar__icon-btn {
+  flex-shrink: 0;
+}
+
+.admin-calendar__icon-btn.btn--icon {
+  width: 44px;
+  height: 44px;
+}
+
+.admin-calendar__icon-btn .btn__icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.admin-calendar__action-delete {
+  border-color: rgba(178, 69, 59, 0.45);
+  color: rgba(134, 43, 36, 0.92);
+}
+
+.admin-calendar__action-delete:hover,
+.admin-calendar__action-delete:focus-visible {
+  border-color: rgba(178, 69, 59, 0.62);
+  background: rgba(227, 166, 161, 0.22);
+}
+
+.admin-calendar__action-delete:disabled {
+  opacity: 0.62;
 }
 
 .admin-panel--full {
@@ -2920,101 +2949,253 @@ main {
   width: min(1120px, 96vw);
   max-height: 90vh;
   overflow: auto;
+  border: 1px solid rgba(209, 191, 167, 0.46);
+  border-radius: 26px;
+  padding: clamp(1.05rem, 2.1vw, 1.45rem);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 243, 233, 0.95));
+  box-shadow:
+    0 36px 70px -45px rgba(58, 58, 58, 0.62),
+    0 22px 46px -38px rgba(85, 107, 47, 0.38);
 }
 
 .admin-subscription-ops-manage__content {
   display: grid;
-  gap: 1rem;
+  gap: 1.05rem;
 }
 
 .admin-subscription-ops-manage__header {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.45rem;
+  padding: 0.2rem 0.15rem 0.75rem;
+  border-bottom: 1px solid rgba(209, 191, 167, 0.45);
+}
+
+.admin-subscription-ops-manage__header .modal__title {
+  margin: 0;
+  padding-right: 1.8rem;
+  font-size: clamp(1.8rem, 2.3vw, 2.35rem);
+}
+
+.admin-subscription-ops-manage__meta {
+  margin: 0;
+  font-size: 0.95rem;
+  color: rgba(47, 54, 36, 0.72);
+  letter-spacing: 0.01em;
+  word-break: break-word;
+}
+
+.admin-subscription-ops-manage .modal__close {
+  width: 36px;
+  height: 36px;
+  top: 0.9rem;
+  right: 0.9rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(85, 107, 47, 0.2);
+  background: rgba(255, 255, 255, 0.86);
+  color: rgba(47, 54, 36, 0.86);
+  transition:
+    background var(--transition-base),
+    border-color var(--transition-base),
+    box-shadow var(--transition-base);
+}
+
+.admin-subscription-ops-manage .modal__close:hover {
+  background: rgba(227, 166, 161, 0.2);
+  border-color: rgba(178, 69, 59, 0.32);
+}
+
+.admin-subscription-ops-manage .modal__close:focus-visible {
+  outline: 2px solid rgba(85, 107, 47, 0.55);
+  outline-offset: 2px;
 }
 
 .admin-subscription-ops-manage__badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .admin-subscription-ops-manage__tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  gap: 0.48rem;
+  border: 1px solid rgba(209, 191, 167, 0.45);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.74);
+  padding: 0.4rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.admin-subscription-ops-manage__tabs::-webkit-scrollbar {
+  height: 8px;
+}
+
+.admin-subscription-ops-manage__tabs::-webkit-scrollbar-thumb {
+  background: rgba(85, 107, 47, 0.26);
+  border-radius: 999px;
 }
 
 .admin-subscription-ops-manage__tab {
-  border: 1px solid rgba(85, 107, 47, 0.26);
+  border: 1px solid rgba(85, 107, 47, 0.22);
   background: rgba(255, 255, 255, 0.82);
   border-radius: 999px;
-  padding: 0.38rem 0.85rem;
+  padding: 0.5rem 1rem;
+  min-height: 40px;
+  line-height: 1;
   font-weight: 600;
+  font-size: 0.94rem;
   color: var(--color-text);
   cursor: pointer;
-  transition: background var(--transition-base), border-color var(--transition-base);
+  transition:
+    background var(--transition-base),
+    border-color var(--transition-base),
+    box-shadow var(--transition-base),
+    transform var(--transition-base);
 }
 
 .admin-subscription-ops-manage__tab:hover {
   border-color: rgba(85, 107, 47, 0.5);
+  background: rgba(167, 199, 161, 0.16);
 }
 
 .admin-subscription-ops-manage__tab.is-active {
-  background: rgba(85, 107, 47, 0.18);
-  border-color: rgba(85, 107, 47, 0.55);
+  background: linear-gradient(
+    180deg,
+    rgba(167, 199, 161, 0.34),
+    rgba(167, 199, 161, 0.22)
+  );
+  border-color: rgba(85, 107, 47, 0.58);
+  box-shadow: 0 8px 20px -14px rgba(47, 54, 36, 0.7);
 }
 
 .admin-subscription-ops-manage__tab:focus-visible {
-  outline: 2px solid rgba(85, 107, 47, 0.35);
-  outline-offset: 1px;
+  outline: 2px solid rgba(85, 107, 47, 0.55);
+  outline-offset: 2px;
+  transform: translateY(-1px);
 }
 
 .admin-subscription-ops-manage__layout {
   display: grid;
-  gap: 0.85rem;
+  gap: 1rem;
 }
 
 .admin-subscription-ops-manage__summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.7rem;
+  grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+  gap: 0.8rem;
 }
 
 .admin-subscription-ops-manage__card {
-  border: 1px solid rgba(85, 107, 47, 0.18);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.78);
-  padding: 0.8rem 0.9rem;
+  border: 1px solid rgba(85, 107, 47, 0.2);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 0.95rem 1rem;
   display: grid;
-  gap: 0.28rem;
+  align-content: start;
+  gap: 0.7rem;
+  box-shadow:
+    0 16px 34px -28px rgba(58, 58, 58, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .admin-subscription-ops-manage__card h4 {
   margin: 0;
+  font-size: 1.08rem;
+  line-height: 1.2;
+}
+
+.admin-subscription-ops-manage__card-body {
+  margin: 0;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.admin-subscription-ops-manage__kv-row {
+  display: grid;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0.48rem 0;
+  border-bottom: 1px dashed rgba(209, 191, 167, 0.5);
+}
+
+.admin-subscription-ops-manage__kv-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.admin-subscription-ops-manage__kv-label {
+  margin: 0;
+  color: rgba(47, 54, 36, 0.62);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.admin-subscription-ops-manage__kv-value {
+  margin: 0;
+  color: rgba(47, 54, 36, 0.92);
   font-size: 1rem;
+  line-height: 1.48;
+  word-break: break-word;
+}
+
+.admin-subscription-ops-manage__kv-value.is-strong {
+  color: rgba(47, 54, 36, 0.98);
+  font-weight: 700;
 }
 
 .admin-subscription-ops-manage__actions {
   border: 1px solid rgba(85, 107, 47, 0.18);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.78);
-  padding: 0.9rem;
-  width: min(760px, 100%);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 1rem 1.1rem;
+  width: min(780px, 100%);
+  box-shadow:
+    0 18px 34px -30px rgba(58, 58, 58, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.admin-subscription-ops-manage__section-intro {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.05rem 0.1rem 0.5rem;
+  border-bottom: 1px dashed rgba(209, 191, 167, 0.5);
+}
+
+.admin-subscription-ops-manage__section-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: rgba(47, 54, 36, 0.95);
+}
+
+.admin-subscription-ops-manage__section-note {
+  margin: 0;
 }
 
 .admin-subscription-ops-manage__action-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 0.55rem;
+  grid-template-columns: repeat(2, minmax(210px, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.2rem;
 }
 
 .admin-subscription-ops__actions {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.72rem;
 }
 
 .admin-subscription-ops__actions .admin-form__field {
   margin: 0;
+  display: grid;
+  gap: 0.34rem;
 }
 
 .admin-subscription-ops__actions .admin-form__actions {
@@ -3022,27 +3203,31 @@ main {
 }
 
 .admin-subscription-ops__actions .admin-users-checkbox {
-  margin: 0.1rem 0 0;
+  margin: 0.15rem 0 0;
+  border: 1px dashed rgba(209, 191, 167, 0.65);
+  border-radius: 12px;
+  padding: 0.58rem 0.7rem;
+  background: rgba(255, 255, 255, 0.74);
 }
 
 .admin-subscription-ops__charge-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(140px, 1fr));
-  gap: 0.55rem 0.6rem;
+  gap: 0.65rem 0.7rem;
 }
 
 .admin-subscription-ops__recurring-list {
   display: grid;
-  gap: 0.45rem;
-  padding: 0.55rem 0.65rem;
+  gap: 0.55rem;
+  padding: 0.68rem 0.75rem;
   border: 1px solid rgba(85, 107, 47, 0.15);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.84);
 }
 
 .admin-subscription-ops__recurring-item {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
   align-items: center;
   justify-content: space-between;
 }
@@ -3714,6 +3899,10 @@ main {
   display: grid;
   gap: 0.25rem;
   min-width: 220px;
+}
+
+.admin-filters__field--compact {
+  min-width: 130px;
 }
 
 .admin-users-toolbar {
@@ -8620,6 +8809,21 @@ main {
     justify-content: flex-start;
   }
 
+  .admin-calendar__header,
+  .admin-calendar__details-header {
+    align-items: flex-start;
+  }
+
+  .admin-calendar__details-actions {
+    width: 100%;
+    min-width: 0;
+    align-items: flex-start;
+  }
+
+  .admin-calendar__icon-actions {
+    justify-content: flex-start;
+  }
+
   .admin-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -8712,16 +8916,33 @@ main {
   .admin-subscription-ops-manage .modal__content {
     width: min(96vw, 980px);
     max-height: 88vh;
+    border-radius: 20px;
+    padding: 1rem 1.05rem 1.15rem;
+  }
+
+  .admin-subscription-ops-manage__header {
+    padding-bottom: 0.62rem;
+  }
+
+  .admin-subscription-ops-manage__header .modal__title {
+    font-size: clamp(1.58rem, 5vw, 2rem);
   }
 
   .admin-subscription-ops-manage__tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
-    padding-bottom: 0.2rem;
+    padding: 0.34rem;
+    gap: 0.42rem;
+    -webkit-overflow-scrolling: touch;
   }
 
   .admin-subscription-ops-manage__tab {
     flex: 0 0 auto;
+    min-height: 38px;
+  }
+
+  .admin-subscription-ops-manage__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-subscription-ops-manage__action-grid {
@@ -8776,14 +8997,76 @@ main {
 
   .admin-subscription-ops-manage .modal__content {
     width: min(96vw, 96vw);
+    max-height: calc(100vh - 1.2rem);
+    border-radius: 18px;
+    padding: 0.95rem 0.9rem 1rem;
+  }
+
+  .admin-subscription-ops-manage__header {
+    gap: 0.4rem;
+    padding: 0.1rem 0.05rem 0.6rem;
+  }
+
+  .admin-subscription-ops-manage__header .modal__title {
+    font-size: clamp(1.45rem, 7.2vw, 1.9rem);
+    padding-right: 1.6rem;
+  }
+
+  .admin-subscription-ops-manage__badges {
+    gap: 0.4rem;
+  }
+
+  .admin-subscription-ops-manage__tabs {
+    gap: 0.4rem;
+    padding: 0.3rem;
+    margin-inline: -0.05rem;
+  }
+
+  .admin-subscription-ops-manage__tab {
+    min-height: 42px;
+    padding: 0.5rem 0.88rem;
+    font-size: 0.92rem;
   }
 
   .admin-subscription-ops-manage__summary {
     grid-template-columns: 1fr;
+    gap: 0.75rem;
   }
 
   .admin-subscription-ops-manage__card {
-    padding: 0.75rem 0.8rem;
+    padding: 0.88rem 0.9rem;
+    gap: 0.62rem;
+  }
+
+  .admin-subscription-ops-manage__card h4 {
+    font-size: 1.04rem;
+  }
+
+  .admin-subscription-ops-manage__kv-row {
+    padding: 0.55rem 0;
+  }
+
+  .admin-subscription-ops-manage__kv-label {
+    font-size: 0.73rem;
+  }
+
+  .admin-subscription-ops-manage__kv-value {
+    font-size: 0.97rem;
+    line-height: 1.54;
+  }
+
+  .admin-subscription-ops-manage__actions {
+    padding: 0.9rem 0.85rem;
+    width: 100%;
+  }
+
+  .admin-subscription-ops-manage__section-intro {
+    padding: 0.02rem 0.02rem 0.45rem;
+  }
+
+  .admin-subscription-ops__actions .admin-users-checkbox {
+    align-items: flex-start;
+    line-height: 1.45;
   }
 
   .admin-subscription-ops__recurring-item {
@@ -9466,6 +9749,50 @@ main {
   display: grid;
   gap: 0.7rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.subscription-checkout__guest-lock {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem 0.82rem;
+  border-radius: 14px;
+  border: 1px dashed rgba(85, 107, 47, 0.36);
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(183, 196, 169, 0.22), transparent 60%),
+    rgba(255, 255, 255, 0.82);
+}
+
+.subscription-checkout__guest-lock .modal__meta {
+  margin: 0;
+}
+
+.subscription-checkout__guest-prompt {
+  margin-top: 0.2rem;
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.72rem 0.82rem;
+  border-radius: 14px;
+  border: 1px solid rgba(85, 107, 47, 0.26);
+  background:
+    radial-gradient(140% 120% at 100% 0%, rgba(227, 166, 161, 0.16), transparent 62%),
+    rgba(255, 255, 255, 0.9);
+}
+
+.subscription-checkout__guest-prompt .modal__meta {
+  margin: 0;
+}
+
+.subscription-checkout__guest-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.subscription-checkout__guest-prompt--admin {
+  border-color: rgba(227, 166, 161, 0.42);
+  background:
+    radial-gradient(130% 120% at 0% 0%, rgba(227, 166, 161, 0.2), transparent 60%),
+    rgba(255, 255, 255, 0.92);
 }
 
 .subscription-slot-picker {
@@ -10151,6 +10478,21 @@ main {
 
   .subscription-checkout__panel .grid-form {
     grid-template-columns: 1fr;
+  }
+
+  .subscription-checkout__guest-prompt-actions .btn {
+    flex: 1 1 180px;
+  }
+}
+
+@media (max-width: 768px) {
+  .subscription-checkout__guest-prompt-actions {
+    flex-direction: column;
+  }
+
+  .subscription-checkout__guest-prompt-actions .btn {
+    width: 100%;
+    flex-basis: auto;
   }
 }
 
