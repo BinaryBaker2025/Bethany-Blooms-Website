@@ -5,7 +5,7 @@ import TestimonialCarousel from "../components/TestimonialCarousel.jsx";
 import HeroCarousel from "../components/HeroCarousel.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
-import { getStockBadgeLabel, getStockStatus } from "../lib/stockStatus.js";
+import { getProductCardStockStatus, getStockBadgeLabel } from "../lib/stockStatus.js";
 import heroBackground from "../assets/photos/workshop-banner.jpg";
 import homePhotoOne from "../assets/photos/workshop-frame-hand-pink.jpeg";
 import homePhotoTwo from "../assets/photos/workshop-frame-hand-neutral.jpeg";
@@ -86,11 +86,7 @@ function HomePage() {
     const hasSale = Number.isFinite(salePriceNumber) && salePriceNumber !== priceNumber;
     const basePrice = hasSale ? salePriceNumber : priceNumber;
     const isPurchasable = Number.isFinite(basePrice);
-    const stockStatus = getStockStatus({
-      quantity: product.stock_quantity ?? product.quantity,
-      forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
-      status: product.stock_status,
-    });
+    const stockStatus = getProductCardStockStatus(product);
     const stockBadgeLabel = getStockBadgeLabel(stockStatus);
     const variants = Array.isArray(product.variants)
       ? product.variants
@@ -150,6 +146,7 @@ function HomePage() {
       images,
       isPurchasable,
       stockStatus,
+      isOutOfStock: stockStatus?.state === "out",
       stockBadgeLabel,
       variants,
     };
@@ -165,9 +162,9 @@ function HomePage() {
         id: "hero-cut-flowers",
         variant: "cut",
         badge: "Cut Flowers",
-        title: "Cut Flowers Styled For Celebrations",
+        title: "Pick-Your-Own Fresh Cut Flowers",
         description:
-          "Order lush seasonal arrangements, event styling, and on-site florals designed to suit intimate gatherings, editorials, or heartfelt gifting moments.",
+          "Visit our flower farm and hand-pick your own fresh, seasonal blooms straight from the field for gifting, events, or personal enjoyment.",
         background: CUT_FLOWER_PAGE_IMAGES.homeHeroBackground,
         mediaImage: CUT_FLOWER_PAGE_IMAGES.homeHeroMedia,
         mediaAlt: "Bethany Blooms long floral styling table outdoors",
@@ -345,7 +342,9 @@ function HomePage() {
                     </span>
                   </p>
                   <p className="product-card__description">{product.description}</p>
-                  <span className="btn btn--secondary">View details</span>
+                  <span className="btn btn--secondary">
+                    {product.isOutOfStock ? "Out of stock" : "View details"}
+                  </span>
                 </Reveal>
               );
             })}

@@ -376,6 +376,20 @@ p {
   gap: 0.75rem;
 }
 
+.nav__action--overflow {
+  position: absolute !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.nav__mobile-shortcuts {
+  display: none;
+}
+
+.nav__mobile-shortcut {
+  white-space: nowrap;
+}
+
 .cart-button {
   position: relative;
   background: var(--color-accent);
@@ -418,6 +432,37 @@ p {
   padding: 0.1rem 0.45rem;
   box-shadow: 0 10px 22px -20px rgba(31, 43, 14, 0.45);
   font-weight: 700;
+}
+
+.account-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(38, 48, 19, 0.46);
+  background: rgba(255, 248, 246, 0.92);
+  color: var(--color-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--transition-base),
+    box-shadow var(--transition-base), border-color var(--transition-base),
+    background-color var(--transition-base), color var(--transition-base);
+  box-shadow: 0 14px 28px -24px rgba(31, 43, 14, 0.48);
+}
+
+.account-button svg {
+  width: 21px;
+  height: 21px;
+}
+
+.account-button:hover,
+.account-button:focus-visible,
+.account-button.is-active {
+  transform: translateY(-2px);
+  border-color: rgba(38, 48, 19, 0.64);
+  background: var(--color-accent);
+  color: #fff;
+  box-shadow: 0 18px 34px -22px rgba(31, 43, 14, 0.62);
 }
 
 .menu-toggle {
@@ -1879,10 +1924,18 @@ main {
   height: 36px;
   border-radius: 50%;
   background: rgba(167, 199, 161, 0.25);
+  color: rgba(47, 54, 36, 0.92);
   display: grid;
   place-items: center;
   transition: transform var(--transition-base),
-    background var(--transition-base);
+    background var(--transition-base),
+    color var(--transition-base);
+}
+
+.footer__socials a svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .footer__socials a:hover,
@@ -2203,15 +2256,133 @@ main {
 .admin-sidebar__nav {
   display: flex;
   flex-direction: column;
+  gap: 0.55rem;
+}
+
+.admin-sidebar__section {
+  display: grid;
   gap: 0.35rem;
 }
 
+.admin-sidebar__section-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.42rem 0.3rem;
+  border: none;
+  background: transparent;
+  color: rgba(245, 234, 215, 0.75);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.admin-sidebar__section-toggle:hover,
+.admin-sidebar__section-toggle:focus-visible {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.admin-sidebar__section-toggle .admin-sidebar__chevron {
+  font-size: 0.72rem;
+  transition: transform var(--transition-base);
+}
+
+.admin-sidebar__section-toggle.is-open .admin-sidebar__chevron {
+  transform: rotate(180deg);
+}
+
+.admin-sidebar__section-body {
+  display: none;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-sidebar__section-body.is-open {
+  display: flex;
+}
+
+.admin-sidebar__link,
+.admin-sidebar__group-link,
+.admin-sidebar__group-label,
+.admin-sidebar__sublink,
 .admin-sidebar__nav a {
   padding: 0.5rem 0.75rem;
   border-radius: 0.85rem;
   font-weight: 600;
   color: rgba(245, 234, 215, 0.8);
-  transition: background var(--transition-base), color var(--transition-base);
+  transition: background var(--transition-base), color var(--transition-base),
+    border-color var(--transition-base);
+}
+
+.admin-sidebar__group {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.admin-sidebar__group-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.admin-sidebar__group-link,
+.admin-sidebar__group-label {
+  display: block;
+  padding-right: 0.55rem;
+}
+
+.admin-sidebar__group-toggle {
+  width: 1.95rem;
+  height: 1.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(245, 234, 215, 0.08);
+  color: rgba(245, 234, 215, 0.82);
+  cursor: pointer;
+  transition: background var(--transition-base), color var(--transition-base),
+    border-color var(--transition-base);
+}
+
+.admin-sidebar__group-toggle:hover,
+.admin-sidebar__group-toggle:focus-visible {
+  background: rgba(245, 234, 215, 0.2);
+  color: #fff;
+  border-color: rgba(245, 234, 215, 0.35);
+}
+
+.admin-sidebar__group-toggle .admin-sidebar__chevron {
+  font-size: 0.72rem;
+  transition: transform var(--transition-base);
+}
+
+.admin-sidebar__group-toggle.is-open .admin-sidebar__chevron {
+  transform: rotate(180deg);
+}
+
+.admin-sidebar__group-children {
+  display: none;
+  margin-left: 0.6rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid rgba(245, 234, 215, 0.2);
+  gap: 0.25rem;
+}
+
+.admin-sidebar__group-children.is-open {
+  display: grid;
+}
+
+.admin-sidebar__sublink {
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.42rem 0.65rem;
 }
 
 .admin-sidebar__nav a:hover,
@@ -2222,6 +2393,11 @@ main {
 
 .admin-sidebar__nav a.active {
   background: rgba(245, 234, 215, 0.28);
+  color: #fff;
+}
+
+.admin-sidebar__group-head.is-active .admin-sidebar__group-label {
+  background: rgba(245, 234, 215, 0.2);
   color: #fff;
 }
 
@@ -2697,6 +2873,183 @@ main {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
   margin-top: 1.25rem;
+}
+
+.admin-subscription-ops {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-subscription-ops__kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.9rem;
+}
+
+.admin-subscription-ops__filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem 0.9rem;
+  align-items: end;
+}
+
+.admin-subscription-ops__table td[data-label="Actions"] {
+  min-width: 190px;
+}
+
+.admin-subscription-ops__row {
+  cursor: pointer;
+}
+
+.admin-subscription-ops__row:focus-visible {
+  outline: 2px solid rgba(85, 107, 47, 0.35);
+  outline-offset: -2px;
+}
+
+.admin-subscription-ops__row-actions {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.admin-subscription-ops__row-actions .btn {
+  width: 100%;
+}
+
+.admin-subscription-ops-manage .modal__content {
+  width: min(1120px, 96vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.admin-subscription-ops-manage__content {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-subscription-ops-manage__header {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.admin-subscription-ops-manage__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.admin-subscription-ops-manage__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.admin-subscription-ops-manage__tab {
+  border: 1px solid rgba(85, 107, 47, 0.26);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 999px;
+  padding: 0.38rem 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background var(--transition-base), border-color var(--transition-base);
+}
+
+.admin-subscription-ops-manage__tab:hover {
+  border-color: rgba(85, 107, 47, 0.5);
+}
+
+.admin-subscription-ops-manage__tab.is-active {
+  background: rgba(85, 107, 47, 0.18);
+  border-color: rgba(85, 107, 47, 0.55);
+}
+
+.admin-subscription-ops-manage__tab:focus-visible {
+  outline: 2px solid rgba(85, 107, 47, 0.35);
+  outline-offset: 1px;
+}
+
+.admin-subscription-ops-manage__layout {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.admin-subscription-ops-manage__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.7rem;
+}
+
+.admin-subscription-ops-manage__card {
+  border: 1px solid rgba(85, 107, 47, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 0.8rem 0.9rem;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.admin-subscription-ops-manage__card h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.admin-subscription-ops-manage__actions {
+  border: 1px solid rgba(85, 107, 47, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 0.9rem;
+  width: min(760px, 100%);
+}
+
+.admin-subscription-ops-manage__action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 0.55rem;
+}
+
+.admin-subscription-ops__actions {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.admin-subscription-ops__actions .admin-form__field {
+  margin: 0;
+}
+
+.admin-subscription-ops__actions .admin-form__actions {
+  margin-top: 0.1rem;
+}
+
+.admin-subscription-ops__actions .admin-users-checkbox {
+  margin: 0.1rem 0 0;
+}
+
+.admin-subscription-ops__charge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 0.55rem 0.6rem;
+}
+
+.admin-subscription-ops__recurring-list {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(85, 107, 47, 0.15);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.admin-subscription-ops__recurring-item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.admin-subscription-ops__recurring-item .btn {
+  white-space: nowrap;
+  padding-inline: 0.7rem;
 }
 
 .admin-stat-card {
@@ -3363,6 +3716,216 @@ main {
   min-width: 220px;
 }
 
+.admin-users-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.admin-users-toolbar__field {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 180px;
+  flex: 1 1 200px;
+}
+
+.admin-users-toolbar__field--search {
+  flex: 2 1 320px;
+}
+
+.admin-users-table__hint {
+  margin: -0.2rem 0 0.9rem;
+  color: rgba(47, 54, 36, 0.62);
+  font-size: 0.9rem;
+}
+
+.admin-users-table__row td {
+  vertical-align: middle;
+}
+
+.admin-users-table__row:hover {
+  background: linear-gradient(90deg, rgba(167, 199, 161, 0.12), rgba(227, 166, 161, 0.08));
+}
+
+.admin-users-table__row:focus-visible {
+  outline: 2px solid rgba(85, 107, 47, 0.45);
+  outline-offset: -2px;
+}
+
+.admin-users-row__identity strong {
+  display: block;
+}
+
+.admin-users-row__identity .modal__meta {
+  margin: 0.2rem 0 0;
+}
+
+.admin-users-role-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.62rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-users-role-chip.is-admin {
+  background: rgba(85, 107, 47, 0.16);
+  color: rgba(47, 54, 36, 0.95);
+}
+
+.admin-users-role-chip.is-customer {
+  background: rgba(113, 141, 168, 0.16);
+  color: #3d5368;
+}
+
+.admin-users-modal .modal__content {
+  max-width: 940px;
+}
+
+.admin-users-modal__content {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-users-modal__section {
+  border: 1px solid rgba(209, 191, 167, 0.45);
+  border-radius: 14px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.admin-users-modal__section h4 {
+  margin: 0 0 0.5rem;
+}
+
+.admin-users-account-grid {
+  display: grid;
+  gap: 0.45rem 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.admin-users-account-grid p {
+  margin: 0;
+}
+
+.admin-users-eft-approval {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid rgba(85, 107, 47, 0.2);
+  background: rgba(241, 246, 236, 0.65);
+}
+
+.admin-users-eft-approval .btn {
+  justify-self: start;
+}
+
+.admin-users-modal__account-actions {
+  margin-top: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.admin-users-modal__account-actions .icon-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(85, 107, 47, 0.22);
+  background: rgba(255, 255, 255, 0.95);
+  margin-left: 0;
+}
+
+.admin-users-modal__account-actions .icon-btn.is-active {
+  background: rgba(85, 107, 47, 0.18);
+  border-color: rgba(85, 107, 47, 0.48);
+  color: rgba(47, 54, 36, 0.96);
+}
+
+.admin-users-preferences {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem 1.2rem;
+}
+
+.admin-users-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+}
+
+.admin-users-address-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.admin-users-address-card {
+  border: 1px solid rgba(209, 191, 167, 0.45);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.admin-users-address-card.is-default {
+  border-color: rgba(85, 107, 47, 0.4);
+  background: rgba(167, 199, 161, 0.16);
+}
+
+.admin-users-address-card__title {
+  margin-bottom: 0.2rem;
+}
+
+.admin-users-address-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.admin-users-address-editor {
+  margin-top: 0.8rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(209, 191, 167, 0.35);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-users-address-editor__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.admin-users-address-editor__header h5 {
+  margin: 0;
+}
+
+.admin-users-address-grid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-users-address-grid label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.admin-users-address-grid__full {
+  grid-column: 1 / -1;
+}
+
+.admin-users-modal__message {
+  margin: 0;
+}
+
 .admin-status {
   display: inline-flex;
   align-items: center;
@@ -3432,6 +3995,69 @@ main {
 .admin-status--stock-preorder {
   background: rgba(113, 141, 168, 0.18);
   color: #3d5368;
+}
+
+.admin-orders-table td {
+  vertical-align: top;
+}
+
+.admin-orders-table__order-number {
+  display: block;
+  line-height: 1.2;
+}
+
+.admin-orders-table__order .modal__meta {
+  margin: 0.16rem 0;
+}
+
+.admin-orders-table__ref,
+.admin-orders-table__tracking,
+.admin-orders-table__contact {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-orders-table__amount strong {
+  white-space: nowrap;
+  font-size: 1.02rem;
+}
+
+.admin-orders-table__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.admin-orders-table__payment .admin-status {
+  font-size: 0.82rem;
+  padding: 0.18rem 0.52rem;
+  line-height: 1.25;
+}
+
+.admin-orders-table__status-wrap {
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+}
+
+.admin-orders-table__status-select {
+  min-width: 170px;
+  max-width: 220px;
+}
+
+.admin-orders-table__status-note {
+  margin: 0;
+  line-height: 1.3;
+}
+
+.admin-orders-table__delivery-value {
+  display: block;
+  text-transform: capitalize;
+  margin: 0;
+}
+
+.admin-orders-table__actions-cell .btn {
+  min-width: 92px;
 }
 
 .admin-table tr.is-active {
@@ -3624,45 +4250,152 @@ main {
   flex-wrap: wrap;
 }
 
-.admin-order-detail__grid {
-  display: grid;
-  gap: 1.2rem;
+.admin-order-detail__top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: flex-end;
 }
 
-.admin-order-detail__split {
+.admin-order-detail__top-action {
   display: grid;
-  gap: 1.5rem;
+  gap: 0.35rem;
+  min-width: 220px;
 }
 
-@media (min-width: 980px) {
-  .admin-order-detail__split {
-    grid-template-columns: 1.1fr 0.9fr;
-    align-items: start;
-  }
+.admin-order-detail__top-action > span {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(47, 54, 36, 0.78);
 }
 
-.admin-order-detail__left {
-  display: grid;
-  gap: 1.1rem;
+.admin-order-detail__top-action--status {
+  flex: 1 1 300px;
 }
 
-.admin-order-detail__right {
+.admin-order-detail__top-warning {
+  margin: 0;
+}
+
+.admin-order-detail__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding-bottom: 0.15rem;
+}
+
+.admin-order-detail__tab {
+  border: 1px solid rgba(85, 107, 47, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(47, 54, 36, 0.88);
+  padding: 0.4rem 0.8rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.admin-order-detail__tab.is-active {
+  background: rgba(85, 107, 47, 0.16);
+  border-color: rgba(85, 107, 47, 0.46);
+}
+
+.admin-order-detail__tab:focus-visible {
+  outline: 2px solid rgba(85, 107, 47, 0.45);
+  outline-offset: 2px;
+}
+
+.admin-order-detail__tabpanel {
   display: grid;
-  gap: 1.1rem;
-  position: sticky;
-  top: 1rem;
-  align-self: start;
+  gap: 0.9rem;
+}
+
+.admin-order-detail__key-overview {
+  border: 1px solid rgba(85, 107, 47, 0.26);
+  border-radius: 14px;
+  background: rgba(245, 234, 215, 0.32);
+  padding: 0.78rem 0.86rem 0.86rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.admin-order-detail__key-overview h4 {
+  margin: 0;
+  font-size: 0.97rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: rgba(47, 54, 36, 0.84);
+}
+
+.admin-order-detail__key-strip {
+  display: grid;
+  gap: 0.62rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.admin-order-detail__key-card {
+  border: 1px solid rgba(85, 107, 47, 0.2);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.9));
+  padding: 0.62rem 0.7rem;
+  min-height: 78px;
+  display: grid;
+  align-content: start;
+  gap: 0.22rem;
+}
+
+.admin-order-detail__key-card--total {
+  border-color: rgba(85, 107, 47, 0.46);
+  background: linear-gradient(180deg, rgba(216, 231, 195, 0.48), rgba(255, 255, 255, 0.94));
+  box-shadow: 0 14px 26px -22px rgba(47, 54, 36, 0.62);
+}
+
+.admin-order-detail__key-label {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(47, 54, 36, 0.68);
+}
+
+.admin-order-detail__key-value {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: rgba(47, 54, 36, 0.93);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-order-detail__key-value--total {
+  font-size: 1.24rem;
+  color: rgba(49, 75, 25, 0.98);
+}
+
+.admin-order-detail__section-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.admin-order-detail__section-card {
+  border: 1px solid rgba(209, 191, 167, 0.45);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0.8rem 0.9rem;
+  display: grid;
+  gap: 0.32rem;
 }
 
 @media (min-width: 820px) {
-  .admin-order-detail__grid {
+  .admin-order-detail__section-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-}
 
-.admin-order-detail__actions {
-  display: grid;
-  gap: 0.85rem;
+  .admin-order-detail__section-grid--two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .admin-order-detail__actions-grid {
@@ -3686,6 +4419,29 @@ main {
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: flex-end;
+}
+
+.admin-order-detail__save-hint {
+  margin: 0;
+}
+
+.admin-order-detail__advanced {
+  border: 1px dashed rgba(209, 191, 167, 0.75);
+  border-radius: 12px;
+  background: rgba(245, 234, 215, 0.24);
+  padding: 0.65rem 0.8rem;
+}
+
+.admin-order-detail__advanced summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: rgba(47, 54, 36, 0.82);
+}
+
+.admin-order-detail__advanced-body {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.3rem;
 }
 
 .admin-order-email-status {
@@ -3720,6 +4476,8 @@ main {
 
 .admin-order-detail .modal__meta {
   color: rgba(47, 54, 36, 0.7);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .order-items li {
@@ -4499,6 +5257,400 @@ main {
   }
 }
 
+.admin-invoice-preview__panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.subscription-invoice-preview {
+  --invoice-accent: #536f34;
+  --invoice-background: #ffffff;
+  --invoice-header-tint: linear-gradient(140deg, rgba(236, 242, 226, 0.78), rgba(243, 231, 216, 0.84));
+  --invoice-panel: rgba(248, 248, 244, 0.96);
+  --invoice-border: rgba(26, 33, 26, 0.11);
+  --invoice-text: #1f2a21;
+  --invoice-muted: rgba(31, 42, 33, 0.66);
+  max-width: 800px;
+  margin: 0 auto;
+  border-radius: 24px;
+  border: 1px solid var(--invoice-border);
+  background: var(--invoice-background);
+  box-shadow: 0 24px 64px -44px rgba(18, 28, 18, 0.55);
+  overflow: hidden;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--invoice-text);
+}
+
+.subscription-invoice-preview__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.25rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding: 1.35rem 1.4rem;
+  background: var(--invoice-header-tint);
+}
+
+.subscription-invoice-preview__brand {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.subscription-invoice-preview__logo-slot {
+  width: 144px;
+  height: 50px;
+  border: 1px dashed rgba(31, 42, 33, 0.25);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.subscription-invoice-preview__brand-name {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  line-height: 1.2;
+}
+
+.subscription-invoice-preview__brand-subtitle {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--invoice-muted);
+  letter-spacing: 0.02em;
+}
+
+.subscription-invoice-preview__headline {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+}
+
+.subscription-invoice-preview__headline h3 {
+  margin: 0;
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  letter-spacing: 0.014em;
+  line-height: 1.08;
+}
+
+.subscription-invoice-preview__status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.3rem 0.82rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.subscription-invoice-preview__status-badge.is-pending {
+  color: #7f4511;
+  background: #ffedd5;
+}
+
+.subscription-invoice-preview__status-badge.is-paid {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.subscription-invoice-preview__status-badge.is-overdue {
+  color: #7f1d1d;
+  background: #fee2e2;
+}
+
+.subscription-invoice-preview__status-badge.is-cancelled {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.subscription-invoice-preview__section {
+  padding: 1rem 1.4rem 1.25rem;
+  border-top: 1px solid var(--invoice-border);
+}
+
+.subscription-invoice-preview__section-title {
+  margin: 0 0 0.72rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--invoice-muted);
+  font-weight: 700;
+}
+
+.subscription-invoice-preview__meta-grid,
+.subscription-invoice-preview__plan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.62rem;
+}
+
+.subscription-invoice-preview__plan-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.subscription-invoice-preview__meta-card,
+.subscription-invoice-preview__info-panel,
+.subscription-invoice-preview__footer-card {
+  border-radius: 14px;
+  border: 1px solid rgba(26, 33, 26, 0.08);
+  background: var(--invoice-panel);
+  padding: 0.75rem 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.subscription-invoice-preview__meta-label {
+  margin: 0 0 0.28rem;
+  font-size: 0.69rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--invoice-muted);
+}
+
+.subscription-invoice-preview__meta-value {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.42;
+  letter-spacing: 0.01em;
+}
+
+.subscription-invoice-preview__split-grid,
+.subscription-invoice-preview__footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.subscription-invoice-preview__panel-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.69rem;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--invoice-muted);
+  font-weight: 700;
+}
+
+.subscription-invoice-preview__info-panel p,
+.subscription-invoice-preview__footer-card p {
+  margin: 0 0 0.35rem;
+  line-height: 1.5;
+  font-size: 0.9rem;
+}
+
+.subscription-invoice-preview__footer-card a {
+  color: var(--invoice-accent);
+  font-weight: 600;
+  text-decoration-thickness: 1.5px;
+}
+
+.subscription-invoice-preview__table-wrap {
+  border: 1px solid rgba(26, 33, 26, 0.09);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.subscription-invoice-preview__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.subscription-invoice-preview__table thead {
+  background: rgba(236, 242, 226, 0.58);
+}
+
+.subscription-invoice-preview__table th,
+.subscription-invoice-preview__table td {
+  padding: 0.72rem 0.7rem;
+  border-bottom: 1px solid rgba(26, 33, 26, 0.09);
+  font-size: 0.87rem;
+  line-height: 1.45;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.subscription-invoice-preview__table th {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--invoice-muted);
+  font-weight: 700;
+}
+
+.subscription-invoice-preview__table td.is-numeric,
+.subscription-invoice-preview__table th.is-numeric {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.subscription-invoice-preview__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.subscription-invoice-preview__line-title {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.44;
+}
+
+.subscription-invoice-preview__line-note {
+  margin: 0.25rem 0 0;
+  color: var(--invoice-muted);
+  font-size: 0.8rem;
+}
+
+.subscription-invoice-preview__section--totals {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.subscription-invoice-preview__totals {
+  width: min(100%, 320px);
+  border: 1px solid rgba(26, 33, 26, 0.11);
+  border-radius: 14px;
+  background: rgba(250, 250, 247, 0.96);
+  padding: 0.68rem 0.86rem;
+}
+
+.subscription-invoice-preview__totals-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 0.24rem 0;
+  font-size: 0.92rem;
+}
+
+.subscription-invoice-preview__totals-row strong {
+  font-weight: 600;
+}
+
+.subscription-invoice-preview__totals-row.is-total {
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(26, 33, 26, 0.14);
+  font-size: 1.03rem;
+}
+
+.subscription-invoice-preview__totals-row.is-total strong {
+  color: var(--invoice-accent);
+  font-size: 1.12rem;
+}
+
+.subscription-invoice-preview__pdf-panel {
+  display: grid;
+  gap: 0.45rem;
+}
+
+@media (max-width: 980px) {
+  .subscription-invoice-preview__meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .subscription-invoice-preview__plan-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .subscription-invoice-preview {
+    border-radius: 20px;
+  }
+
+  .subscription-invoice-preview__header {
+    padding: 1.05rem 1rem;
+  }
+
+  .subscription-invoice-preview__section {
+    padding: 0.9rem 1rem 1.05rem;
+  }
+
+  .subscription-invoice-preview__headline {
+    justify-items: start;
+  }
+
+  .subscription-invoice-preview__split-grid,
+  .subscription-invoice-preview__footer,
+  .subscription-invoice-preview__meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .subscription-invoice-preview__table-wrap {
+    overflow-x: auto;
+  }
+
+  .subscription-invoice-preview__table {
+    min-width: 640px;
+  }
+
+  .subscription-invoice-preview__section--totals {
+    justify-content: stretch;
+  }
+
+  .subscription-invoice-preview__totals {
+    width: 100%;
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  .admin-invoice-preview .admin-panel__header,
+  .admin-invoice-preview .admin-email-preview__controls,
+  .admin-invoice-preview .subscription-invoice-preview__pdf-panel {
+    display: none !important;
+  }
+
+  .admin-invoice-preview .admin-email-preview__layout {
+    display: block;
+  }
+
+  .admin-invoice-preview .admin-email-preview__panel {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .admin-invoice-preview .subscription-invoice-preview {
+    max-width: none;
+    border-radius: 0;
+    border: 1px solid rgba(10, 10, 10, 0.25);
+    box-shadow: none;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  .admin-invoice-preview .subscription-invoice-preview__header,
+  .admin-invoice-preview .subscription-invoice-preview__meta-card,
+  .admin-invoice-preview .subscription-invoice-preview__info-panel,
+  .admin-invoice-preview .subscription-invoice-preview__footer-card,
+  .admin-invoice-preview .subscription-invoice-preview__totals,
+  .admin-invoice-preview .subscription-invoice-preview__table thead {
+    background: #fff !important;
+    box-shadow: none;
+  }
+
+  .admin-invoice-preview .subscription-invoice-preview * {
+    color: #111 !important;
+  }
+
+  .admin-invoice-preview .subscription-invoice-preview__status-badge {
+    border: 1px solid #444;
+    background: #fff !important;
+    color: #111 !important;
+  }
+}
+
 .admin-preview {
   width: 100%;
   max-height: 220px;
@@ -4786,6 +5938,70 @@ main {
   display: grid;
   gap: 0.35rem;
   margin-top: 1.25rem;
+}
+
+.product-detail__gift-card-config {
+  margin-top: 1.25rem;
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(85, 107, 47, 0.22);
+  background: rgba(245, 234, 215, 0.45);
+}
+
+.product-detail__gift-card-config h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.product-detail__gift-card-options {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.product-detail__gift-card-option {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(209, 191, 167, 0.5);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.product-detail__gift-card-option-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.product-detail__gift-card-option-qty .input {
+  width: 72px;
+  text-align: center;
+  padding: 0.35rem 0.45rem;
+}
+
+.product-detail__gift-card-option.is-selected {
+  border-color: rgba(85, 107, 47, 0.5);
+  background: rgba(167, 199, 161, 0.25);
+}
+
+.product-detail__gift-card-fields {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.product-detail__gift-card-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.product-detail__gift-card-terms {
+  margin: 0;
+  font-size: 0.88rem;
+  color: rgba(58, 58, 58, 0.78);
 }
 
 .cart-list__item {
@@ -5139,6 +6355,15 @@ main {
   background: rgba(167, 199, 161, 0.25);
 }
 
+.checkout-payment-method.is-disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.checkout-payment-method.is-disabled input {
+  cursor: not-allowed;
+}
+
 .checkout-eft {
   display: grid;
   gap: 0.7rem;
@@ -5245,7 +6470,7 @@ main {
   display: grid;
   gap: 2rem;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  align-items: start;
+  align-items: stretch;
 }
 
 .cart-page__panel {
@@ -5303,11 +6528,17 @@ main {
 }
 
 .cart-page__summary {
+  align-self: stretch;
+  height: 100%;
+  position: relative;
+}
+
+.cart-page__summary-inner {
   position: sticky;
-  top: 6.5rem;
-  align-self: start;
+  top: calc(var(--site-header-height, 96px) + 0.75rem);
   display: grid;
   gap: 0.85rem;
+  width: 100%;
 }
 
 .cart-page__actions {
@@ -5351,9 +6582,11 @@ main {
 
   .cart-page__summary {
     order: -1;
-    position: sticky;
-    top: calc(var(--site-header-height) + 0.75rem);
     z-index: 10;
+  }
+
+  .cart-page__summary-inner {
+    top: calc(var(--site-header-height, 96px) + 0.75rem);
   }
 
   .cart-page {
@@ -5362,6 +6595,10 @@ main {
 
   .cart-page__panel {
     overflow: hidden;
+  }
+
+  .cart-page__summary-inner {
+    overflow: visible;
   }
 
   .cart-page__sticky-bar {
@@ -5375,6 +6612,10 @@ main {
 }
 
 @media (max-width: 640px) {
+  .cart-page {
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
+  }
+
   .cart-page__header {
     margin-bottom: 1.25rem;
   }
@@ -5439,6 +6680,12 @@ main {
   }
 
   .cart-page__sticky-bar {
+    position: fixed;
+    left: max(1rem, env(safe-area-inset-left));
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    z-index: 20;
+    margin-top: 0;
     padding: 0.85rem 1rem;
   }
 }
@@ -6308,6 +7555,40 @@ main {
     cursor: pointer;
   }
 
+  .nav__mobile-shortcuts {
+    display: grid;
+    width: 100%;
+    gap: 0.5rem;
+    margin: 0 0 0.55rem;
+    padding: 0 0 0.75rem;
+    border-bottom: 1px solid rgba(85, 107, 47, 0.14);
+  }
+
+  .nav__mobile-shortcut {
+    width: 100%;
+    border: 1px solid rgba(85, 107, 47, 0.25);
+    background: rgba(167, 199, 161, 0.14);
+    color: var(--color-text);
+    border-radius: 11px;
+    padding: 0.56rem 0.75rem;
+    font: inherit;
+    font-weight: 700;
+    text-align: left;
+    line-height: 1.3;
+    cursor: pointer;
+    transition: background var(--transition-base), border-color var(--transition-base),
+      color var(--transition-base);
+  }
+
+  .nav__mobile-shortcut:hover,
+  .nav__mobile-shortcut:focus-visible,
+  .nav__mobile-shortcut.active {
+    background: rgba(85, 107, 47, 0.18);
+    border-color: rgba(85, 107, 47, 0.45);
+    color: rgba(47, 54, 36, 0.98);
+    outline: none;
+  }
+
   .nav__links a,
   .nav__trigger {
     width: 100%;
@@ -6940,6 +8221,51 @@ main {
   font-size: 1.05rem;
   font-weight: 700;
 }
+
+.report-product-controls {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  margin-bottom: 1rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(209, 191, 167, 0.45);
+  border-radius: 14px;
+  background: rgba(245, 234, 215, 0.4);
+}
+
+.report-product-controls__field {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.report-product-controls__field .input {
+  width: 100%;
+}
+
+.report-product-controls__actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1100px) {
+  .report-product-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .report-product-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .report-product-controls__actions {
+    justify-content: flex-start;
+  }
+}
+
 .pos-checkout__section {
   display: grid;
   gap: 0.75rem;
@@ -7071,23 +8397,66 @@ main {
   z-index: 1;
 }
 
+.admin-sidebar__link,
+.admin-sidebar__group-link,
+.admin-sidebar__group-label,
+.admin-sidebar__sublink,
 .admin-sidebar__nav a {
   border: 1px solid transparent;
   background: rgba(245, 234, 215, 0.08);
   letter-spacing: 0.01em;
 }
 
-.admin-sidebar__nav a:hover,
-.admin-sidebar__nav a:focus-visible {
+.admin-sidebar__section-toggle {
+  color: rgba(245, 234, 215, 0.72);
+}
+
+.admin-sidebar__section-toggle:hover,
+.admin-sidebar__section-toggle:focus-visible {
+  color: #fff;
+}
+
+.admin-sidebar__group-toggle {
+  background: rgba(245, 234, 215, 0.08);
+  border-color: transparent;
+}
+
+.admin-sidebar__group-toggle:hover,
+.admin-sidebar__group-toggle:focus-visible {
   background: linear-gradient(135deg, rgba(245, 234, 215, 0.26), rgba(227, 166, 161, 0.18));
   border-color: rgba(245, 234, 215, 0.35);
   color: #fff;
 }
 
-.admin-sidebar__nav a.active {
+.admin-sidebar__group-children {
+  border-left-color: rgba(245, 234, 215, 0.24);
+}
+
+.admin-sidebar__nav a:hover,
+.admin-sidebar__nav a:focus-visible,
+.admin-sidebar__link:hover,
+.admin-sidebar__link:focus-visible,
+.admin-sidebar__group-link:hover,
+.admin-sidebar__group-link:focus-visible,
+.admin-sidebar__sublink:hover,
+.admin-sidebar__sublink:focus-visible {
+  background: linear-gradient(135deg, rgba(245, 234, 215, 0.26), rgba(227, 166, 161, 0.18));
+  border-color: rgba(245, 234, 215, 0.35);
+  color: #fff;
+}
+
+.admin-sidebar__nav a.active,
+.admin-sidebar__link.active,
+.admin-sidebar__group-link.active,
+.admin-sidebar__sublink.active {
   background: linear-gradient(135deg, rgba(245, 234, 215, 0.3), rgba(227, 166, 161, 0.22));
   border-color: rgba(245, 234, 215, 0.4);
   box-shadow: 0 18px 34px -26px rgba(0, 0, 0, 0.4);
+}
+
+.admin-sidebar__group-head.is-active .admin-sidebar__group-label {
+  background: linear-gradient(135deg, rgba(245, 234, 215, 0.3), rgba(227, 166, 161, 0.22));
+  border-color: rgba(245, 234, 215, 0.4);
 }
 
 .admin-shell__main .btn--primary {
@@ -7281,13 +8650,31 @@ main {
 
   .admin-detail-grid,
   .admin-shipping-grid,
-  .admin-order-detail__grid,
-  .admin-order-detail__split {
+  .admin-order-detail__section-grid {
     grid-template-columns: 1fr;
   }
 
-  .admin-order-detail__right {
-    position: static;
+  .admin-order-detail__top-actions {
+    align-items: stretch;
+  }
+
+  .admin-order-detail__top-action {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .admin-order-detail__key-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-order-detail__tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 0.3rem;
+  }
+
+  .admin-order-detail__tab {
+    flex: 0 0 auto;
   }
 
   .admin-modal__actions {
@@ -7317,9 +8704,93 @@ main {
   .admin-form__actions .btn {
     width: 100%;
   }
+
+  .admin-subscription-ops__filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-subscription-ops-manage .modal__content {
+    width: min(96vw, 980px);
+    max-height: 88vh;
+  }
+
+  .admin-subscription-ops-manage__tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+  }
+
+  .admin-subscription-ops-manage__tab {
+    flex: 0 0 auto;
+  }
+
+  .admin-subscription-ops-manage__action-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-orders-view .admin-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7rem;
+    margin: 0.85rem 0 1.15rem;
+  }
+
+  .admin-orders-view .admin-kpi {
+    padding: 0.85rem 0.9rem;
+  }
+
+  .admin-orders-view .admin-kpi__value {
+    font-size: 1.45rem;
+  }
+
+  .admin-orders-view .admin-filters__left {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-orders-view .admin-filters__field {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .admin-users-toolbar__field,
+  .admin-users-toolbar__field--search {
+    min-width: 0;
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .admin-users-address-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {
+  .admin-subscription-ops__filters {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-subscription-ops__charge-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-subscription-ops-manage .modal__content {
+    width: min(96vw, 96vw);
+  }
+
+  .admin-subscription-ops-manage__summary {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-subscription-ops-manage__card {
+    padding: 0.75rem 0.8rem;
+  }
+
+  .admin-subscription-ops__recurring-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .admin-table {
     min-width: 0;
     border: none;
@@ -7368,5 +8839,1341 @@ main {
 
   .admin-table__actions {
     justify-content: flex-start;
+  }
+
+  .admin-subscription-ops__table td[data-label="Actions"] {
+    display: block;
+  }
+
+  .admin-subscription-ops__table td[data-label="Actions"]::before {
+    display: block;
+    margin-bottom: 0.35rem;
+    min-width: 0;
+  }
+
+  .admin-orders-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem 0.9rem;
+    padding: 0.95rem;
+  }
+
+  .admin-orders-table td {
+    display: block;
+    width: auto;
+    padding: 0;
+    border-bottom: none;
+    min-width: 0;
+  }
+
+  .admin-orders-table td::before {
+    display: block;
+    margin-bottom: 0.18rem;
+    min-width: 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(47, 54, 36, 0.62);
+  }
+
+  .admin-orders-table__order,
+  .admin-orders-table__customer,
+  .admin-orders-table__status {
+    grid-column: 1 / -1;
+  }
+
+  .admin-orders-table__actions-cell {
+    display: flex;
+    justify-content: flex-end;
+    align-items: end;
+  }
+
+  .admin-orders-table__status-select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .admin-orders-table__amount strong {
+    font-size: 1rem;
+  }
+
+  .admin-order-detail__actions-row {
+    align-items: stretch;
+  }
+
+  .admin-order-detail__actions-row .btn {
+    width: 100%;
+  }
+}
+
+.gift-card-page__grid {
+  margin-top: 1rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.gift-card-sheet {
+  border-radius: 22px;
+  border: 1px solid rgba(85, 107, 47, 0.24);
+  background: linear-gradient(160deg, rgba(245, 234, 215, 0.85), rgba(255, 255, 255, 0.96));
+  padding: 1.2rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.gift-card-sheet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.gift-card-sheet__header h2 {
+  margin: 0;
+}
+
+.gift-card-sheet__value {
+  margin: 0;
+  font-size: clamp(1.5rem, 2vw + 1rem, 2.2rem);
+  font-weight: 700;
+  color: rgba(34, 50, 22, 0.95);
+}
+
+.gift-card-sheet__meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.gift-card-sheet__meta p {
+  margin: 0;
+}
+
+.gift-card-sheet__message {
+  border-radius: 14px;
+  border: 1px solid rgba(209, 191, 167, 0.45);
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.75rem 0.85rem;
+}
+
+.gift-card-sheet__message p {
+  margin: 0.35rem 0 0;
+}
+
+.gift-card-sheet__options {
+  border-radius: 14px;
+  border: 1px solid rgba(209, 191, 167, 0.45);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 0.7rem 0.8rem;
+}
+
+.gift-card-sheet__options ul {
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.gift-card-sheet__options li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+}
+
+.gift-card-panel {
+  border-radius: 18px;
+  border: 1px solid rgba(209, 191, 167, 0.45);
+  background: rgba(255, 255, 255, 0.88);
+  padding: 1rem;
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+}
+
+.gift-card-panel h3,
+.gift-card-panel h4 {
+  margin: 0;
+}
+
+.gift-card-panel__actions {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.gift-card-panel__terms p {
+  margin: 0.35rem 0 0;
+  color: rgba(58, 58, 58, 0.85);
+}
+
+.gift-card-panel__links {
+  display: grid;
+  gap: 0.5rem;
+}
+
+@media (max-width: 900px) {
+  .gift-card-page__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.account-page__inner {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.account-page__header h1 {
+  margin-bottom: 0.45rem;
+}
+
+.account-auth {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.account-auth--centered {
+  justify-items: center;
+}
+
+.account-auth__panel {
+  display: grid;
+  gap: 0.8rem;
+  width: min(100%, 560px);
+  margin: 0 auto;
+  padding: 1.05rem;
+}
+
+.account-auth__links {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.account-auth__links p {
+  margin: 0;
+}
+
+.account-auth__link {
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  text-decoration: underline;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.account-auth__link:hover,
+.account-auth__link:focus-visible {
+  color: var(--color-text);
+}
+
+.account-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.account-panel {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.account-panel__content {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.account-subscriptions {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.account-subscriptions h3 {
+  margin: 0.1rem 0 0.1rem;
+  font-size: 1rem;
+}
+
+.account-subscription-panel {
+  gap: 1rem;
+}
+
+.account-subscription-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.account-subscription-form {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+}
+
+.account-subscription-form .btn {
+  min-height: 44px;
+}
+
+.account-subscription-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.account-subscription-card {
+  border: 1px solid rgba(47, 54, 36, 0.14);
+  border-radius: 16px;
+  background:
+    radial-gradient(160% 140% at 0% 0%, rgba(167, 199, 161, 0.14), transparent 58%),
+    rgba(255, 255, 255, 0.84);
+  padding: 0.9rem 1rem;
+  display: grid;
+  gap: 0.75rem;
+  box-shadow: 0 22px 36px -34px rgba(47, 54, 36, 0.55);
+}
+
+.account-subscription-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.account-subscription-card__head p {
+  margin: 0;
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+
+.account-subscription-card__amount {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.74rem 0.82rem;
+  border-radius: 14px;
+  border: 1px solid rgba(85, 107, 47, 0.28);
+  background:
+    radial-gradient(120% 150% at 0% 0%, rgba(167, 199, 161, 0.28), transparent 62%),
+    rgba(255, 255, 255, 0.92);
+}
+
+.account-subscription-card__amount-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(47, 54, 36, 0.68);
+}
+
+.account-subscription-card__amount strong {
+  font-size: clamp(1.3rem, 2vw, 1.5rem);
+  line-height: 1.1;
+  color: rgba(47, 54, 36, 0.96);
+}
+
+.account-subscription-card__amount .modal__meta {
+  margin: 0.1rem 0 0;
+}
+
+.account-subscription-card__payment-state {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 0.05rem;
+  padding: 0.22rem 0.58rem;
+  border-radius: 999px;
+  border: 1px solid rgba(85, 107, 47, 0.24);
+  background: rgba(167, 199, 161, 0.2);
+  color: rgba(47, 54, 36, 0.9);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.account-subscription-card__payment-state.is-pending {
+  border-color: rgba(178, 65, 55, 0.3);
+  background: rgba(227, 166, 161, 0.24);
+  color: rgba(111, 34, 28, 0.92);
+}
+
+.account-subscription-card__facts {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.account-subscription-fact {
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.62rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(47, 54, 36, 0.12);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.account-subscription-fact span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(47, 54, 36, 0.62);
+}
+
+.account-subscription-fact strong {
+  color: rgba(47, 54, 36, 0.95);
+  font-size: 0.98rem;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.account-subscription-fact .modal__meta {
+  margin: 0;
+}
+
+.account-subscription-fact--notice {
+  border-color: rgba(85, 107, 47, 0.24);
+  background: rgba(241, 246, 236, 0.78);
+}
+
+.account-subscription-fact--wide {
+  grid-column: 1 / -1;
+}
+
+.account-subscription-delivery-preference {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(47, 54, 36, 0.12);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.account-subscription-delivery-preference__title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(47, 54, 36, 0.62);
+}
+
+.account-subscription-slot-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.account-subscription-slot-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(47, 54, 36, 0.18);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+}
+
+.account-subscription-slot-option input {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.account-subscription-slot-option.is-selected {
+  border-color: rgba(85, 107, 47, 0.55);
+  background: rgba(167, 199, 161, 0.24);
+}
+
+.account-subscription-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(47, 54, 36, 0.12);
+}
+
+.account-subscription-card__actions .btn {
+  min-height: 38px;
+  padding: 0.42rem 0.82rem;
+}
+
+.account-subscription-card__invoice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+  padding: 0.58rem 0.66rem;
+  border-radius: 12px;
+  border: 1px solid rgba(47, 54, 36, 0.12);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.account-subscription-card__invoice .modal__meta {
+  margin: 0;
+}
+
+.account-subscription-card__invoice strong {
+  font-size: 0.98rem;
+  color: rgba(47, 54, 36, 0.94);
+}
+
+.account-subscription-proof {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(85, 107, 47, 0.35);
+  background: rgba(241, 246, 236, 0.7);
+}
+
+.account-subscription-proof__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.account-subscription-proof__actions .input {
+  min-width: min(100%, 260px);
+}
+
+.account-subscription-proof__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.account-subscription-invoices {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.account-subscription-invoices h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.account-subscription-history-dialog {
+  max-width: min(94vw, 980px);
+  width: min(100%, 980px);
+}
+
+.account-subscription-history {
+  display: grid;
+  gap: 1rem;
+}
+
+.account-subscription-history__section {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.account-subscription-history__section h4 {
+  margin: 0;
+}
+
+.subscription-checkout .section__inner {
+  max-width: 1100px;
+}
+
+.subscription-checkout {
+  display: grid;
+  gap: 1rem;
+}
+
+.subscription-checkout__header h1 {
+  margin-bottom: 0.35rem;
+}
+
+.subscription-checkout__grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  align-items: start;
+}
+
+.subscription-checkout__panel,
+.subscription-checkout__summary,
+.subscription-checkout-locked {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.subscription-checkout__panel h2,
+.subscription-checkout__summary h2 {
+  margin: 0.1rem 0 0;
+}
+
+.subscription-checkout__summary h3 {
+  margin: 0.4rem 0 0;
+}
+
+.subscription-checkout__summary-list {
+  display: grid;
+  gap: 0.24rem;
+}
+
+.subscription-checkout__summary-list p {
+  margin: 0;
+}
+
+.subscription-checkout__plan-meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.subscription-checkout__plan-meta .modal__meta {
+  margin: 0;
+}
+
+.subscription-checkout__plan-description {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: rgba(47, 54, 36, 0.8);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.subscription-checkout__due-now {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.72rem 0.86rem;
+  border-radius: 14px;
+  border: 1px solid rgba(85, 107, 47, 0.3);
+  background:
+    radial-gradient(130% 140% at 0% 0%, rgba(167, 199, 161, 0.25), transparent 60%),
+    rgba(255, 255, 255, 0.88);
+}
+
+.subscription-checkout__due-now-label {
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(47, 54, 36, 0.72);
+}
+
+.subscription-checkout__due-now strong {
+  font-size: 1.3rem;
+  line-height: 1.1;
+  color: rgba(47, 54, 36, 0.96);
+}
+
+.subscription-checkout__panel .grid-form {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.subscription-slot-picker {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.82rem 0.9rem;
+  border: 1px solid rgba(85, 107, 47, 0.22);
+  border-radius: 18px;
+  background:
+    radial-gradient(130% 160% at 0% 0%, rgba(183, 196, 169, 0.24), transparent 58%),
+    radial-gradient(140% 130% at 100% 100%, rgba(227, 166, 161, 0.18), transparent 62%),
+    rgba(255, 255, 255, 0.78);
+  box-shadow: 0 14px 28px -24px rgba(47, 54, 36, 0.58);
+}
+
+.subscription-slot-picker .modal__meta {
+  margin: 0;
+}
+
+.subscription-slot-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.subscription-slot-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(85, 107, 47, 0.25);
+  border-radius: 999px;
+  padding: 0.34rem 0.84rem;
+  background: rgba(255, 255, 255, 0.93);
+  font-size: 0.9rem;
+  line-height: 1.1;
+  color: rgba(47, 54, 36, 0.92);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-base),
+    background var(--transition-base),
+    box-shadow var(--transition-base),
+    transform var(--transition-base);
+}
+
+.subscription-slot-option:hover {
+  border-color: rgba(85, 107, 47, 0.44);
+  box-shadow: 0 10px 18px -16px rgba(47, 54, 36, 0.62);
+  transform: translateY(-1px);
+}
+
+.subscription-slot-option input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.subscription-slot-option span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.52rem;
+  font-weight: 600;
+}
+
+.subscription-slot-option span::before {
+  content: "";
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  border: 1.5px solid rgba(85, 107, 47, 0.44);
+  background: rgba(255, 255, 255, 0.95);
+  color: transparent;
+  font-size: 0.74rem;
+  font-weight: 700;
+  transition:
+    border-color var(--transition-base),
+    background var(--transition-base),
+    color var(--transition-base);
+}
+
+.subscription-slot-option:focus-within {
+  outline: 2px solid rgba(85, 107, 47, 0.36);
+  outline-offset: 2px;
+}
+
+.subscription-slot-option.is-selected {
+  border-color: rgba(85, 107, 47, 0.62);
+  background:
+    linear-gradient(135deg, rgba(183, 196, 169, 0.38), rgba(227, 166, 161, 0.2)),
+    rgba(255, 255, 255, 0.95);
+  box-shadow: 0 12px 22px -16px rgba(85, 107, 47, 0.66);
+}
+
+.subscription-slot-option.is-selected span::before {
+  content: "✓";
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-offwhite);
+}
+
+.subscription-checkout__actions {
+  margin-top: 0.35rem;
+}
+
+.subscription-payment-options {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.subscription-payment-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid rgba(47, 54, 36, 0.16);
+  border-radius: 14px;
+  padding: 0.65rem 0.75rem;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.subscription-payment-option input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--color-accent);
+}
+
+.subscription-payment-option span {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.subscription-payment-option small {
+  color: rgba(47, 54, 36, 0.68);
+  font-size: 0.84rem;
+}
+
+.subscription-payment-option.is-selected {
+  border-color: rgba(85, 107, 47, 0.5);
+  background: rgba(167, 199, 161, 0.22);
+}
+
+.subscription-payment-option.is-disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.subscription-checkout__eft-guidance {
+  margin-top: 0.65rem;
+  padding: 0.72rem 0.82rem;
+  border-radius: 12px;
+  border: 1px solid rgba(209, 191, 167, 0.5);
+  background: rgba(245, 234, 215, 0.5);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.subscription-checkout__eft-guidance p {
+  margin: 0;
+}
+
+.payment-status-page .section__inner,
+.account-subscription-pay-page .section__inner {
+  max-width: 920px;
+}
+
+.payment-status-card {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid rgba(209, 191, 167, 0.52);
+  border-radius: 24px;
+  padding: clamp(1rem, 2.5vw, 1.6rem);
+  background:
+    radial-gradient(130% 105% at 0% 0%, rgba(167, 199, 161, 0.22), transparent 58%),
+    radial-gradient(120% 110% at 100% 100%, rgba(227, 166, 161, 0.2), transparent 62%),
+    rgba(255, 255, 255, 0.74);
+  box-shadow: 0 30px 58px -46px rgba(47, 54, 36, 0.55);
+}
+
+.payment-status-card h1 {
+  margin: 0.1rem 0 0;
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+}
+
+.payment-status-card h2 {
+  margin: 0;
+  font-size: clamp(1.05rem, 2vw, 1.25rem);
+}
+
+.payment-status-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.payment-status-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  height: 40px;
+  border-radius: 999px;
+  padding: 0 0.85rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-offwhite);
+  background: rgba(85, 107, 47, 0.9);
+}
+
+.payment-status-card__icon--warn {
+  background: rgba(170, 87, 52, 0.92);
+}
+
+.payment-status-card__icon--pending {
+  background: rgba(48, 79, 112, 0.9);
+}
+
+.payment-status-card__lead {
+  margin: 0;
+  color: rgba(47, 54, 36, 0.82);
+  font-size: 1.03rem;
+  line-height: 1.45;
+}
+
+.payment-status-card__list {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.45rem;
+  color: rgba(47, 54, 36, 0.8);
+}
+
+.payment-status-card__meta {
+  margin: 0;
+  color: rgba(47, 54, 36, 0.74);
+}
+
+.payment-status-card__notice {
+  border: 1px solid rgba(85, 107, 47, 0.2);
+  background: rgba(167, 199, 161, 0.2);
+  border-radius: 14px;
+  padding: 0.7rem 0.85rem;
+  font-weight: 600;
+  color: rgba(47, 54, 36, 0.86);
+}
+
+.payment-status-card__notice--reference {
+  font-size: 1.02rem;
+}
+
+.payment-status-card__panel {
+  border: 1px solid rgba(209, 191, 167, 0.52);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.9rem 1rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.payment-status-card__details-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.payment-status-card__details-grid p {
+  margin: 0;
+}
+
+.payment-status-card__actions {
+  margin-top: 0.15rem;
+}
+
+.payment-status-card__bank-details p,
+.payment-status-card__proof p {
+  margin: 0;
+}
+
+.payment-status-card__proof {
+  gap: 0.75rem;
+}
+
+.payment-status-card__proof .checkout-eft-proof__field {
+  margin: 0;
+}
+
+.payment-status-page--success .payment-status-card__icon {
+  background: rgba(85, 107, 47, 0.9);
+}
+
+.payment-status-page--cancelled .payment-status-card__icon {
+  background: rgba(170, 87, 52, 0.9);
+}
+
+.payment-status-page--eft .payment-status-card__icon,
+.payment-status-page--subscription .payment-status-card__icon {
+  background: rgba(48, 79, 112, 0.9);
+}
+
+.account-subscription-pay-page .section__inner {
+  max-width: 920px;
+}
+
+.account-subscription-pay {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.account-subscription-pay h1 {
+  margin: 0;
+}
+
+.account-subscription-pay .payment-status-card__header {
+  margin-bottom: 0.1rem;
+}
+
+@media (max-width: 760px) {
+  .payment-status-card {
+    border-radius: 20px;
+    padding: 0.95rem 0.85rem;
+    gap: 0.85rem;
+  }
+
+  .payment-status-card__header {
+    align-items: flex-start;
+  }
+
+  .payment-status-card__icon {
+    min-width: 50px;
+    height: 36px;
+    font-size: 0.72rem;
+  }
+
+  .payment-status-card__details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-status-card__actions {
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .payment-status-card__actions .btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-order-detail__key-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-order-detail__key-value--total {
+    font-size: 1.12rem;
+  }
+}
+
+.account-addresses,
+.account-orders {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.account-address-card,
+.account-order-card {
+  border: 1px solid rgba(47, 54, 36, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 0.72rem 0.85rem;
+}
+
+.account-address-card__title {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+}
+
+.account-address-card__actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-top: 0.55rem;
+}
+
+.account-address-card__actions .btn {
+  padding: 0.48rem 0.72rem;
+  min-height: 40px;
+}
+
+.account-address-toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.account-address-dialog {
+  max-width: min(94vw, 760px);
+  width: min(100%, 760px);
+}
+
+.account-address-dialog__form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.account-address-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.account-order-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.account-order-card__head p {
+  margin: 0;
+}
+
+.account-order-card--link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.account-order-card--link:hover,
+.account-order-card--link:focus-visible {
+  border-color: rgba(85, 107, 47, 0.4);
+  box-shadow: 0 16px 34px -24px rgba(47, 54, 36, 0.5);
+  transform: translateY(-1px);
+}
+
+.account-order-card--link:focus-visible {
+  outline: 2px solid rgba(85, 107, 47, 0.35);
+  outline-offset: 2px;
+}
+
+.account-order-card__cta {
+  margin-top: 0.45rem;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.account-order-page__back {
+  display: inline-block;
+  margin-bottom: 0.9rem;
+  font-weight: 600;
+  color: rgba(47, 54, 36, 0.82);
+}
+
+.account-order-page__back:hover,
+.account-order-page__back:focus-visible {
+  color: var(--color-accent);
+}
+
+.account-order-detail {
+  display: grid;
+  gap: 1.15rem;
+  border: 1px solid rgba(209, 191, 167, 0.5);
+  border-radius: 26px;
+  padding: clamp(1rem, 2vw, 1.35rem);
+  background:
+    radial-gradient(130% 110% at 0% 0%, rgba(167, 199, 161, 0.24), transparent 58%),
+    radial-gradient(120% 120% at 100% 100%, rgba(227, 166, 161, 0.2), transparent 60%),
+    rgba(255, 255, 255, 0.66);
+  box-shadow: 0 34px 70px -54px rgba(47, 54, 36, 0.55);
+}
+
+.account-order-detail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid rgba(209, 191, 167, 0.55);
+  padding-bottom: 1rem;
+}
+
+.account-order-detail__header h1 {
+  margin: 0.32rem 0 0.2rem;
+  font-size: clamp(2rem, 4vw, 2.45rem);
+  letter-spacing: 0.01em;
+}
+
+.account-order-detail__badge {
+  margin-right: 0;
+}
+
+.account-order-detail__placed-at {
+  margin: 0;
+  font-size: 1.02rem;
+  color: rgba(47, 54, 36, 0.74);
+}
+
+.account-order-detail__status {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+  align-content: start;
+  min-width: min(100%, 280px);
+  padding: 0.55rem 0.65rem;
+  border-radius: 15px;
+  background: rgba(245, 234, 215, 0.66);
+  border: 1px solid rgba(209, 191, 167, 0.45);
+}
+
+.account-order-detail__status .modal__meta {
+  margin: 0;
+}
+
+.account-order-detail__status-pill {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+}
+
+.account-order-detail__grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
+}
+
+.account-order-detail__card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(47, 54, 36, 0.14);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.82));
+  padding: 1rem 0.95rem 0.95rem;
+  box-shadow: 0 20px 36px -32px rgba(47, 54, 36, 0.75);
+}
+
+.account-order-detail__card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(85, 107, 47, 0.78), rgba(183, 196, 169, 0.45));
+}
+
+.account-order-detail__card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.27rem;
+  letter-spacing: 0.01em;
+}
+
+.account-order-detail__card p {
+  margin: 0.28rem 0;
+  line-height: 1.42;
+}
+
+.account-order-detail__items {
+  border-top: 1px solid rgba(209, 191, 167, 0.55);
+  padding-top: 1rem;
+}
+
+.account-order-detail__items h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.45rem;
+}
+
+.account-order-items {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.account-order-item-card {
+  border: 1px solid rgba(47, 54, 36, 0.14);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0.82rem 0.9rem;
+  box-shadow: 0 18px 30px -32px rgba(47, 54, 36, 0.9);
+}
+
+.account-order-item-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.account-order-item-card__name {
+  margin: 0;
+  font-weight: 600;
+  font-size: 1.03rem;
+}
+
+.account-order-item-card__total {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.account-order-item-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+
+.account-order-item-card__chip {
+  margin-right: 0;
+  font-size: 0.76rem;
+  padding: 0.18rem 0.64rem;
+}
+
+.account-order-item-card__chips .account-order-item-card__chip:not(.badge--stock-preorder) {
+  background: rgba(85, 107, 47, 0.12);
+  color: rgba(47, 54, 36, 0.95);
+}
+
+.account-order-item-card .modal__meta {
+  margin: 0.24rem 0 0;
+}
+
+@media (max-width: 860px) {
+  .account-order-detail {
+    padding: 0.95rem 0.8rem;
+    border-radius: 20px;
+  }
+
+  .account-order-detail__header {
+    padding-bottom: 0.85rem;
+  }
+
+  .account-order-detail__header h1 {
+    font-size: 1.85rem;
+  }
+
+  .account-order-detail__status {
+    width: 100%;
+    justify-items: start;
+  }
+
+  .account-order-detail__status-pill {
+    font-size: 0.78rem;
+  }
+
+  .account-order-detail__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 980px) {
+  .account-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .account-panel--subscriptions {
+    grid-column: 1 / -1;
+  }
+
+  .account-panel--orders {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 980px) {
+  .account-subscription-form {
+    grid-template-columns: 1fr;
+  }
+
+  .account-subscription-card__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .subscription-checkout__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .subscription-checkout__panel .grid-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .site-header,
+  .site-footer,
+  .gift-card-panel,
+  .breadcrumb-link {
+    display: none !important;
+  }
+
+  .gift-card-page {
+    padding: 0;
+  }
+
+  .gift-card-page .section__inner {
+    max-width: none;
+    padding: 0;
+  }
+
+  .gift-card-sheet {
+    border: 1px solid rgba(58, 58, 58, 0.28);
+    box-shadow: none;
+    break-inside: avoid;
   }
 }

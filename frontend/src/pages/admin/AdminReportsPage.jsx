@@ -50,6 +50,45 @@ const parseNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const normalizeVariantLabel = (item) => {
+  const label = item?.metadata?.variantLabel;
+  if (typeof label !== "string") return "";
+  return label.trim();
+};
+
+const buildProductReportLabel = (item, fallbackName) => {
+  const baseName = (item?.name || fallbackName || "Product").toString().trim() || "Product";
+  const variantLabel = normalizeVariantLabel(item);
+  return variantLabel ? `${baseName} - ${variantLabel}` : baseName;
+};
+
+const resolveProductReportIdentity = (item) => {
+  const metadata = item?.metadata || {};
+  const rawItemId = (item?.id || "").toString().trim();
+  const idSegments = rawItemId ? rawItemId.split(":") : [];
+  const fallbackProductId = idSegments[0] || rawItemId;
+  const fallbackVariantId = idSegments.length > 1 ? idSegments.slice(1).join(":") : "";
+
+  const productKey = (
+    metadata.productId ||
+    metadata.productID ||
+    metadata.product ||
+    fallbackProductId ||
+    item?.name ||
+    ""
+  )
+    .toString()
+    .trim();
+
+  const variantLabel = normalizeVariantLabel(item);
+  const variantId = (metadata.variantId || fallbackVariantId || "")
+    .toString()
+    .trim();
+  const variantKey = (variantId || variantLabel).toString().trim().toLowerCase();
+
+  return { productKey, variantKey };
+};
+
 function AdminReportsPage() {
   usePageMetadata({
     title: "Admin - Reports",
@@ -72,6 +111,10 @@ function AdminReportsPage() {
 
   const [startDate, setStartDate] = useState(toLocalDateKey(defaultStart));
   const [endDate, setEndDate] = useState(toLocalDateKey(today));
+  const [productSort, setProductSort] = useState("qty-desc");
+  const [minQty, setMinQty] = useState("1");
+  const [minRevenue, setMinRevenue] = useState("");
+  const [productSearch, setProductSearch] = useState("");
 
   const rangeBounds = useMemo(() => {
     const start = startDate ? new Date(startDate) : null;
@@ -134,16 +177,22 @@ function AdminReportsPage() {
     .filter((sale) => sale.paymentMethod === "card")
     .reduce((sum, sale) => sum + parseNumber(sale.total, 0), 0);
 
-  const popularItems = useMemo(() => {
+  const productTotalsRaw = useMemo(() => {
     const map = new Map();
 
-    filteredOrders.forEach((order) => {
+    recognizedRevenueOrders.forEach((order) => {
       (order.items || []).forEach((item) => {
         const isProduct = item.metadata?.type === "product";
         if (!isProduct) return;
-        const key = item.id || item.name;
-        if (!key) return;
-        const entry = map.get(key) || { name: item.name || key, quantity: 0, revenue: 0 };
+        const { productKey, variantKey } = resolveProductReportIdentity(item);
+        if (!productKey) return;
+        const key = variantKey ? `${productKey}::${variantKey}` : productKey;
+        const entry = map.get(key) || {
+          key,
+          name: buildProductReportLabel(item, productKey),
+          quantity: 0,
+          revenue: 0,
+        };
         const quantity = parseNumber(item.quantity, 0);
         entry.quantity += quantity;
         entry.revenue += parseNumber(item.price, 0) * quantity;
@@ -151,24 +200,75 @@ function AdminReportsPage() {
       });
     });
 
-    filteredSales.forEach((sale) => {
-      (sale.items || []).forEach((item) => {
-        const isPosItem = item.type === "product" || item.type === "pos-product";
-        if (!isPosItem) return;
-        const key = item.id || item.name;
-        if (!key) return;
-        const entry = map.get(key) || { name: item.name || key, quantity: 0, revenue: 0 };
-        const quantity = parseNumber(item.quantity, 0);
-        entry.quantity += quantity;
-        entry.revenue += parseNumber(item.price, 0) * quantity;
-        map.set(key, entry);
-      });
+    return Array.from(map.values());
+  }, [recognizedRevenueOrders]);
+
+  const minQtyValue = useMemo(() => {
+    const parsed = Number.parseInt(minQty, 10);
+    if (!Number.isFinite(parsed)) return 1;
+    return Math.max(1, Math.floor(parsed));
+  }, [minQty]);
+
+  const minRevenueValue = useMemo(() => {
+    const parsed = Number(minRevenue);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, parsed);
+  }, [minRevenue]);
+
+  const productSearchTerm = useMemo(
+    () => productSearch.toLowerCase().trim(),
+    [productSearch],
+  );
+
+  const hasProductSales = useMemo(
+    () => productTotalsRaw.some((item) => item.quantity >= 1),
+    [productTotalsRaw],
+  );
+
+  const visibleProductTotals = useMemo(() => {
+    const compareByName = (a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+
+    const filtered = productTotalsRaw.filter((item) => {
+      if (item.quantity < 1) return false;
+      if (item.quantity < minQtyValue) return false;
+      if (item.revenue < minRevenueValue) return false;
+      if (productSearchTerm && !item.name.toLowerCase().includes(productSearchTerm)) return false;
+      return true;
     });
 
-    return Array.from(map.values())
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 8);
-  }, [filteredOrders, filteredSales]);
+    filtered.sort((a, b) => {
+      const nameCompare = compareByName(a, b);
+      if (productSort === "qty-asc") {
+        const qtyDiff = a.quantity - b.quantity;
+        return qtyDiff !== 0 ? qtyDiff : nameCompare;
+      }
+      if (productSort === "revenue-desc") {
+        const revenueDiff = b.revenue - a.revenue;
+        return revenueDiff !== 0 ? revenueDiff : nameCompare;
+      }
+      if (productSort === "revenue-asc") {
+        const revenueDiff = a.revenue - b.revenue;
+        return revenueDiff !== 0 ? revenueDiff : nameCompare;
+      }
+      if (productSort === "name-asc") {
+        return nameCompare;
+      }
+      if (productSort === "name-desc") {
+        return nameCompare * -1;
+      }
+      const qtyDiff = b.quantity - a.quantity;
+      return qtyDiff !== 0 ? qtyDiff : nameCompare;
+    });
+
+    return filtered;
+  }, [productTotalsRaw, minQtyValue, minRevenueValue, productSearchTerm, productSort]);
+
+  const handleResetProductFilters = () => {
+    setProductSort("qty-desc");
+    setMinQty("1");
+    setMinRevenue("");
+    setProductSearch("");
+  };
 
   const visitsInRange = useMemo(() => {
     const normalizedVisits = (siteVisits || []).map((visit) => ({
@@ -262,22 +362,79 @@ function AdminReportsPage() {
 
       <div className="report-grid">
         <div className="report-card report-card--wide">
-          <h3>Popular products</h3>
-          {popularItems.length === 0 ? (
+          <h3>Product totals</h3>
+          <p className="modal__meta">Online product orders only (bookings and POS excluded).</p>
+          <div className="report-product-controls">
+            <label className="report-product-controls__field modal__meta">
+              Search
+              <input
+                className="input"
+                type="search"
+                placeholder="Product or variant"
+                value={productSearch}
+                onChange={(event) => setProductSearch(event.target.value)}
+              />
+            </label>
+            <label className="report-product-controls__field modal__meta">
+              Min qty
+              <input
+                className="input"
+                type="number"
+                min="1"
+                step="1"
+                value={minQty}
+                onChange={(event) => setMinQty(event.target.value)}
+              />
+            </label>
+            <label className="report-product-controls__field modal__meta">
+              Min revenue
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="0.01"
+                value={minRevenue}
+                onChange={(event) => setMinRevenue(event.target.value)}
+              />
+            </label>
+            <label className="report-product-controls__field modal__meta">
+              Sort by
+              <select
+                className="input"
+                value={productSort}
+                onChange={(event) => setProductSort(event.target.value)}
+              >
+                <option value="qty-desc">Qty high to low</option>
+                <option value="qty-asc">Qty low to high</option>
+                <option value="revenue-desc">Revenue high to low</option>
+                <option value="revenue-asc">Revenue low to high</option>
+                <option value="name-asc">Product A-Z</option>
+                <option value="name-desc">Product Z-A</option>
+              </select>
+            </label>
+            <div className="report-product-controls__actions">
+              <button className="btn btn--secondary" type="button" onClick={handleResetProductFilters}>
+                Clear
+              </button>
+            </div>
+          </div>
+          {!hasProductSales ? (
             <p className="modal__meta">No product sales recorded in this range.</p>
+          ) : visibleProductTotals.length === 0 ? (
+            <p className="modal__meta">No products match the current filters.</p>
           ) : (
             <div className="admin-table__wrapper">
               <table className="admin-table admin-table--compact">
                 <thead>
                   <tr>
-                    <th scope="col">Product</th>
+                    <th scope="col">Product / Variant</th>
                     <th scope="col">Qty sold</th>
                     <th scope="col">Revenue</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {popularItems.map((item) => (
-                    <tr key={item.name}>
+                  {visibleProductTotals.map((item) => (
+                    <tr key={item.key}>
                       <td>{item.name}</td>
                       <td>{item.quantity}</td>
                       <td>{moneyFormatter.format(item.revenue)}</td>

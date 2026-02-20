@@ -23,6 +23,37 @@ const resolveItemType = (entry) => {
   return "product";
 };
 
+const normalizeStockStatus = (value = "") =>
+  value
+    .toString()
+    .trim()
+    .toLowerCase();
+
+const normalizeStockQuantity = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null;
+};
+
+const getOutOfStockMessage = (item = {}) => {
+  const variantLabel = (item.metadata?.variantLabel || "").toString().trim();
+  if (variantLabel) return `${variantLabel} is out of stock.`;
+  const itemName = (item.name || "").toString().trim();
+  if (itemName) return `${itemName} is out of stock.`;
+  return "This item is out of stock.";
+};
+
+const publishCartNotice = (message) => {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("cart-notice", {
+      detail: {
+        message: (message || "").toString().trim() || "Cart updated.",
+      },
+    }),
+  );
+};
+
 export function CartProvider({ children }) {
   const [items, setItems] = useState(() => readStorage());
   const [isReady, setIsReady] = useState(false);
@@ -43,12 +74,47 @@ export function CartProvider({ children }) {
       const existingType = resolveItemType(prev[0]);
 
       if (existingType && incomingType && existingType !== incomingType) {
-        if (typeof window !== "undefined") {
-          window.alert(
-            "You can only have workshops or products in your cart at one time. Please clear your cart to switch.",
-          );
-        }
+        publishCartNotice(
+          "You can only have workshops or products in your cart at one time. Clear your cart to switch.",
+        );
         return prev;
+      }
+
+      if (incomingType === "product") {
+        const isGiftCard = Boolean(item.metadata?.giftCard?.isGiftCard || item.metadata?.isGiftCard);
+        if (!isGiftCard) {
+          const stockStatus = normalizeStockStatus(
+            item.metadata?.stockStatus || item.metadata?.stock_status || item.stockStatus || item.stock_status || "",
+          );
+          const stockQuantity = normalizeStockQuantity(
+            item.metadata?.stockQuantity ??
+              item.metadata?.stock_quantity ??
+              item.stockQuantity ??
+              item.stock_quantity,
+          );
+          const isOutOfStock =
+            stockStatus === "out" ||
+            stockStatus === "out_of_stock" ||
+            (stockQuantity !== null && stockQuantity <= 0);
+
+          if (isOutOfStock) {
+            publishCartNotice(getOutOfStockMessage(item));
+            return prev;
+          }
+
+          const existing = prev.find((entry) => entry.id === item.id);
+          if (existing && stockQuantity !== null) {
+            const nextQuantity = (Number(existing.quantity) || 0) + (item.quantity ?? 1);
+            if (nextQuantity > stockQuantity) {
+              publishCartNotice(
+                stockQuantity <= 0
+                  ? getOutOfStockMessage(item)
+                  : `Only ${stockQuantity} available for this item.`,
+              );
+              return prev;
+            }
+          }
+        }
       }
 
       const existing = prev.find((entry) => entry.id === item.id);

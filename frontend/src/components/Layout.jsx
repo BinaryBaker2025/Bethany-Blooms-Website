@@ -1,14 +1,15 @@
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useModal } from "../context/ModalContext.jsx";
 import Header from "./Header.jsx";
 import Footer from "./Footer.jsx";
-import BookingModal from "./BookingModal.jsx";
 import WhatsAppFloatingButton from "./WhatsAppFloatingButton.jsx";
+
+const BookingModal = lazy(() => import("./BookingModal.jsx"));
 
 function Layout() {
   const location = useLocation();
-  const { closeBooking, cartNotice, dismissCartNotice } = useModal();
+  const { closeBooking, cartNotice, dismissCartNotice, isBookingOpen } = useModal();
 
   useEffect(() => {
     closeBooking();
@@ -46,7 +47,11 @@ function Layout() {
         </div>
       )}
       <WhatsAppFloatingButton hasCartNotice={Boolean(cartNotice)} />
-      <BookingModal />
+      {isBookingOpen && (
+        <Suspense fallback={null}>
+          <BookingModal />
+        </Suspense>
+      )}
     </div>
   );
 }

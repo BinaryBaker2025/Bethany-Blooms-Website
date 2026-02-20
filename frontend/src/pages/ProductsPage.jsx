@@ -8,7 +8,7 @@ import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { formatPreorderSendMonth, getProductPreorderSendMonth } from "../lib/preorder.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
-import { getStockBadgeLabel, getStockStatus } from "../lib/stockStatus.js";
+import { getProductCardStockStatus, getStockBadgeLabel } from "../lib/stockStatus.js";
 
 const stripHtml = (value = "") =>
   value
@@ -24,6 +24,36 @@ const normalizeCategoryToken = (value = "") =>
     .toLowerCase()
     .replace(/[_\s]+/g, "-");
 
+const normalizeSubscriptionPlanStatus = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "live") return "live";
+  if (normalized === "archived") return "archived";
+  return "draft";
+};
+
+const normalizeSubscriptionTier = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "biweekly") return "bi-weekly";
+  if (normalized === "weekly" || normalized === "bi-weekly" || normalized === "monthly") {
+    return normalized;
+  }
+  return "";
+};
+
+const formatSubscriptionTier = (value = "") => {
+  const normalized = normalizeSubscriptionTier(value);
+  if (normalized === "weekly") return "Weekly";
+  if (normalized === "bi-weekly") return "Bi-weekly";
+  if (normalized === "monthly") return "Monthly";
+  return "";
+};
+
+const normalizePriceAmount = (value = "") => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Number(parsed.toFixed(2));
+};
+
 function ProductsPage() {
   const { openCart } = useModal();
   const [searchParams] = useSearchParams();
@@ -32,6 +62,13 @@ function ProductsPage() {
     orderByField: "createdAt",
     orderDirection: "desc",
   });
+  const { items: remoteSubscriptionPlans, status: subscriptionPlansStatus } = useFirestoreCollection(
+    "subscriptionPlans",
+    {
+      orderByField: "updatedAt",
+      orderDirection: "desc",
+    },
+  );
   const { items: categoryItems } = useFirestoreCollection("productCategories", {
     orderByField: "name",
     orderDirection: "asc",
@@ -103,11 +140,7 @@ function ProductsPage() {
     const hasSale = Number.isFinite(salePriceNumber) && salePriceNumber !== priceNumber;
     const basePrice = hasSale ? salePriceNumber : priceNumber;
     const isPurchasable = Number.isFinite(basePrice);
-    const stockStatus = getStockStatus({
-      quantity: product.stock_quantity ?? product.quantity,
-      forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
-      status: product.stock_status,
-    });
+    const stockStatus = getProductCardStockStatus(product);
     const stockBadgeLabel = getStockBadgeLabel(stockStatus);
     const preorderSendMonth = getProductPreorderSendMonth(product);
     const preorderSendMonthLabel = formatPreorderSendMonth(preorderSendMonth);
@@ -198,12 +231,107 @@ function ProductsPage() {
       categoryKeys: Array.from(categoryKeys),
       isPurchasable,
       stockStatus,
+      isOutOfStock: stockStatus?.state === "out",
       stockBadgeLabel,
       preorderSendMonth,
       preorderSendMonthLabel,
       variants,
     };
   });
+
+  const normalizedSubscriptionPlans = useMemo(() => {
+    const resolvePlanCategory = (value) => {
+      if (!value) return null;
+      const key = value.toString().trim().toLowerCase();
+      if (!key) return null;
+      return categoryLookup.get(key) || null;
+    };
+
+    return remoteSubscriptionPlans
+      .filter((plan) => normalizeSubscriptionPlanStatus(plan?.status || "draft") === "live")
+      .map((plan, index) => {
+        const planId = (plan?.id || "").toString().trim();
+        if (!planId) return null;
+
+        const perDeliveryAmount = normalizePriceAmount(plan?.monthlyAmount ?? plan?.monthly_amount);
+        if (!perDeliveryAmount) return null;
+
+        const tier = normalizeSubscriptionTier(plan?.tier);
+        const tierLabel = formatSubscriptionTier(tier);
+
+        const rawCategoryValues = [
+          plan?.categoryId,
+          plan?.categoryName,
+          plan?.category,
+          plan?.categorySlug,
+        ]
+          .map((value) => (value || "").toString().trim())
+          .filter(Boolean);
+
+        const categoryKeys = new Set();
+        const categoryLabels = [];
+        rawCategoryValues.forEach((value) => {
+          const resolved = resolvePlanCategory(value);
+          if (resolved) {
+            const idKey = (resolved.id || "").toString().trim().toLowerCase();
+            const slugKey = (resolved.slug || "").toString().trim().toLowerCase();
+            const nameKey = (resolved.name || "").toString().trim().toLowerCase();
+            if (idKey) categoryKeys.add(idKey);
+            if (slugKey) categoryKeys.add(slugKey);
+            if (nameKey) categoryKeys.add(nameKey);
+            if (resolved.name && !categoryLabels.includes(resolved.name)) {
+              categoryLabels.push(resolved.name);
+            }
+            return;
+          }
+          const fallback = value.toLowerCase();
+          categoryKeys.add(fallback);
+          if (!categoryLabels.includes(value)) {
+            categoryLabels.push(value);
+          }
+        });
+
+        if (!categoryLabels.length) {
+          categoryLabels.push("Subscriptions");
+        }
+
+        const title = (plan?.name || plan?.title || "Flower subscription").toString().trim();
+        const generatedDescription = [
+          tierLabel ? `${tierLabel} delivery` : null,
+          "Billed monthly based on selected Monday deliveries",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const description = stripHtml(plan?.description || generatedDescription || "Flower subscription plan.");
+
+        return {
+          ...plan,
+          id: `subscription-plan-${planId}`,
+          sourcePlanId: planId,
+          slug: `subscription-plan-${index + 1}`,
+          title,
+          name: title,
+          description,
+          displayPrice: `R${perDeliveryAmount.toFixed(2)} / delivery`,
+          originalPrice: null,
+          numericPrice: perDeliveryAmount,
+          image: (plan?.image || "").toString().trim() || heroBackground,
+          images: [(plan?.image || "").toString().trim()].filter(Boolean),
+          categoryLabels,
+          categoryKeys: Array.from(categoryKeys),
+          category: categoryLabels[0] || "Subscriptions",
+          isPurchasable: true,
+          isOutOfStock: false,
+          stockStatus: { state: "in" },
+          stockBadgeLabel: null,
+          preorderSendMonth: null,
+          preorderSendMonthLabel: "",
+          variants: [],
+          isSubscriptionPlan: true,
+        };
+      })
+      .filter(Boolean);
+  }, [categoryLookup, remoteSubscriptionPlans]);
 
   const activeCategory = useMemo(() => {
     if (!activeCategoryParam) return null;
@@ -228,28 +356,45 @@ function ProductsPage() {
     title: metaTitle,
     description: metaDescription,
   });
-  const filteredProducts = useMemo(() => {
-    if (!activeCategoryParam) return normalizedProducts;
+
+  const hasCategoryFilter = Boolean(activeCategoryParam);
+  const activeCategoryKeys = useMemo(() => {
+    if (!hasCategoryFilter) return [];
     const key = activeCategoryParam.toLowerCase();
-    const activeKeys = activeCategory
+    const keys = activeCategory
       ? [
           activeCategory.id?.toLowerCase?.(),
           activeCategory.slug?.toLowerCase?.(),
           activeCategory.name?.toLowerCase?.(),
         ].filter(Boolean)
-      : null;
+      : [key];
+    return Array.from(new Set(keys));
+  }, [activeCategory, activeCategoryParam, hasCategoryFilter]);
+
+  const filteredProducts = useMemo(() => {
+    if (!hasCategoryFilter) return normalizedProducts;
     return normalizedProducts.filter((product) => {
       const productKeys = product.categoryKeys || [];
-      if (activeKeys?.length) {
-        return productKeys.some((entry) => activeKeys.includes(entry));
+      if (activeCategoryKeys.length) {
+        return productKeys.some((entry) => activeCategoryKeys.includes(entry));
       }
-      return productKeys.includes(key);
+      return false;
     });
-  }, [normalizedProducts, activeCategoryParam, activeCategory]);
+  }, [activeCategoryKeys, hasCategoryFilter, normalizedProducts]);
 
-  const displayProducts = filteredProducts;
+  const filteredSubscriptionPlans = useMemo(() => {
+    if (!hasCategoryFilter) return [];
+    if (!activeCategoryKeys.length) return normalizedSubscriptionPlans;
+    return normalizedSubscriptionPlans.filter((plan) => {
+      const planKeys = plan.categoryKeys || [];
+      return planKeys.some((entry) => activeCategoryKeys.includes(entry));
+    });
+  }, [activeCategoryKeys, hasCategoryFilter, normalizedSubscriptionPlans]);
 
-  const hasCategoryFilter = Boolean(activeCategoryParam);
+  const displayProducts = hasCategoryFilter
+    ? [...filteredSubscriptionPlans, ...filteredProducts]
+    : filteredProducts;
+
   const isCutFlowerCategory = useMemo(() => {
     if (!hasCategoryFilter) return false;
     const tokens = new Set([
@@ -314,7 +459,7 @@ function ProductsPage() {
           </Reveal>
           {hasCategoryFilter && (
             <p className="modal__meta">
-              Showing {activeCategory?.name || activeCategoryParam} products.{" "}
+              Showing {activeCategory?.name || activeCategoryParam} items.{" "}
               <a href="/products">View all products</a>
             </p>
           )}
@@ -324,7 +469,10 @@ function ProductsPage() {
               const categoryLabel = (product.categoryLabels?.[0] || product.category || "Product")
                 .toString()
                 .replace(/[-_]+/g, " ");
-              const productUrl = `/products/${encodeURIComponent(product.slug)}`;
+              const subscriptionPlanId = (product.sourcePlanId || "").toString().trim();
+              const productUrl = product.isSubscriptionPlan
+                ? `/subscriptions/checkout${subscriptionPlanId ? `?planId=${encodeURIComponent(subscriptionPlanId)}` : ""}`
+                : `/products/${encodeURIComponent(product.slug)}`;
 
               return (
                 <Reveal
@@ -356,21 +504,29 @@ function ProductsPage() {
                       )}
                     </span>
                   </p>
-                  <span className="btn btn--secondary">View details</span>
+                  <span className="btn btn--secondary">
+                    {product.isSubscriptionPlan ? "Choose plan" : product.isOutOfStock ? "Out of stock" : "View details"}
+                  </span>
                 </Reveal>
               );
             })}
           </div>
-          {displayProducts.length === 0 && status !== "loading" && (
+          {displayProducts.length === 0 &&
+            status !== "loading" &&
+            (!hasCategoryFilter || subscriptionPlansStatus !== "loading") && (
             <p className="empty-state">
               {hasCategoryFilter
-                ? "No products found in this category yet."
+                ? "No items found in this category yet."
                 : "No products available yet. Create one from the admin dashboard."}
             </p>
           )}
-          {status === "loading" && <p className="empty-state">Loading products…</p>}
-          {status === "empty" && <p className="empty-state">No products available yet. Check back soon!</p>}
-          {status === "error" && (
+          {(status === "loading" || (hasCategoryFilter && subscriptionPlansStatus === "loading")) && (
+            <p className="empty-state">Loading products…</p>
+          )}
+          {status === "empty" && !hasCategoryFilter && (
+            <p className="empty-state">No products available yet. Check back soon!</p>
+          )}
+          {(status === "error" || (hasCategoryFilter && subscriptionPlansStatus === "error")) && (
             <p className="empty-state">We couldn’t load products from the server. Please refresh to try again.</p>
           )}
         </div>

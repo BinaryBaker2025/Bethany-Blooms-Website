@@ -220,7 +220,7 @@ function CutFlowersPage() {
     {
       title: "Relaxed Farm Sessions",
       description:
-        "Book a time slot for a calm, hands-on flower experience at the farm rather than off-site event styling.",
+        "Cut flower sessions run every Saturday from 08:00 to 11:00 and 16:00 to 19:00, with bookings also open during weekdays.",
     },
   ];
 
@@ -334,7 +334,8 @@ function CutFlowersPage() {
   const processSteps = [
     {
       title: "1. Choose Your Session",
-      description: "Pick a date and time that suits you, then reserve your farm visit.",
+      description:
+        "Plan a weekday slot with us, or simply pop in on Saturdays for open walk-ins between 08:00-11:00 and 16:00-19:00.",
     },
     {
       title: "2. Arrive At The Farm",

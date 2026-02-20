@@ -268,11 +268,14 @@ function ContactPage() {
             </Reveal>
             <Reveal as="article" className="card" delay={240}>
               <h3 className="card__title">Hours</h3>
-              <p>Tuesday – Saturday, 09:00 – 16:00</p>
+              <ul style={{listStyle: "none", padding: 0, margin: 0}}>
+                <li>Monday – Friday by appoinment</li>
+                <li>Saturday, 08:00-11:00 and  16:00-19:00</li>
+              </ul>
             </Reveal>
             <Reveal as="article" className="card" delay={360}>
               <h3 className="card__title">Cut Flower Desk</h3>
-              <p>Orders for bouquets, event florals, and subscriptions close every Wednesday at 16:00.</p>
+              <p>Please contact us today if you would like any flowers for an event or special occasion.</p>
             </Reveal>
           </div>
         </div>

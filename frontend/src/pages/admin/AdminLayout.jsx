@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import Reveal from "../../components/Reveal.jsx";
@@ -34,24 +34,146 @@ const EyeIcon = ({ open = false }) => (
   </svg>
 );
 
-const NAV_LINKS = [
-  { to: "/admin", label: "Dashboard", end: true },
-  { to: "/admin/products", label: "Products" },
-  { to: "/admin/media", label: "Image Library" },
-  { to: "/admin/workshops", label: "Workshops & Bookings", end: true },
-  { to: "/admin/workshops/calendar", label: "Calendar" },
-  { to: "/admin/cut-flowers/classes", label: "Cut Flower Classes" },
-  { to: "/admin/cut-flowers/bookings", label: "Cut Flower Bookings" },
-  { to: "/admin/events", label: "Events" },
-  { to: "/admin/emails", label: "Email Preview" },
-  { to: "/admin/pos", label: "POS", end: true },
-  { to: "/admin/pos/cash-up", label: "POS Cash Up" },
-  { to: "/admin/reports", label: "Reports" },
-  { to: "/admin/orders", label: "Orders" },
-  { to: "/admin/shipping", label: "Shipping & Courier" },
-  { to: "/admin/users", label: "Users" },
-  { to: "/admin/profile", label: "Profile" },
+const NAV_SECTIONS = [
+  {
+    id: "overview",
+    label: "Overview",
+    defaultOpen: false,
+    items: [
+      { type: "link", id: "dashboard", to: "/admin", label: "Dashboard", end: true },
+    ],
+  },
+  {
+    id: "commerce",
+    label: "Commerce",
+    defaultOpen: true,
+    items: [
+      { type: "link", id: "orders", to: "/admin/orders", label: "Orders" },
+      { type: "link", id: "products", to: "/admin/products", label: "Products" },
+      {
+        type: "link",
+        id: "subscriptions",
+        to: "/admin/subscriptions",
+        label: "Subscription Plans",
+      },
+      {
+        type: "link",
+        id: "subscription-ops",
+        to: "/admin/subscription-ops",
+        label: "Subscription Ops",
+      },
+      { type: "link", id: "shipping", to: "/admin/shipping", label: "Shipping & Courier" },
+    ],
+  },
+  {
+    id: "content",
+    label: "Content",
+    defaultOpen: false,
+    items: [
+      { type: "link", id: "media", to: "/admin/media", label: "Image Library" },
+      {
+        type: "group",
+        id: "workshops",
+        label: "Workshops",
+        to: "/admin/workshops",
+        end: true,
+        children: [
+          { to: "/admin/workshops", label: "Workshops & Bookings", end: true },
+          { to: "/admin/workshops/calendar", label: "Calendar" },
+        ],
+      },
+      {
+        type: "group",
+        id: "cut-flowers",
+        label: "Cut Flowers",
+        children: [
+          { to: "/admin/cut-flowers/classes", label: "Classes" },
+          { to: "/admin/cut-flowers/bookings", label: "Bookings" },
+        ],
+      },
+      { type: "link", id: "events", to: "/admin/events", label: "Events" },
+    ],
+  },
+  {
+    id: "operations",
+    label: "Operations",
+    defaultOpen: true,
+    items: [
+      {
+        type: "group",
+        id: "pos",
+        label: "POS",
+        to: "/admin/pos",
+        end: true,
+        children: [
+          { to: "/admin/pos", label: "POS", end: true },
+          { to: "/admin/pos/cash-up", label: "Cash Up" },
+        ],
+      },
+      { type: "link", id: "reports", to: "/admin/reports", label: "Reports" },
+    ],
+  },
+  {
+    id: "tools",
+    label: "Tools",
+    defaultOpen: false,
+    items: [
+      { type: "link", id: "emails", to: "/admin/emails", label: "Email Preview" },
+      { type: "link", id: "invoices", to: "/admin/invoices", label: "Invoice Preview" },
+    ],
+  },
+  {
+    id: "admin",
+    label: "Admin",
+    defaultOpen: false,
+    items: [
+      { type: "link", id: "users", to: "/admin/users", label: "Users" },
+      { type: "link", id: "profile", to: "/admin/profile", label: "Profile" },
+    ],
+  },
 ];
+
+const createInitialExpandedSections = () =>
+  NAV_SECTIONS.reduce((accumulator, section) => {
+    accumulator[section.id] = Boolean(section.defaultOpen);
+    return accumulator;
+  }, {});
+
+const toGroupStateKey = (sectionId = "", itemId = "") => `${sectionId}:${itemId}`;
+
+const routeMatchesPath = (pathname = "", to = "", end = false) => {
+  if (!to) return false;
+  if (end) return pathname === to;
+  return pathname === to || pathname.startsWith(`${to}/`);
+};
+
+const navItemMatchesPath = (item, pathname = "") => {
+  if (!item || !pathname) return false;
+  if (item.type === "link") {
+    return routeMatchesPath(pathname, item.to, item.end);
+  }
+  if (item.type === "group") {
+    if (routeMatchesPath(pathname, item.to, item.end)) return true;
+    return (item.children || []).some((child) =>
+      routeMatchesPath(pathname, child.to, child.end),
+    );
+  }
+  return false;
+};
+
+const formatAdminAuthError = (error) => {
+  const code = (error?.code || "").toString().trim().toLowerCase();
+  if (code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") {
+    return "Incorrect email/password, or this account does not exist in Firebase Authentication.";
+  }
+  if (code === "auth/too-many-requests") {
+    return "Too many attempts. Please wait a few minutes and try again.";
+  }
+  if (code === "auth/user-disabled") {
+    return "This account has been disabled.";
+  }
+  return error?.message || "Unable to sign in.";
+};
 
 function AdminLayout() {
   const {
@@ -68,12 +190,69 @@ function AdminLayout() {
   const [authError, setAuthError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [expandedSections, setExpandedSections] = useState(() => createInitialExpandedSections());
+  const [expandedGroups, setExpandedGroups] = useState({});
   const location = useLocation();
   const navigate = useNavigate();
+
+  const pathName = location.pathname || "";
+
+  const currentActiveMap = useMemo(() => {
+    const sectionMatchMap = {};
+    const groupMatchMap = {};
+    NAV_SECTIONS.forEach((section) => {
+      const sectionHasMatch = section.items.some((item) => {
+        if (item.type === "group") {
+          const key = toGroupStateKey(section.id, item.id);
+          const hasMatch = navItemMatchesPath(item, pathName);
+          groupMatchMap[key] = hasMatch;
+          return hasMatch;
+        }
+        return navItemMatchesPath(item, pathName);
+      });
+      sectionMatchMap[section.id] = sectionHasMatch;
+    });
+    return {
+      sections: sectionMatchMap,
+      groups: groupMatchMap,
+    };
+  }, [pathName]);
 
   useEffect(() => {
     setDrawerOpen(false);
   }, [location.pathname, location.search, location.hash]);
+
+  useEffect(() => {
+    const sectionsToOpen = Object.entries(currentActiveMap.sections).filter(([, isActive]) => isActive);
+    if (sectionsToOpen.length > 0) {
+      setExpandedSections((previous) => {
+        const next = { ...previous };
+        let changed = false;
+        sectionsToOpen.forEach(([sectionId]) => {
+          if (!next[sectionId]) {
+            next[sectionId] = true;
+            changed = true;
+          }
+        });
+        return changed ? next : previous;
+      });
+    }
+
+    const groupsToOpen = Object.entries(currentActiveMap.groups).filter(([, isActive]) => isActive);
+    if (groupsToOpen.length > 0) {
+      setExpandedGroups((previous) => {
+        const next = { ...previous };
+        let changed = false;
+        groupsToOpen.forEach(([groupKey]) => {
+          if (!next[groupKey]) {
+            next[groupKey] = true;
+            changed = true;
+          }
+        });
+        return changed ? next : previous;
+      });
+    }
+  }, [currentActiveMap]);
 
   const handleSignIn = async (event) => {
     event.preventDefault();
@@ -84,8 +263,33 @@ function AdminLayout() {
       setShowPassword(false);
       navigate("/admin");
     } catch (error) {
-      setAuthError(error.message);
+      setAuthError(formatAdminAuthError(error));
     }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } finally {
+      navigate("/", { replace: true });
+    }
+  };
+
+  const handleNavClick = () => setDrawerOpen(false);
+
+  const handleToggleSection = (sectionId) => {
+    setExpandedSections((previous) => ({
+      ...previous,
+      [sectionId]: !previous[sectionId],
+    }));
+  };
+
+  const handleToggleGroup = (sectionId, itemId) => {
+    const key = toGroupStateKey(sectionId, itemId);
+    setExpandedGroups((previous) => ({
+      ...previous,
+      [key]: !previous[key],
+    }));
   };
 
   if (!user || !isAdmin) {
@@ -177,14 +381,115 @@ function AdminLayout() {
               <span className="menu-toggle__icon" aria-hidden="true"></span>
             </button>
           </div>
-          <nav className="admin-sidebar__nav">
-            {NAV_LINKS.map(({ to, label, end }) => (
-              <NavLink key={to} to={to} end={end} onClick={() => setDrawerOpen(false)}>
-                {label}
-              </NavLink>
-            ))}
+          <nav className="admin-sidebar__nav" aria-label="Admin sections">
+            {NAV_SECTIONS.map((section) => {
+              const sectionExpanded = Boolean(expandedSections[section.id]);
+              const sectionPanelId = `admin-sidebar-section-${section.id}`;
+              return (
+                <section className="admin-sidebar__section" key={section.id}>
+                  <button
+                    className={`admin-sidebar__section-toggle ${sectionExpanded ? "is-open" : ""}`}
+                    type="button"
+                    aria-expanded={sectionExpanded}
+                    aria-controls={sectionPanelId}
+                    onClick={() => handleToggleSection(section.id)}
+                  >
+                    <span>{section.label}</span>
+                    <span className="admin-sidebar__chevron" aria-hidden="true">
+                      &#9662;
+                    </span>
+                  </button>
+                  <div
+                    className={`admin-sidebar__section-body ${sectionExpanded ? "is-open" : ""}`}
+                    id={sectionPanelId}
+                  >
+                    {section.items.map((item) => {
+                      if (item.type === "link") {
+                        return (
+                          <NavLink
+                            key={item.id}
+                            to={item.to}
+                            end={item.end}
+                            className={({ isActive }) =>
+                              `admin-sidebar__link ${isActive ? "active" : ""}`
+                            }
+                            onClick={handleNavClick}
+                          >
+                            {item.label}
+                          </NavLink>
+                        );
+                      }
+
+                      const groupKey = toGroupStateKey(section.id, item.id);
+                      const groupExpanded = Boolean(expandedGroups[groupKey]);
+                      const hasChildMatch = (item.children || []).some((child) =>
+                        routeMatchesPath(pathName, child.to, child.end),
+                      );
+                      const parentOrChildActive =
+                        routeMatchesPath(pathName, item.to, item.end) || hasChildMatch;
+                      const groupPanelId = `admin-sidebar-group-${section.id}-${item.id}`;
+
+                      return (
+                        <div className="admin-sidebar__group" key={item.id}>
+                          <div
+                            className={`admin-sidebar__group-head ${parentOrChildActive ? "is-active" : ""}`}
+                          >
+                            {item.to ? (
+                              <NavLink
+                                to={item.to}
+                                end={item.end}
+                                className={({ isActive }) =>
+                                  `admin-sidebar__group-link ${isActive || hasChildMatch ? "active" : ""}`
+                                }
+                                onClick={handleNavClick}
+                              >
+                                {item.label}
+                              </NavLink>
+                            ) : (
+                              <span className={`admin-sidebar__group-label ${hasChildMatch ? "is-active" : ""}`}>
+                                {item.label}
+                              </span>
+                            )}
+                            <button
+                              className={`admin-sidebar__group-toggle ${groupExpanded ? "is-open" : ""}`}
+                              type="button"
+                              aria-label={`Toggle ${item.label}`}
+                              aria-expanded={groupExpanded}
+                              aria-controls={groupPanelId}
+                              onClick={() => handleToggleGroup(section.id, item.id)}
+                            >
+                              <span className="admin-sidebar__chevron" aria-hidden="true">
+                                &#9662;
+                              </span>
+                            </button>
+                          </div>
+                          <div
+                            className={`admin-sidebar__group-children ${groupExpanded ? "is-open" : ""}`}
+                            id={groupPanelId}
+                          >
+                            {(item.children || []).map((child) => (
+                              <NavLink
+                                key={`${item.id}-${child.to}`}
+                                to={child.to}
+                                end={child.end}
+                                className={({ isActive }) =>
+                                  `admin-sidebar__sublink ${isActive ? "active" : ""}`
+                                }
+                                onClick={handleNavClick}
+                              >
+                                {child.label}
+                              </NavLink>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
           </nav>
-          <button className="btn btn--secondary admin-sidebar__signout" type="button" onClick={signOut}>
+          <button className="btn btn--secondary admin-sidebar__signout" type="button" onClick={handleSignOut}>
             Sign Out
           </button>
         </aside>
@@ -211,7 +516,7 @@ function AdminLayout() {
               <p className="admin-shell__title">Admin Portal</p>
               <p className="admin-shell__subtitle">Signed in as {user.email}</p>
             </div>
-            <button className="btn btn--secondary" type="button" onClick={signOut}>
+            <button className="btn btn--secondary" type="button" onClick={handleSignOut}>
               Sign Out
             </button>
           </header>

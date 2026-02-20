@@ -123,82 +123,102 @@ function EftSubmittedPage() {
   };
 
   return (
-    <section className="section section--tight">
-      <div className="section__inner">
-        <span className="badge">EFT Order</span>
-        <h1>Order received - awaiting payment approval</h1>
-        <p>
-          Your order has been created and is pending admin payment approval. Please transfer using the details below and
-          use your order reference exactly.
-        </p>
-        <div className="checkout-eft__bank-details">
-          <p>
-            <strong>Account Name:</strong> {bankDetails.accountName}
+    <section className="section section--tight payment-status-page payment-status-page--eft">
+      <div className="section__inner payment-status-page__inner">
+        <article className="payment-status-card">
+          <header className="payment-status-card__header">
+            <span className="badge">EFT order created</span>
+            <span className="payment-status-card__icon payment-status-card__icon--pending" aria-hidden="true">
+              EFT
+            </span>
+          </header>
+          <h1>Order received - awaiting payment approval</h1>
+          <p className="payment-status-card__lead">
+            Transfer using the bank details below, then upload proof of payment so our team can review it quickly.
           </p>
-          <p>
-            <strong>Bank:</strong> {bankDetails.bankName}
-          </p>
-          <p>
-            <strong>Account Type:</strong> {bankDetails.accountType}
-          </p>
-          <p>
-            <strong>Account Number:</strong> {bankDetails.accountNumber}
-          </p>
-          <p>
-            <strong>Branch Code:</strong> {bankDetails.branchCode}
-          </p>
-          <p>
-            <strong>Reference:</strong> {orderReference}
-          </p>
-        </div>
-        <p className="modal__meta">
-          Admin must approve EFT payment before fulfilment. Need help? Contact {bankDetails.supportEmail}.
-        </p>
-        <div className="checkout-eft-proof">
-          <h2>Upload proof of payment</h2>
-          {canUploadProof ? (
-            <>
-              <p className="modal__meta">
-                Upload your proof so our team can match your payment to {orderReference}.
+
+          <div className="payment-status-card__notice payment-status-card__notice--reference">
+            Use this reference exactly: <strong>{orderReference}</strong>
+          </div>
+
+          <div className="payment-status-card__panel payment-status-card__bank-details">
+            <h2>Bank details</h2>
+            <div className="payment-status-card__details-grid">
+              <p>
+                <strong>Account Name:</strong> {bankDetails.accountName}
               </p>
-              <label className="checkout-eft-proof__field">
-                <span>Proof file (PDF or image, max 10MB)</span>
-                <input
-                  className="input"
-                  type="file"
-                  accept={EFT_PROOF_ACCEPT}
-                  onChange={handleProofFileChange}
+              <p>
+                <strong>Bank:</strong> {bankDetails.bankName}
+              </p>
+              <p>
+                <strong>Account Type:</strong> {bankDetails.accountType}
+              </p>
+              <p>
+                <strong>Account Number:</strong> {bankDetails.accountNumber}
+              </p>
+              <p>
+                <strong>Branch Code:</strong> {bankDetails.branchCode}
+              </p>
+              <p>
+                <strong>Reference:</strong> {orderReference}
+              </p>
+            </div>
+          </div>
+
+          <div className="payment-status-card__panel payment-status-card__proof">
+            <h2>Upload proof of payment</h2>
+            {canUploadProof ? (
+              <>
+                <p className="modal__meta">
+                  Upload your proof so we can match your payment to <strong>{orderReference}</strong>.
+                </p>
+                <label className="checkout-eft-proof__field">
+                  <span>Proof file (PDF or image, max 10MB)</span>
+                  <input
+                    className="input"
+                    type="file"
+                    accept={EFT_PROOF_ACCEPT}
+                    onChange={handleProofFileChange}
+                    disabled={proofUploading || Boolean(proofSuccess)}
+                  />
+                </label>
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={uploadProof}
                   disabled={proofUploading || Boolean(proofSuccess)}
-                />
-              </label>
-              <button
-                className="btn btn--primary"
-                type="button"
-                onClick={uploadProof}
-                disabled={proofUploading || Boolean(proofSuccess)}
-              >
-                {proofUploading ? "Uploading proof..." : proofSuccess ? "Proof uploaded" : "Upload proof"}
-              </button>
-            </>
-          ) : (
-            <p className="modal__meta">
-              We can&apos;t upload proof from this session. Please contact support and include your order number.
-            </p>
-          )}
-          {proofUploadExpired && (
-            <p className="admin-panel__error">This upload session has expired. Please contact support.</p>
-          )}
-          {proofError && <p className="admin-panel__error">{proofError}</p>}
-          {proofSuccess && <p className="admin-save-indicator">{proofSuccess}</p>}
-        </div>
-        <div className="cta-group">
-          <Link className="btn btn--primary" to="/products">
-            Continue shopping
-          </Link>
-          <Link className="btn btn--secondary" to="/contact">
-            Contact support
-          </Link>
-        </div>
+                >
+                  {proofUploading ? "Uploading proof..." : proofSuccess ? "Proof uploaded" : "Upload proof"}
+                </button>
+              </>
+            ) : (
+              <p className="modal__meta">
+                We cannot upload proof from this session. Contact support and include your order number.
+              </p>
+            )}
+            {proofUploadExpired && (
+              <p className="admin-panel__error">This upload session has expired. Please contact support.</p>
+            )}
+            {proofError && <p className="admin-panel__error">{proofError}</p>}
+            {proofSuccess && <p className="admin-save-indicator">{proofSuccess}</p>}
+          </div>
+
+          <p className="payment-status-card__meta">
+            Admin must approve EFT payment before fulfilment. Need help? Contact {bankDetails.supportEmail}.
+          </p>
+
+          <div className="cta-group payment-status-card__actions">
+            <Link className="btn btn--primary" to="/account">
+              View my account
+            </Link>
+            <Link className="btn btn--secondary" to="/products">
+              Continue shopping
+            </Link>
+            <Link className="btn btn--secondary" to="/contact">
+              Contact support
+            </Link>
+          </div>
+        </article>
       </div>
     </section>
   );

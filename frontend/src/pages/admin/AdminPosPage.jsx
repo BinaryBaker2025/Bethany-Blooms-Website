@@ -127,6 +127,13 @@ const formatTimeRange = (startTime, endTime) => {
 const buildCartKey = ({ type, sourceId, variantId, sessionId }) =>
   [type, sourceId, variantId || "base", sessionId || "default"].join(":");
 
+const normalizeGiftCardCode = (value = "") =>
+  value
+    .toString()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .trim();
+
 const normalizeCategoryValue = (value) =>
   value
     .toString()
@@ -182,6 +189,10 @@ function AdminPosPage() {
   const [discountType, setDiscountType] = useState("none");
   const [discountValue, setDiscountValue] = useState("");
   const [cashReceived, setCashReceived] = useState("");
+  const [giftCardCodeInput, setGiftCardCodeInput] = useState("");
+  const [giftCardMatches, setGiftCardMatches] = useState([]);
+  const [giftCardLookupLoading, setGiftCardLookupLoading] = useState(false);
+  const [giftCardLookupError, setGiftCardLookupError] = useState(null);
   const [changeConfirmOpen, setChangeConfirmOpen] = useState(false);
   const changeConfirmRef = useRef(false);
 
@@ -667,6 +678,73 @@ function AdminPosPage() {
     setCustomer((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleGiftCardCodeLookup = async () => {
+    if (!functionsInstance || !inventoryEnabled) {
+      setGiftCardLookupError("Gift card lookup is unavailable. Please check admin permissions.");
+      return;
+    }
+    const normalizedCode = normalizeGiftCardCode(giftCardCodeInput);
+    if (!normalizedCode) {
+      setGiftCardLookupError("Enter a gift card code.");
+      return;
+    }
+    if (
+      giftCardMatches.some(
+        (entry) => normalizeGiftCardCode(entry.code || "") === normalizedCode,
+      )
+    ) {
+      setGiftCardLookupError("This gift card code has already been added.");
+      return;
+    }
+
+    setGiftCardLookupLoading(true);
+    setGiftCardLookupError(null);
+    try {
+      const lookupGiftCardByCode = httpsCallable(
+        functionsInstance,
+        "lookupGiftCardByCode",
+      );
+      const response = await lookupGiftCardByCode({ code: normalizedCode });
+      const giftCard = response?.data?.giftCard || null;
+      if (!giftCard?.id || !giftCard?.code) {
+        throw new Error("Gift card lookup returned incomplete data.");
+      }
+      setGiftCardMatches((prev) => [
+        ...prev,
+        {
+          giftCardId: giftCard.id,
+          code: normalizeGiftCardCode(giftCard.code),
+          status: (giftCard.status || "unknown").toString().trim().toLowerCase(),
+          isExpired: Boolean(giftCard.isExpired),
+          isActive: Boolean(giftCard.isActive),
+          recipientName: (giftCard.recipientName || "").toString().trim(),
+          purchaserName: (giftCard.purchaserName || "").toString().trim(),
+          value: parseNumber(giftCard.value, 0),
+          currency: (giftCard.currency || "ZAR").toString().trim() || "ZAR",
+          expiresAt: giftCard.expiresAt || null,
+          matchedAtIso: new Date().toISOString(),
+        },
+      ]);
+      setGiftCardCodeInput("");
+    } catch (error) {
+      setGiftCardLookupError(
+        error.message || "Unable to validate gift card code.",
+      );
+    } finally {
+      setGiftCardLookupLoading(false);
+    }
+  };
+
+  const handleRemoveGiftCardMatch = (code) => {
+    const normalizedCode = normalizeGiftCardCode(code);
+    setGiftCardMatches((prev) =>
+      prev.filter(
+        (entry) => normalizeGiftCardCode(entry.code || "") !== normalizedCode,
+      ),
+    );
+    setGiftCardLookupError(null);
+  };
+
   const handleAddToCart = (item) => {
     setCartItems((prev) => {
       const existingIndex = prev.findIndex((entry) => entry.key === item.key);
@@ -934,6 +1012,10 @@ function AdminPosPage() {
     setCashReceived("");
     changeConfirmRef.current = false;
     setChangeConfirmOpen(false);
+    setGiftCardCodeInput("");
+    setGiftCardMatches([]);
+    setGiftCardLookupLoading(false);
+    setGiftCardLookupError(null);
     setCheckoutStatus("idle");
     setCheckoutError(null);
   };
@@ -1100,6 +1182,26 @@ function AdminPosPage() {
             : 0,
       amount: pricing.discountAmount,
     };
+    const normalizedGiftCardMatches = giftCardMatches
+      .map((entry) => {
+        const code = normalizeGiftCardCode(entry.code || "");
+        const giftCardId = (entry.giftCardId || "").toString().trim();
+        if (!code || !giftCardId) return null;
+        return {
+          giftCardId,
+          code,
+          status: (entry.status || "unknown").toString().trim().toLowerCase(),
+          isExpired: Boolean(entry.isExpired),
+          isActive: Boolean(entry.isActive),
+          recipientName: (entry.recipientName || "").toString().trim(),
+          purchaserName: (entry.purchaserName || "").toString().trim(),
+          value: parseNumber(entry.value, 0),
+          currency: (entry.currency || "ZAR").toString().trim() || "ZAR",
+          expiresAt: entry.expiresAt || null,
+          matchedAtIso: (entry.matchedAtIso || new Date().toISOString()).toString(),
+        };
+      })
+      .filter(Boolean);
     const salePayload = {
       receiptNumber,
       customer: trimmedCustomer,
@@ -1119,6 +1221,12 @@ function AdminPosPage() {
       cashReceived: paymentMethod === "cash" ? cashStats.cashReceived : null,
       changeDue: paymentMethod === "cash" ? cashStats.changeDue : null,
       changeConfirmed: paymentMethod === "cash" ? confirmedChange : null,
+      ...(normalizedGiftCardMatches.length > 0
+        ? {
+            giftCardMatches: normalizedGiftCardMatches,
+            giftCardMatchedCount: normalizedGiftCardMatches.length,
+          }
+        : {}),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -1247,6 +1355,8 @@ function AdminPosPage() {
             paymentMethod,
             cashReceived: salePayload.cashReceived,
             changeDue: salePayload.changeDue,
+            giftCardMatches: normalizedGiftCardMatches,
+            giftCardMatchedCount: normalizedGiftCardMatches.length,
           });
         } catch (error) {
           console.warn("Unable to send POS receipt", error);
@@ -1265,6 +1375,8 @@ function AdminPosPage() {
         paymentMethod,
         cashReceived: salePayload.cashReceived,
         changeDue: salePayload.changeDue,
+        giftCardMatches: normalizedGiftCardMatches,
+        giftCardMatchedCount: normalizedGiftCardMatches.length,
       });
       setCheckoutStatus("success");
       if (showPrintableReceipt) {
@@ -2149,6 +2261,83 @@ function AdminPosPage() {
 
             <div className="pos-checkout__section">
               <div className="pos-checkout__section-title">
+                <h4>Gift card code matching</h4>
+                <p className="modal__meta">
+                  Validate gift card codes and log them on this POS sale.
+                </p>
+              </div>
+              <div className="pos-checkout__fields">
+                <input
+                  className="input"
+                  placeholder="Gift card code (e.g. BBGC-1234-ABCDE1-11)"
+                  value={giftCardCodeInput}
+                  onChange={(event) => {
+                    setGiftCardCodeInput(normalizeGiftCardCode(event.target.value));
+                    setGiftCardLookupError(null);
+                  }}
+                />
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={handleGiftCardCodeLookup}
+                  disabled={giftCardLookupLoading || !functionsInstance || !inventoryEnabled}
+                >
+                  {giftCardLookupLoading ? "Checking..." : "Validate & Add"}
+                </button>
+              </div>
+              <p className="modal__meta">
+                Gift cards are validated and logged only. Redemption state and value are not changed here.
+              </p>
+              {giftCardLookupError && (
+                <p className="admin-panel__error">{giftCardLookupError}</p>
+              )}
+              {giftCardMatches.length > 0 && (
+                <ul className="pos-cart__list">
+                  {giftCardMatches.map((match) => {
+                    const normalizedStatus = (match.status || "unknown")
+                      .toString()
+                      .trim()
+                      .toLowerCase();
+                    const statusLabel = normalizedStatus
+                      ? normalizedStatus.replace(/_/g, " ")
+                      : "unknown";
+                    return (
+                      <li key={`${match.giftCardId}-${match.code}`} className="pos-cart__item">
+                        <div className="pos-cart__row">
+                          <div className="pos-cart__info">
+                            <p className="pos-cart__name">{match.code}</p>
+                            <div className="pos-cart__meta">
+                              <span>
+                                Status: {statusLabel}
+                                {match.isExpired ? " (expired)" : ""}
+                                {match.isActive ? " (active)" : ""}
+                              </span>
+                              {match.recipientName && <span>Recipient: {match.recipientName}</span>}
+                              {match.purchaserName && <span>Purchased by: {match.purchaserName}</span>}
+                            </div>
+                          </div>
+                          <div className="pos-cart__line-total">
+                            {formatCurrency(match.value || 0)}
+                          </div>
+                        </div>
+                        <div className="pos-cart__controls">
+                          <button
+                            className="btn btn--secondary btn--small"
+                            type="button"
+                            onClick={() => handleRemoveGiftCardMatch(match.code)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
+            <div className="pos-checkout__section">
+              <div className="pos-checkout__section-title">
                 <h4>Receipt</h4>
                 <p className="modal__meta">Ask the customer if they want an emailed receipt.</p>
               </div>
@@ -2467,7 +2656,35 @@ function AdminPosPage() {
                   </p>
                 </>
               )}
+              {Array.isArray(receiptData.giftCardMatches) &&
+                receiptData.giftCardMatches.length > 0 && (
+                  <p>
+                    <strong>Gift card matches:</strong>{" "}
+                    {receiptData.giftCardMatches.length}
+                  </p>
+                )}
             </div>
+            {Array.isArray(receiptData.giftCardMatches) &&
+              receiptData.giftCardMatches.length > 0 && (
+                <div className="pos-receipt__section">
+                  <ul>
+                    {receiptData.giftCardMatches.map((match, index) => {
+                      const statusLabel = (match.status || "unknown")
+                        .toString()
+                        .trim()
+                        .toLowerCase()
+                        .replace(/_/g, " ");
+                      return (
+                        <li key={`${match.code}-${index}`}>
+                          {match.code} - {statusLabel}
+                          {match.isExpired ? " (expired)" : ""}
+                          {match.isActive ? " (active)" : ""}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
             <div className="pos-receipt__section">
               <ul>
                 {receiptData.items.map((item, index) => (

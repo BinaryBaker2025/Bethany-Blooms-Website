@@ -20,7 +20,13 @@ service cloud.firestore {
     }
 
     function userDocHasOnlyAllowedFields(data) {
-      return data.keys().hasOnly(["role", "email", "createdAt", "updatedAt"]);
+      return data.keys().hasOnly(["uid", "role", "email", "createdAt", "updatedAt"]);
+    }
+
+    function userDocUidMatches(userId, data) {
+      return ("uid" in data)
+        && data.uid is string
+        && data.uid == userId;
     }
 
     // Allow the very first creation of an admin profile by the signed-in user
@@ -29,14 +35,46 @@ service cloud.firestore {
       return isSelf(userId)
         && !exists(userDocPath(userId))
         && userDocHasOnlyAllowedFields(request.resource.data)
+        && userDocUidMatches(userId, request.resource.data)
         && request.resource.data.role == "admin"
         && request.resource.data.email == request.auth.token.email;
     }
 
-    function isValidSelfUpdate(newData, existingData) {
+    function isValidSelfUpdate(userId, newData, existingData) {
       return userDocHasOnlyAllowedFields(newData)
+        && userDocUidMatches(userId, newData)
+        && (!("uid" in existingData) || existingData.uid == userId)
         && newData.role == existingData.role
         && newData.email == existingData.email;
+    }
+
+    function validCustomerProfile(data, userId) {
+      return data.keys().hasOnly([
+          "uid",
+          "email",
+          "fullName",
+          "phone",
+          "addresses",
+          "defaultAddressId",
+          "preferences",
+          "createdAt",
+          "updatedAt",
+        ])
+        && data.uid is string
+        && data.uid == userId
+        && data.email is string
+        && data.email == request.auth.token.email
+        && (!("fullName" in data) || (data.fullName is string && data.fullName.size() <= 160))
+        && (!("phone" in data) || (data.phone is string && data.phone.size() <= 40))
+        && (!("addresses" in data) || data.addresses is list)
+        && (!("defaultAddressId" in data) || (data.defaultAddressId is string && data.defaultAddressId.size() <= 120))
+        && (!("preferences" in data)
+          || (
+            data.preferences is map
+            && data.preferences.keys().hasOnly(["marketingEmails", "orderUpdates"])
+            && (!("marketingEmails" in data.preferences) || data.preferences.marketingEmails is bool)
+            && (!("orderUpdates" in data.preferences) || data.preferences.orderUpdates is bool)
+          ));
     }
 
     function validBooking(data) {
@@ -111,6 +149,7 @@ service cloud.firestore {
 
     function validOrder(data) {
       return data.keys().hasOnly([
+          "customerUid",
           "customer",
           "items",
           "subtotal",
@@ -134,6 +173,7 @@ service cloud.firestore {
           "courierName",
         ])
         && data.customer.keys().hasOnly(["fullName", "email", "phone", "address"])
+        && (!("customerUid" in data) || data.customerUid == null || (data.customerUid is string && data.customerUid.size() > 0))
         && data.customer.fullName is string && data.customer.fullName.size() > 0
         && data.customer.email is string && data.customer.email.size() > 0
         && data.customer.phone is string && data.customer.phone.size() > 0
@@ -194,6 +234,22 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time;
     }
 
+    function isOrderOwner() {
+      return signedIn()
+        && (
+          (("customerUid" in resource.data)
+            && resource.data.customerUid is string
+            && resource.data.customerUid == request.auth.uid)
+          || (
+            ("customer" in resource.data)
+            && resource.data.customer is map
+            && ("email" in resource.data.customer)
+            && resource.data.customer.email is string
+            && resource.data.customer.email == request.auth.token.email
+          )
+        );
+    }
+
     function paymentApprovalDecision(data) {
       return ("paymentApprovalStatus" in data)
         ? data.paymentApprovalStatus
@@ -223,12 +279,28 @@ service cloud.firestore {
         || canBootstrapAdminUser(userId)
         || (isSelf(userId)
           && userDocHasOnlyAllowedFields(request.resource.data)
-          && request.resource.data.role == "customer");
+          && userDocUidMatches(userId, request.resource.data)
+          && request.resource.data.role == "customer"
+          && request.resource.data.email == request.auth.token.email);
 
-      allow update: if (isSelf(userId) && isValidSelfUpdate(request.resource.data, resource.data))
+      allow update: if (isSelf(userId) && isValidSelfUpdate(userId, request.resource.data, resource.data))
         || isAdmin();
 
       allow delete: if isAdmin();
+    }
+
+    match /customerProfiles/{userId} {
+      allow get: if isSelf(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isSelf(userId) && validCustomerProfile(request.resource.data, userId);
+      allow update: if isSelf(userId) && validCustomerProfile(request.resource.data, userId);
+      allow delete: if isSelf(userId) || isAdmin();
+    }
+
+    match /customerProfiles/{userId}/orders/{orderId} {
+      allow get: if isSelf(userId) || isAdmin();
+      allow list: if isSelf(userId) || isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /products/{document=**} {
@@ -236,9 +308,23 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /subscriptionPlans/{planId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /productCategories/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    match /productTags/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /productMedia/{document=**} {
+      allow read, write: if isAdmin();
     }
 
     match /workshops/{document=**} {
@@ -268,8 +354,37 @@ service cloud.firestore {
 
     match /orders/{orderId} {
       allow create: if validOrder(request.resource.data);
-      allow read, delete: if isAdmin();
+      allow read: if isAdmin() || isOrderOwner();
+      allow delete: if isAdmin();
       allow update: if isAdmin() && eftStatusAllowed(request.resource.data);
+    }
+
+    match /subscriptions/{subscriptionId} {
+      allow read: if isAdmin()
+        || (signedIn()
+          && ("customerUid" in resource.data)
+          && resource.data.customerUid is string
+          && resource.data.customerUid == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /subscriptionCustomerSettings/{userId} {
+      allow read: if isAdmin() || isSelf(userId);
+      allow write: if isAdmin();
+    }
+
+    match /subscriptionInvoices/{invoiceId} {
+      allow read: if isAdmin()
+        || (signedIn()
+          && ("customerUid" in resource.data)
+          && resource.data.customerUid is string
+          && resource.data.customerUid == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /subscriptionAdminAuditLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     match /config/{document=**} {
@@ -279,6 +394,34 @@ service cloud.firestore {
     match /courierOptions/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    match /posProducts/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /posSales/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /posCashups/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /siteVisits/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /giftCards/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /pendingPayfastOrders/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /pendingPayfastSubscriptions/{document=**} {
+      allow read, write: if isAdmin();
     }
 
     match /config/orderCounter {
@@ -297,7 +440,7 @@ service cloud.firestore {
     }
 
     match /{document=**} {
-      allow read, write: if signedIn();
+      allow read, write: if false;
     }
   }
 }

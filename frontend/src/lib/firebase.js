@@ -5,12 +5,12 @@ import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDVSRCzKJtApzAS7o1Q8eIFC2Sfku2lq_0",
-  authDomain: "bethanyblooms-89dcc.firebaseapp.com",
-  projectId: "bethanyblooms-89dcc",
-  storageBucket: "bethanyblooms-89dcc.firebasestorage.app",
-  messagingSenderId: "274838965032",
-  appId: "1:274838965032:web:ec3ddae38ad60f665ede1d",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 function assertConfig(config) {
@@ -21,7 +21,7 @@ function assertConfig(config) {
   if (missing.length) {
     throw new Error(
       `Missing Firebase environment variables: ${missing.join(", ")}. ` +
-        "Copy .env.example to .env and supply your Firebase credentials.",
+        "Copy .env.example to .env.local and supply your Firebase credentials.",
     );
   }
 }

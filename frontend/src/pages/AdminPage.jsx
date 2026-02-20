@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   addDoc,
   collection,
@@ -41,6 +41,7 @@ import {
   createDateGroup,
   createTimeSlot,
 } from "./admin/constants.js";
+export { AdminUsersView } from "./admin/AdminUsersView.jsx";
 
 function ConfirmDialog({
   open,
@@ -57,7 +58,7 @@ function ConfirmDialog({
     <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
       <div className="modal__content">
         <button className="modal__close" type="button" onClick={onCancel} aria-label="Close">
-          ×
+          Ã—
         </button>
         <h3 className="modal__title" id="confirm-title">
           {title}
@@ -68,7 +69,7 @@ function ConfirmDialog({
             {cancelLabel}
           </button>
           <button className="btn btn--primary" type="button" onClick={onConfirm} disabled={busy}>
-            {busy ? "Working…" : confirmLabel}
+            {busy ? "Workingâ€¦" : confirmLabel}
           </button>
         </div>
       </div>
@@ -124,6 +125,30 @@ const INITIAL_PRODUCT_FORM = {
   hasVariants: false,
   variants: [],
   featured: false,
+  isGiftCard: false,
+  giftCardExpiryDays: "365",
+  giftCardTerms:
+    "Gift card is redeemable for selected Bethany Blooms services or products. Non-refundable and not exchangeable for cash. Valid only until the expiry date shown.",
+  giftCardOptions: [],
+};
+
+const SUBSCRIPTION_PLAN_TIERS = Object.freeze([
+  { value: "weekly", label: "Weekly" },
+  { value: "bi-weekly", label: "Bi-weekly" },
+  { value: "monthly", label: "Monthly" },
+]);
+
+const SUBSCRIPTION_PLAN_STEM_OPTIONS = Object.freeze([16, 32]);
+
+const INITIAL_SUBSCRIPTION_PLAN_FORM = {
+  name: "",
+  description: "",
+  categoryId: "",
+  tier: "weekly",
+  stems: "16",
+  monthlyAmount: "",
+  status: "live",
+  image: "",
 };
 
 const INITIAL_WORKSHOP_FORM = {
@@ -165,6 +190,7 @@ const createProductVariant = () => ({
   id: `product-variant-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
   label: "",
   price: "",
+  quantity: "",
 });
 
 const EVENT_REPEAT_WEEKDAYS = [
@@ -245,6 +271,24 @@ const parseNumber = (value, fallback = null) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const normalizeSubscriptionCategoryToken = (value = "") =>
+  value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+
+const looksLikeSubscriptionCategory = (value = "") => {
+  const token = normalizeSubscriptionCategoryToken(value);
+  return Boolean(token && token.includes("subscription"));
+};
+
+const normalizeGiftCardExpiryDays = (value, fallback = 365) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.max(1, Math.min(1825, Math.floor(parsed)));
+};
+
 const buildAdminOrderCartKey = ({ sourceId, variantId }) =>
   ["admin-order", sourceId, variantId || "base"].join(":");
 
@@ -273,16 +317,20 @@ const formatOrderStatusLabel = (status) =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const DELIVERY_METHODS = ["company", "courier"];
-const COURIER_OPTIONS = [
-  "The Courier Guy",
-  "DSV",
-  "Fastway",
-  "Aramex",
-  "PUDO",
-  "PostNet",
-  "uAfrica/Skynet",
-  "Other",
-];
+const ORDER_DETAIL_TABS = Object.freeze([
+  { id: "overview", label: "Overview" },
+  { id: "customer-info", label: "Customer Info" },
+  { id: "order-info", label: "Order Info" },
+  { id: "delivery", label: "Delivery" },
+  { id: "communication", label: "Communication" },
+]);
+const EMPTY_SHIPPING_ADDRESS = Object.freeze({
+  street: "",
+  suburb: "",
+  city: "",
+  province: "",
+  postalCode: "",
+});
 const ADMIN_PAGE_SIZE = 100;
 const MAX_FEATURED_PRODUCTS = 4;
 const MAX_PRODUCT_IMAGES = 6;
@@ -298,6 +346,82 @@ const moneyFormatter = new Intl.NumberFormat("en-ZA", {
   currency: "ZAR",
   maximumFractionDigits: 2,
 });
+
+const normalizeShippingAddressDraft = (value = {}) => ({
+  street: (value?.street || value?.streetAddress || "").toString().trim(),
+  suburb: (value?.suburb || "").toString().trim(),
+  city: (value?.city || "").toString().trim(),
+  province: (value?.province || "").toString().trim(),
+  postalCode: (value?.postalCode || value?.postcode || "").toString().trim(),
+});
+
+const parseShippingAddressFromString = (value = "") => {
+  const normalized = (value || "").toString().trim();
+  if (!normalized) return { ...EMPTY_SHIPPING_ADDRESS };
+
+  const parts = normalized
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) return { ...EMPTY_SHIPPING_ADDRESS };
+  if (parts.length >= 5) {
+    return normalizeShippingAddressDraft({
+      street: parts[0],
+      suburb: parts[1],
+      city: parts[2],
+      province: parts[3],
+      postalCode: parts.slice(4).join(", "),
+    });
+  }
+
+  const [street = "", suburb = "", city = "", provinceAndPostal = ""] = parts;
+  let province = provinceAndPostal;
+  let postalCode = "";
+  const provinceMatch = provinceAndPostal.match(/^(.*?)(?:\s+|,\s*)(\d{4})$/);
+  if (provinceMatch) {
+    province = (provinceMatch[1] || "").toString().trim();
+    postalCode = (provinceMatch[2] || "").toString().trim();
+  }
+  return normalizeShippingAddressDraft({
+    street,
+    suburb,
+    city,
+    province,
+    postalCode,
+  });
+};
+
+const resolveOrderDeliveryAddressDraft = (order = {}) => {
+  const structured = normalizeShippingAddressDraft(order?.shippingAddress || {});
+  const hasStructuredValue = Object.values(structured).some((value) => value);
+  if (hasStructuredValue) return structured;
+  return parseShippingAddressFromString(order?.customer?.address || "");
+};
+
+const isShippingAddressComplete = (address = {}) => {
+  const normalized = normalizeShippingAddressDraft(address);
+  return Boolean(
+    normalized.street &&
+    normalized.suburb &&
+    normalized.city &&
+    normalized.province &&
+    /^\d{4}$/.test(normalized.postalCode),
+  );
+};
+
+const resolveOrderSubtotalAmount = (order = {}) => {
+  const explicitSubtotal = Number(order?.subtotal);
+  if (Number.isFinite(explicitSubtotal) && explicitSubtotal >= 0) {
+    return explicitSubtotal;
+  }
+  return (Array.isArray(order?.items) ? order.items : []).reduce((sum, item) => {
+    const price = Number(item?.price ?? 0);
+    const quantity = Number(item?.quantity ?? 1);
+    if (!Number.isFinite(price)) return sum;
+    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+    return sum + price * safeQuantity;
+  }, 0);
+};
 
 const IconPlus = ({ title = "Add", ...props }) => (
   <svg
@@ -487,7 +611,7 @@ const parseIsExtra = (option, label) => {
 
 const formatOptionLabel = (label, price) => {
   if (typeof label !== "string" || !label.trim()) return "Option";
-  if (Number.isFinite(price)) return `${label} · R${price}`;
+  if (Number.isFinite(price)) return `${label} Â· R${price}`;
   return label;
 };
 
@@ -549,7 +673,7 @@ const formatTimeRange = (startTime, endTime) => {
   if (!startLabel) return "";
   const endLabel = formatTimeValue(endTime);
   if (!endLabel) return startLabel;
-  return `${startLabel} – ${endLabel}`;
+  return `${startLabel} â€“ ${endLabel}`;
 };
 
 const formatRepeatLabel = (repeatDays) => {
@@ -572,15 +696,344 @@ const buildTimeSummary = (timeSlots) => {
       return slot.label ? `${slot.label} (${formattedTime})` : formattedTime;
     })
     .filter(Boolean);
-  return labels.length ? labels.join(" · ") : "";
+  return labels.length ? labels.join(" Â· ") : "";
 };
 
 const formatPriceLabel = (value) => {
-  if (value === undefined || value === null) return "—";
+  if (value === undefined || value === null) return "-";
   if (typeof value === "number") return moneyFormatter.format(value);
   const numeric = Number(value);
   if (Number.isFinite(numeric)) return moneyFormatter.format(numeric);
   return value;
+};
+
+const normalizeSubscriptionPlanTierValue = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "biweekly") return "bi-weekly";
+  return SUBSCRIPTION_PLAN_TIERS.some((entry) => entry.value === normalized) ? normalized : "";
+};
+
+const normalizeSubscriptionPlanStemsValue = (value = "") => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return 0;
+  return SUBSCRIPTION_PLAN_STEM_OPTIONS.includes(parsed) ? parsed : 0;
+};
+
+const resolveSubscriptionPlanMonthlyAmount = (value = "") => {
+  if (value === undefined || value === null || value === "") return null;
+  const normalizedValue =
+    typeof value === "number" ?
+       value
+      : Number(String(value).replace(/[^0-9.,-]/g, "").replace(/,/g, "."));
+  const numericAmount = Number(normalizedValue);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) return null;
+  return Number(numericAmount.toFixed(2));
+};
+
+const formatSubscriptionPlanTierLabel = (tier = "") => {
+  const normalizedTier = normalizeSubscriptionPlanTierValue(tier);
+  const matched = SUBSCRIPTION_PLAN_TIERS.find((entry) => entry.value === normalizedTier);
+  return matched?.label || "Monthly";
+};
+
+const SUBSCRIPTION_STATUS_OPTIONS = Object.freeze([
+  "active",
+  "paused",
+  "cancelled",
+]);
+
+const SUBSCRIPTION_INVOICE_STATUS_OPTIONS = Object.freeze([
+  "pending-payment",
+  "paid",
+  "cancelled",
+]);
+
+const SUBSCRIPTION_PAYMENT_METHOD_OPTIONS = Object.freeze([
+  PAYMENT_METHODS.PAYFAST,
+  PAYMENT_METHODS.EFT,
+]);
+const SUBSCRIPTION_INVOICE_TYPES = Object.freeze({
+  CYCLE: "cycle",
+  TOPUP: "topup",
+});
+const SUBSCRIPTION_CHARGE_MODES = Object.freeze([
+  { value: "one-time", label: "One-time" },
+  { value: "recurring", label: "Recurring" },
+]);
+const SUBSCRIPTION_CHARGE_BASES = Object.freeze([
+  { value: "flat", label: "Flat" },
+  { value: "per-delivery", label: "Per delivery" },
+]);
+const SUBSCRIPTION_OPS_MANAGE_TABS = Object.freeze([
+  { id: "overview", label: "Overview" },
+  { id: "billing", label: "Billing" },
+  { id: "plan-charges", label: "Plan & charges" },
+]);
+const SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB = SUBSCRIPTION_OPS_MANAGE_TABS[0].id;
+
+const SUBSCRIPTION_EXPECTED_DELIVERIES_BY_TIER = Object.freeze({
+  weekly: 4,
+  "bi-weekly": 2,
+  monthly: 1,
+});
+
+const normalizeSubscriptionOpsStatus = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  return SUBSCRIPTION_STATUS_OPTIONS.includes(normalized) ? normalized : "active";
+};
+
+const normalizeSubscriptionOpsInvoiceStatus = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  return SUBSCRIPTION_INVOICE_STATUS_OPTIONS.includes(normalized) ? normalized : "pending-payment";
+};
+
+const normalizeSubscriptionInvoiceType = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === SUBSCRIPTION_INVOICE_TYPES.TOPUP) return SUBSCRIPTION_INVOICE_TYPES.TOPUP;
+  return SUBSCRIPTION_INVOICE_TYPES.CYCLE;
+};
+
+const formatSubscriptionInvoiceTypeLabel = (value = "") =>
+  normalizeSubscriptionInvoiceType(value) === SUBSCRIPTION_INVOICE_TYPES.TOPUP ? "Top-up" : "Cycle";
+
+const normalizeSubscriptionChargeMode = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  return normalized === "recurring" ? "recurring" : "one-time";
+};
+
+const normalizeSubscriptionChargeBasis = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  return normalized === "per-delivery" ? "per-delivery" : "flat";
+};
+
+const normalizeSubscriptionOpsPaymentMethod = (value = "") =>
+  normalizeOrderPaymentMethod(value || PAYMENT_METHODS.PAYFAST);
+
+const formatSubscriptionPaymentMethodLabel = (value = "") =>
+  normalizeSubscriptionOpsPaymentMethod(value) === PAYMENT_METHODS.EFT ? "EFT" : "PayFast";
+
+const normalizeSubscriptionOpsPaymentApprovalStatus = (value = "", paymentMethod = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === PAYMENT_APPROVAL_STATUSES.PENDING) return PAYMENT_APPROVAL_STATUSES.PENDING;
+  if (normalized === PAYMENT_APPROVAL_STATUSES.APPROVED) return PAYMENT_APPROVAL_STATUSES.APPROVED;
+  if (normalized === PAYMENT_APPROVAL_STATUSES.REJECTED) return PAYMENT_APPROVAL_STATUSES.REJECTED;
+  return normalizeSubscriptionOpsPaymentMethod(paymentMethod) === PAYMENT_METHODS.EFT
+    ? PAYMENT_APPROVAL_STATUSES.PENDING
+    : PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
+};
+
+const formatSubscriptionPaymentApprovalLabel = (value = "", paymentMethod = "") => {
+  const normalized = normalizeSubscriptionOpsPaymentApprovalStatus(value, paymentMethod);
+  if (normalized === PAYMENT_APPROVAL_STATUSES.APPROVED) return "Approved";
+  if (normalized === PAYMENT_APPROVAL_STATUSES.REJECTED) return "Rejected";
+  if (normalized === PAYMENT_APPROVAL_STATUSES.PENDING) return "Pending admin approval";
+  return "Not required";
+};
+
+const normalizeCycleMonthValue = (value = "") => {
+  const normalized = (value || "").toString().trim();
+  const match = normalized.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return "";
+  }
+  return `${year}-${String(month).padStart(2, "0")}`;
+};
+
+const getCurrentJohannesburgCycleMonth = () => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Johannesburg",
+    year: "numeric",
+    month: "2-digit",
+  });
+  const parts = formatter.formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value || "";
+  const month = parts.find((part) => part.type === "month")?.value || "";
+  const normalized = normalizeCycleMonthValue(`${year}-${month}`);
+  if (normalized) return normalized;
+  const fallback = new Date();
+  return `${fallback.getUTCFullYear()}-${String(fallback.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+const formatCycleMonthLabel = (monthKey = "") => {
+  const normalized = normalizeCycleMonthValue(monthKey);
+  if (!normalized) return monthKey || "Unknown cycle";
+  const [yearText, monthText] = normalized.split("-");
+  const date = new Date(Date.UTC(Number(yearText), Number(monthText) - 1, 1));
+  return date.toLocaleDateString("en-ZA", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+};
+
+const formatSubscriptionStatusLabel = (status = "") => {
+  const normalized = normalizeSubscriptionOpsStatus(status);
+  return normalized.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const formatSubscriptionInvoiceStatusLabel = (status = "") => {
+  const normalized = normalizeSubscriptionOpsInvoiceStatus(status);
+  return normalized.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const resolveExpectedCycleDeliveries = (tier = "") => {
+  const normalized = normalizeSubscriptionPlanTierValue(tier);
+  return SUBSCRIPTION_EXPECTED_DELIVERIES_BY_TIER[normalized] || 0;
+};
+
+const normalizeSubscriptionMondaySlotValue = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  return ["first", "second", "third", "fourth", "last"].includes(normalized) ? normalized : "";
+};
+
+const formatSubscriptionMondaySlotLabel = (slot = "") => {
+  const normalized = normalizeSubscriptionMondaySlotValue(slot);
+  if (normalized === "first") return "1st Monday";
+  if (normalized === "second") return "2nd Monday";
+  if (normalized === "third") return "3rd Monday";
+  if (normalized === "fourth") return "4th Monday";
+  if (normalized === "last") return "Last Monday";
+  return "";
+};
+
+const normalizeSubscriptionMondaySlotsForTier = (tier = "", values = []) => {
+  const normalizedTier = normalizeSubscriptionPlanTierValue(tier);
+  if (!normalizedTier) return [];
+  if (normalizedTier === "weekly") return ["first", "second", "third", "fourth", "last"];
+  const required = normalizedTier === "bi-weekly" ? 2 : 1;
+  const seen = new Set();
+  const slots = (Array.isArray(values) ? values : [])
+    .map((entry) => normalizeSubscriptionMondaySlotValue(entry))
+    .filter((entry) => {
+      if (!entry || seen.has(entry)) return false;
+      seen.add(entry);
+      return true;
+    });
+  const defaults = normalizedTier === "bi-weekly" ? ["first", "third"] : ["first"];
+  defaults.forEach((entry) => {
+    if (slots.length >= required) return;
+    if (!seen.has(entry)) {
+      seen.add(entry);
+      slots.push(entry);
+    }
+  });
+  return slots.slice(0, required);
+};
+
+const normalizeIsoDateValue = (value = "") => {
+  const normalized = (value || "").toString().trim();
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return "";
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+
+const compareIsoDateValues = (left = "", right = "") => {
+  const leftValue = normalizeIsoDateValue(left);
+  const rightValue = normalizeIsoDateValue(right);
+  if (!leftValue && !rightValue) return 0;
+  if (!leftValue) return 1;
+  if (!rightValue) return -1;
+  return leftValue.localeCompare(rightValue);
+};
+
+const formatSubscriptionDeliveryDateLabel = (value = "") => {
+  const normalized = normalizeIsoDateValue(value);
+  if (!normalized) return "";
+  const [yearText, monthText, dayText] = normalized.split("-");
+  const date = new Date(Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText), 12, 0, 0));
+  return date.toLocaleDateString("en-ZA", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+};
+
+const formatSubscriptionDeliveryDateList = (values = []) =>
+  (Array.isArray(values) ? values : [])
+    .map((entry) => formatSubscriptionDeliveryDateLabel(entry))
+    .filter(Boolean)
+    .join(", ");
+
+const listSubscriptionMondaysForCycle = (cycleMonth = "") => {
+  const normalizedCycle = normalizeCycleMonthValue(cycleMonth);
+  if (!normalizedCycle) return [];
+  const [yearText, monthText] = normalizedCycle.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return [];
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const mondays = [];
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+    if (date.getUTCDay() !== 1) continue;
+    mondays.push(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+  }
+  return mondays;
+};
+
+const resolveSubscriptionCycleDeliveryDates = ({ tier = "", slots = [], cycleMonth = "" } = {}) => {
+  const normalizedTier = normalizeSubscriptionPlanTierValue(tier);
+  const mondays = listSubscriptionMondaysForCycle(cycleMonth);
+  if (!normalizedTier || !mondays.length) return [];
+  if (normalizedTier === "weekly") return mondays;
+  const mondayMap = {
+    first: mondays[0] || "",
+    second: mondays[1] || "",
+    third: mondays[2] || "",
+    fourth: mondays[3] || "",
+    last: mondays[mondays.length - 1] || "",
+  };
+  return Array.from(
+    new Set(
+      normalizeSubscriptionMondaySlotsForTier(normalizedTier, slots)
+        .map((slot) => normalizeIsoDateValue(mondayMap[slot] || ""))
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => compareIsoDateValues(a, b));
+};
+
+const resolveSubscriptionDisplayPlanName = (entry = {}) => {
+  const direct = (entry?.planName || "").toString().trim();
+  if (direct) return direct;
+  const planName = (entry?.subscriptionPlan?.name || "").toString().trim();
+  if (planName) return planName;
+  const productName = (entry?.subscriptionProduct?.productName || "").toString().trim();
+  const variantLabel = (entry?.subscriptionProduct?.variantLabel || "").toString().trim();
+  if (productName && variantLabel) return `${productName} - ${variantLabel}`;
+  if (productName) return productName;
+  return "Subscription";
+};
+
+const csvEscape = (value) => {
+  const text = value === undefined || value === null ? "" : String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  }
+  return text;
+};
+
+const downloadCsvFile = (rows = [], fileName = "export.csv") => {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const csv = rows.map((row) => row.map((cell) => csvEscape(cell)).join(",")).join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 };
 
 const slugifyId = (value = "") =>
@@ -640,6 +1093,20 @@ const parseSheetPriceValue = (value) => {
   return String(value).trim();
 };
 
+const parseSheetQuantityValue = (value) => {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+  const cleaned = String(value).replace(/[^0-9.-]/g, "");
+  if (!cleaned) return "";
+  const parsed = Number(cleaned);
+  if (Number.isFinite(parsed)) {
+    return Math.max(0, Math.floor(parsed));
+  }
+  return "";
+};
+
 const getPrimarySession = (workshop) => {
   if (!Array.isArray(workshop.sessions)) return null;
   if (workshop.primarySessionId) {
@@ -673,13 +1140,12 @@ function useUploadAsset(storage) {
 
 export function AdminDashboardView() {
   usePageMetadata({
-    title: "Admin · Dashboard",
+    title: "Admin Â· Dashboard",
     description:
       "Quick stats for Bethany Blooms inventory, workshops, and orders.",
   });
   const { user } = useAuth();
   const {
-    db,
     products,
     workshops,
     bookings,
@@ -735,10 +1201,26 @@ export function AdminDashboardView() {
   }, [bookings.length, orders, products.length, workshops]);
 
   const quickLinks = [
+    { to: "/admin/orders", title: "Orders", body: "Manage payments" },
     {
       to: "/admin/products",
       title: "Products",
       body: "Upload imagery & pricing",
+    },
+    {
+      to: "/admin/users",
+      title: "Users",
+      body: "Roles, profiles & addresses",
+    },
+    {
+      to: "/admin/subscription-ops",
+      title: "Subscription Ops",
+      body: "Delivery-ready roster",
+    },
+    {
+      to: "/admin/subscriptions",
+      title: "Subscription Plans",
+      body: "Manage plan catalogue",
     },
     {
       to: "/admin/workshops",
@@ -746,16 +1228,11 @@ export function AdminDashboardView() {
       body: "Session slots & bookings",
     },
     {
-      to: "/admin/cut-flowers/classes",
-      title: "Cut Flowers",
-      body: "Custom blooms & installs",
+      to: "/admin/pos",
+      title: "POS",
+      body: "In-store checkout & cash-up",
     },
-    {
-      to: "/admin/events",
-      title: "Events",
-      body: "Pop-ups & launches",
-    },
-    { to: "/admin/orders", title: "Orders", body: "Manage payments" },
+    { to: "/admin/reports", title: "Reports", body: "Sales and performance" },
     { to: "/admin/profile", title: "Profile", body: "Account & sign out" },
   ];
 
@@ -822,7 +1299,7 @@ export function AdminDashboardView() {
           <div className="admin-panel__header">
             <h3>Upcoming sessions</h3>
             {inventoryLoading && (
-              <span className="badge badge--muted">Syncing…</span>
+              <span className="badge badge--muted">Syncingâ€¦</span>
             )}
           </div>
           {upcomingSessions.length > 0 ? (
@@ -836,7 +1313,7 @@ export function AdminDashboardView() {
                     </span>
                   </p>
                   <p className="modal__meta">
-                    Capacity {entry.session.capacity || DEFAULT_SLOT_CAPACITY} ·{" "}
+                    Capacity {entry.session.capacity || DEFAULT_SLOT_CAPACITY} Â·{" "}
                     {entry.workshop.location || "Studio"}
                   </p>
                 </li>
@@ -851,7 +1328,7 @@ export function AdminDashboardView() {
           <div className="admin-panel__header">
             <h3>Recent orders</h3>
             {inventoryLoading && (
-              <span className="badge badge--muted">Syncing…</span>
+              <span className="badge badge--muted">Syncingâ€¦</span>
             )}
           </div>
           {recentOrders.length > 0 ? (
@@ -863,7 +1340,7 @@ export function AdminDashboardView() {
                       <strong>{order.customer.fullName || "Guest"}</strong>
                     </p>
                     <p className="modal__meta">
-                      {order.customer.email || "—"}
+                      {order.customer.email || "â€”"}
                     </p>
                   </div>
                   <div>
@@ -889,10 +1366,6 @@ export function AdminDashboardView() {
 }
 
 export function AdminProductsView() {
-  usePageMetadata({
-    title: "Admin · Products",
-    description: "Manage Bethany Blooms product listings stored in Firebase.",
-  });
   const {
     db,
     storage,
@@ -904,11 +1377,27 @@ export function AdminProductsView() {
     inventoryError,
   } = useAdminData();
   const location = useLocation();
-  const isCategoriesTab = location.pathname.includes("/admin/products/categories");
-  const activeTab = isCategoriesTab ? "categories" : "products";
-  const headerNote = isCategoriesTab ?
-     "Manage the categories shown across the storefront."
-    : "Build your storefront inventory directly from Firestore.";
+  const isSubscriptionsTab = location.pathname.includes("/admin/subscriptions");
+  const isCategoriesTab =
+    !isSubscriptionsTab && location.pathname.includes("/admin/products/categories");
+  const activeTab = isSubscriptionsTab
+    ? "subscriptions"
+    : isCategoriesTab
+      ? "categories"
+      : "products";
+  const headerNote =
+    activeTab === "categories"
+      ? "Manage the categories shown across the storefront."
+      : activeTab === "subscriptions"
+        ? "Manage subscription plans separately from standard products."
+        : "Build your storefront inventory directly from Firestore.";
+  usePageMetadata({
+    title: activeTab === "subscriptions" ? "Admin Â· Subscriptions" : "Admin Â· Products",
+    description:
+      activeTab === "subscriptions"
+        ? "Manage subscription plan products shown to customers."
+        : "Manage Bethany Blooms product listings stored in Firebase.",
+  });
   const [statusMessage, setStatusMessage] = useState(null);
   const [productForm, setProductForm] = useState(INITIAL_PRODUCT_FORM);
   const [editingProductId, setEditingProductId] = useState(null);
@@ -951,7 +1440,20 @@ export function AdminProductsView() {
   const [productImportMessage, setProductImportMessage] = useState(null);
   const [productImportError, setProductImportError] = useState(null);
   const [featuredUpdatingId, setFeaturedUpdatingId] = useState(null);
-  const uploadAsset = useUploadAsset(storage);
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+  const [testGiftCardEmail, setTestGiftCardEmail] = useState("admin@bethanyblooms.co.za");
+  const [testGiftCardPurchaserName, setTestGiftCardPurchaserName] = useState("");
+  const [testGiftCardRecipientName, setTestGiftCardRecipientName] = useState("");
+  const [testGiftCardMessage, setTestGiftCardMessage] = useState("");
+  const [testGiftCardSending, setTestGiftCardSending] = useState(false);
+  const [testGiftCardResult, setTestGiftCardResult] = useState(null);
+  const [testGiftCardError, setTestGiftCardError] = useState(null);
   const {
     items: mediaItems,
     status: mediaStatus,
@@ -1020,6 +1522,47 @@ export function AdminProductsView() {
     if (!key) return null;
     return categoryLookup.get(key) || null;
   };
+  const defaultSubscriptionCategoryId = useMemo(() => {
+    const matched = categoryOptions.find((category) =>
+      [category.id, category.slug, category.name].some((value) =>
+        looksLikeSubscriptionCategory(value),
+      ),
+    );
+    return (matched?.id || "").toString().trim();
+  }, [categoryOptions]);
+  const subscriptionProducts = useMemo(
+    () =>
+      products.filter((product) => {
+        if (!product || typeof product !== "object") return false;
+        if (product.isSubscription === true || product.subscriptionEnabled === true) return true;
+        if (looksLikeSubscriptionCategory(product.productType || product.type || product.kind || "")) {
+          return true;
+        }
+        const rawCategoryValues = [];
+        if (Array.isArray(product.category_ids)) rawCategoryValues.push(...product.category_ids);
+        if (Array.isArray(product.categoryIds)) rawCategoryValues.push(...product.categoryIds);
+        if (product.categoryId) rawCategoryValues.push(product.categoryId);
+        if (product.categorySlug) rawCategoryValues.push(product.categorySlug);
+        if (product.category) rawCategoryValues.push(product.category);
+        if (product.categoryName) rawCategoryValues.push(product.categoryName);
+
+        return rawCategoryValues.some((value) => {
+          const normalized = (value || "").toString().trim();
+          if (!normalized) return false;
+          if (looksLikeSubscriptionCategory(normalized)) return true;
+          const resolved = categoryLookup.get(normalized.toLowerCase()) || null;
+          return Boolean(
+            resolved &&
+              [resolved.id, resolved.slug, resolved.name].some((entry) =>
+                looksLikeSubscriptionCategory(entry),
+              ),
+          );
+        });
+      }),
+    [products, categoryLookup],
+  );
+  const managedProducts =
+    activeTab === "subscriptions" ? subscriptionProducts : products;
   const categoryUsage = useMemo(() => {
     const usage = new Map();
     products.forEach((product) => {
@@ -1033,9 +1576,11 @@ export function AdminProductsView() {
          [product.category]
         : [];
       categoryIds.forEach((id) => {
-        const resolved = resolveCategory(id);
-        if (!resolved.id) return;
-        usage.set(resolved.id, (usage.get(resolved.id) || 0) + 1);
+        const key = (id || "").toString().trim().toLowerCase();
+        const resolved = key ? categoryLookup.get(key) || null : null;
+        const resolvedId = resolved?.id || null;
+        if (!resolvedId) return;
+        usage.set(resolvedId, (usage.get(resolvedId) || 0) + 1);
       });
     });
     return usage;
@@ -1097,25 +1642,32 @@ export function AdminProductsView() {
   );
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(products.length / ADMIN_PAGE_SIZE) - 1);
+    const maxPage = Math.max(0, Math.ceil(managedProducts.length / ADMIN_PAGE_SIZE) - 1);
     setProductPage((prev) => Math.min(prev, maxPage));
-  }, [products.length]);
+  }, [managedProducts.length]);
 
   const paginatedProducts = useMemo(() => {
     const start = productPage * ADMIN_PAGE_SIZE;
-    return products.slice(start, start + ADMIN_PAGE_SIZE);
-  }, [products, productPage]);
+    return managedProducts.slice(start, start + ADMIN_PAGE_SIZE);
+  }, [managedProducts, productPage]);
 
   const openProductModal = () => {
-    setProductForm({
+    const initialForm = {
       ...INITIAL_PRODUCT_FORM,
-    });
+    };
+    if (activeTab === "subscriptions" && defaultSubscriptionCategoryId) {
+      initialForm.categoryIds = [defaultSubscriptionCategoryId];
+    }
+    setProductForm(initialForm);
     setProductMainImageFile(null);
     setProductMainImagePreview("");
     setProductGalleryFiles([]);
     setProductGalleryPreviews([]);
     setEditingProductId(null);
     setProductError(null);
+    setTestGiftCardEmail("admin@bethanyblooms.co.za");
+    setTestGiftCardResult(null);
+    setTestGiftCardError(null);
     if (productMainImageInputRef.current) {
       productMainImageInputRef.current.value = "";
     }
@@ -1142,6 +1694,9 @@ export function AdminProductsView() {
     setEditingProductId(null);
     setProductError(null);
     setProductSaving(false);
+    setTestGiftCardSending(false);
+    setTestGiftCardResult(null);
+    setTestGiftCardError(null);
     if (productMainImageInputRef.current) {
       productMainImageInputRef.current.value = "";
     }
@@ -1412,12 +1967,15 @@ export function AdminProductsView() {
 
   const handleToggleHasVariants = (checked) => {
     setProductForm((prev) => {
+      if (prev.isGiftCard) {
+        return { ...prev, hasVariants: false, variants: [] };
+      }
       if (!checked) {
         return { ...prev, hasVariants: false, variants: [] };
       }
       const nextVariants =
         prev.variants && prev.variants.length > 0 ? prev.variants : [createProductVariant()];
-      return { ...prev, hasVariants: true, variants: nextVariants };
+      return { ...prev, hasVariants: true, variants: nextVariants, stockQuantity: "" };
     });
   };
 
@@ -1443,6 +2001,102 @@ export function AdminProductsView() {
       ...prev,
       variants: (prev.variants || []).filter((variant) => variant.id !== variantId),
     }));
+  };
+
+  const handleToggleGiftCardProduct = (enabled) => {
+    setTestGiftCardResult(null);
+    setTestGiftCardError(null);
+    setProductForm((prev) => {
+      if (!enabled) {
+        return {
+          ...prev,
+          isGiftCard: false,
+        };
+      }
+      return {
+        ...prev,
+        isGiftCard: true,
+        hasVariants: false,
+        variants: [],
+        stockStatus: "in_stock",
+        preorderSendMonth: "",
+        stockQuantity: "",
+        videoEmbed: "",
+        galleryImages: [],
+        sunlight: "",
+        soilType: "",
+        watering: "",
+        climate: "",
+        plantingDepth: "",
+        plantingSpacing: "",
+        bestPlantingTime: "",
+        bloomPeriod: "",
+        flowerColor: "",
+        matureHeight: "",
+        pestIssues: "",
+        diseaseInfo: "",
+        propagation: "",
+        companions: "",
+        relatedProductIds: [],
+        upsellProductIds: [],
+        crossSellProductIds: [],
+      };
+    });
+    if (enabled) {
+      if (Array.isArray(productGalleryPreviewUrlRef.current)) {
+        productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
+        productGalleryPreviewUrlRef.current = [];
+      }
+      setProductGalleryFiles([]);
+      setProductGalleryPreviews([]);
+      if (productGalleryImageInputRef.current) {
+        productGalleryImageInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleSendTestGiftCard = async () => {
+    if (!functionsInstance) {
+      setTestGiftCardError("Gift card test function is not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setTestGiftCardError("Admin access is required to send a test gift card.");
+      return;
+    }
+    const recipientEmail = (testGiftCardEmail || "").toString().trim();
+    const purchaserName = (testGiftCardPurchaserName || "").toString().trim();
+    const recipientName = (testGiftCardRecipientName || "").toString().trim();
+    const message = (testGiftCardMessage || "").toString().trim();
+    if (!recipientEmail) {
+      setTestGiftCardError("Enter the email address that should receive the test gift card.");
+      return;
+    }
+    if (!productForm.title.trim()) {
+      setTestGiftCardError("Add a title first so the test gift card uses the right product name.");
+      return;
+    }
+
+    setTestGiftCardSending(true);
+    setTestGiftCardError(null);
+    setTestGiftCardResult(null);
+    try {
+      const sendTestGiftCard = httpsCallable(functionsInstance, "sendTestGiftCard");
+      const payload = {
+        recipientEmail,
+        productId: editingProductId || null,
+        productTitle: productForm.title.trim(),
+      };
+      if (purchaserName) payload.purchaserName = purchaserName;
+      if (recipientName) payload.recipientName = recipientName;
+      if (message) payload.message = message;
+      const response = await sendTestGiftCard(payload);
+      setTestGiftCardResult(response?.data || {});
+    } catch (error) {
+      setTestGiftCardError(error.message || "Unable to send the test gift card.");
+    } finally {
+      setTestGiftCardSending(false);
+    }
   };
 
   const handleSingleSelectChange = (field, event) => {
@@ -1510,6 +2164,7 @@ export function AdminProductsView() {
             : String(product.quantity)
           : String(product.stockQuantity)
         : String(product.stock_quantity);
+    const hasVariants = Array.isArray(product.variants) && product.variants.length > 0;
     const dimensionsSource =
       product.dimensions && typeof product.dimensions === "object" ? product.dimensions : {};
     setProductForm({
@@ -1520,7 +2175,7 @@ export function AdminProductsView() {
       slug: product.slug || slugifyId(product.title || product.name || ""),
       stockStatus: stockStatusValue,
       preorderSendMonth: getProductPreorderSendMonth(product),
-      stockQuantity: stockQuantityValue,
+      stockQuantity: hasVariants ? "" : stockQuantityValue,
       categoryIds: normalizedCategoryIds.slice(0, 1),
       tagIds: normalizedTagIds.map((value) => value.toString()).slice(0, 1),
       shortDescription: product.short_description || product.shortDescription || product.description || "",
@@ -1575,7 +2230,7 @@ export function AdminProductsView() {
           : []
       ).slice(0, 1),
       status: product.status || "draft",
-      hasVariants: Array.isArray(product.variants) && product.variants.length > 0,
+      hasVariants,
       variants: Array.isArray(product.variants)
         ? product.variants.filter(Boolean).map((variant) => ({
             id:
@@ -1586,9 +2241,52 @@ export function AdminProductsView() {
               variant.price === undefined || variant.price === null
                 ? ""
                 : String(variant.price),
+            quantity:
+              variant.stock_quantity === undefined || variant.stock_quantity === null
+                ? variant.stockQuantity === undefined || variant.stockQuantity === null
+                  ? variant.quantity === undefined || variant.quantity === null
+                    ? ""
+                    : String(variant.quantity)
+                  : String(variant.stockQuantity)
+                : String(variant.stock_quantity),
           }))
         : [],
       featured: Boolean(product.featured),
+      isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
+      giftCardExpiryDays: String(
+        normalizeGiftCardExpiryDays(
+          product.giftCardExpiryDays || product.gift_card_expiry_days || 365,
+          365,
+        ),
+      ),
+      giftCardTerms: (
+        product.giftCardTerms ||
+        product.gift_card_terms ||
+        INITIAL_PRODUCT_FORM.giftCardTerms
+      )
+        .toString()
+        .trim(),
+      giftCardOptions: (
+        Array.isArray(product.giftCardOptions)
+          ? product.giftCardOptions
+          : Array.isArray(product.gift_card_options)
+          ? product.gift_card_options
+          : []
+      )
+        .filter(Boolean)
+        .map((option, index) => ({
+          id:
+            (option.id || "").toString().trim() ||
+            `gift-card-option-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`,
+          label: (option.label || option.name || "").toString().trim(),
+          amount:
+            option.amount === undefined || option.amount === null
+              ? option.price === undefined || option.price === null
+                ? ""
+                : String(option.price)
+              : String(option.amount),
+        }))
+        .filter((option) => option.label),
     });
     if (productMainPreviewUrlRef.current) {
       URL.revokeObjectURL(productMainPreviewUrlRef.current);
@@ -1610,6 +2308,8 @@ export function AdminProductsView() {
     }
     setEditingProductId(product.id);
     setProductError(null);
+    setTestGiftCardResult(null);
+    setTestGiftCardError(null);
     setProductModalOpen(true);
     } catch (error) {
       console.error("Unable to load product for editing", error);
@@ -1749,7 +2449,6 @@ export function AdminProductsView() {
         return null;
       };
       let importedCount = 0;
-      /* eslint-disable no-await-in-loop */
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
         const rawTitle =
@@ -1891,16 +2590,24 @@ export function AdminProductsView() {
 
         const variantLabels = parseListValue(getCellValue(row, ["Variant Labels", "Variants"]) || "");
         const variantPrices = parseListValue(getCellValue(row, ["Variant Prices", "Variant Price"]) || "");
+        const variantQuantities = parseListValue(
+          getCellValue(row, ["Variant Quantities", "Variant Quantity", "Variant Qty"]) || "",
+        );
         let variants = variantLabels
           .map((label, idx) => {
             const cleanedLabel = label.toString().trim();
             if (!cleanedLabel) return null;
             const rawPrice = variantPrices[idx] ?? "";
             const parsedPrice = parseSheetPriceValue(rawPrice);
+            const rawQuantity = variantQuantities[idx] ?? "";
+            const parsedQuantity = parseSheetQuantityValue(rawQuantity);
+            const variantQuantity = parsedQuantity === "" ? resolvedQuantity : parsedQuantity;
             return {
               id: slugifyId(cleanedLabel) || `variant-${idx + 1}`,
               label: cleanedLabel,
               price: parsedPrice === "" ? null : parsedPrice,
+              quantity: variantQuantity,
+              stock_quantity: variantQuantity,
             };
           })
           .filter(Boolean);
@@ -1910,12 +2617,17 @@ export function AdminProductsView() {
           for (let i = 1; i <= 5; i += 1) {
             const label = getCellValue(row, [`Variant ${i} Label`, `Variant ${i}`]);
             const price = getCellValue(row, [`Variant ${i} Price`]);
+            const quantityValue = getCellValue(row, [`Variant ${i} Quantity`, `Variant ${i} Qty`]);
             if (!label) continue;
             const parsedPrice = parseSheetPriceValue(price);
+            const parsedQuantity = parseSheetQuantityValue(quantityValue);
+            const variantQuantity = parsedQuantity === "" ? resolvedQuantity : parsedQuantity;
             fallbackVariants.push({
               id: slugifyId(label) || `variant-${i}`,
               label: label.toString().trim(),
               price: parsedPrice === "" ? null : parsedPrice,
+              quantity: variantQuantity,
+              stock_quantity: variantQuantity,
             });
           }
           variants = fallbackVariants;
@@ -1928,6 +2640,8 @@ export function AdminProductsView() {
         const metaKeywords = Array.from(new Set(keywordTokens)).join(", ");
         const skuValue = generateSku(cleanedTitle, slugValue);
         const primaryImage = mainImageValue || galleryImages[0] || "";
+        const hasVariantInventory = Array.isArray(variants) && variants.length > 0;
+        const baseStockQuantity = hasVariantInventory ? null : resolvedQuantity;
 
         const docRef = doc(collection(db, "products"), docId);
         let docExists = false;
@@ -1975,8 +2689,8 @@ export function AdminProductsView() {
           stock_status: normalizedStockStatus,
           preorder_send_month: preorderSendMonth,
           preorderSendMonth: preorderSendMonth,
-          stock_quantity: resolvedQuantity,
-          quantity: resolvedQuantity,
+          stock_quantity: baseStockQuantity,
+          quantity: baseStockQuantity,
           status,
           barcode: rawBarcode || null,
           forceOutOfStock: normalizedStockStatus === "out_of_stock",
@@ -1992,7 +2706,6 @@ export function AdminProductsView() {
         await setDoc(docRef, payload, { merge: true });
         importedCount += 1;
       }
-      /* eslint-enable no-await-in-loop */
       setStatusMessage(
         `Imported ${importedCount} product${importedCount === 1 ? "" : "s"} from spreadsheet.`,
       );
@@ -2002,7 +2715,7 @@ export function AdminProductsView() {
     } catch (importError) {
       console.error(importError);
       setProductImportError(
-        importError.message || "We couldn’t import products from the selected spreadsheet.",
+        importError.message || "We couldnâ€™t import products from the selected spreadsheet.",
       );
       setProductImportMessage(null);
     } finally {
@@ -2044,6 +2757,7 @@ export function AdminProductsView() {
       "Featured",
       "Variant Labels",
       "Variant Prices",
+      "Variant Quantities",
       "Barcode",
     ];
     const sample = [
@@ -2079,6 +2793,7 @@ export function AdminProductsView() {
       "no",
       "Small, Medium, Large",
       "0, 20, 40",
+      "10, 8, 4",
       "",
     ];
     const notes = [
@@ -2088,7 +2803,8 @@ export function AdminProductsView() {
       "Preorder Send Month: YYYY-MM (only used for preorder items).",
       "Category and Tag are single values.",
       "Featured: yes or no.",
-      "Variant Labels/Prices: comma-separated (prices optional).",
+      "Stock Quantity is for non-variant products only.",
+      "Variant Labels/Prices/Quantities: comma-separated (prices optional, quantities required for variants).",
       "Use the admin Image Library to upload and copy image links.",
     ];
 
@@ -2114,8 +2830,9 @@ export function AdminProductsView() {
       setCategoryError("Category name is required.");
       return;
     }
-    const isEditing = Boolean(editingCategory.id);
-    const slug = isEditing ? editingCategory.id : slugifyId(name);
+    const editingCategoryId = (editingCategory?.id || "").toString().trim();
+    const isEditing = Boolean(editingCategoryId);
+    const slug = isEditing ? editingCategoryId : slugifyId(name);
     if (!slug) {
       setCategoryError("Please enter a category name with letters or numbers.");
       return;
@@ -2127,7 +2844,7 @@ export function AdminProductsView() {
       }
     } else {
       const existing = resolveCategory(name);
-      if (existing && existing.id !== editingCategory.id) {
+      if (existing && existing.id !== editingCategoryId) {
         setCategoryError("That category already exists.");
         return;
       }
@@ -2399,13 +3116,14 @@ export function AdminProductsView() {
     const title = productForm.title.trim();
     const slug = productForm.slug.trim();
     const sku = productForm.sku.trim();
+    const isGiftCardProduct = Boolean(productForm.isGiftCard);
     const shortDescriptionText = sanitizePlainText(productForm.shortDescription);
     const longDescriptionText = sanitizePlainText(productForm.longDescription);
-    const priceNumber = Number(productForm.price);
+    const priceNumber = isGiftCardProduct ? 0 : Number(productForm.price);
     const salePriceNumber =
-      productForm.salePrice === "" ? null : Number(productForm.salePrice);
-    const stockQuantityNumber =
-      productForm.stockQuantity === "" ? null : Number(productForm.stockQuantity);
+      isGiftCardProduct ? null : productForm.salePrice === "" ? null : Number(productForm.salePrice);
+    const stockQuantityInput =
+      isGiftCardProduct ? null : productForm.stockQuantity === "" ? null : Number(productForm.stockQuantity);
     const derivedStatus = productForm.status || "draft";
 
     if (!title) {
@@ -2416,15 +3134,20 @@ export function AdminProductsView() {
       setProductError("Product slug is required.");
       return;
     }
-    if (!Number.isFinite(priceNumber)) {
+    if (!isGiftCardProduct && !Number.isFinite(priceNumber)) {
       setProductError("Please enter a valid price.");
       return;
     }
-    if (salePriceNumber !== null && !Number.isFinite(salePriceNumber)) {
+    if (!isGiftCardProduct && salePriceNumber !== null && !Number.isFinite(salePriceNumber)) {
       setProductError("Please enter a valid sale price.");
       return;
     }
-    if (stockQuantityNumber !== null && !Number.isFinite(stockQuantityNumber)) {
+    if (
+      !isGiftCardProduct &&
+      !productForm.hasVariants &&
+      stockQuantityInput !== null &&
+      !Number.isFinite(stockQuantityInput)
+    ) {
       setProductError("Please enter a valid stock quantity.");
       return;
     }
@@ -2444,25 +3167,77 @@ export function AdminProductsView() {
     const keywordTokens = `${title} ${tagLabels.join(" ")}`.split(/\s+/).filter(Boolean);
     const metaKeywords = Array.from(new Set(keywordTokens)).join(", ");
     const skuValue = sku || generateSku(title, slug);
+    const giftCardExpiryDays = normalizeGiftCardExpiryDays(productForm.giftCardExpiryDays, 365);
+    const giftCardTerms = (productForm.giftCardTerms || "").toString().trim();
+    const effectiveGiftCardTerms = giftCardTerms || INITIAL_PRODUCT_FORM.giftCardTerms;
+    const sanitizedGiftCardOptions = (Array.isArray(productForm.giftCardOptions)
+      ? productForm.giftCardOptions
+      : []
+    )
+      .map((option, index) => {
+        const label = (option?.label || "").toString().trim();
+        const amountNumber = Number(option?.amount);
+        if (!label) return null;
+        if (!Number.isFinite(amountNumber) || amountNumber < 0) return null;
+        return {
+          id:
+            (option?.id || "").toString().trim() ||
+            `gift-card-option-${index + 1}-${Date.now().toString(36)}`,
+          label,
+          amount: Math.max(0, Number(amountNumber.toFixed(2))),
+        };
+      })
+      .filter(Boolean);
 
     const rawVariants = Array.isArray(productForm.variants) ? productForm.variants : [];
+    const invalidVariantQuantities = [];
     const sanitizedVariants = rawVariants
       .map((variant, index) => {
         const label = (variant.label || "").toString().trim();
         if (!label) return null;
         const priceNumber = Number(variant.price);
+        const quantityInput = (variant.quantity ?? "").toString().trim();
+        const quantityNumber = Number(quantityInput);
+        const hasQuantity = quantityInput !== "";
+        if (productForm.hasVariants && (!hasQuantity || !Number.isFinite(quantityNumber) || quantityNumber < 0)) {
+          invalidVariantQuantities.push(label || `Variant ${index + 1}`);
+          return null;
+        }
+        const normalizedQuantity =
+          hasQuantity && Number.isFinite(quantityNumber) ? Math.max(0, Math.floor(quantityNumber)) : null;
         return {
           id: variant.id || slugifyId(label) || `variant-${index + 1}`,
           label,
           price: Number.isFinite(priceNumber) ? priceNumber : null,
+          quantity: normalizedQuantity,
+          stock_quantity: normalizedQuantity,
         };
       })
       .filter(Boolean);
-    if (productForm.hasVariants && sanitizedVariants.length === 0) {
+    if (!isGiftCardProduct && productForm.hasVariants && invalidVariantQuantities.length > 0) {
+      setProductError("Enter a valid stock quantity for every variant.");
+      return;
+    }
+    if (!isGiftCardProduct && productForm.hasVariants && sanitizedVariants.length === 0) {
       setProductError("Add at least one variant before saving.");
       return;
     }
-    const normalizedVariants = productForm.hasVariants ? sanitizedVariants : [];
+    const normalizedVariants = isGiftCardProduct
+      ? []
+      : productForm.hasVariants
+      ? sanitizedVariants
+      : [];
+    const hasVariantInventory = normalizedVariants.length > 0;
+    const baseStockQuantity =
+      isGiftCardProduct
+        ? null
+        : hasVariantInventory
+        ? null
+        : stockQuantityInput === null
+          ? productForm.stockStatus === "out_of_stock"
+            ? 0
+            : null
+          : Math.max(0, Math.floor(stockQuantityInput));
 
     try {
       setProductSaving(true);
@@ -2475,10 +3250,12 @@ export function AdminProductsView() {
         if (uploaded) mainImageUrl = uploaded;
       }
 
-      let galleryUrls = Array.isArray(productForm.galleryImages) ?
-         productForm.galleryImages.filter(Boolean)
+      let galleryUrls = isGiftCardProduct
+        ? []
+        : Array.isArray(productForm.galleryImages)
+        ? productForm.galleryImages.filter(Boolean)
         : [];
-      if (productGalleryFiles.length > 0) {
+      if (!isGiftCardProduct && productGalleryFiles.length > 0) {
         for (const file of productGalleryFiles) {
           const uploaded = await uploadProductMedia(file);
           if (uploaded) galleryUrls.push(uploaded);
@@ -2486,6 +3263,8 @@ export function AdminProductsView() {
       }
       const limitedGallery = galleryUrls.slice(0, MAX_PRODUCT_IMAGES);
       const primaryImage = mainImageUrl || limitedGallery[0] || "";
+      const finalGallery = isGiftCardProduct ? (primaryImage ? [primaryImage] : []) : limitedGallery;
+      const finalVideoEmbed = isGiftCardProduct ? "" : productForm.videoEmbed.trim();
 
       const primaryCategory = normalizedCategoryIds.length ?
          resolveCategory(normalizedCategoryIds[0])
@@ -2500,7 +3279,8 @@ export function AdminProductsView() {
         depth: productForm.dimensions.depth || "",
       };
       const preorderSendMonthValue = normalizePreorderSendMonth(productForm.preorderSendMonth);
-      const preorderSendMonthPayload = productForm.stockStatus === "preorder" ? preorderSendMonthValue : "";
+      const preorderSendMonthPayload =
+        !isGiftCardProduct && productForm.stockStatus === "preorder" ? preorderSendMonthValue : "";
 
       const payload = {
         title,
@@ -2508,36 +3288,31 @@ export function AdminProductsView() {
         price: priceNumber,
         sale_price: salePriceNumber,
         slug,
-        stock_status: productForm.stockStatus,
+        stock_status: isGiftCardProduct ? "in_stock" : productForm.stockStatus,
         preorder_send_month: preorderSendMonthPayload,
         preorderSendMonth: preorderSendMonthPayload,
-        stock_quantity:
-          stockQuantityNumber === null
-            ? productForm.stockStatus === "out_of_stock"
-              ? 0
-              : null
-            : Math.max(0, Math.floor(stockQuantityNumber)),
+        stock_quantity: baseStockQuantity,
         category_ids: normalizedCategoryIds,
         tag_ids: normalizedTagIds,
         short_description: shortDescriptionText,
         long_description: longDescriptionText,
         main_image: primaryImage,
-        gallery_images: limitedGallery,
-        video_embed: productForm.videoEmbed.trim(),
-        sunlight: productForm.sunlight || "",
-        soil_type: productForm.soilType || "",
-        watering: productForm.watering || "",
-        climate: productForm.climate || "",
-        planting_depth: productForm.plantingDepth || "",
-        planting_spacing: productForm.plantingSpacing || "",
-        best_planting_time: productForm.bestPlantingTime || "",
-        bloom_period: productForm.bloomPeriod || "",
-        flower_color: productForm.flowerColor || "",
-        mature_height: productForm.matureHeight || "",
-        pest_issues: productForm.pestIssues || "",
-        disease_info: productForm.diseaseInfo || "",
-        propagation: productForm.propagation || "",
-        companions: productForm.companions || "",
+        gallery_images: finalGallery,
+        video_embed: finalVideoEmbed,
+        sunlight: isGiftCardProduct ? "" : productForm.sunlight || "",
+        soil_type: isGiftCardProduct ? "" : productForm.soilType || "",
+        watering: isGiftCardProduct ? "" : productForm.watering || "",
+        climate: isGiftCardProduct ? "" : productForm.climate || "",
+        planting_depth: isGiftCardProduct ? "" : productForm.plantingDepth || "",
+        planting_spacing: isGiftCardProduct ? "" : productForm.plantingSpacing || "",
+        best_planting_time: isGiftCardProduct ? "" : productForm.bestPlantingTime || "",
+        bloom_period: isGiftCardProduct ? "" : productForm.bloomPeriod || "",
+        flower_color: isGiftCardProduct ? "" : productForm.flowerColor || "",
+        mature_height: isGiftCardProduct ? "" : productForm.matureHeight || "",
+        pest_issues: isGiftCardProduct ? "" : productForm.pestIssues || "",
+        disease_info: isGiftCardProduct ? "" : productForm.diseaseInfo || "",
+        propagation: isGiftCardProduct ? "" : productForm.propagation || "",
+        companions: isGiftCardProduct ? "" : productForm.companions || "",
         meta_title: metaTitle,
         meta_description: metaDescription,
         meta_keywords: metaKeywords,
@@ -2546,31 +3321,39 @@ export function AdminProductsView() {
         country_of_origin: productForm.countryOfOrigin.trim(),
         delivery_info: productForm.deliveryInfo.trim(),
         related_product_ids: Array.isArray(productForm.relatedProductIds) ?
-           productForm.relatedProductIds.filter(Boolean)
+           isGiftCardProduct
+            ? []
+            : productForm.relatedProductIds.filter(Boolean)
           : [],
         upsell_product_ids: Array.isArray(productForm.upsellProductIds) ?
-           productForm.upsellProductIds.filter(Boolean)
+           isGiftCardProduct
+            ? []
+            : productForm.upsellProductIds.filter(Boolean)
           : [],
         cross_sell_product_ids: Array.isArray(productForm.crossSellProductIds) ?
-           productForm.crossSellProductIds.filter(Boolean)
+           isGiftCardProduct
+            ? []
+            : productForm.crossSellProductIds.filter(Boolean)
           : [],
         name: title,
         description: shortDescriptionText || longDescriptionText,
         image: primaryImage,
-        images: limitedGallery,
+        images: finalGallery,
         category: primaryCategoryLabel,
         categoryId: primaryCategoryId,
         categorySlug: primaryCategorySlug,
         status: derivedStatus,
-        quantity:
-          stockQuantityNumber === null
-            ? productForm.stockStatus === "out_of_stock"
-              ? 0
-              : null
-            : Math.max(0, Math.floor(stockQuantityNumber)),
-        forceOutOfStock: productForm.stockStatus === "out_of_stock",
+        quantity: baseStockQuantity,
+        forceOutOfStock: isGiftCardProduct ? false : productForm.stockStatus === "out_of_stock",
         variants: normalizedVariants,
         featured: Boolean(productForm.featured),
+        isGiftCard: isGiftCardProduct,
+        gift_card_expiry_days: isGiftCardProduct ? giftCardExpiryDays : null,
+        giftCardExpiryDays: isGiftCardProduct ? giftCardExpiryDays : null,
+        gift_card_terms: isGiftCardProduct ? effectiveGiftCardTerms : "",
+        giftCardTerms: isGiftCardProduct ? effectiveGiftCardTerms : "",
+        gift_card_options: isGiftCardProduct ? sanitizedGiftCardOptions : [],
+        giftCardOptions: isGiftCardProduct ? sanitizedGiftCardOptions : [],
         updatedAt: serverTimestamp(),
       };
 
@@ -2597,7 +3380,7 @@ export function AdminProductsView() {
     <div className="admin-panel admin-panel--full">
       <div className="admin-panel__header">
         <div>
-          <h2>Products</h2>
+          <h2>{activeTab === "subscriptions" ? "Subscriptions" : "Products"}</h2>
           <p className="admin-panel__note">
             {headerNote}
           </p>
@@ -2646,23 +3429,38 @@ export function AdminProductsView() {
             )}
           </div>
         )}
+        {activeTab === "subscriptions" && (
+          <div className="admin-panel__header-actions">
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={openProductModal}
+              disabled={!inventoryEnabled}
+            >
+              <IconPlus className="btn__icon" aria-hidden="true" />
+              Add Subscription Plan
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="admin-tabs">
-        <NavLink
-          to="/admin/products"
-          end
-          className={({ isActive }) => `admin-tab${isActive ? " is-active" : ""}`}
-        >
-          Products
-        </NavLink>
-        <NavLink
-          to="/admin/products/categories"
-          className={({ isActive }) => `admin-tab${isActive ? " is-active" : ""}`}
-        >
-          Categories
-        </NavLink>
-      </div>
+      {!isSubscriptionsTab && (
+        <div className="admin-tabs">
+          <NavLink
+            to="/admin/products"
+            end
+            className={({ isActive }) => `admin-tab${isActive ? " is-active" : ""}`}
+          >
+            Products
+          </NavLink>
+          <NavLink
+            to="/admin/products/categories"
+            className={({ isActive }) => `admin-tab${isActive ? " is-active" : ""}`}
+          >
+            Categories
+          </NavLink>
+        </div>
+      )}
 
       {activeTab === "categories" && (
         <div className="admin-panel__content admin-panel__content--split">
@@ -2855,7 +3653,7 @@ export function AdminProductsView() {
         onConfirm={handleConfirmDeleteCategory}
       />
 
-      {activeTab === "products" && (
+      {(activeTab === "products" || activeTab === "subscriptions") && (
         <div className="admin-panel__content">
           <div className="admin-table__wrapper">
             {!categoryOptions.length && (
@@ -2863,7 +3661,13 @@ export function AdminProductsView() {
                 No categories yet. Add one to help customers browse products.
               </p>
             )}
-            {products.length > 0 ? (
+            {activeTab === "subscriptions" && !defaultSubscriptionCategoryId && (
+              <p className="admin-panel__notice">
+                Create a category named <strong>Subscriptions</strong>, then assign plans to that
+                category.
+              </p>
+            )}
+            {managedProducts.length > 0 ? (
               <table className="admin-table">
                 <thead>
                   <tr>
@@ -2882,7 +3686,7 @@ export function AdminProductsView() {
                   {paginatedProducts.map((product) => {
                     const updatedAt = product.updatedAt?.toDate?.()
                       ? bookingDateFormatter.format(product.updatedAt.toDate())
-                      : "—";
+                      : "â€”";
                     const stockStatus = getStockStatus({
                       quantity: product.stock_quantity ?? product.quantity,
                       forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
@@ -2920,10 +3724,10 @@ export function AdminProductsView() {
                       .filter(Boolean)
                       .forEach((value) => {
                         const resolved = resolveCategory(value);
-                        const label = resolved.name || value;
+                        const label = resolved?.name || value;
                         if (!categoryLabels.includes(label)) categoryLabels.push(label);
                       });
-                    const primaryCategory = categoryLabels[0] || "—";
+                    const primaryCategory = categoryLabels[0] || "â€”";
                     const extraCategoryCount = Math.max(0, categoryLabels.length - 1);
                     const descriptionText = stripHtml(
                       product.short_description ||
@@ -2977,7 +3781,7 @@ export function AdminProductsView() {
                             {stockLabel}
                           </span>
                           <p className="modal__meta">
-                            Qty: {stockStatus.quantity ?? "—"}
+                            Qty: {stockStatus.quantity ?? "â€”"}
                           </p>
                           {stockStatus.state === "preorder" && preorderSendMonthLabel && (
                             <p className="modal__meta">Send month: {preorderSendMonthLabel}</p>
@@ -3025,13 +3829,17 @@ export function AdminProductsView() {
               </table>
             ) : (
               <p className="admin-panel__notice">
-                No products found. Add your first item.
+                {activeTab === "subscriptions"
+                  ? "No subscription plans found. Add your first subscription plan."
+                  : "No products found. Add your first item."}
               </p>
             )}
-            <p className="modal__meta">
-              {featuredProductCount}/{MAX_FEATURED_PRODUCTS} products featured on the home page.
-            </p>
-            <AdminPagination page={productPage} total={products.length} onPageChange={setProductPage} />
+            {activeTab === "products" && (
+              <p className="modal__meta">
+                {featuredProductCount}/{MAX_FEATURED_PRODUCTS} products featured on the home page.
+              </p>
+            )}
+            <AdminPagination page={productPage} total={managedProducts.length} onPageChange={setProductPage} />
             {inventoryLoading && (
               <p className="modal__meta">Syncing latest products...</p>
             )}
@@ -3064,7 +3872,13 @@ export function AdminProductsView() {
             &times;
           </button>
           <h3 className="modal__title">
-            {editingProductId ? "Edit Product" : "Add Product"}
+            {editingProductId
+              ? activeTab === "subscriptions"
+                ? "Edit Subscription Plan"
+                : "Edit Product"
+              : activeTab === "subscriptions"
+                ? "Add Subscription Plan"
+                : "Add Product"}
           </h3>
           <form className="admin-form" onSubmit={handleCreateProduct}>
             <div className="admin-form__section admin-form__full">
@@ -3112,32 +3926,47 @@ export function AdminProductsView() {
                   </div>
                 </label>
                 <label className="admin-form__field">
-                  Price *
-                  <input
+                  Gift card product
+                  <select
                     className="input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={productForm.price}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, price: event.target.value }))
-                    }
-                    required
-                  />
+                    value={productForm.isGiftCard ? "yes" : "no"}
+                    onChange={(event) => handleToggleGiftCardProduct(event.target.value === "yes")}
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
                 </label>
-                <label className="admin-form__field">
-                  Sale price
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={productForm.salePrice}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, salePrice: event.target.value }))
-                    }
-                  />
-                </label>
+                {!productForm.isGiftCard && (
+                  <>
+                    <label className="admin-form__field">
+                      Price *
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={productForm.price}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({ ...prev, price: event.target.value }))
+                        }
+                        required
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Sale price
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={productForm.salePrice}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({ ...prev, salePrice: event.target.value }))
+                        }
+                      />
+                    </label>
+                  </>
+                )}
                 <label className="admin-form__field">
                   Stock status
                   <select
@@ -3146,40 +3975,57 @@ export function AdminProductsView() {
                     onChange={(event) =>
                       setProductForm((prev) => ({ ...prev, stockStatus: event.target.value }))
                     }
+                    disabled={productForm.isGiftCard}
                   >
                     <option value="in_stock">In stock</option>
                     <option value="out_of_stock">Out of stock</option>
                     <option value="preorder">Preorder</option>
                   </select>
                 </label>
-                <label className="admin-form__field">
-                  Preorder send month
-                  <input
-                    className="input"
-                    type="month"
-                    value={productForm.preorderSendMonth}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({
-                        ...prev,
-                        preorderSendMonth: normalizePreorderSendMonth(event.target.value),
-                      }))
-                    }
-                    disabled={productForm.stockStatus !== "preorder"}
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Stock quantity
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={productForm.stockQuantity}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, stockQuantity: event.target.value }))
-                    }
-                  />
-                </label>
+                {!productForm.isGiftCard && (
+                  <label className="admin-form__field">
+                    Preorder send month
+                    <input
+                      className="input"
+                      type="month"
+                      value={productForm.preorderSendMonth}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({
+                          ...prev,
+                          preorderSendMonth: normalizePreorderSendMonth(event.target.value),
+                        }))
+                      }
+                      disabled={productForm.stockStatus !== "preorder"}
+                    />
+                  </label>
+                )}
+                {productForm.isGiftCard ? (
+                  <div className="admin-form__field">
+                    <span className="admin-panel__note">
+                      Stock quantity is unlimited for digital gift card products.
+                    </span>
+                  </div>
+                ) : productForm.hasVariants ? (
+                  <div className="admin-form__field">
+                    <span className="admin-panel__note">
+                      Base stock quantity is disabled for variant products and will be saved as null.
+                    </span>
+                  </div>
+                ) : (
+                  <label className="admin-form__field">
+                    Stock quantity
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={productForm.stockQuantity}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, stockQuantity: event.target.value }))
+                      }
+                    />
+                  </label>
+                )}
                 <label className="admin-form__field">
                   Status
                   <select
@@ -3268,6 +4114,119 @@ export function AdminProductsView() {
               </div>
             </div>
 
+            {productForm.isGiftCard && (
+              <div className="admin-form__section admin-form__full">
+                <div className="admin-form__section-header">
+                  <h4>Gift Card Test</h4>
+                </div>
+                <div className="admin-form__section-grid">
+                  <label className="admin-form__field admin-form__full">
+                    Test recipient email
+                    <input
+                      className="input"
+                      type="email"
+                      value={testGiftCardEmail}
+                      onChange={(event) => setTestGiftCardEmail(event.target.value)}
+                      placeholder="admin@bethanyblooms.co.za"
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Purchaser name (optional)
+                    <input
+                      className="input"
+                      type="text"
+                      maxLength={120}
+                      value={testGiftCardPurchaserName}
+                      onChange={(event) => setTestGiftCardPurchaserName(event.target.value)}
+                      placeholder="Name of purchaser"
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Recipient name (optional)
+                    <input
+                      className="input"
+                      type="text"
+                      maxLength={120}
+                      value={testGiftCardRecipientName}
+                      onChange={(event) => setTestGiftCardRecipientName(event.target.value)}
+                      placeholder="Name on the gift card"
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Test message (optional)
+                    <textarea
+                      className="input textarea"
+                      rows="3"
+                      maxLength={320}
+                      value={testGiftCardMessage}
+                      onChange={(event) => setTestGiftCardMessage(event.target.value)}
+                      placeholder="Short message for the card"
+                    />
+                  </label>
+                  <div className="admin-form__field admin-form__full">
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={handleSendTestGiftCard}
+                      disabled={testGiftCardSending || !inventoryEnabled || !functionsInstance}
+                    >
+                      {testGiftCardSending ? "Sending test..." : "Send test gift card"}
+                    </button>
+                    <p className="admin-panel__note">
+                      This sends a test gift card email and generates a live gift card page + PDF without using PayFast
+                      or EFT checkout.
+                    </p>
+                  </div>
+                  {testGiftCardResult?.giftCard?.accessUrl && (
+                    <div className="admin-form__field admin-form__full">
+                      <p className="admin-panel__status">
+                        Test gift card created.
+                        {testGiftCardResult.emailStatus === "sent" ?
+                           ` Email sent to ${testGiftCardResult.recipientEmail || testGiftCardEmail}.`
+                          : testGiftCardResult.emailStatus === "failed" ?
+                           ` Email failed: ${testGiftCardResult.emailError || "Unknown error"}.`
+                          : " Email was not sent, but preview links are ready."}
+                      </p>
+                      {testGiftCardResult?.giftCard?.code && (
+                        <p className="admin-panel__note">
+                          <strong>Card code:</strong> {testGiftCardResult.giftCard.code}
+                        </p>
+                      )}
+                      <div className="admin-form__actions">
+                        <a
+                          className="btn btn--secondary btn--small"
+                          href={testGiftCardResult.giftCard.accessUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open gift card page
+                        </a>
+                        <a
+                          className="btn btn--secondary btn--small"
+                          href={testGiftCardResult.giftCard.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Download test PDF
+                        </a>
+                        <a
+                          className="btn btn--secondary btn--small"
+                          href={testGiftCardResult.giftCard.printUrl || testGiftCardResult.giftCard.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open print view
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                  {testGiftCardError && (
+                    <p className="admin-panel__error admin-form__full">{testGiftCardError}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="admin-form__section admin-form__full">
               <div className="admin-form__section-header">
                 <h4>Descriptions</h4>
@@ -3342,361 +4301,396 @@ export function AdminProductsView() {
                     </div>
                   )}
                 </div>
-                <div className="admin-form__field admin-form__full">
-                  <label htmlFor="product-gallery-images">Gallery images</label>
-                  <input
-                    key={editingProductId ?? "new-product-gallery"}
-                    className="input input--file"
-                    id="product-gallery-images"
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    ref={productGalleryImageInputRef}
-                    onChange={handleGalleryImagesChange}
-                  />
-                  <div className="admin-media-picker">
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      onClick={() => openMediaLibrary("gallery")}
-                    >
-                      Choose from library
-                    </button>
-                  </div>
-                  <p className="admin-panel__note">
-                    Upload up to {MAX_PRODUCT_IMAGES} JPG or PNG files (max 3MB each).
+                {productForm.isGiftCard ? (
+                  <p className="admin-panel__note admin-form__full">
+                    Gift cards use a single main image only.
                   </p>
-                  {productGalleryPreviews.length > 0 && (
-                    <div className="admin-preview-grid">
-                      {productGalleryPreviews.map((preview, index) => (
-                        <div className="admin-preview-card" key={`${preview}-${index}`}>
-                          <img
-                            src={preview}
-                            alt={`Product gallery preview ${index + 1}`}
-                            className="admin-preview" loading="lazy" decoding="async"/>
+                ) : (
+                  <>
+                    <div className="admin-form__field admin-form__full">
+                      <label htmlFor="product-gallery-images">Gallery images</label>
+                      <input
+                        key={editingProductId ?? "new-product-gallery"}
+                        className="input input--file"
+                        id="product-gallery-images"
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        ref={productGalleryImageInputRef}
+                        onChange={handleGalleryImagesChange}
+                      />
+                      <div className="admin-media-picker">
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={() => openMediaLibrary("gallery")}
+                        >
+                          Choose from library
+                        </button>
+                      </div>
+                      <p className="admin-panel__note">
+                        Upload up to {MAX_PRODUCT_IMAGES} JPG or PNG files (max 3MB each).
+                      </p>
+                      {productGalleryPreviews.length > 0 && (
+                        <div className="admin-preview-grid">
+                          {productGalleryPreviews.map((preview, index) => (
+                            <div className="admin-preview-card" key={`${preview}-${index}`}>
+                              <img
+                                src={preview}
+                                alt={`Product gallery preview ${index + 1}`}
+                                className="admin-preview" loading="lazy" decoding="async"/>
+                              <button
+                                className="icon-btn icon-btn--danger admin-preview-remove"
+                                type="button"
+                                onClick={() => handleRemoveGalleryImage(index)}
+                                aria-label={`Remove gallery image ${index + 1}`}
+                              >
+                                <IconTrash aria-hidden="true" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <label className="admin-form__field admin-form__full">
+                      Video from YouTube
+                      <textarea
+                        className="input textarea"
+                        rows="3"
+                        value={productForm.videoEmbed}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({ ...prev, videoEmbed: event.target.value }))
+                        }
+                        placeholder="https://www.youtube.com/watch?v=..."
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {!productForm.isGiftCard && (
+              <div className="admin-form__section admin-form__full">
+                <div className="admin-form__section-header">
+                  <h4>Attributes</h4>
+                </div>
+                <div className="admin-form__section-grid">
+                  <label className="admin-form__field">
+                    Sunlight
+                    <select
+                      className="input"
+                      value={productForm.sunlight}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, sunlight: event.target.value }))
+                      }
+                    >
+                      <option value="">Select sunlight</option>
+                      <option value="full_sun">Full sun</option>
+                      <option value="partial_shade">Partial shade</option>
+                      <option value="shade">Shade</option>
+                    </select>
+                  </label>
+                  <label className="admin-form__field">
+                    Soil type
+                    <input
+                      className="input"
+                      value={productForm.soilType}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, soilType: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Watering
+                    <input
+                      className="input"
+                      value={productForm.watering}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, watering: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Climate
+                    <input
+                      className="input"
+                      value={productForm.climate}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, climate: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Planting depth
+                    <input
+                      className="input"
+                      value={productForm.plantingDepth}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, plantingDepth: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Planting spacing
+                    <input
+                      className="input"
+                      value={productForm.plantingSpacing}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, plantingSpacing: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Best planting time
+                    <input
+                      className="input"
+                      value={productForm.bestPlantingTime}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, bestPlantingTime: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Bloom period
+                    <input
+                      className="input"
+                      value={productForm.bloomPeriod}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, bloomPeriod: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Flower color
+                    <input
+                      className="input"
+                      value={productForm.flowerColor}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, flowerColor: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Mature height
+                    <input
+                      className="input"
+                      value={productForm.matureHeight}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, matureHeight: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Pest issues
+                    <textarea
+                      className="input textarea"
+                      rows="2"
+                      value={productForm.pestIssues}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, pestIssues: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Disease info
+                    <textarea
+                      className="input textarea"
+                      rows="2"
+                      value={productForm.diseaseInfo}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, diseaseInfo: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Propagation
+                    <textarea
+                      className="input textarea"
+                      rows="2"
+                      value={productForm.propagation}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, propagation: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Companions
+                    <textarea
+                      className="input textarea"
+                      rows="2"
+                      value={productForm.companions}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, companions: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {!productForm.isGiftCard && (
+              <div className="admin-form__section admin-form__full">
+                <div className="admin-form__section-header">
+                  <h4>Variants</h4>
+                </div>
+                <div className="admin-form__section-grid">
+                  <label className="admin-form__field">
+                    Has variants
+                    <select
+                      className="input"
+                      value={productForm.hasVariants ? "yes" : "no"}
+                      onChange={(event) => handleToggleHasVariants(event.target.value === "yes")}
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </label>
+                  <p className="admin-panel__note admin-form__full">
+                    Add size, colour, shape, or other variants when enabled. Leave price blank to use the base price
+                    and set stock per variant.
+                  </p>
+                  {productForm.hasVariants ? (
+                    <>
+                      {(productForm.variants || []).map((variant, index) => (
+                        <div className="admin-session-row" key={variant.id}>
+                          <div className="admin-session-field admin-session-field--label">
+                            <label
+                              className="admin-session-label"
+                              htmlFor={`product-variant-label-${variant.id}`}
+                            >
+                              Variant #{index + 1}
+                            </label>
+                            <input
+                              className="input"
+                              id={`product-variant-label-${variant.id}`}
+                              value={variant.label}
+                              onChange={(event) =>
+                                handleProductVariantChange(variant.id, "label", event.target.value)
+                              }
+                              placeholder="Small, Red, Round, etc."
+                            />
+                          </div>
+                          <div className="admin-session-field">
+                            <label
+                              className="admin-session-label"
+                              htmlFor={`product-variant-price-${variant.id}`}
+                            >
+                              Price (optional)
+                            </label>
+                            <input
+                              className="input"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              id={`product-variant-price-${variant.id}`}
+                              value={variant.price}
+                              onChange={(event) =>
+                                handleProductVariantChange(variant.id, "price", event.target.value)
+                              }
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <div className="admin-session-field">
+                            <label
+                              className="admin-session-label"
+                              htmlFor={`product-variant-quantity-${variant.id}`}
+                            >
+                              Quantity
+                            </label>
+                            <input
+                              className="input"
+                              type="number"
+                              min="0"
+                              step="1"
+                              id={`product-variant-quantity-${variant.id}`}
+                              value={variant.quantity ?? ""}
+                              onChange={(event) =>
+                                handleProductVariantChange(variant.id, "quantity", event.target.value)
+                              }
+                              placeholder="0"
+                            />
+                          </div>
                           <button
-                            className="icon-btn icon-btn--danger admin-preview-remove"
+                            className="icon-btn icon-btn--danger admin-session-remove"
                             type="button"
-                            onClick={() => handleRemoveGalleryImage(index)}
-                            aria-label={`Remove gallery image ${index + 1}`}
+                            onClick={() => handleRemoveProductVariant(variant.id)}
+                            aria-label={`Remove variant ${index + 1}`}
                           >
                             <IconTrash aria-hidden="true" />
                           </button>
                         </div>
                       ))}
-                    </div>
+                      <button className="btn btn--secondary" type="button" onClick={handleAddProductVariant}>
+                        Add variant
+                      </button>
+                    </>
+                  ) : (
+                    <p className="modal__meta admin-form__full">No variants added.</p>
                   )}
                 </div>
-                <label className="admin-form__field admin-form__full">
-                  Video from YouTube
-                  <textarea
-                    className="input textarea"
-                    rows="3"
-                    value={productForm.videoEmbed}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, videoEmbed: event.target.value }))
-                    }
-                    placeholder="https://www.youtube.com/watchv=..."
-                  />
-                </label>
               </div>
-            </div>
+            )}
 
-            <div className="admin-form__section admin-form__full">
-              <div className="admin-form__section-header">
-                <h4>Attributes</h4>
-              </div>
-              <div className="admin-form__section-grid">
-                <label className="admin-form__field">
-                  Sunlight
-                  <select
-                    className="input"
-                    value={productForm.sunlight}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, sunlight: event.target.value }))
-                    }
-                  >
-                    <option value="">Select sunlight</option>
-                    <option value="full_sun">Full sun</option>
-                    <option value="partial_shade">Partial shade</option>
-                    <option value="shade">Shade</option>
-                  </select>
-                </label>
-                <label className="admin-form__field">
-                  Soil type
-                  <input
-                    className="input"
-                    value={productForm.soilType}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, soilType: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Watering
-                  <input
-                    className="input"
-                    value={productForm.watering}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, watering: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Climate
-                  <input
-                    className="input"
-                    value={productForm.climate}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, climate: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Planting depth
-                  <input
-                    className="input"
-                    value={productForm.plantingDepth}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, plantingDepth: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Planting spacing
-                  <input
-                    className="input"
-                    value={productForm.plantingSpacing}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, plantingSpacing: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Best planting time
-                  <input
-                    className="input"
-                    value={productForm.bestPlantingTime}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, bestPlantingTime: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Bloom period
-                  <input
-                    className="input"
-                    value={productForm.bloomPeriod}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, bloomPeriod: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Flower color
-                  <input
-                    className="input"
-                    value={productForm.flowerColor}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, flowerColor: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Mature height
-                  <input
-                    className="input"
-                    value={productForm.matureHeight}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, matureHeight: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field admin-form__full">
-                  Pest issues
-                  <textarea
-                    className="input textarea"
-                    rows="2"
-                    value={productForm.pestIssues}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, pestIssues: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field admin-form__full">
-                  Disease info
-                  <textarea
-                    className="input textarea"
-                    rows="2"
-                    value={productForm.diseaseInfo}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, diseaseInfo: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field admin-form__full">
-                  Propagation
-                  <textarea
-                    className="input textarea"
-                    rows="2"
-                    value={productForm.propagation}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, propagation: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field admin-form__full">
-                  Companions
-                  <textarea
-                    className="input textarea"
-                    rows="2"
-                    value={productForm.companions}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, companions: event.target.value }))
-                    }
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="admin-form__section admin-form__full">
-              <div className="admin-form__section-header">
-                <h4>Variants</h4>
-              </div>
-              <div className="admin-form__section-grid">
-                <label className="admin-form__field">
-                  Has variants
-                  <select
-                    className="input"
-                    value={productForm.hasVariants ? "yes" : "no"}
-                    onChange={(event) => handleToggleHasVariants(event.target.value === "yes")}
-                  >
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
-                  </select>
-                </label>
-                <p className="admin-panel__note admin-form__full">
-                  Add size, colour, shape, or other variants when enabled. Leave price blank to use the base price.
-                </p>
-                {productForm.hasVariants ? (
-                  <>
-                    {(productForm.variants || []).map((variant, index) => (
-                      <div className="admin-session-row" key={variant.id}>
-                        <div className="admin-session-field admin-session-field--label">
-                          <label
-                            className="admin-session-label"
-                            htmlFor={`product-variant-label-${variant.id}`}
-                          >
-                            Variant #{index + 1}
-                          </label>
-                          <input
-                            className="input"
-                            id={`product-variant-label-${variant.id}`}
-                            value={variant.label}
-                            onChange={(event) =>
-                              handleProductVariantChange(variant.id, "label", event.target.value)
-                            }
-                            placeholder="Small, Red, Round, etc."
-                          />
-                        </div>
-                        <div className="admin-session-field">
-                          <label
-                            className="admin-session-label"
-                            htmlFor={`product-variant-price-${variant.id}`}
-                          >
-                            Price (optional)
-                          </label>
-                          <input
-                            className="input"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            id={`product-variant-price-${variant.id}`}
-                            value={variant.price}
-                            onChange={(event) =>
-                              handleProductVariantChange(variant.id, "price", event.target.value)
-                            }
-                            placeholder="0.00"
-                          />
-                        </div>
-                        <button
-                          className="icon-btn icon-btn--danger admin-session-remove"
-                          type="button"
-                          onClick={() => handleRemoveProductVariant(variant.id)}
-                          aria-label={`Remove variant ${index + 1}`}
-                        >
-                          <IconTrash aria-hidden="true" />
-                        </button>
-                      </div>
-                    ))}
-                    <button className="btn btn--secondary" type="button" onClick={handleAddProductVariant}>
-                      Add variant
-                    </button>
-                  </>
-                ) : (
-                  <p className="modal__meta admin-form__full">No variants added.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="admin-form__section admin-form__full">
-              <div className="admin-form__section-header">
-                <h4>Related products</h4>
-              </div>
-              <div className="admin-form__section-grid">
-                <div className="admin-form__field admin-form__full">
-                  <label>Related products</label>
-                  <select
-                    className="input"
-                    value={productForm.relatedProductIds[0] || ""}
-                    onChange={(event) => handleSingleSelectChange("relatedProductIds", event)}
-                  >
-                    <option value="">Select a related product</option>
-                    {products
-                      .filter((product) => product.id !== editingProductId)
-                      .map((product) => (
-                        <option key={`related-${product.id}`} value={product.id}>
-                          {product.title || product.name || "Product"}
-                        </option>
-                      ))}
-                  </select>
+            {!productForm.isGiftCard && (
+              <div className="admin-form__section admin-form__full">
+                <div className="admin-form__section-header">
+                  <h4>Related products</h4>
                 </div>
-                <div className="admin-form__field admin-form__full">
-                  <label>Upsell products</label>
-                  <select
-                    className="input"
-                    value={productForm.upsellProductIds[0] || ""}
-                    onChange={(event) => handleSingleSelectChange("upsellProductIds", event)}
-                  >
-                    <option value="">Select an upsell product</option>
-                    {products
-                      .filter((product) => product.id !== editingProductId)
-                      .map((product) => (
-                        <option key={`upsell-${product.id}`} value={product.id}>
-                          {product.title || product.name || "Product"}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                <div className="admin-form__field admin-form__full">
-                  <label>Cross-sell products</label>
-                  <select
-                    className="input"
-                    value={productForm.crossSellProductIds[0] || ""}
-                    onChange={(event) => handleSingleSelectChange("crossSellProductIds", event)}
-                  >
-                    <option value="">Select a cross-sell product</option>
-                    {products
-                      .filter((product) => product.id !== editingProductId)
-                      .map((product) => (
-                        <option key={`cross-${product.id}`} value={product.id}>
-                          {product.title || product.name || "Product"}
-                        </option>
-                      ))}
-                  </select>
+                <div className="admin-form__section-grid">
+                  <div className="admin-form__field admin-form__full">
+                    <label>Related products</label>
+                    <select
+                      className="input"
+                      value={productForm.relatedProductIds[0] || ""}
+                      onChange={(event) => handleSingleSelectChange("relatedProductIds", event)}
+                    >
+                      <option value="">Select a related product</option>
+                      {products
+                        .filter((product) => product.id !== editingProductId)
+                        .map((product) => (
+                          <option key={`related-${product.id}`} value={product.id}>
+                            {product.title || product.name || "Product"}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="admin-form__field admin-form__full">
+                    <label>Upsell products</label>
+                    <select
+                      className="input"
+                      value={productForm.upsellProductIds[0] || ""}
+                      onChange={(event) => handleSingleSelectChange("upsellProductIds", event)}
+                    >
+                      <option value="">Select an upsell product</option>
+                      {products
+                        .filter((product) => product.id !== editingProductId)
+                        .map((product) => (
+                          <option key={`upsell-${product.id}`} value={product.id}>
+                            {product.title || product.name || "Product"}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="admin-form__field admin-form__full">
+                    <label>Cross-sell products</label>
+                    <select
+                      className="input"
+                      value={productForm.crossSellProductIds[0] || ""}
+                      onChange={(event) => handleSingleSelectChange("crossSellProductIds", event)}
+                    >
+                      <option value="">Select a cross-sell product</option>
+                      {products
+                        .filter((product) => product.id !== editingProductId)
+                        .map((product) => (
+                          <option key={`cross-${product.id}`} value={product.id}>
+                            {product.title || product.name || "Product"}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             <div className="admin-modal__actions admin-form__actions">
               <button
@@ -3815,9 +4809,2183 @@ export function AdminProductsView() {
   );
 }
 
+export function AdminSubscriptionsView() {
+  usePageMetadata({
+    title: "Admin Â· Subscriptions",
+    description: "Create and manage flower subscription plans.",
+  });
+
+  const {
+    db,
+    user,
+    productCategories,
+    inventoryEnabled,
+    inventoryError,
+  } = useAdminData();
+  const {
+    items: subscriptionPlans,
+    status: plansStatus,
+    error: plansError,
+  } = useFirestoreCollection("subscriptionPlans", {
+    orderByField: "updatedAt",
+    orderDirection: "desc",
+  });
+
+  const [planForm, setPlanForm] = useState(INITIAL_SUBSCRIPTION_PLAN_FORM);
+  const [isPlanModalOpen, setPlanModalOpen] = useState(false);
+  const [editingPlanId, setEditingPlanId] = useState(null);
+  const [planSaving, setPlanSaving] = useState(false);
+  const [planDeleting, setPlanDeleting] = useState(false);
+  const [planError, setPlanError] = useState(null);
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [pendingDeletePlan, setPendingDeletePlan] = useState(null);
+
+  const categoryOptions = useMemo(
+    () =>
+      (Array.isArray(productCategories) ? productCategories : [])
+        .map((category) => {
+          const id = (category?.id || "").toString().trim();
+          if (!id) return null;
+          return {
+            id,
+            name: (category?.name || category?.title || id).toString().trim(),
+          };
+        })
+        .filter(Boolean),
+    [productCategories],
+  );
+
+  const categoryLookup = useMemo(() => {
+    const map = new Map();
+    categoryOptions.forEach((category) => {
+      map.set(category.id, category);
+    });
+    return map;
+  }, [categoryOptions]);
+
+  const resolvedMonthlyAmount = useMemo(
+    () => resolveSubscriptionPlanMonthlyAmount(planForm.monthlyAmount),
+    [planForm.monthlyAmount],
+  );
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 3500);
+    return () => clearTimeout(timeout);
+  }, [statusMessage]);
+
+  useEffect(() => {
+    if (isPlanModalOpen || editingPlanId || planForm.categoryId || !categoryOptions.length) return;
+    setPlanForm((prev) => ({
+      ...prev,
+      categoryId: categoryOptions[0].id,
+    }));
+  }, [categoryOptions, editingPlanId, isPlanModalOpen, planForm.categoryId]);
+
+  const resetPlanForm = () => {
+    setPlanForm({
+      ...INITIAL_SUBSCRIPTION_PLAN_FORM,
+      categoryId: categoryOptions[0]?.id || "",
+    });
+  };
+
+  const openCreatePlanModal = () => {
+    resetPlanForm();
+    setEditingPlanId(null);
+    setPlanError(null);
+    setPlanModalOpen(true);
+  };
+
+  const closePlanModal = () => {
+    setPlanModalOpen(false);
+    setEditingPlanId(null);
+    setPlanSaving(false);
+    setPlanError(null);
+  };
+
+  const handleEditPlan = (plan) => {
+    if (!plan) return;
+    const normalizedTier = normalizeSubscriptionPlanTierValue(plan.tier) || "weekly";
+    const normalizedStems = normalizeSubscriptionPlanStemsValue(plan.stems) || 16;
+    const normalizedStatus = ["live", "draft", "archived"].includes(
+      (plan?.status || "").toString().trim().toLowerCase(),
+    )
+      ? plan.status.toString().trim().toLowerCase()
+      : "draft";
+    setPlanForm({
+      name: (plan?.name || "").toString().trim(),
+      description: (plan?.description || "").toString(),
+      categoryId: (plan?.categoryId || "").toString().trim(),
+      tier: normalizedTier,
+      stems: String(normalizedStems),
+      monthlyAmount:
+        plan?.monthlyAmount === undefined || plan?.monthlyAmount === null ?
+           ""
+          : String(plan.monthlyAmount),
+      status: normalizedStatus,
+      image: (plan?.image || "").toString().trim(),
+    });
+    setEditingPlanId(plan.id);
+    setPlanError(null);
+    setPlanModalOpen(true);
+  };
+
+  const handleSavePlan = async (event) => {
+    event.preventDefault();
+    if (!db || !inventoryEnabled) {
+      setPlanError("You do not have permission to update subscription plans.");
+      return;
+    }
+
+    const name = (planForm.name || "").toString().trim();
+    const description = sanitizePlainText((planForm.description || "").toString().trim());
+    const categoryId = (planForm.categoryId || "").toString().trim();
+    const tier = normalizeSubscriptionPlanTierValue(planForm.tier);
+    const stems = normalizeSubscriptionPlanStemsValue(planForm.stems);
+    const monthlyAmount = resolveSubscriptionPlanMonthlyAmount(planForm.monthlyAmount);
+    const image = (planForm.image || "").toString().trim();
+    const statusValue = (planForm.status || "").toString().trim().toLowerCase();
+    const status = ["live", "draft", "archived"].includes(statusValue) ? statusValue : "draft";
+    const category = categoryLookup.get(categoryId) || null;
+
+    if (!name) {
+      setPlanError("Plan name is required.");
+      return;
+    }
+    if (!categoryId || !category) {
+      setPlanError("Choose a valid category.");
+      return;
+    }
+    if (!tier || !stems) {
+      setPlanError("Select a valid tier and stems option.");
+      return;
+    }
+    if (!monthlyAmount) {
+      setPlanError("Enter a valid per-delivery price.");
+      return;
+    }
+
+    try {
+      setPlanSaving(true);
+      setPlanError(null);
+      const payload = {
+        name,
+        description,
+        categoryId: category.id,
+        categoryName: category.name || category.id,
+        tier,
+        stems,
+        monthlyAmount,
+        currency: "ZAR",
+        status,
+        image,
+        updatedAt: serverTimestamp(),
+        updatedByUid: (user?.uid || "").toString().trim() || null,
+      };
+
+      if (editingPlanId) {
+        await updateDoc(doc(db, "subscriptionPlans", editingPlanId), payload);
+        setStatusMessage("Subscription plan updated.");
+      } else {
+        await addDoc(collection(db, "subscriptionPlans"), {
+          ...payload,
+          createdAt: serverTimestamp(),
+          createdByUid: (user?.uid || "").toString().trim() || null,
+        });
+        setStatusMessage("Subscription plan saved.");
+      }
+      closePlanModal();
+    } catch (error) {
+      setPlanError(error.message || "Unable to save subscription plan.");
+    } finally {
+      setPlanSaving(false);
+    }
+  };
+
+  const handleDeletePlan = async () => {
+    const planId = (pendingDeletePlan?.id || "").toString().trim();
+    if (!planId || !db || !inventoryEnabled) {
+      setPendingDeletePlan(null);
+      return;
+    }
+    try {
+      setPlanDeleting(true);
+      await deleteDoc(doc(db, "subscriptionPlans", planId));
+      setStatusMessage("Subscription plan removed.");
+      setPendingDeletePlan(null);
+    } catch (error) {
+      setPlanError(error.message || "Unable to remove subscription plan.");
+    } finally {
+      setPlanDeleting(false);
+    }
+  };
+
+  return (
+    <div className="admin-panel admin-panel--full">
+      <div className="admin-panel__header">
+        <div>
+          <h2>Subscriptions</h2>
+          <p className="admin-panel__note">
+            Create standalone subscription plans and set per-delivery pricing manually.
+          </p>
+        </div>
+        <div className="admin-panel__header-actions">
+          <button
+            className="btn btn--primary"
+            type="button"
+            onClick={openCreatePlanModal}
+            disabled={!inventoryEnabled}
+          >
+            <IconPlus className="btn__icon" aria-hidden="true" />
+            Add Subscription Plan
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-panel__content">
+        <div className="admin-table__wrapper">
+          {plansStatus === "loading" && (
+            <p className="modal__meta">Syncing latest subscription plans...</p>
+          )}
+          {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+          {plansError && <p className="admin-panel__error">{plansError.message || "Unable to load plans."}</p>}
+          {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+          {planError && <p className="admin-panel__error">{planError}</p>}
+          {subscriptionPlans.length > 0 ? (
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th scope="col">Plan</th>
+                  <th scope="col">Category</th>
+                  <th scope="col">Tier</th>
+                  <th scope="col">Stems</th>
+                  <th scope="col">Per delivery</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col" className="admin-table__actions">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {subscriptionPlans.map((plan) => {
+                  const updatedAt = plan.updatedAt?.toDate?.()
+                    ? bookingDateFormatter.format(plan.updatedAt.toDate())
+                    : "â€”";
+                  const categoryName =
+                    (plan?.categoryName || categoryLookup.get((plan?.categoryId || "").toString().trim())?.name || "â€”")
+                      .toString()
+                      .trim();
+                  const tierLabel = formatSubscriptionPlanTierLabel(plan?.tier);
+                  const stemsValue = normalizeSubscriptionPlanStemsValue(plan?.stems);
+                  const monthlyAmount = resolveSubscriptionPlanMonthlyAmount(plan?.monthlyAmount);
+                  const status = (plan?.status || "draft").toString().trim().toLowerCase();
+                  const statusLabel = status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : "Draft";
+                  return (
+                    <tr key={plan.id}>
+                      <td>
+                        <div className="admin-table__product">
+                          {(plan?.image || "").toString().trim() ? (
+                            <img
+                              src={plan.image}
+                              alt={plan.name || "Subscription plan"}
+                              className="admin-table__thumb"
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          ) : (
+                            <span className="admin-table__thumb admin-table__thumb--placeholder">
+                              <IconImage aria-hidden="true" />
+                            </span>
+                          )}
+                          <div>
+                            <strong>{plan.name || "Subscription plan"}</strong>
+                            {plan.description && <p className="modal__meta">{plan.description}</p>}
+                          </div>
+                        </div>
+                      </td>
+                      <td>{categoryName || "â€”"}</td>
+                      <td>{tierLabel}</td>
+                      <td>{stemsValue || "â€”"}</td>
+                      <td>{formatPriceLabel(monthlyAmount)}</td>
+                      <td>
+                        <span className="admin-status">
+                          {statusLabel.replace(/_/g, " ")}
+                        </span>
+                      </td>
+                      <td>{updatedAt}</td>
+                      <td className="admin-table__actions">
+                        <button
+                          className="icon-btn"
+                          type="button"
+                          onClick={() => handleEditPlan(plan)}
+                          disabled={!inventoryEnabled}
+                          title="Edit plan"
+                        >
+                          <IconEdit aria-hidden="true" />
+                        </button>
+                        <button
+                          className="icon-btn icon-btn--danger"
+                          type="button"
+                          onClick={() => setPendingDeletePlan(plan)}
+                          disabled={!inventoryEnabled}
+                          title="Delete plan"
+                        >
+                          <IconTrash aria-hidden="true" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="admin-panel__notice">
+              No subscription plans found. Add your first subscription plan.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div
+        className={`modal admin-modal ${isPlanModalOpen ? "is-active" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={isPlanModalOpen ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closePlanModal();
+        }}
+      >
+        <div className="modal__content admin-modal__content">
+          <button className="modal__close" type="button" aria-label="Close" onClick={closePlanModal}>
+            &times;
+          </button>
+          <h3 className="modal__title">{editingPlanId ? "Edit Subscription Plan" : "Add Subscription Plan"}</h3>
+          <form className="admin-form" onSubmit={handleSavePlan}>
+            <div className="admin-form__section admin-form__full">
+              <div className="admin-form__section-header">
+                <h4>Plan details</h4>
+                <span className="badge">
+                  {resolvedMonthlyAmount ? formatPriceLabel(resolvedMonthlyAmount) : "Set per-delivery price"}
+                </span>
+              </div>
+              <div className="admin-form__section-grid">
+                <label className="admin-form__field admin-form__full">
+                  Plan name *
+                  <input
+                    className="input"
+                    value={planForm.name}
+                    onChange={(event) =>
+                      setPlanForm((prev) => ({ ...prev, name: event.target.value }))
+                    }
+                    required
+                  />
+                </label>
+                <label className="admin-form__field admin-form__full">
+                  Description
+                  <textarea
+                    className="input textarea"
+                    rows="4"
+                    value={planForm.description}
+                    onChange={(event) =>
+                      setPlanForm((prev) => ({ ...prev, description: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Category *
+                  <select
+                    className="input"
+                    value={planForm.categoryId}
+                    onChange={(event) =>
+                      setPlanForm((prev) => ({ ...prev, categoryId: event.target.value }))
+                    }
+                    required
+                  >
+                    <option value="">Select category</option>
+                    {categoryOptions.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="admin-form__field">
+                  Tier *
+                  <select
+                    className="input"
+                    value={planForm.tier}
+                    onChange={(event) =>
+                      setPlanForm((prev) => ({ ...prev, tier: event.target.value }))
+                    }
+                    required
+                  >
+                    {SUBSCRIPTION_PLAN_TIERS.map((tierOption) => (
+                      <option key={tierOption.value} value={tierOption.value}>
+                        {tierOption.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="admin-form__field">
+                  Stems per delivery *
+                  <select
+                    className="input"
+                    value={planForm.stems}
+                    onChange={(event) =>
+                      setPlanForm((prev) => ({ ...prev, stems: event.target.value }))
+                    }
+                    required
+                  >
+                    {SUBSCRIPTION_PLAN_STEM_OPTIONS.map((stemsOption) => (
+                      <option key={stemsOption} value={stemsOption}>
+                        {stemsOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="admin-form__field">
+                  Per-delivery price (ZAR) *
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={planForm.monthlyAmount}
+                    onChange={(event) =>
+                      setPlanForm((prev) => ({ ...prev, monthlyAmount: event.target.value }))
+                    }
+                    placeholder="0.00"
+                    required
+                  />
+                </label>
+                <label className="admin-form__field">
+                  Status
+                  <select
+                    className="input"
+                    value={planForm.status}
+                    onChange={(event) =>
+                      setPlanForm((prev) => ({ ...prev, status: event.target.value }))
+                    }
+                  >
+                    <option value="live">Live</option>
+                    <option value="draft">Draft</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </label>
+                <label className="admin-form__field admin-form__full">
+                  Image URL (optional)
+                  <input
+                    className="input"
+                    value={planForm.image}
+                    onChange={(event) =>
+                      setPlanForm((prev) => ({ ...prev, image: event.target.value }))
+                    }
+                    placeholder="https://..."
+                  />
+                </label>
+                <p className="admin-panel__note admin-form__full">
+                  Per-delivery pricing is set manually by admin and can be changed any time.
+                </p>
+              </div>
+            </div>
+
+            <div className="admin-modal__actions admin-form__actions">
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={closePlanModal}
+                disabled={planSaving}
+              >
+                Cancel
+              </button>
+              <button className="btn btn--primary" type="submit" disabled={planSaving || !inventoryEnabled}>
+                {planSaving ? "Saving..." : editingPlanId ? "Update Plan" : "Save Plan"}
+              </button>
+            </div>
+            {planError && <p className="admin-panel__error">{planError}</p>}
+          </form>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={Boolean(pendingDeletePlan)}
+        title="Delete subscription plan"
+        message={
+          pendingDeletePlan
+            ? `${pendingDeletePlan.name || "This plan"} will be removed and no longer available for new subscriptions.`
+            : "This cannot be undone."
+        }
+        confirmLabel="Delete plan"
+        busy={planDeleting}
+        onCancel={() => setPendingDeletePlan(null)}
+        onConfirm={handleDeletePlan}
+      />
+    </div>
+  );
+}
+
+export function AdminSubscriptionOpsView() {
+  usePageMetadata({
+    title: "Admin - Subscription Ops",
+    description: "Track customer subscriptions, payment status, and delivery-ready roster.",
+  });
+
+  const { inventoryEnabled } = useAdminData();
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const {
+    items: subscriptions,
+    status: subscriptionsStatus,
+    error: subscriptionsError,
+  } = useFirestoreCollection("subscriptions", {
+    orderByField: "updatedAt",
+    orderDirection: "desc",
+  });
+  const {
+    items: subscriptionInvoices,
+    status: invoicesStatus,
+    error: invoicesError,
+  } = useFirestoreCollection("subscriptionInvoices", {
+    orderByField: "updatedAt",
+    orderDirection: "desc",
+  });
+  const {
+    items: subscriptionPlans,
+    status: plansStatus,
+    error: plansError,
+  } = useFirestoreCollection("subscriptionPlans", {
+    orderByField: "updatedAt",
+    orderDirection: "desc",
+  });
+
+  const [selectedCycleMonth, setSelectedCycleMonth] = useState(() =>
+    getCurrentJohannesburgCycleMonth(),
+  );
+  const [searchTerm, setSearchTerm] = useState("");
+  const [subscriptionStatusFilter, setSubscriptionStatusFilter] = useState("all");
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState("all");
+  const [deliveryReadinessFilter, setDeliveryReadinessFilter] = useState("all");
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState("all");
+  const [tierFilter, setTierFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
+  const [provinceFilter, setProvinceFilter] = useState("all");
+  const [actionDrafts, setActionDrafts] = useState({});
+  const [busySubscriptionId, setBusySubscriptionId] = useState("");
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [errorMessage, setErrorMessage] = useState(null);
+  const [confirmState, setConfirmState] = useState(null);
+  const [manageSubscriptionId, setManageSubscriptionId] = useState("");
+  const [activeManageTab, setActiveManageTab] = useState(
+    SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB,
+  );
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 4200);
+    return () => clearTimeout(timeout);
+  }, [statusMessage]);
+
+  const selectedCycleLabel = useMemo(
+    () => formatCycleMonthLabel(selectedCycleMonth),
+    [selectedCycleMonth],
+  );
+
+  const liveSubscriptionPlans = useMemo(
+    () =>
+      (Array.isArray(subscriptionPlans) ? subscriptionPlans : [])
+        .filter((plan) => ((plan?.status || "").toString().trim().toLowerCase() || "draft") === "live")
+        .sort((left, right) => {
+          const leftName = (left?.name || "").toString().toLowerCase();
+          const rightName = (right?.name || "").toString().toLowerCase();
+          if (leftName !== rightName) return leftName.localeCompare(rightName);
+          return (left?.id || "").toString().localeCompare((right?.id || "").toString());
+        }),
+    [subscriptionPlans],
+  );
+
+  const cycleInvoicesBySubscription = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach((invoice) => {
+      const subscriptionId = (invoice?.subscriptionId || "").toString().trim();
+      if (!subscriptionId) return;
+      const invoiceCycle = normalizeCycleMonthValue(invoice?.cycleMonth || "");
+      if (!invoiceCycle || invoiceCycle !== selectedCycleMonth) return;
+      const existingRows = map.get(subscriptionId) || [];
+      map.set(subscriptionId, [...existingRows, invoice]);
+    });
+    map.forEach((rows, subscriptionId) => {
+      map.set(
+        subscriptionId,
+        [...rows].sort((left, right) => {
+          const leftTime = parseDateValue(left?.updatedAt || left?.createdAt)?.getTime() || 0;
+          const rightTime = parseDateValue(right?.updatedAt || right?.createdAt)?.getTime() || 0;
+          return rightTime - leftTime;
+        }),
+      );
+    });
+    return map;
+  }, [selectedCycleMonth, subscriptionInvoices]);
+
+  const baseInvoiceBySubscription = useMemo(() => {
+    const map = new Map();
+    cycleInvoicesBySubscription.forEach((rows, subscriptionId) => {
+      const list = Array.isArray(rows) ? rows : [];
+      const explicitCycle = list.find(
+        (invoice) => normalizeSubscriptionInvoiceType(invoice?.invoiceType || "") === SUBSCRIPTION_INVOICE_TYPES.CYCLE,
+      );
+      if (explicitCycle) {
+        map.set(subscriptionId, explicitCycle);
+        return;
+      }
+      const legacyDefault = list.find((invoice) => {
+        const type = (invoice?.invoiceType || "").toString().trim().toLowerCase();
+        return !type || type === "cycle";
+      });
+      if (legacyDefault) {
+        map.set(subscriptionId, legacyDefault);
+      }
+    });
+    return map;
+  }, [cycleInvoicesBySubscription, selectedCycleMonth]);
+
+  const allRows = useMemo(() => {
+    return (Array.isArray(subscriptions) ? subscriptions : [])
+      .map((subscription) => {
+        const subscriptionId = (subscription?.id || "").toString().trim();
+        if (!subscriptionId) return null;
+
+        const cycleInvoices = cycleInvoicesBySubscription.get(subscriptionId) || [];
+        const invoice = baseInvoiceBySubscription.get(subscriptionId) || null;
+        const topupInvoices = cycleInvoices.filter(
+          (entry) =>
+            normalizeSubscriptionInvoiceType(entry?.invoiceType || "") === SUBSCRIPTION_INVOICE_TYPES.TOPUP,
+        );
+        const subscriptionStatus = normalizeSubscriptionOpsStatus(subscription?.status);
+        const invoiceStatus = invoice
+          ? normalizeSubscriptionOpsInvoiceStatus(invoice?.status)
+          : "missing";
+        const invoiceType = invoice ? normalizeSubscriptionInvoiceType(invoice?.invoiceType || "") : "missing";
+        const paymentMethod = normalizeSubscriptionOpsPaymentMethod(
+          invoice?.paymentMethod || subscription?.paymentMethod || PAYMENT_METHODS.PAYFAST,
+        );
+        const paymentApprovalStatus = normalizeSubscriptionOpsPaymentApprovalStatus(
+          invoice?.paymentApprovalStatus ||
+            invoice?.paymentApproval?.decision ||
+            subscription?.paymentApprovalStatus ||
+            subscription?.paymentApproval?.decision ||
+            "",
+          paymentMethod,
+        );
+        const tier = normalizeSubscriptionPlanTierValue(
+          subscription?.tier || subscription?.subscriptionPlan?.tier,
+        );
+        const stems = normalizeSubscriptionPlanStemsValue(
+          subscription?.stems || subscription?.subscriptionPlan?.stems,
+        );
+        const planName = resolveSubscriptionDisplayPlanName(subscription);
+        const customerName = (subscription?.customer?.fullName || "").toString().trim();
+        const customerEmail = (subscription?.customer?.email || "").toString().trim();
+        const customerPhone = (subscription?.customer?.phone || "").toString().trim();
+        const address = subscription?.address || {};
+        const city = (address?.city || "").toString().trim();
+        const province = (address?.province || "").toString().trim();
+        const addressLabel = formatShippingAddress(address);
+        const invoiceAmount = Number(invoice?.amount || 0);
+        const invoiceBaseAmount = Number(invoice?.baseAmount || invoice?.amount || 0);
+        const invoiceAdjustmentsTotal = Number(invoice?.adjustmentsTotal || 0);
+        const invoiceNumber =
+          Number.isFinite(Number(invoice?.invoiceNumber))
+            ? Number(invoice.invoiceNumber)
+            : null;
+        const invoiceId = (invoice?.id || invoice?.invoiceId || "").toString().trim();
+        const topupPendingAmount = topupInvoices.reduce((sum, topupInvoice) => {
+          const topupStatus = normalizeSubscriptionOpsInvoiceStatus(topupInvoice?.status || "");
+          if (topupStatus !== "pending-payment") return sum;
+          return sum + Number(topupInvoice?.amount || 0);
+        }, 0);
+        const topupCount = topupInvoices.length;
+        const recurringCharges = Array.isArray(subscription?.billingCharges?.recurring)
+          ? subscription.billingCharges.recurring.filter(
+              (entry) => ((entry?.status || "").toString().trim().toLowerCase() || "active") === "active",
+            )
+          : [];
+        const subscriptionPlanId = (
+          subscription?.subscriptionPlan?.planId ||
+          subscription?.subscriptionProduct?.productId ||
+          ""
+        ).toString().trim();
+        const lastPaymentAt = parseDateValue(subscription?.lastPaymentAt);
+        const paidAt = parseDateValue(invoice?.paidAt);
+        const readyToSend = subscriptionStatus === "active" && invoiceStatus === "paid";
+        const mondaySlots = normalizeSubscriptionMondaySlotsForTier(
+          tier,
+          invoice?.deliverySchedule?.slots || subscription?.deliveryPreference?.slots || [],
+        );
+        const cycleDeliveryDates =
+          Array.isArray(invoice?.deliverySchedule?.cycleDeliveryDates) &&
+          invoice.deliverySchedule.cycleDeliveryDates.length
+            ? Array.from(
+                new Set(
+                  invoice.deliverySchedule.cycleDeliveryDates
+                    .map((entry) => normalizeIsoDateValue(entry))
+                    .filter(Boolean),
+                ),
+              ).sort((leftDate, rightDate) => compareIsoDateValues(leftDate, rightDate))
+            : resolveSubscriptionCycleDeliveryDates({
+                tier,
+                slots: mondaySlots,
+                cycleMonth: selectedCycleMonth,
+              });
+        const includedDeliveryDates =
+          Array.isArray(invoice?.deliverySchedule?.includedDeliveryDates) &&
+          invoice.deliverySchedule.includedDeliveryDates.length
+            ? Array.from(
+                new Set(
+                  invoice.deliverySchedule.includedDeliveryDates
+                    .map((entry) => normalizeIsoDateValue(entry))
+                    .filter(Boolean),
+                ),
+              ).sort((leftDate, rightDate) => compareIsoDateValues(leftDate, rightDate))
+            : cycleDeliveryDates;
+        const mondaySlotLabel = mondaySlots
+          .map((slot) => formatSubscriptionMondaySlotLabel(slot))
+          .filter(Boolean)
+          .join(", ");
+        const cycleDeliveryLabel = formatSubscriptionDeliveryDateList(cycleDeliveryDates);
+        const includedDeliveryLabel = formatSubscriptionDeliveryDateList(includedDeliveryDates);
+        const expectedDeliveries =
+          cycleDeliveryDates.length || resolveExpectedCycleDeliveries(tier);
+
+        const searchText = [
+          subscriptionId,
+          customerName,
+          customerEmail,
+          customerPhone,
+          planName,
+          tier,
+          stems ? `${stems}` : "",
+          city,
+          province,
+          addressLabel,
+          invoiceId,
+          invoiceNumber ? `INV-${invoiceNumber}` : "",
+          invoiceType,
+          invoiceStatus,
+          paymentMethod,
+          paymentApprovalStatus,
+          subscriptionStatus,
+          subscriptionPlanId,
+          topupCount ? `topups ${topupCount}` : "",
+          topupPendingAmount ? `${topupPendingAmount}` : "",
+          recurringCharges.map((entry) => entry?.label || "").join(" "),
+          mondaySlotLabel,
+          cycleDeliveryLabel,
+          includedDeliveryLabel,
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        return {
+          subscriptionId,
+          subscription,
+          invoice,
+          invoiceType,
+          cycleInvoices,
+          topupInvoices,
+          topupCount,
+          topupPendingAmount,
+          invoiceId,
+          invoiceNumber,
+          invoiceStatus,
+          paymentMethod,
+          paymentApprovalStatus,
+          subscriptionPlanId,
+          recurringCharges,
+          subscriptionStatus,
+          tier,
+          stems,
+          planName,
+          customerName,
+          customerEmail,
+          customerPhone,
+          city,
+          province,
+          addressLabel,
+          expectedDeliveries,
+          invoiceAmount,
+          invoiceBaseAmount,
+          invoiceAdjustmentsTotal,
+          lastPaymentAt,
+          paidAt,
+          mondaySlots,
+          mondaySlotLabel,
+          cycleDeliveryDates,
+          cycleDeliveryLabel,
+          includedDeliveryDates,
+          includedDeliveryLabel,
+          readyToSend,
+          isMissingInvoice: !invoice,
+          searchText,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (left.readyToSend !== right.readyToSend) {
+          return left.readyToSend ? -1 : 1;
+        }
+        const leftName = (left.customerName || "").toLowerCase();
+        const rightName = (right.customerName || "").toLowerCase();
+        if (leftName !== rightName) return leftName.localeCompare(rightName);
+        return left.subscriptionId.localeCompare(right.subscriptionId);
+      });
+  }, [baseInvoiceBySubscription, cycleInvoicesBySubscription, selectedCycleMonth, subscriptions]);
+
+  const manageRow = useMemo(
+    () =>
+      allRows.find((row) => row.subscriptionId === manageSubscriptionId) || null,
+    [allRows, manageSubscriptionId],
+  );
+
+  useEffect(() => {
+    if (!manageSubscriptionId) return;
+    if (!manageRow) {
+      setManageSubscriptionId("");
+      setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB);
+    }
+  }, [manageRow, manageSubscriptionId]);
+
+  const cityOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        allRows
+          .map((row) => (row.city || "").toString().trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+  }, [allRows]);
+
+  const visibleRows = useMemo(() => {
+    const normalizedSearch = searchTerm.toString().trim().toLowerCase();
+    return allRows.filter((row) => {
+      if (normalizedSearch && !row.searchText.includes(normalizedSearch)) return false;
+      if (subscriptionStatusFilter !== "all" && row.subscriptionStatus !== subscriptionStatusFilter) {
+        return false;
+      }
+      if (invoiceStatusFilter !== "all" && row.invoiceStatus !== invoiceStatusFilter) {
+        return false;
+      }
+      if (paymentMethodFilter !== "all" && row.paymentMethod !== paymentMethodFilter) {
+        return false;
+      }
+      if (deliveryReadinessFilter === "ready" && !row.readyToSend) {
+        return false;
+      }
+      if (
+        deliveryReadinessFilter === "payment-required" &&
+        row.invoiceStatus !== "pending-payment" &&
+        row.invoiceStatus !== "missing"
+      ) {
+        return false;
+      }
+      if (tierFilter !== "all" && row.tier !== tierFilter) return false;
+      if (cityFilter !== "all" && row.city !== cityFilter) return false;
+      if (provinceFilter !== "all" && row.province !== provinceFilter) return false;
+      return true;
+    });
+  }, [
+    allRows,
+    cityFilter,
+    deliveryReadinessFilter,
+    invoiceStatusFilter,
+    paymentMethodFilter,
+    provinceFilter,
+    searchTerm,
+    subscriptionStatusFilter,
+    tierFilter,
+  ]);
+
+  const readyToSendRows = useMemo(
+    () => visibleRows.filter((row) => row.readyToSend),
+    [visibleRows],
+  );
+
+  const metrics = useMemo(() => {
+    const activeCount = allRows.filter((row) => row.subscriptionStatus === "active").length;
+    const paidThisCycle = allRows.filter((row) => row.invoiceStatus === "paid").length;
+    const pendingOrUnpaid = allRows.filter(
+      (row) => row.invoiceStatus === "pending-payment" || row.invoiceStatus === "missing",
+    ).length;
+    const readyToSend = allRows.filter((row) => row.readyToSend).length;
+    return [
+      { id: "active", label: "Active subscriptions", value: activeCount },
+      { id: "paid", label: "Paid this cycle", value: paidThisCycle },
+      { id: "unpaid", label: "Pending / unpaid", value: pendingOrUnpaid },
+      { id: "ready", label: "Ready to send", value: readyToSend },
+    ];
+  }, [allRows]);
+
+  const getDraft = (subscriptionId, row) => {
+    const draft = actionDrafts[subscriptionId];
+    return {
+      subscriptionStatus:
+        draft?.subscriptionStatus || row.subscriptionStatus || "active",
+      invoiceStatus:
+        draft?.invoiceStatus || (row.invoiceStatus === "missing" ? "pending-payment" : row.invoiceStatus),
+      paymentMethod: draft?.paymentMethod || row.paymentMethod || PAYMENT_METHODS.PAYFAST,
+      applyToPendingInvoice: draft?.applyToPendingInvoice !== false,
+      planId: (draft?.planId || row.subscriptionPlanId || "").toString(),
+      chargeAmount: (draft?.chargeAmount || "").toString(),
+      chargeLabel: (draft?.chargeLabel || "").toString(),
+      chargeMode: normalizeSubscriptionChargeMode(draft?.chargeMode || "one-time"),
+      chargeBasis: normalizeSubscriptionChargeBasis(draft?.chargeBasis || "flat"),
+      reason: draft?.reason || "",
+    };
+  };
+
+  const setDraftValue = (subscriptionId, key, value) => {
+    setActionDrafts((prev) => ({
+      ...prev,
+      [subscriptionId]: {
+        ...(prev[subscriptionId] || {}),
+        [key]: value,
+      },
+    }));
+  };
+
+  const handleOpenManageSubscription = (row) => {
+    if (!row?.subscriptionId) return;
+    setManageSubscriptionId(row.subscriptionId);
+    setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB);
+    setErrorMessage(null);
+    setStatusMessage(null);
+  };
+
+  const handleManageTabKeyDown = (event) => {
+    const key = event.key;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(key)) return;
+    event.preventDefault();
+    const currentIndex = Math.max(
+      0,
+      SUBSCRIPTION_OPS_MANAGE_TABS.findIndex((tab) => tab.id === activeManageTab),
+    );
+    if (key === "Home") {
+      setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_TABS[0].id);
+      return;
+    }
+    if (key === "End") {
+      setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_TABS[SUBSCRIPTION_OPS_MANAGE_TABS.length - 1].id);
+      return;
+    }
+    const direction = key === "ArrowLeft" ? -1 : 1;
+    const nextIndex =
+      (currentIndex + direction + SUBSCRIPTION_OPS_MANAGE_TABS.length) %
+      SUBSCRIPTION_OPS_MANAGE_TABS.length;
+    setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_TABS[nextIndex].id);
+  };
+
+  const buildExportRows = (rows) => {
+    const header = [
+      "Cycle",
+      "Subscription ID",
+      "Customer",
+      "Email",
+      "Phone",
+      "Plan",
+      "Tier",
+      "Stems",
+      "Monday Slots",
+      "Expected Deliveries",
+      "Cycle Delivery Dates",
+      "Included Delivery Dates",
+      "Subscription Status",
+      "Invoice Status",
+      "Invoice Type",
+      "Payment Method",
+      "Payment Approval",
+      "Paid for Cycle",
+      "Delivery Eligible",
+      "Invoice Number",
+      "Invoice Amount",
+      "Invoice Base Amount",
+      "Invoice Adjustments",
+      "Pending Top-up Amount",
+      "Top-up Count",
+      "Recurring Charges",
+      "Ready To Send",
+      "Address",
+      "City",
+      "Province",
+      "Paid At",
+      "Last Payment At",
+    ];
+    const body = rows.map((row) => [
+      selectedCycleMonth,
+      row.subscriptionId,
+      row.customerName || "",
+      row.customerEmail || "",
+      row.customerPhone || "",
+      row.planName || "",
+      formatSubscriptionPlanTierLabel(row.tier),
+      row.stems || "",
+      row.mondaySlotLabel || "",
+      row.expectedDeliveries || 0,
+      row.cycleDeliveryLabel || "",
+      row.includedDeliveryLabel || "",
+      formatSubscriptionStatusLabel(row.subscriptionStatus),
+      row.invoiceStatus === "missing" ? "Missing" : formatSubscriptionInvoiceStatusLabel(row.invoiceStatus),
+      row.invoice ? formatSubscriptionInvoiceTypeLabel(row.invoiceType) : "",
+      formatSubscriptionPaymentMethodLabel(row.paymentMethod),
+      formatSubscriptionPaymentApprovalLabel(row.paymentApprovalStatus, row.paymentMethod),
+      row.invoiceStatus === "paid" ? "Yes" : "No",
+      row.readyToSend ? "Yes" : "No",
+      row.invoiceNumber ? `INV-${row.invoiceNumber}` : "",
+      row.invoice ? Number(row.invoiceAmount || 0).toFixed(2) : "",
+      row.invoice ? Number(row.invoiceBaseAmount || 0).toFixed(2) : "",
+      row.invoice ? Number(row.invoiceAdjustmentsTotal || 0).toFixed(2) : "",
+      Number(row.topupPendingAmount || 0).toFixed(2),
+      row.topupCount || 0,
+      Array.isArray(row.recurringCharges) ? row.recurringCharges.map((entry) => entry?.label || "").filter(Boolean).join(" | ") : "",
+      row.readyToSend ? "Yes" : "No",
+      row.addressLabel || "",
+      row.city || "",
+      row.province || "",
+      row.paidAt ? bookingDateFormatter.format(row.paidAt) : "",
+      row.lastPaymentAt ? bookingDateFormatter.format(row.lastPaymentAt) : "",
+    ]);
+    return [header, ...body];
+  };
+
+  const handleExportFiltered = () => {
+    if (!visibleRows.length) {
+      setErrorMessage("No rows to export for current filters.");
+      return;
+    }
+    setErrorMessage(null);
+    const rows = buildExportRows(visibleRows);
+    downloadCsvFile(rows, `subscription-ops-filtered-${selectedCycleMonth}.csv`);
+  };
+
+  const handleExportReadyToSend = () => {
+    if (!readyToSendRows.length) {
+      setErrorMessage("No delivery-ready subscriptions for this cycle.");
+      return;
+    }
+    setErrorMessage(null);
+    const rows = buildExportRows(readyToSendRows);
+    downloadCsvFile(rows, `subscription-ops-ready-to-send-${selectedCycleMonth}.csv`);
+  };
+
+  const executeSubscriptionStatusOverride = async ({ row, nextStatus, reason }) => {
+    if (!functionsInstance) {
+      throw new Error("Cloud Functions are not available.");
+    }
+    const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionStatus");
+    await callable({
+      subscriptionId: row.subscriptionId,
+      status: nextStatus,
+      reason,
+    });
+  };
+
+  const executeInvoiceStatusOverride = async ({
+    row,
+    nextStatus,
+    reason,
+    createIfMissing = true,
+  }) => {
+    if (!functionsInstance) {
+      throw new Error("Cloud Functions are not available.");
+    }
+    const callable = httpsCallable(functionsInstance, "adminUpsertSubscriptionInvoiceStatus");
+    await callable({
+      subscriptionId: row.subscriptionId,
+      cycleMonth: selectedCycleMonth,
+      status: nextStatus,
+      reason,
+      createIfMissing,
+    });
+  };
+
+  const executeSubscriptionPaymentMethodOverride = async ({
+    row,
+    paymentMethod,
+    reason,
+    applyToPendingInvoice = true,
+  }) => {
+    if (!functionsInstance) {
+      throw new Error("Cloud Functions are not available.");
+    }
+    const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionPaymentMethod");
+    await callable({
+      subscriptionId: row.subscriptionId,
+      paymentMethod,
+      reason,
+      applyToPendingInvoice,
+    });
+  };
+
+  const executeSubscriptionPlanAssignment = async ({
+    row,
+    planId,
+    reason,
+  }) => {
+    if (!functionsInstance) {
+      throw new Error("Cloud Functions are not available.");
+    }
+    const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionPlanAssignment");
+    await callable({
+      subscriptionId: row.subscriptionId,
+      planId,
+      cycleMonth: selectedCycleMonth,
+      reason,
+      applyToCurrentCycle: true,
+      sendUpdatedInvoiceEmail: true,
+    });
+  };
+
+  const executeSubscriptionInvoiceCharge = async ({
+    row,
+    amount,
+    label,
+    reason,
+    chargeMode,
+    chargeBasis,
+  }) => {
+    if (!functionsInstance) {
+      throw new Error("Cloud Functions are not available.");
+    }
+    const callable = httpsCallable(functionsInstance, "adminAddSubscriptionInvoiceCharge");
+    await callable({
+      subscriptionId: row.subscriptionId,
+      cycleMonth: selectedCycleMonth,
+      amount,
+      label,
+      reason,
+      chargeMode,
+      chargeBasis,
+      createInvoiceIfMissing: true,
+      sendUpdatedInvoiceEmail: true,
+    });
+  };
+
+  const executeSubscriptionRecurringChargeRemoval = async ({
+    row,
+    chargeId,
+    reason,
+  }) => {
+    if (!functionsInstance) {
+      throw new Error("Cloud Functions are not available.");
+    }
+    const callable = httpsCallable(functionsInstance, "adminRemoveSubscriptionRecurringCharge");
+    await callable({
+      subscriptionId: row.subscriptionId,
+      chargeId,
+      cycleMonth: selectedCycleMonth,
+      reason,
+      sendUpdatedInvoiceEmail: true,
+    });
+  };
+
+  const runConfirmedAction = async () => {
+    if (!confirmState) return;
+    const {
+      row,
+      actionType,
+      nextStatus,
+      nextPaymentMethod,
+      applyToPendingInvoice,
+      nextPlanId,
+      chargeAmount,
+      chargeLabel,
+      chargeMode,
+      chargeBasis,
+      chargeId,
+      reason,
+    } = confirmState;
+    setBusySubscriptionId(row.subscriptionId);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      if (actionType === "subscription-status") {
+        await executeSubscriptionStatusOverride({
+          row,
+          nextStatus,
+          reason,
+        });
+        setStatusMessage(
+          `${row.customerName || "Subscription"} updated to ${formatSubscriptionStatusLabel(nextStatus)}.`,
+        );
+      } else if (actionType === "invoice-status") {
+        await executeInvoiceStatusOverride({
+          row,
+          nextStatus,
+          reason,
+          createIfMissing: true,
+        });
+        setStatusMessage(
+          `Invoice for ${row.customerName || "subscription"} set to ${formatSubscriptionInvoiceStatusLabel(nextStatus)}.`,
+        );
+      } else if (actionType === "create-invoice") {
+        await executeInvoiceStatusOverride({
+          row,
+          nextStatus: "pending-payment",
+          reason,
+          createIfMissing: true,
+        });
+        setStatusMessage(`Cycle invoice created for ${row.customerName || row.subscriptionId}.`);
+      } else if (actionType === "payment-method") {
+        await executeSubscriptionPaymentMethodOverride({
+          row,
+          paymentMethod: nextPaymentMethod,
+          reason,
+          applyToPendingInvoice,
+        });
+        setStatusMessage(
+          `${row.customerName || "Subscription"} payment method set to ${formatSubscriptionPaymentMethodLabel(
+            nextPaymentMethod,
+          )}.`,
+        );
+      } else if (actionType === "plan-assignment") {
+        await executeSubscriptionPlanAssignment({
+          row,
+          planId: nextPlanId,
+          reason,
+        });
+        const selectedPlan = liveSubscriptionPlans.find(
+          (plan) => (plan?.id || "").toString().trim() === (nextPlanId || "").toString().trim(),
+        );
+        setStatusMessage(
+          `${row.customerName || "Subscription"} switched to ${selectedPlan?.name || "selected plan"}.`,
+        );
+      } else if (actionType === "invoice-charge-add") {
+        await executeSubscriptionInvoiceCharge({
+          row,
+          amount: chargeAmount,
+          label: chargeLabel,
+          reason,
+          chargeMode,
+          chargeBasis,
+        });
+        setStatusMessage(
+          `${row.customerName || "Subscription"} invoice updated with ${formatPriceLabel(
+            chargeAmount,
+          )} ${chargeMode === "recurring" ? "recurring" : "one-time"} charge.`,
+        );
+      } else if (actionType === "recurring-charge-remove") {
+        await executeSubscriptionRecurringChargeRemoval({
+          row,
+          chargeId,
+          reason,
+        });
+        setStatusMessage(`${row.customerName || "Subscription"} recurring charge removed.`);
+      }
+    } catch (error) {
+      setErrorMessage(error?.message || "Unable to update subscription operations state.");
+    } finally {
+      setBusySubscriptionId("");
+      setConfirmState(null);
+    }
+  };
+
+  const requestActionConfirmation = ({
+    row,
+    actionType,
+    title,
+    message,
+    confirmLabel,
+    ...rest
+  }) => {
+    setConfirmState({
+      row,
+      actionType,
+      title,
+      message,
+      confirmLabel,
+      ...rest,
+    });
+  };
+
+  const handleApplySubscriptionStatus = (row) => {
+    const draft = getDraft(row.subscriptionId, row);
+    const reason = (draft.reason || "").toString().trim();
+    const nextStatus = normalizeSubscriptionOpsStatus(draft.subscriptionStatus);
+    if (!reason) {
+      setErrorMessage("A reason is required before applying subscription status changes.");
+      return;
+    }
+    if (nextStatus === row.subscriptionStatus) {
+      setErrorMessage("Choose a different subscription status before applying.");
+      return;
+    }
+    requestActionConfirmation({
+      row,
+      actionType: "subscription-status",
+      nextStatus,
+      reason,
+      title: "Confirm subscription status change",
+      message: `Update ${row.customerName || row.subscriptionId} from ${formatSubscriptionStatusLabel(
+        row.subscriptionStatus,
+      )} to ${formatSubscriptionStatusLabel(nextStatus)}?`,
+      confirmLabel: "Apply status",
+    });
+  };
+
+  const handleApplyInvoiceStatus = (row) => {
+    const draft = getDraft(row.subscriptionId, row);
+    const reason = (draft.reason || "").toString().trim();
+    const nextStatus = normalizeSubscriptionOpsInvoiceStatus(draft.invoiceStatus);
+    if (!reason) {
+      setErrorMessage("A reason is required before applying invoice status changes.");
+      return;
+    }
+    if (row.isMissingInvoice) {
+      setErrorMessage("Create a cycle invoice first before overriding invoice status.");
+      return;
+    }
+    if (nextStatus === row.invoiceStatus) {
+      setErrorMessage("Choose a different invoice status before applying.");
+      return;
+    }
+    requestActionConfirmation({
+      row,
+      actionType: "invoice-status",
+      nextStatus,
+      reason,
+      title: "Confirm invoice status override",
+      message: `Set ${row.customerName || row.subscriptionId} invoice from ${formatSubscriptionInvoiceStatusLabel(
+        row.invoiceStatus,
+      )} to ${formatSubscriptionInvoiceStatusLabel(nextStatus)} for ${selectedCycleLabel}?`,
+      confirmLabel: "Apply invoice status",
+    });
+  };
+
+  const handleApplyPaymentMethod = (row) => {
+    const draft = getDraft(row.subscriptionId, row);
+    const reason = (draft.reason || "").toString().trim();
+    const nextPaymentMethod = normalizeSubscriptionOpsPaymentMethod(draft.paymentMethod);
+    if (!reason) {
+      setErrorMessage("A reason is required before switching payment method.");
+      return;
+    }
+    if (nextPaymentMethod === row.paymentMethod) {
+      setErrorMessage("Choose a different payment method before applying.");
+      return;
+    }
+    requestActionConfirmation({
+      row,
+      actionType: "payment-method",
+      nextPaymentMethod,
+      applyToPendingInvoice: draft.applyToPendingInvoice !== false,
+      reason,
+      title: "Confirm payment method switch",
+      message: `Switch ${row.customerName || row.subscriptionId} from ${formatSubscriptionPaymentMethodLabel(
+        row.paymentMethod,
+      )} to ${formatSubscriptionPaymentMethodLabel(nextPaymentMethod)}?`,
+      confirmLabel: "Apply payment method",
+    });
+  };
+
+  const handleCreateMissingInvoice = (row) => {
+    const draft = getDraft(row.subscriptionId, row);
+    const reason = (draft.reason || "").toString().trim();
+    if (!reason) {
+      setErrorMessage("A reason is required before creating a cycle invoice.");
+      return;
+    }
+    requestActionConfirmation({
+      row,
+      actionType: "create-invoice",
+      nextStatus: "pending-payment",
+      reason,
+      title: "Create missing cycle invoice",
+      message: `Create a ${selectedCycleLabel} invoice for ${row.customerName || row.subscriptionId}?`,
+      confirmLabel: "Create invoice",
+    });
+  };
+
+  const handleApplyPlanAssignment = (row) => {
+    const draft = getDraft(row.subscriptionId, row);
+    const reason = (draft.reason || "").toString().trim();
+    const nextPlanId = (draft.planId || "").toString().trim();
+    if (!reason) {
+      setErrorMessage("A reason is required before applying plan changes.");
+      return;
+    }
+    if (!nextPlanId) {
+      setErrorMessage("Select a subscription plan before applying.");
+      return;
+    }
+    if (nextPlanId === row.subscriptionPlanId) {
+      setErrorMessage("Choose a different plan before applying.");
+      return;
+    }
+    const selectedPlan = liveSubscriptionPlans.find(
+      (plan) => (plan?.id || "").toString().trim() === nextPlanId,
+    );
+    requestActionConfirmation({
+      row,
+      actionType: "plan-assignment",
+      nextPlanId,
+      reason,
+      title: "Confirm plan reassignment",
+      message: `Switch ${row.customerName || row.subscriptionId} to ${
+        selectedPlan?.name || "the selected plan"
+      } for ${selectedCycleLabel}?`,
+      confirmLabel: "Apply plan",
+    });
+  };
+
+  const handleApplyInvoiceCharge = (row) => {
+    const draft = getDraft(row.subscriptionId, row);
+    const reason = (draft.reason || "").toString().trim();
+    const chargeAmount = Number(draft.chargeAmount);
+    const chargeLabel = (draft.chargeLabel || "").toString().trim() || "Admin charge";
+    const chargeMode = normalizeSubscriptionChargeMode(draft.chargeMode);
+    const chargeBasis = normalizeSubscriptionChargeBasis(draft.chargeBasis);
+    if (!reason) {
+      setErrorMessage("A reason is required before adding invoice charges.");
+      return;
+    }
+    if (!Number.isFinite(chargeAmount) || chargeAmount <= 0) {
+      setErrorMessage("Charge amount must be greater than 0.");
+      return;
+    }
+    requestActionConfirmation({
+      row,
+      actionType: "invoice-charge-add",
+      chargeAmount,
+      chargeLabel,
+      chargeMode,
+      chargeBasis,
+      reason,
+      title: "Confirm invoice charge",
+      message: `Add ${formatPriceLabel(chargeAmount)} (${chargeMode}, ${chargeBasis}) to ${row.customerName || row.subscriptionId} for ${selectedCycleLabel}?`,
+      confirmLabel: "Apply charge",
+    });
+  };
+
+  const handleRemoveRecurringCharge = (row, charge) => {
+    const draft = getDraft(row.subscriptionId, row);
+    const reason = (draft.reason || "").toString().trim();
+    const chargeId = (charge?.chargeId || "").toString().trim();
+    if (!reason) {
+      setErrorMessage("A reason is required before removing recurring charges.");
+      return;
+    }
+    if (!chargeId) {
+      setErrorMessage("Recurring charge ID is missing.");
+      return;
+    }
+    requestActionConfirmation({
+      row,
+      actionType: "recurring-charge-remove",
+      chargeId,
+      reason,
+      title: "Remove recurring charge",
+      message: `Remove recurring charge "${charge?.label || "Recurring charge"}" for ${row.customerName || row.subscriptionId}?`,
+      confirmLabel: "Remove charge",
+    });
+  };
+
+  return (
+    <div className="admin-panel admin-panel--full admin-subscription-ops">
+      <Reveal as="div" className="admin-panel__header">
+        <div>
+          <h2>Subscription Ops</h2>
+          <p className="admin-panel__note">
+            Track paid active subscriptions and export your delivery-ready roster for {selectedCycleLabel}.
+          </p>
+        </div>
+        <div className="admin-panel__header-actions">
+          <button className="btn btn--secondary" type="button" onClick={handleExportReadyToSend}>
+            Export ready to send
+          </button>
+          <button className="btn btn--secondary" type="button" onClick={handleExportFiltered}>
+            Export filtered
+          </button>
+          <Link className="btn btn--secondary" to="/admin/subscriptions">
+            Manage plans
+          </Link>
+        </div>
+      </Reveal>
+
+      <div className="admin-subscription-ops__kpis">
+        {metrics.map((metric) => (
+          <article key={metric.id} className="admin-stat-card">
+            <p className="admin-stat-card__label">{metric.label}</p>
+            <p className="admin-stat-card__value">{metric.value}</p>
+            <p className="admin-stat-card__hint">{selectedCycleLabel}</p>
+          </article>
+        ))}
+      </div>
+
+      <div className="admin-subscription-ops__filters">
+        <label className="admin-form__field">
+          Cycle month
+          <input
+            className="input"
+            type="month"
+            value={selectedCycleMonth}
+            onChange={(event) => {
+              const nextMonth = normalizeCycleMonthValue(event.target.value);
+              if (!nextMonth) return;
+              setSelectedCycleMonth(nextMonth);
+            }}
+          />
+        </label>
+        <label className="admin-form__field">
+          Search
+          <input
+            className="input"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Name, email, plan, address..."
+          />
+        </label>
+        <label className="admin-form__field">
+          Subscription status
+          <select
+            className="input"
+            value={subscriptionStatusFilter}
+            onChange={(event) => setSubscriptionStatusFilter(event.target.value)}
+          >
+            <option value="all">All</option>
+            {SUBSCRIPTION_STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>
+                {formatSubscriptionStatusLabel(status)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="admin-form__field">
+          Invoice status
+          <select
+            className="input"
+            value={invoiceStatusFilter}
+            onChange={(event) => setInvoiceStatusFilter(event.target.value)}
+          >
+            <option value="all">All</option>
+            <option value="missing">Missing invoice</option>
+            {SUBSCRIPTION_INVOICE_STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>
+                {formatSubscriptionInvoiceStatusLabel(status)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="admin-form__field">
+          Delivery readiness
+          <select
+            className="input"
+            value={deliveryReadinessFilter}
+            onChange={(event) => setDeliveryReadinessFilter(event.target.value)}
+          >
+            <option value="all">All</option>
+            <option value="ready">Delivery-ready only</option>
+            <option value="payment-required">Payment required</option>
+          </select>
+        </label>
+        <label className="admin-form__field">
+          Payment method
+          <select
+            className="input"
+            value={paymentMethodFilter}
+            onChange={(event) => setPaymentMethodFilter(event.target.value)}
+          >
+            <option value="all">All</option>
+            {SUBSCRIPTION_PAYMENT_METHOD_OPTIONS.map((method) => (
+              <option key={method} value={method}>
+                {formatSubscriptionPaymentMethodLabel(method)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="admin-form__field">
+          Tier
+          <select
+            className="input"
+            value={tierFilter}
+            onChange={(event) => setTierFilter(event.target.value)}
+          >
+            <option value="all">All</option>
+            {SUBSCRIPTION_PLAN_TIERS.map((entry) => (
+              <option key={entry.value} value={entry.value}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="admin-form__field">
+          Province
+          <select
+            className="input"
+            value={provinceFilter}
+            onChange={(event) => setProvinceFilter(event.target.value)}
+          >
+            <option value="all">All</option>
+            {SA_PROVINCES.map((province) => (
+              <option key={province.value} value={province.value}>
+                {province.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="admin-form__field">
+          City
+          <select
+            className="input"
+            value={cityFilter}
+            onChange={(event) => setCityFilter(event.target.value)}
+          >
+            <option value="all">All</option>
+            {cityOptions.map((city) => (
+              <option key={city} value={city}>
+                {city}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {subscriptionsStatus === "loading" && <p className="modal__meta">Loading subscriptions...</p>}
+      {invoicesStatus === "loading" && <p className="modal__meta">Loading cycle invoices...</p>}
+      {plansStatus === "loading" && <p className="modal__meta">Loading subscription plans...</p>}
+      {!inventoryEnabled && (
+        <p className="admin-panel__error">Admin access is required for subscription operations.</p>
+      )}
+      {subscriptionsError && (
+        <p className="admin-panel__error">{subscriptionsError.message || "Unable to load subscriptions."}</p>
+      )}
+      {invoicesError && (
+        <p className="admin-panel__error">{invoicesError.message || "Unable to load subscription invoices."}</p>
+      )}
+      {plansError && (
+        <p className="admin-panel__error">{plansError.message || "Unable to load subscription plans."}</p>
+      )}
+      {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+      {errorMessage && <p className="admin-panel__error">{errorMessage}</p>}
+
+      <div className="admin-table__wrapper">
+        {visibleRows.length > 0 ? (
+          <table className="admin-table admin-table--compact admin-subscription-ops__table">
+            <thead>
+              <tr>
+                <th scope="col">Customer</th>
+                <th scope="col">Delivery</th>
+                <th scope="col">Plan</th>
+                <th scope="col">Cycle invoice</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row) => {
+                const invoiceStatusLabel = row.isMissingInvoice
+                  ? "Missing"
+                  : formatSubscriptionInvoiceStatusLabel(row.invoiceStatus);
+                return (
+                  <tr
+                    key={row.subscriptionId}
+                    className="admin-subscription-ops__row admin-table__row--clickable"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open subscription details for ${row.customerName || row.subscriptionId}`}
+                    onClick={() => handleOpenManageSubscription(row)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleOpenManageSubscription(row);
+                      }
+                    }}
+                  >
+                    <td data-label="Customer">
+                      <strong>{row.customerName || "Customer"}</strong>
+                      <p className="modal__meta">{row.customerEmail || "No email"}</p>
+                      <p className="modal__meta">{row.customerPhone || "No phone"}</p>
+                    </td>
+                    <td data-label="Delivery">
+                      <p className="modal__meta">
+                        {row.city || "-"} | {row.province || "-"}
+                      </p>
+                      <p className="modal__meta">
+                        Mondays: {row.includedDeliveryLabel || row.cycleDeliveryLabel || "None"}
+                      </p>
+                    </td>
+                    <td data-label="Plan">
+                      <strong>{row.planName}</strong>
+                      <p className="modal__meta">
+                        {formatSubscriptionPlanTierLabel(row.tier)} | {row.expectedDeliveries} deliveries
+                      </p>
+                      <p className="modal__meta">Recurring charges: {row.recurringCharges.length || 0}</p>
+                    </td>
+                    <td data-label="Cycle invoice">
+                      <p className="modal__meta">
+                        Invoice: {row.invoiceNumber ? `INV-${row.invoiceNumber}` : "-"}
+                      </p>
+                      <p className="modal__meta">
+                        Status: {invoiceStatusLabel}
+                      </p>
+                      <p className="modal__meta">
+                        Total: {row.invoice ? formatPriceLabel(row.invoiceAmount) : "-"}
+                      </p>
+                      {row.topupPendingAmount > 0 && (
+                        <p className="modal__meta">
+                          Pending top-up: {formatPriceLabel(row.topupPendingAmount)}
+                        </p>
+                      )}
+                    </td>
+                    <td data-label="Status">
+                      <span className={`badge badge--stock-${row.readyToSend ? "in" : "out"}`} style={{ marginBottom: "0.45rem" }}>
+                        {row.readyToSend ? "Ready to send" : "Not ready"}
+                      </span>
+                      <span className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`} style={{ marginBottom: "0.45rem" }}>
+                        Paid for {selectedCycleLabel}: {row.invoiceStatus === "paid" ? "Yes" : "No"}
+                      </span>
+                      <p className="modal__meta">Subscription: {formatSubscriptionStatusLabel(row.subscriptionStatus)}</p>
+                      <p className="modal__meta">Method: {formatSubscriptionPaymentMethodLabel(row.paymentMethod)}</p>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <p className="admin-panel__notice">
+            No subscriptions match the current cycle and filters.
+          </p>
+        )}
+      </div>
+
+      {manageRow && (() => {
+        const draft = getDraft(manageRow.subscriptionId, manageRow);
+        const rowBusy = busySubscriptionId === manageRow.subscriptionId;
+        const invoiceStatusLabel = manageRow.isMissingInvoice
+          ? "Missing"
+          : formatSubscriptionInvoiceStatusLabel(manageRow.invoiceStatus);
+        return (
+          <div
+            className="modal is-active admin-modal admin-subscription-ops-manage"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="subscription-ops-manage-title"
+          >
+            <div className="modal__content admin-subscription-ops-manage__content">
+              <button
+                className="modal__close"
+                type="button"
+                onClick={() => {
+                  if (rowBusy) return;
+                  setManageSubscriptionId("");
+                  setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB);
+                }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+
+              <header className="admin-subscription-ops-manage__header">
+                <h3 className="modal__title" id="subscription-ops-manage-title">
+                  Manage {manageRow.customerName || "subscription"}
+                </h3>
+                <p className="modal__meta">
+                  {selectedCycleLabel} · {manageRow.subscriptionId}
+                </p>
+                <div className="admin-subscription-ops-manage__badges">
+                  <span className={`badge badge--stock-${manageRow.readyToSend ? "in" : "out"}`}>
+                    {manageRow.readyToSend ? "Ready to send" : "Not ready"}
+                  </span>
+                  <span className={`badge badge--stock-${manageRow.invoiceStatus === "paid" ? "in" : "out"}`}>
+                    Paid for {selectedCycleLabel}: {manageRow.invoiceStatus === "paid" ? "Yes" : "No"}
+                  </span>
+                  <span className="badge badge--stock-in">
+                    {formatSubscriptionPaymentMethodLabel(manageRow.paymentMethod)}
+                  </span>
+                </div>
+              </header>
+
+              <div
+                className="admin-subscription-ops-manage__tabs"
+                role="tablist"
+                aria-label="Subscription management sections"
+                onKeyDown={handleManageTabKeyDown}
+              >
+                {SUBSCRIPTION_OPS_MANAGE_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    id={`admin-subscription-ops-manage-tab-${tab.id}`}
+                    className={`admin-subscription-ops-manage__tab ${activeManageTab === tab.id ? "is-active" : ""}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeManageTab === tab.id ? "true" : "false"}
+                    aria-controls={`admin-subscription-ops-manage-panel-${tab.id}`}
+                    onClick={() => setActiveManageTab(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="admin-subscription-ops-manage__layout">
+                {activeManageTab === "overview" && (
+                <section
+                  className="admin-subscription-ops-manage__summary"
+                  id="admin-subscription-ops-manage-panel-overview"
+                  role="tabpanel"
+                  aria-labelledby="admin-subscription-ops-manage-tab-overview"
+                >
+                  <article className="admin-subscription-ops-manage__card">
+                    <h4>Customer</h4>
+                    <p className="modal__meta"><strong>{manageRow.customerName || "Customer"}</strong></p>
+                    <p className="modal__meta">{manageRow.customerEmail || "No email"}</p>
+                    <p className="modal__meta">{manageRow.customerPhone || "No phone"}</p>
+                  </article>
+
+                  <article className="admin-subscription-ops-manage__card">
+                    <h4>Delivery</h4>
+                    <p className="modal__meta">{manageRow.addressLabel || "No delivery address"}</p>
+                    <p className="modal__meta">{manageRow.city || "-"} | {manageRow.province || "-"}</p>
+                    <p className="modal__meta">Mondays this cycle: {manageRow.cycleDeliveryLabel || "None"}</p>
+                    <p className="modal__meta">Included in invoice: {manageRow.includedDeliveryLabel || "None"}</p>
+                  </article>
+
+                  <article className="admin-subscription-ops-manage__card">
+                    <h4>Plan</h4>
+                    <p className="modal__meta"><strong>{manageRow.planName}</strong></p>
+                    <p className="modal__meta">
+                      {formatSubscriptionPlanTierLabel(manageRow.tier)} | {manageRow.expectedDeliveries} deliveries
+                    </p>
+                    <p className="modal__meta">Monday slots: {manageRow.mondaySlotLabel || "-"}</p>
+                    <p className="modal__meta">Recurring charges: {manageRow.recurringCharges.length || 0}</p>
+                  </article>
+
+                  <article className="admin-subscription-ops-manage__card">
+                    <h4>Cycle invoice</h4>
+                    <p className="modal__meta">Invoice: {manageRow.invoiceNumber ? `INV-${manageRow.invoiceNumber}` : "-"}</p>
+                    <p className="modal__meta">Status: {invoiceStatusLabel}</p>
+                    <p className="modal__meta">Type: {manageRow.invoice ? formatSubscriptionInvoiceTypeLabel(manageRow.invoiceType) : "-"}</p>
+                    <p className="modal__meta">Amount: {manageRow.invoice ? formatPriceLabel(manageRow.invoiceAmount) : "-"}</p>
+                    <p className="modal__meta">
+                      Base {manageRow.invoice ? formatPriceLabel(manageRow.invoiceBaseAmount) : "-"} | Adjustments{" "}
+                      {manageRow.invoice ? formatPriceLabel(manageRow.invoiceAdjustmentsTotal) : "-"}
+                    </p>
+                    <p className="modal__meta">
+                      Top-ups: {manageRow.topupCount} | Pending {formatPriceLabel(manageRow.topupPendingAmount)}
+                    </p>
+                    <p className="modal__meta">
+                      Approval: {formatSubscriptionPaymentApprovalLabel(manageRow.paymentApprovalStatus, manageRow.paymentMethod)}
+                    </p>
+                  </article>
+                </section>
+                )}
+
+                {activeManageTab !== "overview" && (
+                <section
+                  className="admin-subscription-ops-manage__actions"
+                  id={`admin-subscription-ops-manage-panel-${activeManageTab}`}
+                  role="tabpanel"
+                  aria-labelledby={`admin-subscription-ops-manage-tab-${activeManageTab}`}
+                >
+                  <div className="admin-subscription-ops__actions">
+                    {activeManageTab === "billing" && (
+                      <>
+                        <p className="modal__meta"><strong>Billing controls</strong></p>
+                        <p className="modal__meta">Manage status, invoice state, and payment method for this cycle.</p>
+                        <label className="admin-form__field">
+                          Subscription status
+                          <select
+                            className="input"
+                            value={draft.subscriptionStatus}
+                            disabled={rowBusy}
+                            onChange={(event) =>
+                              setDraftValue(manageRow.subscriptionId, "subscriptionStatus", event.target.value)
+                            }
+                          >
+                            {SUBSCRIPTION_STATUS_OPTIONS.map((status) => (
+                              <option key={status} value={status}>
+                                {formatSubscriptionStatusLabel(status)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="admin-form__field">
+                          Invoice status
+                          <select
+                            className="input"
+                            value={draft.invoiceStatus}
+                            disabled={rowBusy || manageRow.isMissingInvoice}
+                            onChange={(event) =>
+                              setDraftValue(manageRow.subscriptionId, "invoiceStatus", event.target.value)
+                            }
+                          >
+                            {SUBSCRIPTION_INVOICE_STATUS_OPTIONS.map((status) => (
+                              <option key={status} value={status}>
+                                {formatSubscriptionInvoiceStatusLabel(status)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="admin-form__field">
+                          Payment method
+                          <select
+                            className="input"
+                            value={draft.paymentMethod}
+                            disabled={rowBusy}
+                            onChange={(event) =>
+                              setDraftValue(manageRow.subscriptionId, "paymentMethod", event.target.value)
+                            }
+                          >
+                            {SUBSCRIPTION_PAYMENT_METHOD_OPTIONS.map((method) => (
+                              <option key={method} value={method}>
+                                {formatSubscriptionPaymentMethodLabel(method)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="admin-users-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={draft.applyToPendingInvoice !== false}
+                            disabled={rowBusy}
+                            onChange={(event) =>
+                              setDraftValue(
+                                manageRow.subscriptionId,
+                                "applyToPendingInvoice",
+                                event.target.checked,
+                              )
+                            }
+                          />
+                          Apply to pending invoice when available
+                        </label>
+                        <label className="admin-form__field">
+                          Reason (required)
+                          <textarea
+                            className="input textarea"
+                            rows="3"
+                            value={draft.reason}
+                            disabled={rowBusy}
+                            onChange={(event) =>
+                              setDraftValue(manageRow.subscriptionId, "reason", event.target.value)
+                            }
+                          />
+                        </label>
+                        <div className="admin-subscription-ops-manage__action-grid">
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            disabled={rowBusy || !inventoryEnabled}
+                            onClick={() => handleApplySubscriptionStatus(manageRow)}
+                          >
+                            {rowBusy ? "Working..." : "Update subscription status"}
+                          </button>
+                          {manageRow.isMissingInvoice ? (
+                            <button
+                              className="btn btn--secondary"
+                              type="button"
+                              disabled={rowBusy || !inventoryEnabled}
+                              onClick={() => handleCreateMissingInvoice(manageRow)}
+                            >
+                              {rowBusy ? "Working..." : "Create cycle invoice"}
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn--secondary"
+                              type="button"
+                              disabled={rowBusy || !inventoryEnabled}
+                              onClick={() => handleApplyInvoiceStatus(manageRow)}
+                            >
+                              {rowBusy ? "Working..." : "Update invoice status"}
+                            </button>
+                          )}
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            disabled={rowBusy || !inventoryEnabled}
+                            onClick={() => handleApplyPaymentMethod(manageRow)}
+                          >
+                            {rowBusy ? "Working..." : "Update payment method"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+
+                    {activeManageTab === "plan-charges" && (
+                      <>
+                        <p className="modal__meta"><strong>Plan and charge controls</strong></p>
+                        <p className="modal__meta">Use this section for plan reassignment and invoice surcharges.</p>
+                        <label className="admin-form__field">
+                          Reassign plan
+                          <select
+                            className="input"
+                            value={draft.planId}
+                            disabled={rowBusy}
+                            onChange={(event) =>
+                              setDraftValue(manageRow.subscriptionId, "planId", event.target.value)
+                            }
+                          >
+                            <option value="">Select plan</option>
+                            {liveSubscriptionPlans.map((plan) => (
+                              <option key={plan.id} value={plan.id}>
+                                {plan.name || "Plan"} ({formatSubscriptionPlanTierLabel(plan.tier)})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <div className="admin-subscription-ops__charge-grid">
+                          <label className="admin-form__field">
+                            Charge amount
+                            <input
+                              className="input"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={draft.chargeAmount}
+                              disabled={rowBusy}
+                              onChange={(event) =>
+                                setDraftValue(manageRow.subscriptionId, "chargeAmount", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="admin-form__field">
+                            Charge label
+                            <input
+                              className="input"
+                              value={draft.chargeLabel}
+                              disabled={rowBusy}
+                              onChange={(event) =>
+                                setDraftValue(manageRow.subscriptionId, "chargeLabel", event.target.value)
+                              }
+                              placeholder="Extra delivery labour"
+                            />
+                          </label>
+                          <label className="admin-form__field">
+                            Charge mode
+                            <select
+                              className="input"
+                              value={draft.chargeMode}
+                              disabled={rowBusy}
+                              onChange={(event) =>
+                                setDraftValue(manageRow.subscriptionId, "chargeMode", event.target.value)
+                              }
+                            >
+                              {SUBSCRIPTION_CHARGE_MODES.map((entry) => (
+                                <option key={entry.value} value={entry.value}>
+                                  {entry.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="admin-form__field">
+                            Charge basis
+                            <select
+                              className="input"
+                              value={draft.chargeBasis}
+                              disabled={rowBusy}
+                              onChange={(event) =>
+                                setDraftValue(manageRow.subscriptionId, "chargeBasis", event.target.value)
+                              }
+                            >
+                              {SUBSCRIPTION_CHARGE_BASES.map((entry) => (
+                                <option key={entry.value} value={entry.value}>
+                                  {entry.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+
+                        {manageRow.recurringCharges.length > 0 && (
+                          <div className="admin-subscription-ops__recurring-list">
+                            <p className="modal__meta"><strong>Recurring charges</strong></p>
+                            {manageRow.recurringCharges.map((charge) => (
+                              <div
+                                key={charge.chargeId || `${manageRow.subscriptionId}-${charge.label}`}
+                                className="admin-subscription-ops__recurring-item"
+                              >
+                                <span>
+                                  {(charge.label || "Recurring charge").toString()} - {formatPriceLabel(charge.amount)} ({(charge.basis || "flat").toString()})
+                                </span>
+                                <button
+                                  className="btn btn--secondary"
+                                  type="button"
+                                  disabled={rowBusy || !inventoryEnabled}
+                                  onClick={() => handleRemoveRecurringCharge(manageRow, charge)}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <label className="admin-form__field">
+                          Reason (required)
+                          <textarea
+                            className="input textarea"
+                            rows="3"
+                            value={draft.reason}
+                            disabled={rowBusy}
+                            onChange={(event) =>
+                              setDraftValue(manageRow.subscriptionId, "reason", event.target.value)
+                            }
+                          />
+                        </label>
+
+                        <div className="admin-subscription-ops-manage__action-grid">
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            disabled={rowBusy || !inventoryEnabled || !draft.planId}
+                            onClick={() => handleApplyPlanAssignment(manageRow)}
+                          >
+                            {rowBusy ? "Working..." : "Apply plan reassignment"}
+                          </button>
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            disabled={rowBusy || !inventoryEnabled}
+                            onClick={() => handleApplyInvoiceCharge(manageRow)}
+                          >
+                            {rowBusy ? "Working..." : "Add invoice charge"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </section>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      <ConfirmDialog
+        open={Boolean(confirmState)}
+        title={confirmState?.title || "Confirm action"}
+        message={confirmState?.message || "Are you sure you want to proceed?"}
+        confirmLabel={confirmState?.confirmLabel || "Confirm"}
+        busy={Boolean(busySubscriptionId)}
+        onCancel={() => {
+          if (busySubscriptionId) return;
+          setConfirmState(null);
+        }}
+        onConfirm={runConfirmedAction}
+      />
+    </div>
+  );
+}
+
 export function AdminMediaLibraryView() {
   usePageMetadata({
-    title: "Admin · Image Library",
+    title: "Admin Â· Image Library",
     description: "Upload and manage product images for bulk imports.",
   });
   const { db, storage, inventoryEnabled, inventoryError } = useAdminData();
@@ -4049,7 +7217,7 @@ export function AdminMediaLibraryView() {
 
 export function AdminWorkshopsView() {
   usePageMetadata({
-    title: "Admin · Workshops",
+    title: "Admin Â· Workshops",
     description: "Manage Bethany Blooms workshops, sessions, and bookings.",
   });
   const {
@@ -4391,7 +7559,7 @@ export function AdminWorkshopsView() {
     try {
       setWorkshopSaving(true);
       setStatusMessage(
-        editingWorkshopId ? "Updating workshop…" : "Saving workshop…"
+        editingWorkshopId ? "Updating workshopâ€¦" : "Saving workshopâ€¦"
       );
       let imageUrl = workshopForm.image.trim();
       if (workshopImageFile) {
@@ -4465,7 +7633,7 @@ export function AdminWorkshopsView() {
           <div className="admin-panel__header">
             <h3>Workshops</h3>
             {inventoryLoading && (
-              <span className="badge badge--muted">Syncing…</span>
+              <span className="badge badge--muted">Syncingâ€¦</span>
             )}
           </div>
           {workshops.length > 0 ? (
@@ -4553,7 +7721,7 @@ export function AdminWorkshopsView() {
           <div className="admin-panel__header">
             <h3>Bookings</h3>
             {inventoryLoading && (
-              <span className="badge badge--muted">Syncing…</span>
+              <span className="badge badge--muted">Syncingâ€¦</span>
             )}
           </div>
           {bookings.length > 0 ? (
@@ -4579,14 +7747,14 @@ export function AdminWorkshopsView() {
                       : "Pending";
                     return (
                       <tr key={bookingEntry.id}>
-                        <td>{bookingEntry.name || "—"}</td>
+                        <td>{bookingEntry.name || "â€”"}</td>
                         <td>
                           {bookingEntry.email ? (
                             <a href={`mailto:${bookingEntry.email}`}>
                               {bookingEntry.email}
                             </a>
                           ) : (
-                            "—"
+                            "â€”"
                           )}
                           {bookingEntry.phone && (
                             <p className="modal__meta">{bookingEntry.phone}</p>
@@ -4892,10 +8060,10 @@ export function AdminWorkshopsView() {
                     }))
                   }
                 />
-                <span>Auto-schedule future dates (Mon–Sat)</span>
+                <span>Auto-schedule future dates (Monâ€“Sat)</span>
               </label>
               <p className="admin-panel__note">
-                When enabled, the first date’s time slots repeat for the next 90
+                When enabled, the first dateâ€™s time slots repeat for the next 90
                 days, skipping Sundays.
               </p>
             </div>
@@ -5003,7 +8171,7 @@ export function AdminWorkshopsView() {
                 disabled={!inventoryEnabled || workshopSaving}
               >
                 {workshopSaving ?
-                   "Saving…"
+                   "Savingâ€¦"
                   : editingWorkshopId ?
                    "Update Workshop"
                   : "Save Workshop"}
@@ -5021,7 +8189,7 @@ export function AdminWorkshopsView() {
 
 export function AdminWorkshopsCalendarView() {
   usePageMetadata({
-    title: "Admin · Calendar",
+    title: "Admin Â· Calendar",
     description: "Overview of scheduled workshops, bookings, and events by date.",
   });
   const {
@@ -5250,7 +8418,14 @@ export function AdminWorkshopsCalendarView() {
       }));
     } catch (saveError) {
       console.error(saveError);
-      setQuickEventError("We couldn't save the event. Please try again.");
+      const errorCode = String(saveError?.code || saveError?.message || "");
+      if (errorCode.includes("permission-denied") || errorCode.includes("unauthenticated")) {
+        setQuickEventError(
+          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.'
+        );
+      } else {
+        setQuickEventError(saveError?.message || "We couldn't save the event. Please try again.");
+      }
     } finally {
       setQuickEventSaving(false);
     }
@@ -5268,7 +8443,7 @@ export function AdminWorkshopsCalendarView() {
       </Reveal>
 
       {inventoryLoading && (
-        <p className="modal__meta">Syncing latest workshops…</p>
+        <p className="modal__meta">Syncing latest workshopsâ€¦</p>
       )}
 
       <div className="admin-calendar">
@@ -5280,7 +8455,7 @@ export function AdminWorkshopsCalendarView() {
               onClick={() => handleMonthChange(-1)}
               aria-label="Previous month"
             >
-              ‹
+              â€¹
             </button>
             <div>
               <h3>{monthLabel}</h3>
@@ -5292,7 +8467,7 @@ export function AdminWorkshopsCalendarView() {
               onClick={() => handleMonthChange(1)}
               aria-label="Next month"
             >
-              ›
+              â€º
             </button>
           </div>
 
@@ -5362,7 +8537,7 @@ export function AdminWorkshopsCalendarView() {
                     <div>
                       <strong>{booking.name}</strong>
                       <p className="modal__meta">
-                        {booking.sessionLabel || "Session"} ·{" "}
+                        {booking.sessionLabel || "Session"} Â·{" "}
                         {booking.frame || "Workshop"}
                       </p>
                     </div>
@@ -5532,7 +8707,7 @@ export function AdminWorkshopsCalendarView() {
               aria-label="Close"
               onClick={closeQuickEventForm}
             >
-              ×
+              Ã—
             </button>
             <h3>Add calendar event</h3>
             <p className="admin-panel__note">
@@ -5624,285 +8799,9 @@ export function AdminWorkshopsCalendarView() {
   );
 }
 
-export function AdminUsersView() {
-  usePageMetadata({
-    title: "Admin · Users",
-    description: "Manage user roles for the Bethany Blooms app.",
-  });
-  const db = useMemo(() => {
-    try {
-      return getFirebaseDb();
-    } catch {
-      return null;
-    }
-  }, []);
-  const { items: users, status, error: usersError } = useFirestoreCollection("users", {
-    orderByField: null,
-    orderDirection: null,
-  });
-  const [updatingId, setUpdatingId] = useState(null);
-  const [error, setError] = useState(null);
-  const [message, setMessage] = useState(null);
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserRole, setNewUserRole] = useState("customer");
-  const [userSaving, setUserSaving] = useState(false);
-  const [userModalOpen, setUserModalOpen] = useState(false);
-  const [newUserPassword, setNewUserPassword] = useState("");
-  const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null });
-  const [deleteBusy, setDeleteBusy] = useState(false);
-  const functionsInstance = useMemo(() => {
-    try {
-      return getFirebaseFunctions();
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const handleSetRole = async (userId, nextRole) => {
-    if (!db || !userId) return;
-    setUpdatingId(userId);
-    setError(null);
-    setMessage(null);
-    try {
-      await updateDoc(doc(db, "users", userId), {
-        role: nextRole,
-        updatedAt: serverTimestamp(),
-      });
-      setMessage(`Updated role to ${nextRole}`);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUpdatingId(null);
-    }
-  };
-
-  const friendlyStatus =
-    status === "loading" ?
-       "Loading users…"
-      : status === "error" ?
-       "Could not load users."
-      : null;
-
-  const resetUserForm = () => {
-    setNewUserEmail("");
-    setNewUserRole("customer");
-    setError(null);
-    setMessage(null);
-  };
-
-  const handleCreateUser = async (event) => {
-    event.preventDefault();
-    if (!db) {
-      setError("Firestore is not available.");
-      return;
-    }
-    if (!functionsInstance) {
-      setError("Cloud Functions not available.");
-      return;
-    }
-    const email = newUserEmail.trim();
-    const password = newUserPassword;
-    const role = newUserRole.trim() || "customer";
-    if (!email || !password) {
-      setError("Email and password are required.");
-      return;
-    }
-    setUserSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const createUser = httpsCallable(functionsInstance, "createUserWithRole");
-      await createUser({ email, password, role });
-      setMessage("User created in Auth and Firestore.");
-      resetUserForm();
-      setUserModalOpen(false);
-    } catch (err) {
-      const code = err.code || err.message || "";
-      if (code.includes("permission-denied") || code.includes("unauthenticated")) {
-        setError("You need an admin account with a Firestore user record to create users.");
-      } else if (code.includes("invalid-argument")) {
-        setError(err.message || "Check email and password (min 6 chars).");
-      } else {
-        setError(err.message || "Failed to create user.");
-      }
-    } finally {
-      setUserSaving(false);
-    }
-  };
-
-  return (
-    <div className="admin-panel admin-panel--full">
-      <div className="admin-panel__header">
-        <div>
-          <h2>Users</h2>
-          <p className="admin-panel__note">Manage account roles for admins and customers.</p>
-        </div>
-        <div className="admin-panel__header-actions">
-          <button className="btn btn--primary" type="button" onClick={() => setUserModalOpen(true)}>
-            Add User
-          </button>
-        </div>
-      </div>
-
-      <div className="admin-table__wrapper">
-        {users.length > 0 ? (
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th scope="col">Email</th>
-                <th scope="col">Role</th>
-                <th scope="col">Updated</th>
-                <th scope="col" className="admin-table__actions">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((userDoc) => {
-                const updated = userDoc.updatedAt?.toDate?.()
-                  ? bookingDateFormatter.format(userDoc.updatedAt.toDate())
-                  : "—";
-                const role = userDoc.role || "customer";
-                return (
-                  <tr key={userDoc.id}>
-                    <td>
-                      <div className="admin-table__product">
-                        <div>
-                          <strong>{userDoc.email || "No email"}</strong>
-                          <p className="modal__meta">UID: {userDoc.id}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{role}</td>
-                    <td>{updated}</td>
-                    <td className="admin-table__actions">
-                      <div className="cta-group" style={{ gap: "0.35rem", flexWrap: "nowrap" }}>
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          onClick={() => handleSetRole(userDoc.id, "customer")}
-                          disabled={updatingId === userDoc.id || role === "customer"}
-                        >
-                          Set Customer
-                        </button>
-                        <button
-                          className="btn btn--primary"
-                          type="button"
-                          onClick={() => handleSetRole(userDoc.id, "admin")}
-                          disabled={updatingId === userDoc.id || role === "admin"}
-                        >
-                          Set Admin
-                        </button>
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          onClick={() => setDeleteDialog({ open: true, targetId: userDoc.id })}
-                          disabled={updatingId === userDoc.id}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <p className="admin-panel__notice">
-            {friendlyStatus || "No users found."}
-          </p>
-        )}
-        {message && <p className="admin-panel__status">{message}</p>}
-        {(error || usersError) && <p className="admin-panel__error">{error || usersError.message}</p>}
-      </div>
-      <div
-        className={`modal admin-modal ${userModalOpen ? "is-active" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-hidden={userModalOpen ? "false" : "true"}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) {
-            setUserModalOpen(false);
-            resetUserForm();
-          }
-        }}
-      >
-        <div className="modal__content admin-modal__content">
-          <button className="modal__close" type="button" aria-label="Close" onClick={() => {
-            setUserModalOpen(false);
-            resetUserForm();
-          }}>
-            ×
-          </button>
-          <h3 className="modal__title">Create / Update User</h3>
-          <form className="admin-form" onSubmit={handleCreateUser}>
-            <input
-              className="input"
-              type="email"
-              placeholder="Email (required)"
-              value={newUserEmail}
-              onChange={(e) => setNewUserEmail(e.target.value)}
-            />
-            <select
-              className="input"
-              value={newUserRole}
-              onChange={(e) => setNewUserRole(e.target.value)}
-            >
-              <option value="customer">Customer</option>
-              <option value="admin">Admin</option>
-            </select>
-            <input
-              className="input"
-              type="password"
-              placeholder="Password (min 6 characters)"
-              value={newUserPassword}
-              onChange={(e) => setNewUserPassword(e.target.value)}
-            />
-            <div className="admin-form__actions">
-              <button className="btn btn--secondary" type="button" onClick={resetUserForm}>
-                Reset
-              </button>
-              <button className="btn btn--primary" type="submit" disabled={userSaving}>
-                {userSaving ? "Saving…" : "Save User"}
-              </button>
-            </div>
-            {error && <p className="admin-panel__error">{error}</p>}
-            <p className="modal__meta">
-              Note: This creates the Firebase Auth user and the matching Firestore user document.
-            </p>
-          </form>
-        </div>
-      </div>
-      <ConfirmDialog
-        open={deleteDialog.open}
-        title="Delete User"
-        message="Are you sure you want to delete this user record This does not delete their auth account."
-        confirmLabel="Delete"
-        busy={deleteBusy}
-        onCancel={() => setDeleteDialog({ open: false, targetId: null })}
-        onConfirm={async () => {
-          if (!db || !deleteDialog.targetId) return;
-          setDeleteBusy(true);
-          setError(null);
-          try {
-            await deleteDoc(doc(db, "users", deleteDialog.targetId));
-            setMessage("User deleted. Remove the auth account separately if needed.");
-          } catch (err) {
-            setError(err.message);
-          } finally {
-            setDeleteBusy(false);
-            setDeleteDialog({ open: false, targetId: null });
-          }
-        }}
-      />
-    </div>
-  );
-}
-
 export function AdminEventsView() {
   usePageMetadata({
-    title: "Admin · Events",
+    title: "Admin Â· Events",
     description: "Publish Bethany Blooms events and connect them to workshops.",
   });
   const {
@@ -6172,9 +9071,8 @@ export function AdminEventsView() {
       sanitizedSlots.sort((a, b) => a.time.localeCompare(b.time));
       const primaryTime = sanitizedSlots[0]?.time ?? "";
       const combinedDate = combineDateAndTime(eventForm.date, primaryTime);
-      const linkedWorkshop = workshops.find(
-        (workshop) => workshop.id === eventForm.workshopId
-      );
+      const linkedWorkshop =
+        workshops.find((workshop) => workshop.id === eventForm.workshopId) || null;
       const repeatDays = eventForm.repeatWeekly
         ? Array.isArray(eventForm.repeatDays)
           ? eventForm.repeatDays
@@ -6192,8 +9090,8 @@ export function AdminEventsView() {
         repeatWeekly: Boolean(eventForm.repeatWeekly),
         repeatDays,
         image: imageUrl,
-        workshopId: linkedWorkshop.id || null,
-        workshopTitle: linkedWorkshop.title || linkedWorkshop.name || null,
+        workshopId: linkedWorkshop?.id || null,
+        workshopTitle: linkedWorkshop?.title || linkedWorkshop?.name || null,
         status: eventForm.status || "draft",
         updatedAt: serverTimestamp(),
       };
@@ -6212,7 +9110,14 @@ export function AdminEventsView() {
       resetEventForm();
     } catch (saveError) {
       console.error(saveError);
-      setEventError("We couldn’t save the event. Please try again.");
+      const errorCode = String(saveError?.code || saveError?.message || "");
+      if (errorCode.includes("permission-denied") || errorCode.includes("unauthenticated")) {
+        setEventError(
+          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.'
+        );
+      } else {
+        setEventError(saveError?.message || "We couldn't save the event. Please try again.");
+      }
     } finally {
       setEventSaving(false);
     }
@@ -6236,7 +9141,7 @@ export function AdminEventsView() {
           {blocked && !inventoryError && (
             <p className="admin-panel__error">
               Admin permissions or Firestore connection not detected. Ensure your account has role "admin" in
-              users/{{uid}} and that Firestore is configured for this project.
+              users/{`{uid}`} and that Firestore is configured for this project.
             </p>
           )}
           <div className="admin-panel__content">
@@ -6469,7 +9374,7 @@ export function AdminEventsView() {
                     disabled={eventSaving || !inventoryEnabled}
                   >
                     {eventSaving ?
-                       "Saving…"
+                       "Savingâ€¦"
                       : editingEventId ?
                        "Update Event"
                       : "Create Event"}
@@ -6481,7 +9386,7 @@ export function AdminEventsView() {
             <div>
               <h3>Scheduled Events</h3>
               {inventoryLoading && !events.length ? (
-                <p className="admin-panel__note">Loading events…</p>
+                <p className="admin-panel__note">Loading eventsâ€¦</p>
                 ) : (
                 <div className="admin-panel__list">
                   {normalizedEvents.length === 0 ? (
@@ -6564,7 +9469,7 @@ export function AdminEventsView() {
 
 export function AdminEmailTestView() {
   usePageMetadata({
-    title: "Admin · Email preview",
+    title: "Admin Â· Email preview",
     description: "Preview email HTML with dummy data without sending any emails.",
   });
   const { inventoryEnabled } = useAdminData();
@@ -6692,6 +9597,8 @@ export function AdminEmailTestView() {
               <option value="order-confirmation">Order confirmation (customer)</option>
               <option value="order-admin">Order notification (admin)</option>
               <option value="order-status">Order status update (customer)</option>
+              <option value="order-delivery-update">Order delivery update (customer)</option>
+              <option value="account-welcome">Account welcome (customer)</option>
               <option value="pos-receipt">POS receipt (customer)</option>
               <option value="pos-admin">POS receipt (admin copy)</option>
               <option value="contact-admin">Contact enquiry (admin)</option>
@@ -6762,7 +9669,7 @@ export function AdminEmailTestView() {
         <div className="admin-email-preview__panel">
           <div className="admin-email-preview__meta">
             <p className="modal__meta">
-              <strong>Subject:</strong> {previewData.subject || "—"}
+              <strong>Subject:</strong> {previewData.subject || "â€”"}
             </p>
             {previewData.generatedAt && (
               <p className="modal__meta">
@@ -6789,9 +9696,316 @@ export function AdminEmailTestView() {
   );
 }
 
+export function AdminInvoicePreviewView() {
+  usePageMetadata({
+    title: "Admin Â· Invoice preview",
+    description:
+      "Preview subscription invoice PDF design without sending customer emails.",
+  });
+  const { inventoryEnabled } = useAdminData();
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+  const {
+    items: subscriptionInvoices,
+    status: invoiceSourceStatus,
+    error: subscriptionInvoicesError,
+  } = useFirestoreCollection("subscriptionInvoices", {
+    orderByField: "updatedAt",
+    orderDirection: "desc",
+  });
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
+  const [previewState, setPreviewState] = useState({
+    previewUrl: "",
+    fileName: "",
+    generatedAt: "",
+    invoiceNumber: "",
+    planName: "",
+    cycleMonth: "",
+    amount: null,
+  });
+  const previewUrlRef = useRef("");
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [error, setError] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const localPreviewHelpMessage =
+    "Invoice preview function is unreachable. Deploy `previewSubscriptionInvoiceTemplate` " +
+    "(`firebase deploy --only functions:previewSubscriptionInvoiceTemplate`) or run the " +
+    "Functions emulator (`firebase emulators:start --only functions`) with " +
+    "`VITE_USE_LOCAL_FUNCTIONS=true` in `frontend/.env.local`.";
+
+  const invoiceOptions = useMemo(() => {
+    return subscriptionInvoices
+      .map((entry) => {
+        const id = (entry.id || "").toString().trim();
+        if (!id) return null;
+        const cycleMonth = (entry.cycleMonth || "cycle").toString().trim();
+        const amount = Number(entry.amount || 0);
+        const planName = (
+          entry.planName ||
+          entry?.subscriptionPlan?.name ||
+          entry?.subscriptionProduct?.productName ||
+          "Subscription"
+        )
+          .toString()
+          .trim();
+        return {
+          id,
+          label: `${cycleMonth} Â· ${formatPriceLabel(amount)} Â· ${planName}`,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 120);
+  }, [subscriptionInvoices]);
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 4000);
+    return () => clearTimeout(timeout);
+  }, [statusMessage]);
+
+  useEffect(() => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = "";
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedInvoiceId) return;
+    if (!invoiceOptions.length) return;
+    setSelectedInvoiceId(invoiceOptions[0].id);
+  }, [selectedInvoiceId, invoiceOptions]);
+
+  useEffect(
+    () => () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = "";
+      }
+    },
+    [],
+  );
+
+  const refreshPreview = async (event) => {
+    if (event) event.preventDefault();
+    if (!functionsInstance) {
+      setError("Invoice preview functions are not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setError("Admin access is required to preview invoices.");
+      return;
+    }
+    if (!selectedInvoiceId) {
+      setError("Select an invoice to preview.");
+      return;
+    }
+
+    setLoadingPreview(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const callable = httpsCallable(functionsInstance, "previewSubscriptionInvoiceTemplate");
+      const response = await callable({
+        invoiceId: selectedInvoiceId,
+      });
+      const data = response?.data || {};
+      const encodedPdf = (data.pdfBase64 || "").toString().trim();
+      if (!encodedPdf) {
+        throw new Error("Invoice preview payload was empty.");
+      }
+
+      const binary = window.atob(encodedPdf);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      const blob = new Blob([bytes], {
+        type: (data.mimeType || "application/pdf").toString(),
+      });
+      const nextPreviewUrl = URL.createObjectURL(blob);
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+      }
+      previewUrlRef.current = nextPreviewUrl;
+
+      const generatedAt = (data.generatedAt || "").toString();
+      setPreviewState({
+        previewUrl: nextPreviewUrl,
+        fileName: (data.fileName || "subscription-invoice-preview.pdf").toString(),
+        generatedAt,
+        invoiceNumber: (data.invoiceNumber || "").toString(),
+        planName: (data.planName || "").toString(),
+        cycleMonth: (data.cycleMonth || "").toString(),
+        amount: Number.isFinite(Number(data.amount)) ? Number(data.amount) : null,
+      });
+      const generatedLabel = generatedAt ? new Date(generatedAt).toLocaleString("en-ZA") : "";
+      setStatusMessage(generatedLabel ? `Preview generated at ${generatedLabel}.` : "Preview generated.");
+    } catch (previewError) {
+      const rawMessage = (previewError?.message || "").toString();
+      const normalizedMessage = rawMessage.trim().toLowerCase();
+      const isLocalHost =
+        typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1");
+      const likelyUnreachableCallable =
+        normalizedMessage.includes("failed to fetch") ||
+        normalizedMessage.includes("network") ||
+        normalizedMessage.includes("cors");
+      if (isLocalHost && likelyUnreachableCallable) {
+        setError(localPreviewHelpMessage);
+      } else {
+        setError(rawMessage || "Unable to generate invoice preview.");
+      }
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!functionsInstance || !inventoryEnabled) return;
+    if (!selectedInvoiceId) return;
+    refreshPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [functionsInstance, inventoryEnabled, selectedInvoiceId]);
+
+  return (
+    <div className="admin-panel admin-panel--full admin-email-preview admin-invoice-preview">
+      <Reveal as="div" className="admin-panel__header">
+        <div>
+          <h2>Invoice Preview</h2>
+          <p className="admin-panel__note">
+            Preview subscription invoice PDF design without sending any emails.
+          </p>
+        </div>
+      </Reveal>
+
+      <div className="admin-email-preview__layout">
+        <form className="admin-email-preview__controls" onSubmit={refreshPreview}>
+          <label className="admin-form__field" htmlFor="invoice-preview-id">
+            <span>Invoice</span>
+            <select
+              className="input"
+              id="invoice-preview-id"
+              value={selectedInvoiceId}
+              onChange={(event) => setSelectedInvoiceId(event.target.value)}
+            >
+              {!invoiceOptions.length && <option value="">No invoices available</option>}
+              {invoiceOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p className="admin-panel__note">
+            Uses live subscription invoice data from Firestore.
+          </p>
+
+          {invoiceSourceStatus === "loading" && (
+            <p className="modal__meta">Loading subscription invoices...</p>
+          )}
+          {subscriptionInvoicesError && (
+            <p className="admin-panel__error">
+              {subscriptionInvoicesError.message || "Unable to load subscription invoices."}
+            </p>
+          )}
+
+          <div className="admin-form__actions">
+            <button
+              className="btn btn--primary"
+              type="submit"
+              disabled={loadingPreview || !inventoryEnabled || !functionsInstance || !selectedInvoiceId}
+            >
+              {loadingPreview ? "Generating..." : "Refresh Preview"}
+            </button>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={() => {
+                if (!previewState.previewUrl) return;
+                window.open(previewState.previewUrl, "_blank", "noopener,noreferrer");
+              }}
+              disabled={!previewState.previewUrl}
+            >
+              Open in new tab
+            </button>
+            <a
+              className={`btn btn--secondary ${previewState.previewUrl ? "" : "is-disabled"}`}
+              href={previewState.previewUrl || "#"}
+              download={previewState.fileName || "subscription-invoice-preview.pdf"}
+              onClick={(event) => {
+                if (!previewState.previewUrl) event.preventDefault();
+              }}
+            >
+              Download PDF
+            </a>
+          </div>
+
+          {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+          {error && <p className="admin-panel__error">{error}</p>}
+        </form>
+
+        <div className="admin-email-preview__panel">
+          <div className="admin-email-preview__meta">
+            {previewState.invoiceNumber && (
+              <p className="modal__meta">
+                <strong>Invoice:</strong> {previewState.invoiceNumber}
+              </p>
+            )}
+            {previewState.cycleMonth && (
+              <p className="modal__meta">
+                <strong>Cycle:</strong> {previewState.cycleMonth}
+              </p>
+            )}
+            {previewState.planName && (
+              <p className="modal__meta">
+                <strong>Plan:</strong> {previewState.planName}
+              </p>
+            )}
+            {previewState.amount != null && (
+              <p className="modal__meta">
+                <strong>Amount:</strong> {formatPriceLabel(previewState.amount)}
+              </p>
+            )}
+            {previewState.generatedAt && (
+              <p className="modal__meta">
+                Generated: {new Date(previewState.generatedAt).toLocaleString("en-ZA")}
+              </p>
+            )}
+          </div>
+
+          <p className="modal__meta">
+            <strong>Generated PDF output</strong>
+          </p>
+          <div className="admin-email-preview__frame-wrap">
+            {previewState.previewUrl ? (
+              <iframe
+                className="admin-email-preview__frame"
+                title="Invoice PDF preview"
+                src={previewState.previewUrl}
+              />
+            ) : (
+              <p className="modal__meta" style={{ padding: "1rem" }}>
+                No PDF generated yet.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AdminCutFlowerClassesView() {
   usePageMetadata({
-    title: "Admin · Cut Flower Classes",
+    title: "Admin Â· Cut Flower Classes",
     description: "Create bookable cut flower sessions for customers.",
   });
   const {
@@ -7652,7 +10866,7 @@ export function AdminCutFlowerClassesView() {
 
 export function AdminCutFlowerBookingsView() {
   usePageMetadata({
-    title: "Admin · Cut Flowers",
+    title: "Admin Â· Cut Flowers",
     description: "Track bespoke cut flower bookings separately from workshops.",
   });
   const {
@@ -8667,7 +11881,7 @@ export function AdminCutFlowerBookingsView() {
 }
 export function AdminOrdersView() {
   usePageMetadata({
-    title: "Admin · Orders",
+    title: "Admin Â· Orders",
     description: "Review cart checkouts and fulfilment status.",
   });
   const { db, storage, orders, products, productCategories, inventoryLoading, inventoryError } = useAdminData();
@@ -8685,10 +11899,13 @@ export function AdminOrdersView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [activeOrderDetailTab, setActiveOrderDetailTab] = useState(ORDER_DETAIL_TABS[0].id);
   const [paymentUpdating, setPaymentUpdating] = useState(false);
   const [deliveryMethod, setDeliveryMethod] = useState("company");
-  const [courierName, setCourierName] = useState("");
+  const [deliveryAddressForm, setDeliveryAddressForm] = useState({ ...EMPTY_SHIPPING_ADDRESS });
+  const [deliveryCourierId, setDeliveryCourierId] = useState("");
   const [deliverySaving, setDeliverySaving] = useState(false);
+  const [deliveryUpdateEmailSending, setDeliveryUpdateEmailSending] = useState(false);
   const [resendOrderEmailSending, setResendOrderEmailSending] = useState(false);
   const [preorderNoticeMonth, setPreorderNoticeMonth] = useState("");
   const [preorderNoticeSending, setPreorderNoticeSending] = useState(false);
@@ -8726,6 +11943,7 @@ export function AdminOrdersView() {
       fallback: [],
     });
   const [ordersPage, setOrdersPage] = useState(0);
+  const ordersPageSize = 5;
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -8738,6 +11956,12 @@ export function AdminOrdersView() {
       trackingInputRef.current.focus({ preventScroll: true });
     }
   }, [pendingStatusUpdate]);
+
+  useEffect(() => {
+    if (selectedOrderId) {
+      setActiveOrderDetailTab(ORDER_DETAIL_TABS[0].id);
+    }
+  }, [selectedOrderId]);
 
   const needsTrackingLink = (status) => ["shipped"].includes(status);
 
@@ -8817,29 +12041,6 @@ export function AdminOrdersView() {
         .toLowerCase();
       return productStockStatus === "preorder";
     });
-  };
-
-  const resolvePreorderSendMonthForOrder = (order) => {
-    if (!Array.isArray(order?.items)) return "";
-    for (const item of order.items) {
-      if (!item || item.metadata?.type !== "product") continue;
-      const fromMetadata = normalizePreorderSendMonth(
-        item.metadata?.preorderSendMonth || item.metadata?.preorder_send_month || "",
-      );
-      if (fromMetadata) return fromMetadata;
-      const productId =
-        item.metadata?.productId ||
-        item.metadata?.productID ||
-        item.metadata?.product ||
-        null;
-      if (!productId) continue;
-      const product = productLookup.get(String(productId));
-      const fromProduct = normalizePreorderSendMonth(
-        product?.preorder_send_month || product?.preorderSendMonth || "",
-      );
-      if (fromProduct) return fromProduct;
-    }
-    return "";
   };
 
   const getOrderStatusLabel = (order, statusValue = order?.status) => {
@@ -9544,38 +12745,81 @@ export function AdminOrdersView() {
     }
   };
 
+  const handleDeliveryAddressChange = (field) => (event) => {
+    const value = event.target.value;
+    setDeliveryAddressForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
   const handleSaveDelivery = async () => {
-    if (!db || !selectedOrder) return;
-    if (deliveryMethod === "courier" && !courierName.trim()) {
+    if (!functionsInstance || !selectedOrder?.id) {
+      setStatusMessage("Delivery update service is unavailable.");
+      return;
+    }
+    const normalizedAddress = normalizeShippingAddressDraft(deliveryAddressForm);
+    if (!isShippingAddressComplete(normalizedAddress)) {
+      setStatusMessage("Complete street, suburb, city, province, and a 4-digit postal code before saving.");
+      return;
+    }
+    if (deliveryMethod === "courier" && !deliveryCourierId) {
       setStatusMessage("Select a courier before saving.");
       return;
     }
+
     setDeliverySaving(true);
     try {
-      await updateDoc(doc(db, "orders", selectedOrder.id), {
+      const callable = httpsCallable(functionsInstance, "adminUpdateOrderDeliveryDetails");
+      const response = await callable({
+        orderId: selectedOrder.id,
         deliveryMethod,
-        courierName: deliveryMethod === "courier" ? courierName.trim() : "",
-        trackingLink: trackingInput.trim() || null,
-        updatedAt: serverTimestamp(),
+        courierId: deliveryMethod === "courier" ? deliveryCourierId : "",
+        courierName: deliveryMethod === "courier" ? selectedDeliveryCourier?.name || "" : "",
+        trackingLink: trackingInput.trim(),
+        shippingAddress: normalizedAddress,
       });
-
-        if (functionsInstance && selectedOrder.customer?.email) {
-          const sendOrderStatusEmail = httpsCallable(functionsInstance, "sendOrderStatusEmail");
-          await sendOrderStatusEmail({
-            customer: selectedOrder.customer,
-            customerEmail: selectedOrder.customer?.email || "",
-            orderNumber: selectedOrder.orderNumber,
-            status: getOrderStatusLabel(selectedOrder, normalizeOrderStatus(selectedOrder.status) || "order-placed"),
-            trackingLink: trackingInput.trim(),
-            items: selectedOrder.items || [],
-          });
-        }
-
-      setStatusMessage("Delivery updated");
+      const result = response?.data || {};
+      const changedAmount =
+        Number.isFinite(Number(result.paymentAdjustmentDelta)) ?
+          Number(result.paymentAdjustmentDelta)
+          : 0;
+      if (result.paymentAdjustmentRequired) {
+        setStatusMessage(
+          `Delivery updated. Paid order total changed by ${formatPriceLabel(changedAmount)} and now needs payment review.`,
+        );
+      } else {
+        setStatusMessage("Delivery updated.");
+      }
     } catch (error) {
-      setStatusMessage(error.message);
+      setStatusMessage(error.message || "Unable to update delivery.");
     } finally {
       setDeliverySaving(false);
+    }
+  };
+
+  const handleSendDeliveryUpdateEmail = async () => {
+    if (!functionsInstance || !selectedOrder?.id) return;
+    if (!selectedOrder.customer?.email) {
+      setStatusMessage("Customer email is missing.");
+      return;
+    }
+    setDeliveryUpdateEmailSending(true);
+    try {
+      const callable = httpsCallable(functionsInstance, "adminSendOrderDeliveryUpdateEmail");
+      const response = await callable({
+        orderId: selectedOrder.id,
+      });
+      const result = response?.data || {};
+      if (result.emailStatus === "sent") {
+        setStatusMessage("Delivery update email sent.");
+      } else {
+        setStatusMessage(result.emailError || "Unable to send delivery update email.");
+      }
+    } catch (error) {
+      setStatusMessage(error.message || "Unable to send delivery update email.");
+    } finally {
+      setDeliveryUpdateEmailSending(false);
     }
   };
 
@@ -9665,17 +12909,40 @@ export function AdminOrdersView() {
   }, [orders, searchTerm, statusFilter]);
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(filteredOrders.length / ADMIN_PAGE_SIZE) - 1);
+    const maxPage = Math.max(0, Math.ceil(filteredOrders.length / ordersPageSize) - 1);
     setOrdersPage((prev) => Math.min(prev, maxPage));
-  }, [filteredOrders.length]);
+  }, [filteredOrders.length, ordersPageSize]);
 
   const paginatedOrders = useMemo(() => {
-    const start = ordersPage * ADMIN_PAGE_SIZE;
-    return filteredOrders.slice(start, start + ADMIN_PAGE_SIZE);
-  }, [filteredOrders, ordersPage]);
+    const start = ordersPage * ordersPageSize;
+    return filteredOrders.slice(start, start + ordersPageSize);
+  }, [filteredOrders, ordersPage, ordersPageSize]);
 
   const kpi = useMemo(() => {
     const today = new Date();
+    const normalizePaymentStatusForKpi = (order) => {
+      const method = normalizeOrderPaymentMethod(
+        order?.paymentMethod || (order?.payfast ? PAYMENT_METHODS.PAYFAST : ""),
+      );
+      if (method === PAYMENT_METHODS.EFT) {
+        const approvalStatus = normalizeOrderPaymentApprovalStatus(order || {});
+        if (approvalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED) return "approved";
+        if (approvalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED) return "rejected";
+        return (order?.paymentStatus || "awaiting-approval").toString().toLowerCase() || "awaiting-approval";
+      }
+      return (
+        (order?.payfast?.paymentStatus || order?.paymentStatus || "").toString().toLowerCase() || "unknown"
+      );
+    };
+    const isPaidOrderForKpi = (order) => {
+      const method = normalizeOrderPaymentMethod(
+        order?.paymentMethod || (order?.payfast ? PAYMENT_METHODS.PAYFAST : ""),
+      );
+      if (method === PAYMENT_METHODS.EFT) {
+        return normalizeOrderPaymentApprovalStatus(order || {}) === PAYMENT_APPROVAL_STATUSES.APPROVED;
+      }
+      return ["complete", "paid"].includes(normalizePaymentStatusForKpi(order));
+    };
     const isToday = (ts) => {
       if (!ts.toDate) return false;
       const d = ts.toDate();
@@ -9694,14 +12961,35 @@ export function AdminOrdersView() {
       },
       { "order-placed": 0, "packing-order": 0, "order-ready-for-shipping": 0, shipped: 0, completed: 0, cancelled: 0 }
     );
-    const paidCount = orders.filter((o) => ["complete", "paid", "approved"].includes(normalizePaymentStatus(o))).length;
-    const failedPayments = orders.filter((o) => normalizePaymentStatus(o) === "failed").length;
+    const paidCount = orders.filter((order) => isPaidOrderForKpi(order)).length;
+    const failedPayments = orders.filter((order) => normalizePaymentStatusForKpi(order) === "failed").length;
     return { totalToday, statusCounts, paidCount, failedPayments };
   }, [orders]);
 
   const selectedOrder = selectedOrderId ?
-     filteredOrders.find((order) => order.id === selectedOrderId) || null
+     orders.find((order) => order.id === selectedOrderId) || null
     : null;
+  const deliveryProvince = (deliveryAddressForm.province || "").toString().trim();
+  const deliveryAvailableCouriers = useMemo(() => {
+    if (deliveryMethod !== "courier" || !deliveryProvince) return [];
+    return createOrderCourierOptions
+      .filter((option) => option?.isActive !== false)
+      .map((option) => {
+        const provinceConfig = option?.provinces?.[deliveryProvince] || {};
+        const price = Number(provinceConfig.price);
+        return {
+          id: option.id,
+          name: option.name || "Courier",
+          price,
+          isAvailable: provinceConfig.isAvailable === true,
+        };
+      })
+      .filter((option) => option.isAvailable && Number.isFinite(option.price) && option.price >= 0)
+      .sort((left, right) => left.price - right.price);
+  }, [createOrderCourierOptions, deliveryMethod, deliveryProvince]);
+  const selectedDeliveryCourier = deliveryAvailableCouriers.find(
+    (entry) => entry.id === deliveryCourierId,
+  ) || null;
   const shippingAddressLabel = selectedOrder
     ? formatShippingAddress(selectedOrder.shippingAddress) ||
       selectedOrder.customer?.address ||
@@ -9712,10 +13000,53 @@ export function AdminOrdersView() {
     ? normalizePaymentApprovalStatus(selectedOrder)
     : PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
   const selectedPaymentStatus = selectedOrder ? normalizePaymentStatus(selectedOrder) : "unknown";
+  const selectedPaymentAdjustment = selectedOrder?.paymentAdjustment || null;
   const selectedStatusOptions = selectedOrder ? getAllowedOrderStatuses(selectedOrder) : ORDER_STATUSES;
   const selectedStatusLocked = selectedOrder ? isEftBlocked(selectedOrder) : false;
   const selectedPayfast = selectedOrder?.payfast || {};
   const selectedShipping = selectedOrder?.shipping || {};
+  const deliveryPreview = useMemo(() => {
+    if (!selectedOrder) return null;
+    const previousShippingCostRaw =
+      Number(selectedOrder.shippingCost ?? selectedOrder.shipping?.courierPrice ?? 0);
+    const previousShippingCost = Number.isFinite(previousShippingCostRaw) ?
+       previousShippingCostRaw
+      : 0;
+    const subtotal = resolveOrderSubtotalAmount(selectedOrder);
+    const previousTotalRaw = Number(selectedOrder.totalPrice);
+    const previousTotal = Number.isFinite(previousTotalRaw) ?
+       previousTotalRaw
+      : subtotal + previousShippingCost;
+    const nextShippingCost = deliveryMethod === "courier"
+      ? Number(selectedDeliveryCourier?.price)
+      : previousShippingCost;
+    const canResolveNewShippingCost =
+      deliveryMethod === "courier" ? Number.isFinite(nextShippingCost) : true;
+    const resolvedShippingCost = canResolveNewShippingCost ? nextShippingCost : previousShippingCost;
+    const nextTotal = subtotal + resolvedShippingCost;
+    const totalsChanged = Math.abs(nextTotal - previousTotal) > 0.009;
+    const isPaidOrder =
+      normalizePaymentStatus(selectedOrder) === "paid" ||
+      normalizePaymentStatus(selectedOrder) === "complete" ||
+      (isEftOrder(selectedOrder) &&
+        normalizePaymentApprovalStatus(selectedOrder) === PAYMENT_APPROVAL_STATUSES.APPROVED);
+    const paymentAdjustmentRequired = isPaidOrder && totalsChanged;
+    return {
+      previousShippingCost,
+      nextShippingCost: canResolveNewShippingCost ? resolvedShippingCost : null,
+      previousTotal,
+      nextTotal,
+      canResolveNewShippingCost,
+      paymentAdjustmentRequired,
+      delta: nextTotal - previousTotal,
+    };
+  }, [
+    deliveryMethod,
+    isEftOrder,
+    normalizePaymentApprovalStatus,
+    selectedDeliveryCourier?.price,
+    selectedOrder,
+  ]);
   const selectedOrderEmailNotification = selectedOrder?.notifications?.orderCreated?.customer || null;
   const selectedOrderEmailStatusRaw = (selectedOrderEmailNotification?.status || "").toString().trim().toLowerCase();
   const selectedOrderEmailStatus = ["sent", "failed", "skipped"].includes(selectedOrderEmailStatusRaw)
@@ -9742,18 +13073,110 @@ export function AdminOrdersView() {
     .toLowerCase();
   const selectedOrderEmailError = (selectedOrderEmailNotification?.error || "").toString().trim();
   const selectedOrderEmailNeedsRetry = selectedOrderEmailStatus === "failed" || selectedOrderEmailStatus === "skipped";
+  const handleOrderDetailTabKeyDown = (event) => {
+    const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    const tabIds = ORDER_DETAIL_TABS.map((tab) => tab.id);
+    const currentIndex = tabIds.indexOf(activeOrderDetailTab);
+    if (currentIndex < 0) return;
+    event.preventDefault();
+    if (event.key === "Home") {
+      setActiveOrderDetailTab(tabIds[0]);
+      return;
+    }
+    if (event.key === "End") {
+      setActiveOrderDetailTab(tabIds[tabIds.length - 1]);
+      return;
+    }
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex = (currentIndex + direction + tabIds.length) % tabIds.length;
+    setActiveOrderDetailTab(tabIds[nextIndex]);
+  };
 
   useEffect(() => {
+    const resolvePreorderSendMonthFromOrder = (order) => {
+      if (!Array.isArray(order?.items)) return "";
+      for (const item of order.items) {
+        if (!item || item.metadata?.type !== "product") continue;
+        const fromMetadata = normalizePreorderSendMonth(
+          item.metadata?.preorderSendMonth || item.metadata?.preorder_send_month || "",
+        );
+        if (fromMetadata) return fromMetadata;
+        const productId =
+          item.metadata?.productId ||
+          item.metadata?.productID ||
+          item.metadata?.product ||
+          null;
+        if (!productId) continue;
+        const product = productLookup.get(String(productId));
+        const fromProduct = normalizePreorderSendMonth(
+          product?.preorder_send_month || product?.preorderSendMonth || "",
+        );
+        if (fromProduct) return fromProduct;
+      }
+      return "";
+    };
     if (selectedOrder) {
-      setDeliveryMethod(selectedOrder.deliveryMethod || "company");
-      setCourierName(selectedOrder.courierName || "");
+      setDeliveryMethod((selectedOrder.deliveryMethod || "company").toString().toLowerCase() === "courier" ? "courier" : "company");
+      setDeliveryAddressForm(resolveOrderDeliveryAddressDraft(selectedOrder));
+      const selectedOrderCourierId = (selectedOrder.shipping?.courierId || "").toString().trim();
+      const selectedOrderCourierName = (
+        selectedOrder.shipping?.courierName ||
+        selectedOrder.courierName ||
+        ""
+      ).toString().trim();
+      if (selectedOrderCourierId) {
+        setDeliveryCourierId(selectedOrderCourierId);
+      } else if (selectedOrderCourierName) {
+        const matchingCourier = createOrderCourierOptions.find(
+          (entry) =>
+            (entry?.name || "").toString().trim().toLowerCase() ===
+            selectedOrderCourierName.toLowerCase(),
+        );
+        setDeliveryCourierId(matchingCourier?.id || "");
+      } else {
+        setDeliveryCourierId("");
+      }
       setTrackingInput(selectedOrder.trackingLink || "");
       const fallbackMarchMonth = `${new Date().getFullYear()}-03`;
-      setPreorderNoticeMonth(resolvePreorderSendMonthForOrder(selectedOrder) || fallbackMarchMonth);
+      setPreorderNoticeMonth(resolvePreorderSendMonthFromOrder(selectedOrder) || fallbackMarchMonth);
     } else {
+      setDeliveryAddressForm({ ...EMPTY_SHIPPING_ADDRESS });
+      setDeliveryCourierId("");
       setPreorderNoticeMonth("");
     }
-  }, [selectedOrder]);
+  }, [createOrderCourierOptions, selectedOrder, productLookup]);
+
+  useEffect(() => {
+    if (!selectedOrder) return;
+    if (deliveryMethod !== "courier") {
+      setDeliveryCourierId("");
+      return;
+    }
+    if (!deliveryProvince) {
+      setDeliveryCourierId("");
+      return;
+    }
+    const stillValid = deliveryAvailableCouriers.some((entry) => entry.id === deliveryCourierId);
+    if (stillValid) return;
+    const preferredCourierName = (
+      selectedOrder.shipping?.courierName ||
+      selectedOrder.courierName ||
+      ""
+    ).toString().trim().toLowerCase();
+    const matchedByName = preferredCourierName
+      ? deliveryAvailableCouriers.find(
+          (entry) => entry.name.toString().trim().toLowerCase() === preferredCourierName,
+        )
+      : null;
+    setDeliveryCourierId(matchedByName?.id || deliveryAvailableCouriers[0]?.id || "");
+  }, [
+    deliveryAvailableCouriers,
+    deliveryCourierId,
+    deliveryMethod,
+    deliveryProvince,
+    selectedOrder,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -9785,7 +13208,7 @@ export function AdminOrdersView() {
   }, [selectedOrder?.id, selectedOrder?.paymentProof?.storagePath, storage]);
 
   return (
-    <div className="admin-panel admin-panel--full">
+    <div className="admin-panel admin-panel--full admin-orders-view">
       <Reveal as="div" className="admin-panel__header">
         <div>
           <h2>Orders</h2>
@@ -9862,9 +13285,9 @@ export function AdminOrdersView() {
         </div>
       </Reveal>
 
-      <Reveal as="div" className="admin-table__wrapper" delay={60}>
+      <div className="admin-table__wrapper">
         {filteredOrders.length > 0 ? (
-          <table className="admin-table">
+          <table className="admin-table admin-orders-table">
             <thead>
               <tr>
                 <th scope="col">Order</th>
@@ -9895,18 +13318,19 @@ export function AdminOrdersView() {
                 const statusOptions = getAllowedOrderStatuses(order);
                 const statusLocked = isEftBlocked(order);
                 const deliveryStatus = normalizeDeliveryStatus(order);
+                const deliveryLabel = deliveryStatus.replace(/-/g, " ");
                 return (
                   <tr
                     key={order.id}
-                    className={order.id === selectedOrderId ? "is-active" : ""}
+                    className={`admin-orders-table__row ${order.id === selectedOrderId ? "is-active" : ""}`}
                     onClick={() => setSelectedOrderId(order.id)}
                   >
-                    <td>
-                      <strong>{orderLabel}</strong>
+                    <td className="admin-orders-table__order" data-label="Order">
+                      <strong className="admin-orders-table__order-number">{orderLabel}</strong>
                       <p className="modal__meta">{createdAtLabel}</p>
-                      <p className="modal__meta">Ref: {order.id}</p>
+                      <p className="modal__meta admin-orders-table__ref">Ref: {order.id}</p>
                       {order.trackingLink && (
-                        <p className="modal__meta">
+                        <p className="modal__meta admin-orders-table__tracking">
                           <a
                             href={order.trackingLink}
                             target="_blank"
@@ -9917,55 +13341,63 @@ export function AdminOrdersView() {
                         </p>
                       )}
                     </td>
-                    <td>
-                      <p>{order.customer?.fullName || "—"}</p>
-                      <p className="modal__meta">
-                        {order.customer?.email || "—"}
+                    <td className="admin-orders-table__customer" data-label="Customer">
+                      <p>{order.customer?.fullName || "â€”"}</p>
+                      <p className="modal__meta admin-orders-table__contact">
+                        {order.customer?.email || "â€”"}
                       </p>
                       {order.customer?.phone && (
-                        <p className="modal__meta">{order.customer.phone}</p>
+                        <p className="modal__meta admin-orders-table__contact">{order.customer.phone}</p>
                       )}
                     </td>
-                    <td>{formatPriceLabel(total)}</td>
-                    <td>
-                      <span className={`admin-status admin-status--${paymentMethod}`}>
-                        {paymentMethod}
-                      </span>
-                      <span className={`admin-status admin-status--${paymentStatus}`}>
-                        {paymentStatus}
-                      </span>
-                      {paymentMethod === PAYMENT_METHODS.EFT && (
-                        <span className={`admin-status admin-status--${paymentApprovalStatus}`}>
-                          approval: {paymentApprovalStatus}
+                    <td className="admin-orders-table__amount" data-label="Amount">
+                      <strong>{formatPriceLabel(total)}</strong>
+                    </td>
+                    <td className="admin-orders-table__payment" data-label="Payment">
+                      <div className="admin-orders-table__badges">
+                        <span className={`admin-status admin-status--${paymentMethod}`}>
+                          {paymentMethod}
                         </span>
+                        <span className={`admin-status admin-status--${paymentStatus}`}>
+                          {paymentStatus}
+                        </span>
+                      </div>
+                      {paymentMethod === PAYMENT_METHODS.EFT && (
+                        <div className="admin-orders-table__badges">
+                          <span className={`admin-status admin-status--${paymentApprovalStatus}`}>
+                            approval {paymentApprovalStatus}
+                          </span>
+                        </div>
                       )}
                     </td>
-                    <td>
-                      <select
-                        className="input"
-                        value={normalizeOrderStatus(order.status)}
-                        disabled={statusLocked}
-                        onChange={(event) =>
-                          handleUpdateOrderStatus(order.id, event.target.value)
-                        }
-                      >
-                        {statusOptions.map((status) => (
-                          <option key={status} value={status}>
-                            {formatOrderStatusLabel(status)}
-                          </option>
-                        ))}
-                      </select>
-                      {statusLocked && (
-                        <p className="modal__meta">Awaiting EFT payment approval</p>
-                      )}
-                      {isPreordered && normalizeOrderStatus(order.status) === "order-placed" && (
-                        <p className="modal__meta">Preordered</p>
-                      )}
+                    <td className="admin-orders-table__status" data-label="Order status">
+                      <div className="admin-orders-table__status-wrap">
+                        <select
+                          className="input admin-orders-table__status-select"
+                          value={normalizeOrderStatus(order.status)}
+                          disabled={statusLocked}
+                          onChange={(event) =>
+                            handleUpdateOrderStatus(order.id, event.target.value)
+                          }
+                        >
+                          {statusOptions.map((status) => (
+                            <option key={status} value={status}>
+                              {formatOrderStatusLabel(status)}
+                            </option>
+                          ))}
+                        </select>
+                        {statusLocked && (
+                          <p className="modal__meta admin-orders-table__status-note">Awaiting EFT payment approval</p>
+                        )}
+                        {isPreordered && normalizeOrderStatus(order.status) === "order-placed" && (
+                          <p className="modal__meta admin-orders-table__status-note">Preordered</p>
+                        )}
+                      </div>
                     </td>
-                    <td>
-                      <span className="modal__meta">{deliveryStatus.replace(/-/g, " ")}</span>
+                    <td className="admin-orders-table__delivery" data-label="Delivery">
+                      <span className="modal__meta admin-orders-table__delivery-value">{deliveryLabel}</span>
                     </td>
-                    <td>
+                    <td className="admin-orders-table__actions-cell" data-label="Actions">
                       <button
                         className="btn btn--secondary"
                         type="button"
@@ -9985,15 +13417,20 @@ export function AdminOrdersView() {
         ) : (
           <p className="admin-panel__notice">No orders yet.</p>
         )}
-        <AdminPagination page={ordersPage} total={filteredOrders.length} onPageChange={setOrdersPage} />
-        {inventoryLoading && <p className="modal__meta">Syncing orders…</p>}
+        <AdminPagination
+          page={ordersPage}
+          total={filteredOrders.length}
+          onPageChange={setOrdersPage}
+          pageSize={ordersPageSize}
+        />
+        {inventoryLoading && <p className="modal__meta">Syncing ordersâ€¦</p>}
         {inventoryError && (
           <p className="admin-panel__error">{inventoryError}</p>
         )}
         {statusMessage && (
           <p className="admin-panel__status">{statusMessage}</p>
         )}
-      </Reveal>
+      </div>
 
       <div
         className={`modal admin-modal admin-create-order-modal ${createOrderOpen ? "is-active" : ""}`}
@@ -10136,7 +13573,7 @@ export function AdminOrdersView() {
                   <p className="modal__meta">Select a province to view available couriers.</p>
                 )}
                 {createOrderForm.shippingAddress.province && createOrderCourierStatus === "loading" && (
-                  <p className="modal__meta">Loading courier options…</p>
+                  <p className="modal__meta">Loading courier optionsâ€¦</p>
                 )}
                 {createOrderForm.shippingAddress.province &&
                   createOrderCourierStatus !== "loading" &&
@@ -10562,18 +13999,178 @@ export function AdminOrdersView() {
               </div>
             </div>
 
-            <div className="admin-order-detail__split">
-              <div className="admin-order-detail__left">
-                <div className="admin-order-detail__grid">
-                  <div>
+            <div className="admin-order-detail__top-actions">
+              <label className="admin-order-detail__top-action admin-order-detail__top-action--status">
+                <span>Order status</span>
+                <select
+                  className="input"
+                  value={normalizeOrderStatus(selectedOrder.status)}
+                  disabled={selectedStatusLocked}
+                  onChange={(event) =>
+                    handleUpdateOrderStatus(selectedOrder.id, event.target.value)
+                  }
+                >
+                  {selectedStatusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {formatOrderStatusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={() =>
+                  setPendingStatusUpdate({
+                    orderId: selectedOrder.id,
+                    status: normalizeOrderStatus(selectedOrder.status),
+                    existingLink: selectedOrder.trackingLink || "",
+                  })
+                }
+              >
+                {selectedOrder.trackingLink ? "Update Tracking" : "Add Tracking"}
+              </button>
+              {selectedPaymentMethod === PAYMENT_METHODS.EFT ? (
+                <>
+                  {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.PENDING && (
+                    <>
+                      <button
+                        className="btn btn--primary"
+                        type="button"
+                        disabled={eftReviewLoading}
+                        onClick={() => handleReviewEftPayment(selectedOrder, "approve")}
+                      >
+                        {eftReviewLoading ? "Working..." : "Approve Payment"}
+                      </button>
+                      <button
+                        className="btn btn--secondary"
+                        type="button"
+                        disabled={eftReviewLoading}
+                        onClick={() => handleReviewEftPayment(selectedOrder, "reject")}
+                      >
+                        {eftReviewLoading ? "Working..." : "Reject Payment"}
+                      </button>
+                    </>
+                  )}
+                  {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED && (
+                    <span className="admin-status admin-status--approved">Payment approved</span>
+                  )}
+                  {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED && (
+                    <span className="admin-status admin-status--rejected">Payment rejected</span>
+                  )}
+                </>
+              ) : (
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  disabled={paymentUpdating}
+                  onClick={() => handleMarkPaymentReceived(selectedOrder)}
+                >
+                  {paymentUpdating ? "Updating..." : "Mark Payment Received"}
+                </button>
+              )}
+              <button
+                className="btn btn--secondary"
+                type="button"
+                disabled={deliverySaving}
+                onClick={handleSaveDelivery}
+              >
+                {deliverySaving ? "Saving..." : "Save Delivery"}
+              </button>
+            </div>
+            {selectedStatusLocked && (
+              <p className="modal__meta admin-order-detail__top-warning">
+                EFT payment must be approved before fulfilment.
+              </p>
+            )}
+            {deliveryPreview?.paymentAdjustmentRequired && (
+              <p className="modal__meta admin-order-email-status__error">
+                Paid order total will change by {formatPriceLabel(deliveryPreview.delta)} and require payment review.
+              </p>
+            )}
+
+            <div
+              className="admin-order-detail__tabs"
+              role="tablist"
+              aria-label="Order detail sections"
+              onKeyDown={handleOrderDetailTabKeyDown}
+            >
+              {ORDER_DETAIL_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  id={`admin-order-detail-tab-${tab.id}`}
+                  className={`admin-order-detail__tab ${activeOrderDetailTab === tab.id ? "is-active" : ""}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeOrderDetailTab === tab.id ? "true" : "false"}
+                  aria-controls={`admin-order-detail-panel-${tab.id}`}
+                  onClick={() => setActiveOrderDetailTab(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {activeOrderDetailTab === "overview" && (
+              <div
+                id="admin-order-detail-panel-overview"
+                role="tabpanel"
+                aria-labelledby="admin-order-detail-tab-overview"
+                className="admin-order-detail__tabpanel"
+              >
+                <section className="admin-order-detail__key-overview" aria-label="Important order details">
+                  <h4>Important details</h4>
+                  <div className="admin-order-detail__key-strip">
+                    <article className="admin-order-detail__key-card admin-order-detail__key-card--total">
+                      <p className="admin-order-detail__key-label">Total</p>
+                      <p className="admin-order-detail__key-value admin-order-detail__key-value--total">
+                        {formatPriceLabel(selectedOrder.totalPrice)}
+                      </p>
+                    </article>
+                    <article className="admin-order-detail__key-card">
+                      <p className="admin-order-detail__key-label">Customer</p>
+                      <p className="admin-order-detail__key-value">
+                        {selectedOrder.customer?.fullName || "-"}
+                      </p>
+                    </article>
+                    <article className="admin-order-detail__key-card">
+                      <p className="admin-order-detail__key-label">Email</p>
+                      <p className="admin-order-detail__key-value">
+                        {selectedOrder.customer?.email || "-"}
+                      </p>
+                    </article>
+                    <article className="admin-order-detail__key-card">
+                      <p className="admin-order-detail__key-label">Phone</p>
+                      <p className="admin-order-detail__key-value">
+                        {selectedOrder.customer?.phone || "-"}
+                      </p>
+                    </article>
+                    <article className="admin-order-detail__key-card">
+                      <p className="admin-order-detail__key-label">Order status</p>
+                      <p className="admin-order-detail__key-value">
+                        {getOrderStatusLabel(selectedOrder)}
+                      </p>
+                    </article>
+                    <article className="admin-order-detail__key-card">
+                      <p className="admin-order-detail__key-label">Payment status</p>
+                      <p className="admin-order-detail__key-value">
+                        {selectedPaymentStatus}
+                      </p>
+                    </article>
+                  </div>
+                </section>
+                <div className="admin-order-detail__section-grid">
+                  <section className="admin-order-detail__section-card">
                     <h4>Customer</h4>
-                    <p>{selectedOrder.customer?.fullName || "—"}</p>
-                    <p className="modal__meta">{selectedOrder.customer?.email || "—"}</p>
+                    <p>{selectedOrder.customer?.fullName || "-"}</p>
+                    <p className="modal__meta">{selectedOrder.customer?.email || "-"}</p>
                     {selectedOrder.customer?.phone && <p className="modal__meta">{selectedOrder.customer.phone}</p>}
                     {shippingAddressLabel && <p className="modal__meta">{shippingAddressLabel}</p>}
-                  </div>
-                  <div>
+                  </section>
+                  <section className="admin-order-detail__section-card">
                     <h4>Payment</h4>
+                    <p className="modal__meta">Method: {selectedPaymentMethod}</p>
+                    <p className="modal__meta">Status: {selectedPaymentStatus}</p>
                     {Number.isFinite(selectedOrder.subtotal) && (
                       <p className="modal__meta">Subtotal: {formatPriceLabel(selectedOrder.subtotal)}</p>
                     )}
@@ -10582,28 +14179,17 @@ export function AdminOrdersView() {
                     )}
                     <p className="modal__meta">Total: {formatPriceLabel(selectedOrder.totalPrice)}</p>
                     {selectedPayfast.paymentReference && (
-                      <p className="modal__meta">Ref: {selectedPayfast.paymentReference}</p>
+                      <p className="modal__meta">Reference: {selectedPayfast.paymentReference}</p>
                     )}
                     {selectedPayfast.paymentId && (
                       <p className="modal__meta">PayFast ID: {selectedPayfast.paymentId}</p>
                     )}
-                    {selectedOrder.paymentProof?.storagePath && (
-                      <p className="modal__meta">
-                        Proof:{" "}
-                        {paymentProofUrlLoading ? (
-                          "Loading..."
-                        ) : paymentProofUrl ? (
-                          <a href={paymentProofUrl} target="_blank" rel="noopener noreferrer">
-                            View proof
-                          </a>
-                        ) : (
-                          "Unavailable"
-                        )}
-                      </p>
-                    )}
-                  </div>
-                  <div>
+                  </section>
+                  <section className="admin-order-detail__section-card">
                     <h4>Delivery</h4>
+                    <p className="modal__meta">
+                      Method: {(selectedOrder.deliveryMethod || "company").toString().toLowerCase()}
+                    </p>
                     {selectedShipping.courierName && (
                       <p className="modal__meta">Courier: {selectedShipping.courierName}</p>
                     )}
@@ -10625,22 +14211,21 @@ export function AdminOrdersView() {
                     {shippingAddressLabel && (
                       <p className="modal__meta">Ship to: {shippingAddressLabel}</p>
                     )}
-                  </div>
+                  </section>
                 </div>
-
-                <div>
+                <section className="admin-order-detail__section-card">
                   <h4>Items</h4>
                   <ul className="order-items">
                     {(selectedOrder.items || []).map((item) => (
                       <li key={`${selectedOrder.id}-${item.id}`}>
-                        <strong>{item.name}</strong> ×{item.quantity || 1}
+                        <strong>{item.name}</strong> x{item.quantity || 1}
                         <span className="modal__meta">{formatPriceLabel(item.price)}</span>
                         {item.metadata?.type === "workshop" && (
                           <span className="modal__meta">
                             {item.metadata?.sessionDayLabel ||
                               item.metadata?.sessionLabel ||
                               "Session"}{" "}
-                            · {item.metadata?.attendeeCount || 1} attendee(s)
+                            - {item.metadata?.attendeeCount || 1} attendee(s)
                           </span>
                         )}
                         {item.metadata?.type === "product" && item.metadata?.variantLabel && (
@@ -10660,213 +14245,399 @@ export function AdminOrdersView() {
                       </li>
                     ))}
                   </ul>
+                </section>
+              </div>
+            )}
+
+            {activeOrderDetailTab === "customer-info" && (
+              <div
+                id="admin-order-detail-panel-customer-info"
+                role="tabpanel"
+                aria-labelledby="admin-order-detail-tab-customer-info"
+                className="admin-order-detail__tabpanel"
+              >
+                <div className="admin-order-detail__section-grid admin-order-detail__section-grid--two">
+                  <section className="admin-order-detail__section-card">
+                    <h4>Customer details</h4>
+                    <p>{selectedOrder.customer?.fullName || "-"}</p>
+                    <p className="modal__meta">{selectedOrder.customer?.email || "-"}</p>
+                    <p className="modal__meta">{selectedOrder.customer?.phone || "-"}</p>
+                  </section>
+                  <section className="admin-order-detail__section-card">
+                    <h4>Address on order</h4>
+                    {shippingAddressLabel ? (
+                      <p className="modal__meta">{shippingAddressLabel}</p>
+                    ) : (
+                      <p className="modal__meta">No delivery address on file.</p>
+                    )}
+                    {selectedShipping.courierName && (
+                      <p className="modal__meta">Courier: {selectedShipping.courierName}</p>
+                    )}
+                    {selectedShipping.province && (
+                      <p className="modal__meta">Province: {selectedShipping.province}</p>
+                    )}
+                    <p className="modal__meta">
+                      Delivery method: {(selectedOrder.deliveryMethod || "company").toString().toLowerCase()}
+                    </p>
+                  </section>
                 </div>
               </div>
+            )}
 
-              <div className="admin-order-detail__right">
-                <div className="admin-order-detail__actions">
-                  <div className="admin-order-detail__actions-row">
-                    <label>
-                      Order Status
-                      <select
-                        className="input"
-                        value={normalizeOrderStatus(selectedOrder.status)}
-                        disabled={selectedStatusLocked}
-                        onChange={(event) =>
-                          handleUpdateOrderStatus(selectedOrder.id, event.target.value)
-                        }
-                      >
-                        {selectedStatusOptions.map((status) => (
-                          <option key={status} value={status}>
-                            {formatOrderStatusLabel(status)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {selectedStatusLocked && (
-                      <p className="modal__meta">EFT payment must be approved before fulfilment.</p>
+            {activeOrderDetailTab === "order-info" && (
+              <div
+                id="admin-order-detail-panel-order-info"
+                role="tabpanel"
+                aria-labelledby="admin-order-detail-tab-order-info"
+                className="admin-order-detail__tabpanel"
+              >
+                <div className="admin-order-detail__section-grid">
+                  <section className="admin-order-detail__section-card">
+                    <h4>Order summary</h4>
+                    <p className="modal__meta">
+                      Order #:{" "}
+                      {Number.isFinite(selectedOrder.orderNumber)
+                        ? `#${selectedOrder.orderNumber}`
+                        : selectedOrder.id}
+                    </p>
+                    <p className="modal__meta">
+                      Placed:{" "}
+                      {selectedOrder.createdAt?.toDate?.()
+                        ? bookingDateFormatter.format(selectedOrder.createdAt.toDate())
+                        : "Pending"}
+                    </p>
+                    <p className="modal__meta">Order status: {getOrderStatusLabel(selectedOrder)}</p>
+                    <p className="modal__meta">Payment method: {selectedPaymentMethod}</p>
+                    <p className="modal__meta">Payment status: {selectedPaymentStatus}</p>
+                  </section>
+                  <section className="admin-order-detail__section-card">
+                    <h4>Payment</h4>
+                    {Number.isFinite(selectedOrder.subtotal) && (
+                      <p className="modal__meta">Subtotal: {formatPriceLabel(selectedOrder.subtotal)}</p>
                     )}
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      onClick={() =>
-                        setPendingStatusUpdate({
-                          orderId: selectedOrder.id,
-                          status: normalizeOrderStatus(selectedOrder.status),
-                          existingLink: selectedOrder.trackingLink || "",
-                        })
-                      }
-                    >
-                      {selectedOrder.trackingLink ? "Update Tracking" : "Add Tracking"}
-                    </button>
-                    {selectedPaymentMethod === PAYMENT_METHODS.EFT ? (
-                      <>
-                        {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.PENDING && (
-                          <>
-                            <button
-                              className="btn btn--primary"
-                              type="button"
-                              disabled={eftReviewLoading}
-                              onClick={() => handleReviewEftPayment(selectedOrder, "approve")}
-                            >
-                              {eftReviewLoading ? "Working..." : "Approve Payment"}
-                            </button>
-                            <button
-                              className="btn btn--secondary"
-                              type="button"
-                              disabled={eftReviewLoading}
-                              onClick={() => handleReviewEftPayment(selectedOrder, "reject")}
-                            >
-                              {eftReviewLoading ? "Working..." : "Reject Payment"}
-                            </button>
-                          </>
+                    {Number.isFinite(selectedOrder.shippingCost) && (
+                      <p className="modal__meta">Shipping: {formatPriceLabel(selectedOrder.shippingCost)}</p>
+                    )}
+                    <p className="modal__meta">Total: {formatPriceLabel(selectedOrder.totalPrice)}</p>
+                    {selectedPayfast.paymentReference && (
+                      <p className="modal__meta">Reference: {selectedPayfast.paymentReference}</p>
+                    )}
+                    {selectedPayfast.paymentId && (
+                      <p className="modal__meta">PayFast ID: {selectedPayfast.paymentId}</p>
+                    )}
+                    {selectedOrder.paymentProof?.storagePath && (
+                      <p className="modal__meta">
+                        Proof:{" "}
+                        {paymentProofUrlLoading ? (
+                          "Loading..."
+                        ) : paymentProofUrl ? (
+                          <a href={paymentProofUrl} target="_blank" rel="noopener noreferrer">
+                            View proof
+                          </a>
+                        ) : (
+                          "Unavailable"
                         )}
-                        {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED && (
-                          <span className="admin-status admin-status--approved">Payment approved</span>
-                        )}
-                        {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED && (
-                          <span className="admin-status admin-status--rejected">Payment rejected</span>
-                        )}
-                      </>
+                      </p>
+                    )}
+                  </section>
+                  <section className="admin-order-detail__section-card">
+                    <h4>Delivery summary</h4>
+                    {selectedShipping.courierName && (
+                      <p className="modal__meta">Courier: {selectedShipping.courierName}</p>
+                    )}
+                    {selectedShipping.province && (
+                      <p className="modal__meta">Province: {selectedShipping.province}</p>
+                    )}
+                    {selectedOrder.trackingLink ? (
+                      <a
+                        href={selectedOrder.trackingLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="modal__meta"
+                      >
+                        Tracking link
+                      </a>
                     ) : (
-                      <button
-                        className="btn btn--primary"
-                        type="button"
-                        disabled={paymentUpdating}
-                        onClick={() => handleMarkPaymentReceived(selectedOrder)}
-                      >
-                        {paymentUpdating ? "Updating..." : "Mark Payment Received"}
-                      </button>
+                      <p className="modal__meta">No tracking link yet</p>
                     )}
-                  </div>
-                  <div className="admin-order-detail__actions-grid">
+                    {shippingAddressLabel && (
+                      <p className="modal__meta">Ship to: {shippingAddressLabel}</p>
+                    )}
+                  </section>
+                </div>
+                <section className="admin-order-detail__section-card">
+                  <h4>Items</h4>
+                  <ul className="order-items">
+                    {(selectedOrder.items || []).map((item) => (
+                      <li key={`${selectedOrder.id}-${item.id}`}>
+                        <strong>{item.name}</strong> x{item.quantity || 1}
+                        <span className="modal__meta">{formatPriceLabel(item.price)}</span>
+                        {item.metadata?.type === "workshop" && (
+                          <span className="modal__meta">
+                            {item.metadata?.sessionDayLabel ||
+                              item.metadata?.sessionLabel ||
+                              "Session"}{" "}
+                            - {item.metadata?.attendeeCount || 1} attendee(s)
+                          </span>
+                        )}
+                        {item.metadata?.type === "product" && item.metadata?.variantLabel && (
+                          <span className="modal__meta">
+                            Variant: {item.metadata.variantLabel}
+                          </span>
+                        )}
+                        {item.metadata?.type === "product" &&
+                          (item.metadata?.preorderSendMonth || item.metadata?.preorderSendMonthLabel) && (
+                            <span className="modal__meta">
+                              Send month:{" "}
+                              {item.metadata.preorderSendMonthLabel ||
+                                formatPreorderSendMonth(item.metadata.preorderSendMonth) ||
+                                item.metadata.preorderSendMonth}
+                            </span>
+                          )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              </div>
+            )}
+
+            {activeOrderDetailTab === "delivery" && (
+              <div
+                id="admin-order-detail-panel-delivery"
+                role="tabpanel"
+                aria-labelledby="admin-order-detail-tab-delivery"
+                className="admin-order-detail__tabpanel"
+              >
+              <section className="admin-order-detail__section-card">
+                <h4>Delivery details</h4>
+                <div className="admin-order-detail__actions-grid">
+                  <label>
+                    Delivery Method
+                    <select
+                      className="input"
+                      value={deliveryMethod}
+                      onChange={(event) => setDeliveryMethod(event.target.value)}
+                    >
+                      {DELIVERY_METHODS.map((method) => (
+                        <option key={method} value={method}>
+                          {method}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {deliveryMethod === "courier" && (
                     <label>
-                      Delivery Method
+                      Courier
                       <select
                         className="input"
-                        value={deliveryMethod}
-                        onChange={(event) => setDeliveryMethod(event.target.value)}
+                        value={deliveryCourierId}
+                        onChange={(event) => setDeliveryCourierId(event.target.value)}
                       >
-                        {DELIVERY_METHODS.map((method) => (
-                          <option key={method} value={method}>
-                            {method}
+                        <option value="">Select courier</option>
+                        {deliveryAvailableCouriers.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.name} ({formatPriceLabel(option.price)})
                           </option>
                         ))}
                       </select>
                     </label>
-                    {deliveryMethod === "courier" && (
-                      <>
-                        <label>
-                          Courier
-                          <select
-                            className="input"
-                            value={courierName}
-                            onChange={(event) => setCourierName(event.target.value)}
-                          >
-                            <option value="">Select courier</option>
-                            {COURIER_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="admin-order-detail__wide">
-                          Tracking Link
-                          <input
-                            className="input"
-                            type="url"
-                            value={trackingInput}
-                            onChange={(event) => setTrackingInput(event.target.value)}
-                            placeholder="https://courier.example/track/123"
-                          />
-                        </label>
-                      </>
-                    )}
-                    {deliveryMethod === "company" && (
-                      <label className="admin-order-detail__wide">
-                        Tracking Link (optional)
-                        <input
-                          className="input"
-                          type="url"
-                          value={trackingInput}
-                          onChange={(event) => setTrackingInput(event.target.value)}
-                          placeholder="https://courier.example/track/123"
-                        />
-                      </label>
-                    )}
-                  </div>
-                  <div className="admin-order-detail__actions-row">
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      disabled={deliverySaving}
-                      onClick={handleSaveDelivery}
+                  )}
+                  <label className="admin-order-detail__wide">
+                    Street address
+                    <input
+                      className="input"
+                      type="text"
+                      value={deliveryAddressForm.street}
+                      onChange={handleDeliveryAddressChange("street")}
+                      placeholder="Street address"
+                    />
+                  </label>
+                  <label>
+                    Suburb
+                    <input
+                      className="input"
+                      type="text"
+                      value={deliveryAddressForm.suburb}
+                      onChange={handleDeliveryAddressChange("suburb")}
+                      placeholder="Suburb"
+                    />
+                  </label>
+                  <label>
+                    City
+                    <input
+                      className="input"
+                      type="text"
+                      value={deliveryAddressForm.city}
+                      onChange={handleDeliveryAddressChange("city")}
+                      placeholder="City"
+                    />
+                  </label>
+                  <label>
+                    Province
+                    <select
+                      className="input"
+                      value={deliveryAddressForm.province}
+                      onChange={handleDeliveryAddressChange("province")}
                     >
-                      {deliverySaving ? "Saving…" : "Save Delivery"}
-                    </button>
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      disabled={resendOrderEmailSending}
-                      onClick={handleResendOrderConfirmationEmail}
-                    >
-                      {resendOrderEmailSending ? "Sending…" : "Resend Order Email"}
-                    </button>
-                  </div>
+                      <option value="">Select province</option>
+                      {SA_PROVINCES.map((provinceOption) => (
+                        <option key={provinceOption.value} value={provinceOption.value}>
+                          {provinceOption.value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Postal code
+                    <input
+                      className="input"
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={deliveryAddressForm.postalCode}
+                      onChange={handleDeliveryAddressChange("postalCode")}
+                      placeholder="0000"
+                    />
+                  </label>
+                  <label className="admin-order-detail__wide">
+                    Tracking Link (optional)
+                    <input
+                      className="input"
+                      type="url"
+                      value={trackingInput}
+                      onChange={(event) => setTrackingInput(event.target.value)}
+                      placeholder="https://courier.example/track/123"
+                    />
+                  </label>
+                </div>
+                {deliveryPreview && (
                   <div className="admin-order-email-status">
                     <p className="modal__meta">
-                      <strong>Order email:</strong>{" "}
-                      {selectedOrderEmailStatusLabel}
-                      {selectedOrderEmailStatus !== "unknown" ? ` (${selectedOrderEmailTemplateLabel})` : ""}
+                      <strong>Delivery totals preview:</strong> Shipping {formatPriceLabel(deliveryPreview.previousShippingCost)} {"->"}{" "}
+                      {deliveryPreview.canResolveNewShippingCost
+                        ? formatPriceLabel(deliveryPreview.nextShippingCost)
+                        : "Select courier"}{" "}
+                      | Total {formatPriceLabel(deliveryPreview.previousTotal)} {"->"}{" "}
+                      {formatPriceLabel(deliveryPreview.nextTotal)}
                     </p>
-                    {selectedOrderEmailAttemptedAtLabel && (
-                      <p className="modal__meta">
-                        Last attempt: {selectedOrderEmailAttemptedAtLabel}
-                        {selectedOrderEmailLastAttemptSource ? ` via ${selectedOrderEmailLastAttemptSource}` : ""}
-                      </p>
-                    )}
-                    {selectedOrderEmailError && (
+                    {deliveryMethod === "courier" &&
+                      !deliveryPreview.canResolveNewShippingCost &&
+                      deliveryProvince && (
+                        <p className="modal__meta admin-order-email-status__warning">
+                          No active courier pricing is available for {deliveryProvince}.
+                        </p>
+                      )}
+                    {deliveryPreview.paymentAdjustmentRequired && (
                       <p className="modal__meta admin-order-email-status__error">
-                        Details: {selectedOrderEmailError}
-                      </p>
-                    )}
-                    {selectedOrderEmailNeedsRetry && (
-                      <p className="modal__meta admin-order-email-status__warning">
-                        Customer may not have received the order email yet. Use "Resend Order Email".
+                        Paid order total will change by {formatPriceLabel(deliveryPreview.delta)} and require payment review.
                       </p>
                     )}
                   </div>
-                  {isPreorderedOrder(selectedOrder) && (
-                    <div className="admin-order-detail__actions-row">
-                      <label>
-                        Pre-order send month
-                        <input
-                          className="input"
-                          type="month"
-                          value={preorderNoticeMonth}
-                          onChange={(event) => setPreorderNoticeMonth(event.target.value)}
-                        />
-                      </label>
-                      <button
-                        className="btn btn--secondary"
-                        type="button"
-                        disabled={preorderNoticeSending}
-                        onClick={handleSendPreorderNoticeEmail}
-                      >
-                        {preorderNoticeSending ? "Sending…" : "Send Pre-order Notice"}
-                      </button>
-                    </div>
-                  )}
-                  {selectedPayfast.gatewayResponse && (
+                )}
+                <p className="modal__meta admin-order-detail__save-hint">
+                  Use "Save Delivery" in the top action bar to apply delivery changes.
+                </p>
+              </section>
+              </div>
+            )}
+
+            {activeOrderDetailTab === "communication" && (
+              <div
+                id="admin-order-detail-panel-communication"
+                role="tabpanel"
+                aria-labelledby="admin-order-detail-tab-communication"
+                className="admin-order-detail__tabpanel"
+              >
+              <section className="admin-order-detail__section-card">
+                <h4>Customer communication</h4>
+                <div className="admin-order-detail__actions-row">
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    disabled={deliveryUpdateEmailSending || !selectedOrder?.customer?.email}
+                    onClick={handleSendDeliveryUpdateEmail}
+                  >
+                    {deliveryUpdateEmailSending ? "Sending..." : "Send Delivery Update Email"}
+                  </button>
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    disabled={resendOrderEmailSending}
+                    onClick={handleResendOrderConfirmationEmail}
+                  >
+                    {resendOrderEmailSending ? "Sending..." : "Resend Order Email"}
+                  </button>
+                </div>
+                <div className="admin-order-email-status">
+                  <p className="modal__meta">
+                    <strong>Order email:</strong>{" "}
+                    {selectedOrderEmailStatusLabel}
+                    {selectedOrderEmailStatus !== "unknown" ? ` (${selectedOrderEmailTemplateLabel})` : ""}
+                  </p>
+                  {selectedOrderEmailAttemptedAtLabel && (
                     <p className="modal__meta">
-                      Gateway: {selectedPayfast.gatewayResponse} · Amount verified:{" "}
-                      {selectedPayfast.validatedWithGateway ? "yes" : "no"}
+                      Last attempt: {selectedOrderEmailAttemptedAtLabel}
+                      {selectedOrderEmailLastAttemptSource ? ` via ${selectedOrderEmailLastAttemptSource}` : ""}
+                    </p>
+                  )}
+                  {selectedOrderEmailError && (
+                    <p className="modal__meta admin-order-email-status__error">
+                      Details: {selectedOrderEmailError}
+                    </p>
+                  )}
+                  {selectedOrderEmailNeedsRetry && (
+                    <p className="modal__meta admin-order-email-status__warning">
+                      Customer may not have received the order email yet. Use "Resend Order Email".
+                    </p>
+                  )}
+                  {selectedPaymentAdjustment?.required && (
+                    <p className="modal__meta admin-order-email-status__warning">
+                      Payment review needed: order total changed after delivery update.
                     </p>
                   )}
                 </div>
+                {isPreorderedOrder(selectedOrder) && (
+                  <div className="admin-order-detail__actions-row">
+                    <label>
+                      Pre-order send month
+                      <input
+                        className="input"
+                        type="month"
+                        value={preorderNoticeMonth}
+                        onChange={(event) => setPreorderNoticeMonth(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      disabled={preorderNoticeSending}
+                      onClick={handleSendPreorderNoticeEmail}
+                    >
+                      {preorderNoticeSending ? "Sending..." : "Send Pre-order Notice"}
+                    </button>
+                  </div>
+                )}
+                <details className="admin-order-detail__advanced">
+                  <summary>Advanced diagnostics</summary>
+                  <div className="admin-order-detail__advanced-body">
+                    {selectedPayfast.gatewayResponse && (
+                      <p className="modal__meta">
+                        Gateway: {selectedPayfast.gatewayResponse} - Amount verified:{" "}
+                        {selectedPayfast.validatedWithGateway ? "yes" : "no"}
+                      </p>
+                    )}
+                    {selectedPayfast.paymentReference && (
+                      <p className="modal__meta">Gateway reference: {selectedPayfast.paymentReference}</p>
+                    )}
+                    {selectedPayfast.paymentId && (
+                      <p className="modal__meta">Gateway payment ID: {selectedPayfast.paymentId}</p>
+                    )}
+                    <p className="modal__meta">Internal order ID: {selectedOrder.id}</p>
+                  </div>
+                </details>
+              </section>
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>
@@ -10898,7 +14669,7 @@ export function AdminOrdersView() {
           <h3 className="modal__title">Add Tracking Link</h3>
           <p className="modal__meta">
             Include a tracking link so your customer can follow their delivery.
-            Leave blank if you’ll share it later.
+            Leave blank if you will share it later.
           </p>
           <label>
             Tracking link
@@ -10945,7 +14716,7 @@ export function AdminOrdersView() {
 
 export function AdminShippingView() {
   usePageMetadata({
-    title: "Admin · Shipping & Courier",
+    title: "Admin Â· Shipping & Courier",
     description: "Configure courier options and province-based delivery costs.",
   });
   const { inventoryEnabled } = useAdminData();
@@ -11162,7 +14933,7 @@ export function AdminShippingView() {
 
         <div className="admin-session-panel">
           <h3>Courier options</h3>
-          {status === "loading" && <p className="modal__meta">Loading courier options…</p>}
+          {status === "loading" && <p className="modal__meta">Loading courier optionsâ€¦</p>}
           {error && <p className="admin-panel__error">{error.message}</p>}
           {courierOptions.length === 0 ? (
             <p className="admin-panel__notice">No courier options configured yet.</p>
@@ -11278,7 +15049,7 @@ export function AdminShippingView() {
                             onClick={() => handleSaveCourier(option.id)}
                             disabled={savingId === option.id}
                           >
-                            {savingId === option.id ? "Saving…" : "Save changes"}
+                            {savingId === option.id ? "Savingâ€¦" : "Save changes"}
                           </button>
                         </div>
                       </>
@@ -11376,7 +15147,7 @@ export function AdminShippingView() {
                   Cancel
                 </button>
                 <button className="btn btn--primary" type="submit" disabled={savingId === "new"}>
-                  {savingId === "new" ? "Saving…" : "Create method"}
+                  {savingId === "new" ? "Savingâ€¦" : "Create method"}
                 </button>
               </div>
             </form>
@@ -11389,12 +15160,13 @@ export function AdminShippingView() {
 
 export function AdminProfileView() {
   usePageMetadata({
-    title: "Admin · Profile",
+    title: "Admin Â· Profile",
     description: "Manage your admin authentication info.",
   });
   const { user, role, signOut, refreshRole } = useAuth();
   const [statusMessage, setStatusMessage] = useState(null);
   const [roleLoading, setRoleLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleRefreshRole = async () => {
     setRoleLoading(true);
@@ -11405,6 +15177,14 @@ export function AdminProfileView() {
       setStatusMessage(error.message);
     } finally {
       setRoleLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } finally {
+      navigate("/", { replace: true });
     }
   };
 
@@ -11429,9 +15209,9 @@ export function AdminProfileView() {
             onClick={handleRefreshRole}
             disabled={roleLoading}
           >
-            {roleLoading ? "Refreshing…" : "Refresh Role"}
+            {roleLoading ? "Refreshingâ€¦" : "Refresh Role"}
           </button>
-          <button className="btn btn--primary" type="button" onClick={signOut}>
+          <button className="btn btn--primary" type="button" onClick={handleSignOut}>
             Sign Out
           </button>
         </div>
@@ -11453,7 +15233,7 @@ function AdminPagination({ page, total, onPageChange, pageSize = ADMIN_PAGE_SIZE
   return (
     <div className="admin-pagination">
       <span className="admin-pagination__info">
-        Showing {start}–{end} of {total}
+        Showing {start}â€“{end} of {total}
       </span>
       <div className="admin-pagination__controls">
         <button
@@ -11479,3 +15259,10 @@ function AdminPagination({ page, total, onPageChange, pageSize = ADMIN_PAGE_SIZE
     </div>
   );
 }
+
+
+
+
+
+
+

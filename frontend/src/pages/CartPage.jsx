@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useCart } from "../context/CartContext.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
+import { useCustomerProfile } from "../hooks/useCustomerProfile.js";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import {
   EFT_BANK_DETAILS,
@@ -11,20 +13,33 @@ import {
   clearPayfastPendingSession,
   setPayfastPendingSession,
 } from "../lib/payfastSession.js";
+import {
+  EFT_ORDER_FUNCTION_FALLBACK_ENDPOINT,
+  EFT_ORDER_FUNCTION_ENDPOINT,
+  PAYFAST_PAYMENT_FUNCTION_ENDPOINT,
+} from "../lib/functionEndpoints.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
-import { getStockStatus } from "../lib/stockStatus.js";
+import { getCustomerStockLabel, getStockStatus } from "../lib/stockStatus.js";
 
 const currency = (value) => `R${value.toFixed(2)}`;
-const PAYFAST_FUNCTION_URL =
-  "https://us-central1-bethanyblooms-89dcc.cloudfunctions.net/createPayfastPaymentHttp";
-const EFT_FUNCTION_URL =
-  "https://us-central1-bethanyblooms-89dcc.cloudfunctions.net/createEftOrderHttp";
+const CHECKOUT_REQUEST_TIMEOUT_MS = 20000;
+const CHECKOUT_MAX_ATTEMPTS = 2;
+const LOCAL_FUNCTIONS_URL_PATTERN = /^https?:\/\/(?:127\.0\.0\.1|localhost):5001\//i;
 const STEP_ORDER = ["contact", "shipping", "payment", "review"];
-const STEP_LABELS = {
+const BASE_STEP_LABELS = {
   contact: "Contact",
   shipping: "Shipping",
   payment: "Payment",
   review: "Review",
+};
+
+const isGiftCardCartItem = (item) =>
+  Boolean(item?.metadata?.giftCard?.isGiftCard || item?.metadata?.isGiftCard);
+
+const normalizeGiftCardOptionQuantity = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
+  return Math.min(200, parsed);
 };
 
 function CartPage() {
@@ -35,6 +50,8 @@ function CartPage() {
   });
 
   const { items, removeItem, updateItemQuantity, clearCart, totalPrice, totalCount } = useCart();
+  const { user } = useAuth();
+  const { profile: customerProfile, saveProfile: saveCustomerProfile } = useCustomerProfile();
   const { items: courierOptions = [], status: courierStatus } = useFirestoreCollection("courierOptions", {
     orderByField: "createdAt",
     orderDirection: "desc",
@@ -57,6 +74,7 @@ function CartPage() {
     province: "",
     postalCode: "",
   });
+  const [selectedSavedAddressId, setSelectedSavedAddressId] = useState("");
   const [selectedCourierId, setSelectedCourierId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS.PAYFAST);
   const [payfastConsent, setPayfastConsent] = useState(false);
@@ -70,6 +88,7 @@ function CartPage() {
   const paymentRef = useRef(null);
   const reviewRef = useRef(null);
   const contactFirstFieldRef = useRef(null);
+  const checkoutAbortRef = useRef(null);
 
   const cartTypeLabel = useMemo(() => {
     if (!items.length) return null;
@@ -88,25 +107,50 @@ function CartPage() {
 
   const resolveStock = (item) => {
     if (!item || item.metadata?.type !== "product") return null;
+    if (isGiftCardCartItem(item)) {
+      return {
+        status: getStockStatus({ quantity: null, status: "in_stock" }),
+        quantity: null,
+      };
+    }
     const productId = item.metadata?.productId || item.metadata?.productID || item.metadata?.product;
     const product = productLookup.get(productId) || null;
     if (!product) return null;
-    const variantId = item.metadata?.variantId || null;
+    const variantId = (item.metadata?.variantId || "").toString().trim();
+    const hasVariants = Array.isArray(product.variants) && product.variants.length > 0;
     const variant =
-      variantId && Array.isArray(product.variants)
-        ? product.variants.find((entry) => entry.id === variantId)
+      variantId && hasVariants
+        ? product.variants.find((entry) => (entry?.id || "").toString().trim() === variantId)
         : null;
+    if (hasVariants && (!variantId || !variant)) {
+      return {
+        status: getStockStatus({
+          quantity: 0,
+          forceOutOfStock: true,
+          status: "out_of_stock",
+        }),
+        quantity: 0,
+      };
+    }
     const rawQuantity =
-      variant?.stock_quantity ??
-      variant?.stockQuantity ??
-      variant?.quantity ??
-      product.stock_quantity ??
-      product.stockQuantity ??
-      product.quantity;
+      hasVariants
+        ? variant?.stock_quantity ?? variant?.stockQuantity ?? variant?.quantity
+        : product.stock_quantity ?? product.stockQuantity ?? product.quantity;
+    const statusValue = (variant?.stock_status || variant?.stockStatus || product.stock_status || "")
+      .toString()
+      .trim()
+      .toLowerCase();
+    const isVariantQuantityMissing =
+      hasVariants && (rawQuantity === undefined || rawQuantity === null || rawQuantity === "");
     const stockStatus = getStockStatus({
       quantity: rawQuantity,
-      forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
-      status: product.stock_status,
+      forceOutOfStock:
+        product.forceOutOfStock ||
+        product.stock_status === "out_of_stock" ||
+        variant?.forceOutOfStock ||
+        variant?.stock_status === "out_of_stock" ||
+        (isVariantQuantityMissing && statusValue !== "preorder"),
+      status: statusValue,
     });
     const quantity = Number.isFinite(stockStatus.quantity) ? stockStatus.quantity : null;
     return {
@@ -135,13 +179,59 @@ function CartPage() {
   );
 
   const hasItems = items.length > 0;
+  const cartHasWorkshops = useMemo(
+    () => items.some((item) => item?.metadata?.type === "workshop"),
+    [items],
+  );
+  const cartHasGiftCards = useMemo(
+    () => items.some((item) => item?.metadata?.type === "product" && isGiftCardCartItem(item)),
+    [items],
+  );
+  const cartHasPhysicalProducts = useMemo(
+    () => items.some((item) => item?.metadata?.type === "product" && !isGiftCardCartItem(item)),
+    [items],
+  );
+  const savedAddresses = useMemo(() => {
+    if (!Array.isArray(customerProfile?.addresses)) return [];
+    return customerProfile.addresses
+      .map((entry) => ({
+        id: (entry.id || "").toString().trim(),
+        label: (entry.label || "Saved address").toString().trim() || "Saved address",
+        street: (entry.street || "").toString().trim(),
+        suburb: (entry.suburb || "").toString().trim(),
+        city: (entry.city || "").toString().trim(),
+        province: (entry.province || "").toString().trim(),
+        postalCode: (entry.postalCode || "").toString().trim(),
+      }))
+      .filter(
+        (entry) =>
+          entry.id &&
+          entry.street &&
+          entry.suburb &&
+          entry.city &&
+          entry.province &&
+          entry.postalCode,
+      );
+  }, [customerProfile?.addresses]);
+  const defaultSavedAddressId = (customerProfile?.defaultAddressId || "").toString().trim();
+  const accountEmail = (user?.email || "").toString().trim();
+  const giftCardOnlyCart = hasItems && cartHasGiftCards && !cartHasPhysicalProducts && !cartHasWorkshops;
+  const requiresShipping = !giftCardOnlyCart;
+  const effectiveCheckoutEmail = accountEmail || contactDetails.email.trim();
+  const stepLabels = useMemo(
+    () => ({
+      ...BASE_STEP_LABELS,
+      shipping: requiresShipping ? "Shipping" : "Delivery",
+    }),
+    [requiresShipping],
+  );
   const isContactComplete = Boolean(
     contactDetails.fullName.trim() &&
-      contactDetails.email.trim() &&
+      effectiveCheckoutEmail &&
       contactDetails.phone.trim(),
   );
   const postalCodeValid = /^\d{4}$/.test(shippingAddress.postalCode.trim());
-  const isShippingComplete = Boolean(
+  const isShippingComplete = !requiresShipping || Boolean(
     shippingAddress.street.trim() &&
       shippingAddress.suburb.trim() &&
       shippingAddress.city.trim() &&
@@ -159,7 +249,7 @@ function CartPage() {
   };
 
   const availableCouriers = useMemo(() => {
-    if (!shippingAddress.province) return [];
+    if (!requiresShipping || !shippingAddress.province) return [];
     return courierOptions
       .filter((option) => option.isActive !== false)
       .map((option) => {
@@ -174,11 +264,11 @@ function CartPage() {
       })
       .filter((option) => option.isAvailable && Number.isFinite(option.price))
       .sort((a, b) => a.price - b.price);
-  }, [courierOptions, shippingAddress.province]);
+  }, [courierOptions, requiresShipping, shippingAddress.province]);
 
   const selectedCourier =
     availableCouriers.find((option) => option.id === selectedCourierId) || null;
-  const shippingCost = selectedCourier ? selectedCourier.price : 0;
+  const shippingCost = requiresShipping && selectedCourier ? selectedCourier.price : 0;
   const itemSubtotal = totalPrice;
   const orderTotal = itemSubtotal + shippingCost;
 
@@ -198,7 +288,7 @@ function CartPage() {
     if (activeStep === "contact" && !isContactComplete) {
       return "Continue with checkout";
     }
-    return `Continue to ${STEP_LABELS[nextStep]}`;
+    return `Continue to ${stepLabels[nextStep]}`;
   })();
 
   useEffect(() => {
@@ -209,6 +299,7 @@ function CartPage() {
 
   useEffect(() => {
     if (!items.length) return;
+    if (user?.uid) return;
     const metadataCustomer = items.find((item) => item.metadata?.customer)?.metadata?.customer;
     if (!metadataCustomer) return;
     setContactDetails((prev) => {
@@ -229,7 +320,55 @@ function CartPage() {
         street: metadataCustomer.address || "",
       };
     });
-  }, [items]);
+  }, [items, user?.uid]);
+
+  useEffect(() => {
+    if (!accountEmail) return;
+    setContactDetails((prev) => {
+      const nextFullName = prev.fullName.trim() || customerProfile?.fullName || user?.displayName || "";
+      const nextPhone = prev.phone.trim() || customerProfile?.phone || "";
+      if (
+        prev.email === accountEmail &&
+        prev.fullName === nextFullName &&
+        prev.phone === nextPhone
+      ) {
+        return prev;
+      }
+      return {
+        fullName: nextFullName,
+        email: accountEmail,
+        phone: nextPhone,
+      };
+    });
+  }, [accountEmail, customerProfile?.fullName, customerProfile?.phone, user?.displayName]);
+
+  useEffect(() => {
+    if (!requiresShipping || savedAddresses.length === 0) {
+      setSelectedSavedAddressId("");
+      return;
+    }
+    setSelectedSavedAddressId((prev) => {
+      if (prev && savedAddresses.some((entry) => entry.id === prev)) return prev;
+      if (defaultSavedAddressId && savedAddresses.some((entry) => entry.id === defaultSavedAddressId)) {
+        return defaultSavedAddressId;
+      }
+      return savedAddresses[0]?.id || "";
+    });
+  }, [defaultSavedAddressId, requiresShipping, savedAddresses]);
+
+  useEffect(() => {
+    if (!requiresShipping || !selectedSavedAddressId) return;
+    const selectedAddress = savedAddresses.find((entry) => entry.id === selectedSavedAddressId);
+    if (!selectedAddress) return;
+    setShippingAddress((prev) => ({
+      ...prev,
+      street: selectedAddress.street,
+      suburb: selectedAddress.suburb,
+      city: selectedAddress.city,
+      province: selectedAddress.province,
+      postalCode: selectedAddress.postalCode,
+    }));
+  }, [requiresShipping, savedAddresses, selectedSavedAddressId]);
 
   useEffect(() => {
     if (!orderSuccess) return undefined;
@@ -239,15 +378,29 @@ function CartPage() {
     return () => clearTimeout(timeout);
   }, [orderSuccess]);
 
+  useEffect(
+    () => () => {
+      checkoutAbortRef.current?.abort();
+      checkoutAbortRef.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (!shippingAddress.province) {
+    if (!requiresShipping || !shippingAddress.province) {
       setSelectedCourierId("");
       return;
     }
     const stillAvailable = availableCouriers.some((option) => option.id === selectedCourierId);
     if (stillAvailable) return;
     setSelectedCourierId(availableCouriers[0]?.id || "");
-  }, [availableCouriers, selectedCourierId, shippingAddress.province]);
+  }, [availableCouriers, requiresShipping, selectedCourierId, shippingAddress.province]);
+
+  useEffect(() => {
+    if (!cartHasGiftCards || paymentMethod !== PAYMENT_METHODS.EFT) return;
+    setPaymentMethod(PAYMENT_METHODS.PAYFAST);
+    setOrderError("Gift cards can only be paid through PayFast.");
+  }, [cartHasGiftCards, paymentMethod]);
 
   const handleContactChange = (field) => (event) => {
     const value = event.target.value;
@@ -344,7 +497,95 @@ function CartPage() {
     form.submit();
   };
 
+  const postCheckoutRequest = async (
+    url,
+    payload,
+    fallbackErrorMessage,
+    options = {},
+  ) => {
+    const { fallbackUrl = null } = options;
+
+    const requestWithRetries = async (targetUrl) => {
+      let lastError = null;
+
+      for (let attempt = 1; attempt <= CHECKOUT_MAX_ATTEMPTS; attempt += 1) {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => {
+          controller.abort();
+        }, CHECKOUT_REQUEST_TIMEOUT_MS);
+        checkoutAbortRef.current = controller;
+
+        try {
+          const response = await fetch(targetUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+          const data = await response.json().catch(() => null);
+
+          if (!response.ok) {
+            const retryableStatus = response.status >= 500 || response.status === 429;
+            const message =
+              (data?.error || "").toString().trim() ||
+              (retryableStatus
+                ? "Checkout service is temporarily unavailable. Please try again."
+                : fallbackErrorMessage);
+            const requestError = new Error(message);
+            requestError.retryable = retryableStatus;
+            throw requestError;
+          }
+
+          return data;
+        } catch (error) {
+          const isAbort = error?.name === "AbortError" || controller.signal.aborted;
+          const isNetworkFailure = error instanceof TypeError;
+          const retryable = Boolean(error?.retryable) || isAbort || isNetworkFailure;
+          lastError = isAbort
+            ? new Error("Checkout request timed out. Please retry.")
+            : error instanceof Error
+              ? error
+              : new Error(fallbackErrorMessage);
+          lastError.retryable = retryable;
+          lastError.networkFailure = isAbort || isNetworkFailure;
+
+          if (attempt < CHECKOUT_MAX_ATTEMPTS && retryable) {
+            await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
+            continue;
+          }
+
+          throw lastError;
+        } finally {
+          window.clearTimeout(timeoutId);
+          if (checkoutAbortRef.current === controller) {
+            checkoutAbortRef.current = null;
+          }
+        }
+      }
+
+      throw lastError || new Error(fallbackErrorMessage);
+    };
+
+    try {
+      return await requestWithRetries(url);
+    } catch (error) {
+      const isLocalEndpointNetworkFailure =
+        LOCAL_FUNCTIONS_URL_PATTERN.test(url) && Boolean(error?.networkFailure);
+      const canUseFallback =
+        fallbackUrl &&
+        fallbackUrl !== url &&
+        isLocalEndpointNetworkFailure;
+      if (!canUseFallback) {
+        throw error;
+      }
+      return requestWithRetries(fallbackUrl);
+    }
+  };
+
   const handlePlaceOrder = async () => {
+    if (placingOrder) return;
     if (!hasItems) return;
 
     const incompleteStep = (() => {
@@ -377,25 +618,52 @@ function CartPage() {
     }
 
     const metadataCustomer = items.find((item) => item.metadata?.customer)?.metadata?.customer;
-    const normalizedShippingAddress = {
-      street: shippingAddress.street.trim(),
-      suburb: shippingAddress.suburb.trim(),
-      city: shippingAddress.city.trim(),
-      province: shippingAddress.province.trim(),
-      postalCode: shippingAddress.postalCode.trim(),
-    };
-    const formattedAddress = formatShippingAddress(normalizedShippingAddress);
+    const normalizedShippingAddress = requiresShipping
+      ? {
+          street: shippingAddress.street.trim(),
+          suburb: shippingAddress.suburb.trim(),
+          city: shippingAddress.city.trim(),
+          province: shippingAddress.province.trim(),
+          postalCode: shippingAddress.postalCode.trim(),
+        }
+      : null;
+    const formattedAddress = normalizedShippingAddress ? formatShippingAddress(normalizedShippingAddress) : "";
+    const digitalAddressFallback = giftCardOnlyCart ? "Digital gift card delivery via email" : "";
+    const checkoutEmail = accountEmail || contactDetails.email || metadataCustomer?.email || "";
     const customer = {
       fullName: contactDetails.fullName || metadataCustomer?.fullName || "",
-      email: contactDetails.email || metadataCustomer?.email || "",
+      email: checkoutEmail,
       phone: contactDetails.phone || metadataCustomer?.phone || "",
-      address: formattedAddress || metadataCustomer?.address || "",
+      address: formattedAddress || metadataCustomer?.address || digitalAddressFallback,
     };
 
     const requiredFields = ["fullName", "email", "phone", "address"];
     const missing = requiredFields.filter((field) => !customer[field]?.trim());
     if (missing.length) {
       setOrderError("Please complete your contact and shipping details before placing the order.");
+      return;
+    }
+
+    const stockIssue = items.find((item) => {
+      if (item.metadata?.type !== "product") return false;
+      const stockInfo = resolveStock(item);
+      if (!stockInfo) return false;
+      if (stockInfo.status?.state === "out") return true;
+      if (Number.isFinite(stockInfo.quantity)) {
+        return (Number(item.quantity) || 0) > stockInfo.quantity;
+      }
+      return false;
+    });
+    if (stockIssue) {
+      const stockInfo = resolveStock(stockIssue);
+      const variantLabel = stockIssue.metadata?.variantLabel ? ` (${stockIssue.metadata.variantLabel})` : "";
+      if (stockInfo?.status?.state === "out") {
+        setOrderError(`${stockIssue.name}${variantLabel} is out of stock. Please remove it from your cart.`);
+      } else {
+        setOrderError(
+          `Only ${stockInfo?.quantity ?? 0} available for ${stockIssue.name}${variantLabel}. Please reduce quantity.`,
+        );
+      }
       return;
     }
 
@@ -423,33 +691,82 @@ function CartPage() {
         },
         items: orderItems,
         subtotal: orderTotal,
-        shippingCost,
-        shippingAddress: normalizedShippingAddress,
-        shipping: selectedCourier
+        shippingCost: requiresShipping ? shippingCost : 0,
+        shippingAddress: requiresShipping ? normalizedShippingAddress : null,
+        shipping: requiresShipping && selectedCourier
           ? {
               courierId: selectedCourier.id,
               courierName: selectedCourier.name,
               courierPrice: selectedCourier.price,
-              province: normalizedShippingAddress.province,
+              province: normalizedShippingAddress?.province || "",
             }
           : null,
+        customerUid: user?.uid || null,
         totalPrice: finalTotal,
       };
 
+      if (user?.uid) {
+        try {
+          const existingAddresses = Array.isArray(customerProfile?.addresses)
+            ? customerProfile.addresses
+            : [];
+          const normalizedAddressKey = normalizedShippingAddress
+            ? formatShippingAddress(normalizedShippingAddress).toLowerCase()
+            : "";
+          const existingAddress = normalizedAddressKey
+            ? existingAddresses.find(
+                (entry) => formatShippingAddress(entry).toLowerCase() === normalizedAddressKey,
+              )
+            : null;
+          const nextAddresses =
+            requiresShipping && normalizedShippingAddress
+              ? existingAddress
+                ? existingAddresses
+                : [
+                    ...existingAddresses,
+                    {
+                      id: selectedSavedAddressId || `addr-${Date.now()}`,
+                      label: selectedSavedAddressId
+                        ? savedAddresses.find((entry) => entry.id === selectedSavedAddressId)?.label ||
+                          "Saved address"
+                        : "Saved address",
+                      ...normalizedShippingAddress,
+                    },
+                  ].slice(0, 10)
+              : existingAddresses;
+
+          await saveCustomerProfile({
+            fullName: customer.fullName.trim(),
+            phone: customer.phone.trim(),
+            addresses: nextAddresses,
+            defaultAddressId:
+              selectedSavedAddressId ||
+              customerProfile?.defaultAddressId ||
+              nextAddresses[0]?.id ||
+              "",
+            preferences: customerProfile?.preferences || {
+              marketingEmails: true,
+              orderUpdates: true,
+            },
+          });
+        } catch (profileSaveError) {
+          console.warn("Unable to update customer profile from checkout", profileSaveError);
+        }
+      }
+
       if (paymentMethod === PAYMENT_METHODS.EFT) {
-        const response = await fetch(EFT_FUNCTION_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
+        const eftData = await postCheckoutRequest(
+          EFT_ORDER_FUNCTION_ENDPOINT,
+          {
             ...checkoutPayload,
             paymentMethod: PAYMENT_METHODS.EFT,
-          }),
-        });
-
-        const eftData = await response.json().catch(() => null);
-        if (!response.ok || !eftData?.ok) {
+          },
+          "Unable to create EFT order.",
+          {
+            fallbackUrl: EFT_ORDER_FUNCTION_FALLBACK_ENDPOINT,
+          },
+        );
+        if (!eftData?.ok) {
           throw new Error(eftData?.error || "Unable to create EFT order.");
         }
 
@@ -480,23 +797,16 @@ function CartPage() {
         });
       } else {
         clearPayfastPendingSession();
-        const response = await fetch(PAYFAST_FUNCTION_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
+        const payfastData = await postCheckoutRequest(
+          PAYFAST_PAYMENT_FUNCTION_ENDPOINT,
+          {
             ...checkoutPayload,
             paymentMethod: PAYMENT_METHODS.PAYFAST,
             returnUrl: `${window.location.origin}/payment/success`,
             cancelUrl: `${window.location.origin}/payment/cancel`,
-          }),
-        });
-
-        const payfastData = await response.json().catch(() => null);
-        if (!response.ok) {
-          throw new Error(payfastData?.error || "Unable to reach PayFast gateway.");
-        }
+          },
+          "Unable to reach PayFast gateway.",
+        );
 
         if (!payfastData?.url || !payfastData?.fields) {
           throw new Error("PayFast gateway returned an invalid response.");
@@ -511,6 +821,7 @@ function CartPage() {
           .trim();
         setPayfastPendingSession({
           paymentReference: paymentReference || null,
+          containsGiftCards: cartHasGiftCards,
           createdAt: new Date().toISOString(),
         });
 
@@ -518,7 +829,7 @@ function CartPage() {
         submitPayfastForm(payfastData.url, payfastData.fields);
       }
     } catch (error) {
-      setOrderError(error.message);
+      setOrderError(error?.message || "Unable to process checkout. Please try again.");
     } finally {
       setPlacingOrder(false);
     }
@@ -539,6 +850,11 @@ function CartPage() {
                 Your cart currently contains {cartTypeLabel}. Clear it before switching between workshops and products.
               </p>
             )}
+            {cartHasGiftCards && (
+              <p className="cart-page__notice">
+                Gift cards are digital and PayFast-only. EFT is disabled for this order.
+              </p>
+            )}
             {items.length === 0 ? (
               <div className="empty-state cart-page__empty">
                 <p>Your cart is currently empty. Add a product or workshop booking to begin.</p>
@@ -557,8 +873,17 @@ function CartPage() {
                   const unitPrice = typeof item.price === "number" ? item.price : Number(item.price) || 0;
                   const total = unitPrice * item.quantity;
                   const isProduct = item.metadata?.type === "product";
+                  const isGiftCard = isProduct && isGiftCardCartItem(item);
+                  const giftCardMeta = isGiftCard ? item.metadata?.giftCard || {} : null;
+                  const giftCardOptions = Array.isArray(giftCardMeta?.selectedOptions)
+                    ? giftCardMeta.selectedOptions.filter(Boolean)
+                    : [];
+                  const giftCardOptionCount = giftCardOptions.reduce((sum, option) => {
+                    return sum + normalizeGiftCardOptionQuantity(option?.quantity);
+                  }, 0);
                   const stockInfo = resolveStock(item);
                   const stockLimit = stockInfo?.quantity;
+                  const stockLabel = stockInfo?.status ? getCustomerStockLabel(stockInfo.status) : "";
                   const maxQuantity = Number.isFinite(stockLimit) ? Math.max(stockLimit, item.quantity) : 99;
                   const canIncrease = Number.isFinite(stockLimit) ? item.quantity < stockLimit : true;
                   const productId =
@@ -587,9 +912,11 @@ function CartPage() {
                         .replace(/\b\w/g, (char) => char.toUpperCase())
                     : "";
                   const productInfoLabel =
-                    categoryLabel || item.metadata?.attribute || item.metadata?.color || "Product";
+                    isGiftCard ? "Gift Card" : categoryLabel || item.metadata?.attribute || item.metadata?.color || "Product";
                   const variantLabel = item.metadata?.variantLabel;
-                  const variantDisplay = variantLabel ? `Variant: ${variantLabel}` : "Variant: Standard";
+                  const variantDisplay = isGiftCard ?
+                     `Gift card options: ${giftCardOptionCount || 0}`
+                    : variantLabel ? `Variant: ${variantLabel}` : "Variant: Standard";
 
                   return (
                     <li key={item.id} className={`cart-list__item ${isProduct ? "cart-list__item--row" : ""}`}>
@@ -598,6 +925,40 @@ function CartPage() {
                           <div className="cart-list__product">
                             <span className="cart-list__title">{item.name}</span>
                             <span className="cart-list__meta-subtle">{productInfoLabel}</span>
+                            {isGiftCard && (
+                              <div className="cart-list__meta">
+                                {(giftCardMeta?.recipientName || giftCardMeta?.purchaserName) && (
+                                  <p>
+                                    <strong>Recipient:</strong>{" "}
+                                    {giftCardMeta.recipientName || giftCardMeta.purchaserName}
+                                  </p>
+                                )}
+                                {giftCardMeta?.purchaserName && (
+                                  <p>
+                                    <strong>Purchased by:</strong> {giftCardMeta.purchaserName}
+                                  </p>
+                                )}
+                                {giftCardMeta?.message && (
+                                  <p>
+                                    <strong>Message:</strong> {giftCardMeta.message}
+                                  </p>
+                                )}
+                                {giftCardOptions.length > 0 && (
+                                  <p>
+                                    <strong>Selected options:</strong>{" "}
+                                    {giftCardOptions
+                                      .map((option) => {
+                                        const quantity = normalizeGiftCardOptionQuantity(option?.quantity);
+                                        const amount = Number(option?.amount || 0);
+                                        const amountLabel = Number.isFinite(amount) ? `R${amount.toFixed(2)}` : "R0.00";
+                                        if (quantity <= 1) return `${option.label} (${amountLabel})`;
+                                        return `${option.label} x${quantity} (${amountLabel} each)`;
+                                      })
+                                      .join(", ")}
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
                           <div className="cart-list__quantity">
                             <span className="cart-list__quantity-label">Qty</span>
@@ -634,9 +995,9 @@ function CartPage() {
                                 +
                               </button>
                             </div>
-                            {Number.isFinite(stockLimit) && (
+                            {stockLabel && (
                               <span className="cart-list__stock-note">
-                                {stockLimit <= 0 ? "Out of stock" : `In stock: ${stockLimit}`}
+                                {stockLabel}
                               </span>
                             )}
                           </div>
@@ -782,7 +1143,7 @@ function CartPage() {
                       disabled={isLocked}
                     >
                       <span className="checkout-step__index">{index + 1}</span>
-                      <span className="checkout-step__title">{STEP_LABELS[step]}</span>
+                      <span className="checkout-step__title">{stepLabels[step]}</span>
                       <span className="checkout-step__status">{statusLabel}</span>
                     </button>
                     <div
@@ -793,7 +1154,9 @@ function CartPage() {
                       {step === "contact" && (
                         <div className="checkout-step__fields">
                           <p className="modal__meta">
-                            Guest checkout is the default. We'll send confirmation updates to your email.
+                            {accountEmail
+                              ? `Signed in as ${accountEmail}. Your account details are prefilled below.`
+                              : "Guest checkout is the default. We'll send confirmation updates to your email."}
                           </p>
                           <label>
                             Full Name
@@ -814,9 +1177,10 @@ function CartPage() {
                               className="input"
                               type="email"
                               autoComplete="email"
-                              value={contactDetails.email}
+                              value={accountEmail || contactDetails.email}
                               onChange={handleContactChange("email")}
                               placeholder="Email address"
+                              readOnly={Boolean(accountEmail)}
                               required
                             />
                           </label>
@@ -837,9 +1201,33 @@ function CartPage() {
 
                       {step === "shipping" && (
                         <div className="checkout-step__fields">
+                          {requiresShipping ? (
+                            <>
                           <p className="modal__meta">
                             Add your delivery or collection address so we can confirm fulfillment details.
                           </p>
+                          {accountEmail && savedAddresses.length > 0 && (
+                            <>
+                              <label>
+                                Saved addresses
+                                <select
+                                  className="input"
+                                  value={selectedSavedAddressId}
+                                  onChange={(event) => setSelectedSavedAddressId(event.target.value)}
+                                >
+                                  <option value="">Enter a new address manually</option>
+                                  {savedAddresses.map((address) => (
+                                    <option key={address.id} value={address.id}>
+                                      {address.label} - {formatShippingAddress(address)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <p className="modal__meta">
+                                Manage saved addresses from your <Link to="/account">Account</Link> page.
+                              </p>
+                            </>
+                          )}
                           <label>
                             Street Address
                             <input
@@ -950,6 +1338,18 @@ function CartPage() {
                             )}
                           </div>
                           <p className="modal__meta">We will confirm delivery details after checkout.</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="modal__meta">
+                                This order contains digital gift cards only. Delivery is by email and no shipping
+                                address is required.
+                              </p>
+                              <p className="modal__meta">
+                                Gift cards will be sent to the checkout email after successful PayFast payment.
+                              </p>
+                            </>
+                          )}
                         </div>
                       )}
 
@@ -977,22 +1377,36 @@ function CartPage() {
                             <label
                               className={`checkout-payment-method ${
                                 paymentMethod === PAYMENT_METHODS.EFT ? "is-selected" : ""
-                              }`}
+                              } ${cartHasGiftCards ? "is-disabled" : ""}`}
                             >
                               <input
                                 type="radio"
                                 name="payment-method"
                                 value={PAYMENT_METHODS.EFT}
                                 checked={paymentMethod === PAYMENT_METHODS.EFT}
+                                disabled={cartHasGiftCards}
                                 onChange={() => {
+                                  if (cartHasGiftCards) {
+                                    setOrderError("Gift cards can only be paid through PayFast.");
+                                    return;
+                                  }
                                   setPaymentMethod(PAYMENT_METHODS.EFT);
                                   setPayfastConsent(false);
                                   setOrderError(null);
                                 }}
                               />
-                              <span>EFT (Manual admin approval required)</span>
+                              <span>
+                                EFT (Manual admin approval required)
+                                {cartHasGiftCards ? " - unavailable for gift cards" : ""}
+                              </span>
                             </label>
                           </div>
+
+                          {cartHasGiftCards && (
+                            <p className="modal__meta">
+                              Gift cards must be paid via PayFast. EFT is disabled for orders containing gift cards.
+                            </p>
+                          )}
 
                           {paymentMethod === PAYMENT_METHODS.PAYFAST && (
                             <>
@@ -1038,17 +1452,23 @@ function CartPage() {
                               <h3>Contact</h3>
                               <p>{contactDetails.fullName || "Add contact details"}</p>
                               <p className="modal__meta">
-                                {contactDetails.email || "Email address"}
+                                {accountEmail || contactDetails.email || "Email address"}
                                 {contactDetails.phone ? ` - ${contactDetails.phone}` : ""}
                               </p>
                             </div>
                             <div className="checkout-review__card">
                               <h3>Shipping</h3>
-                              <p>{formatShippingAddress(shippingAddress) || "Add a delivery address"}</p>
+                              <p>
+                                {requiresShipping ?
+                                   formatShippingAddress(shippingAddress) || "Add a delivery address"
+                                  : "Digital delivery by email"}
+                              </p>
                               <p className="modal__meta">
-                                {selectedCourier
-                                  ? `${selectedCourier.name} · ${currency(selectedCourier.price)}`
-                                  : "Select a courier option"}
+                                {requiresShipping
+                                  ? selectedCourier
+                                    ? `${selectedCourier.name} - ${currency(selectedCourier.price)}`
+                                    : "Select a courier option"
+                                  : "No courier required"}
                               </p>
                             </div>
                             <div className="checkout-review__card">
@@ -1061,7 +1481,9 @@ function CartPage() {
                                     : "Confirm PayFast step"}
                               </p>
                               <p className="modal__meta">
-                                {paymentMethod === PAYMENT_METHODS.EFT
+                                {cartHasGiftCards
+                                  ? "Gift cards are PayFast only."
+                                  : paymentMethod === PAYMENT_METHODS.EFT
                                   ? "After order placement, you will receive exact EFT transfer details and reference."
                                   : "Secure PayFast checkout."}
                               </p>
@@ -1076,50 +1498,58 @@ function CartPage() {
             </div>
           </div>
 
-          <aside className="cart-page__panel cart-page__summary">
-            <h2>Order summary</h2>
-            <div className="cart-page__totals">
-              <div className="cart-page__total-row">
-                <span>Items</span>
-                <strong>{totalCount}</strong>
+          <aside className="cart-page__summary">
+            <div className="cart-page__panel cart-page__summary-inner">
+              <h2>Order summary</h2>
+              <div className="cart-page__totals">
+                <div className="cart-page__total-row">
+                  <span>Items</span>
+                  <strong>{totalCount}</strong>
+                </div>
+                <div className="cart-page__total-row">
+                  <span>Subtotal</span>
+                  <strong>{currency(itemSubtotal)}</strong>
+                </div>
+                <div className="cart-page__total-row cart-page__total-row--muted">
+                  <span>Shipping</span>
+                  <span>
+                    {requiresShipping
+                      ? selectedCourier
+                        ? currency(shippingCost)
+                        : "Select a courier"
+                      : "Digital delivery"}
+                  </span>
+                </div>
+                <div className="cart-page__total-row cart-page__total-row--muted">
+                  <span>Taxes</span>
+                  <span>Included where applicable</span>
+                </div>
+                <div className="cart-page__total-row cart-page__grand-total">
+                  <span>Total</span>
+                  <strong>{currency(orderTotal)}</strong>
+                </div>
               </div>
-              <div className="cart-page__total-row">
-                <span>Subtotal</span>
-                <strong>{currency(itemSubtotal)}</strong>
+              <p className="cart-page__summary-note">
+                {requiresShipping
+                  ? "Shipping is calculated based on the selected courier and province."
+                  : "This order contains digital gift cards, so no shipping fee applies."}
+              </p>
+              {orderError && <p className="admin-panel__error">{orderError}</p>}
+              {orderSuccess && <p className="admin-save-indicator">{orderSuccess}</p>}
+              <div className="cart-page__sticky-bar">
+                <div className="cart-page__sticky-row">
+                  <span>Total</span>
+                  <strong>{currency(orderTotal)}</strong>
+                </div>
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={handlePrimaryAction}
+                  disabled={placingOrder || !hasItems}
+                >
+                  {primaryActionLabel}
+                </button>
               </div>
-              <div className="cart-page__total-row cart-page__total-row--muted">
-                <span>Shipping</span>
-                <span>
-                  {selectedCourier ? currency(shippingCost) : "Select a courier"}
-                </span>
-              </div>
-              <div className="cart-page__total-row cart-page__total-row--muted">
-                <span>Taxes</span>
-                <span>Included where applicable</span>
-              </div>
-              <div className="cart-page__total-row cart-page__grand-total">
-                <span>Total</span>
-                <strong>{currency(orderTotal)}</strong>
-              </div>
-            </div>
-            <p className="cart-page__summary-note">
-              Shipping is calculated based on the selected courier and province.
-            </p>
-            {orderError && <p className="admin-panel__error">{orderError}</p>}
-            {orderSuccess && <p className="admin-save-indicator">{orderSuccess}</p>}
-            <div className="cart-page__sticky-bar">
-              <div className="cart-page__sticky-row">
-                <span>Total</span>
-                <strong>{currency(orderTotal)}</strong>
-              </div>
-              <button
-                className="btn btn--primary"
-                type="button"
-                onClick={handlePrimaryAction}
-                disabled={placingOrder || !hasItems}
-              >
-                {primaryActionLabel}
-              </button>
             </div>
           </aside>
         </div>

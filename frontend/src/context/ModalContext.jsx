@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const ModalContext = createContext(null);
@@ -14,6 +14,18 @@ export function ModalProvider({ children }) {
   }, [navigate]);
   const notifyCart = useCallback((message = "Added to cart") => {
     setCartNotice({ message, id: Date.now() });
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleCartNotice = (event) => {
+      const message = event?.detail?.message;
+      if (!message) return;
+      setCartNotice({ message: String(message), id: Date.now() });
+    };
+    window.addEventListener("cart-notice", handleCartNotice);
+    return () => {
+      window.removeEventListener("cart-notice", handleCartNotice);
+    };
   }, []);
   const dismissCartNotice = useCallback(() => {
     setCartNotice(null);
