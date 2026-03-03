@@ -8,7 +8,7 @@ export const testimonials = [
     author: "Michelle, Johannesburg",
   },
   {
-    quote: "My custom pressed bouquet is now framed in our living room. It’s my favourite keepsake.",
+    quote: "My custom pressed bouquet is now framed in our living room. It's my favourite keepsake.",
     author: "Thabo, Pretoria",
   },
 ];

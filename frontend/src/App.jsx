@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import { CartProvider } from "./context/CartContext.jsx";
 import { ModalProvider } from "./context/ModalContext.jsx";
@@ -26,6 +26,9 @@ const PaymentCancelPage = lazy(() => import("./pages/PaymentCancelPage.jsx"));
 const EftSubmittedPage = lazy(() => import("./pages/EftSubmittedPage.jsx"));
 const GiftCardPage = lazy(() => import("./pages/GiftCardPage.jsx"));
 const DesignSystemPage = lazy(() => import("./pages/DesignSystemPage.jsx"));
+const PrivacyPolicyPage = lazy(() => import("./pages/PrivacyPolicyPage.jsx"));
+const DisclaimerPage = lazy(() => import("./pages/DisclaimerPage.jsx"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage.jsx"));
 
 const loadAdminPageModule = () => import("./pages/AdminPage.jsx");
 const AdminDashboardView = lazy(() =>
@@ -45,6 +48,12 @@ const AdminEmailTestView = lazy(() =>
 );
 const AdminInvoicePreviewView = lazy(() =>
   loadAdminPageModule().then((module) => ({ default: module.AdminInvoicePreviewView })),
+);
+const AdminGiftCardPreviewView = lazy(() =>
+  loadAdminPageModule().then((module) => ({ default: module.AdminGiftCardPreviewView })),
+);
+const AdminGiftCardGenerateManageView = lazy(() =>
+  loadAdminPageModule().then((module) => ({ default: module.AdminGiftCardGenerateManageView })),
 );
 const AdminOrdersView = lazy(() =>
   loadAdminPageModule().then((module) => ({ default: module.AdminOrdersView })),
@@ -124,8 +133,10 @@ function App() {
                 <Route path="/payment/cancel" element={<PaymentCancelPage />} />
                 <Route path="/payment/eft-submitted" element={<EftSubmittedPage />} />
                 <Route path="/gift-cards/:giftCardId" element={<GiftCardPage />} />
+                <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+                <Route path="/disclaimer" element={<DisclaimerPage />} />
                 <Route path="/design" element={<DesignSystemPage />} />
-                <Route path="*" element={<HomePage />} />
+                <Route path="*" element={<NotFoundPage />} />
               </Route>
               <Route path="/admin" element={<AdminLayout />}>
                 <Route index element={<AdminDashboardView />} />
@@ -144,6 +155,18 @@ function App() {
                 <Route path="events" element={<AdminEventsView />} />
                 <Route path="emails" element={<AdminEmailTestView />} />
                 <Route path="invoices" element={<AdminInvoicePreviewView />} />
+                <Route
+                  path="commerce/gift-cards/preview"
+                  element={<AdminGiftCardPreviewView />}
+                />
+                <Route
+                  path="commerce/gift-cards/generate"
+                  element={<AdminGiftCardGenerateManageView />}
+                />
+                <Route
+                  path="gift-cards"
+                  element={<Navigate to="/admin/commerce/gift-cards/preview" replace />}
+                />
                 <Route path="pos" element={<AdminPosPage />} />
                 <Route path="pos/cash-up" element={<AdminPosCashUpPage />} />
                 <Route path="reports" element={<AdminReportsPage />} />

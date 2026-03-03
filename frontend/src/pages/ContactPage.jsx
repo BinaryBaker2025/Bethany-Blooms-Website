@@ -22,8 +22,9 @@ const INITIAL_FORM = {
 
 function ContactPage() {
   usePageMetadata({
-    title: "Contact Bethany Blooms | Enquiries & Custom Floral Art",
-    description: "Get in touch with Bethany Blooms for workshop enquiries, custom pressed floral art, or DIY kit support.",
+    title: "Contact Bethany Blooms | Cut Flowers, Workshops & Custom Floral Art",
+    description:
+      "Get in touch with Bethany Blooms for cut flower bookings, workshop enquiries, custom pressed floral art, or DIY kit support.",
   });
 
   const functionsInstance = useMemo(() => {
@@ -54,13 +55,13 @@ function ContactPage() {
       return;
     }
 
-    setFormState({ state: "loading", message: "Sending your note…" });
+    setFormState({ state: "loading", message: "Sending your note..." });
     try {
       const sendContactEmail = httpsCallable(functionsInstance, "sendContactEmail");
       await sendContactEmail({ ...formData });
       setFormState({
         state: "success",
-        message: "Thank you! Your message is on its way—expect a reply within two business days.",
+        message: "Thank you! Your message is on its way-expect a reply within two business days.",
       });
       setFormData(INITIAL_FORM);
     } catch (error) {
@@ -76,7 +77,7 @@ function ContactPage() {
       <section className="section section--tight">
         <div className="section__inner">
           <Hero variant="contact" background={heroBackground}>
-            <h1>We’d Love to Hear From You</h1>
+            <h1>We'd Love to Hear From You</h1>
             <p>
               Reach out about workshops, bespoke commissions, or simply to say hello. We respond within two business
               days with warmth and detail.
@@ -89,10 +90,10 @@ function ContactPage() {
         <div className="section__inner">
           <Reveal as="div" className="contact-intro">
             <span className="badge">Get in Touch</span>
-            <h2>Tell us what you’re dreaming up</h2>
+            <h2>Tell us what you're dreaming up</h2>
             <p>
               Whether you need help booking a workshop, designing bespoke pressed florals, or sourcing seasonal blooms,
-              we’ll guide the next steps from start to finish.
+              we'll guide the next steps from start to finish.
             </p>
           </Reveal>
 
@@ -100,7 +101,7 @@ function ContactPage() {
             <Reveal as="section" className="contact-panel contact-panel--form">
               <h3>Send a detailed enquiry</h3>
               <p className="contact-panel__subtitle">
-                Share your details and we’ll respond from{" "}
+                Share your details and we'll respond from{" "}
                 <a href="mailto:admin@bethanyblooms.co.za">admin@bethanyblooms.co.za</a>.
               </p>
               <form className="contact-form contact-form--card" onSubmit={handleSubmit}>
@@ -199,13 +200,13 @@ function ContactPage() {
                     </p>
                   ) : (
                     <p className="form-feedback__message">
-                      You’ll receive a confirmation email and personal reply shortly.
+                      You'll receive a confirmation email and personal reply shortly.
                     </p>
                   )}
                 </div>
 
                 <button className="btn btn--primary" type="submit" disabled={formState.state === "loading"}>
-                  {formState.state === "loading" ? "Sending…" : "Send message"}
+                  {formState.state === "loading" ? "Sending..." : "Send message"}
                 </button>
               </form>
             </Reveal>
@@ -223,7 +224,7 @@ function ContactPage() {
                 <a className="contact-detail-card__value" href={COMPANY_PHONE_TEL_HREF}>
                   {COMPANY_PHONE_LOCAL_DISPLAY}
                 </a>
-                <p className="contact-detail-card__meta">Tuesday – Saturday, 09:00 – 16:00 (SAST)</p>
+                <p className="contact-detail-card__meta">Tuesday - Saturday, 09:00 - 16:00 (SAST)</p>
               </div>
               <div className="contact-detail-card">
                 <p className="contact-detail-card__label">Studio</p>
@@ -269,7 +270,7 @@ function ContactPage() {
             <Reveal as="article" className="card" delay={240}>
               <h3 className="card__title">Hours</h3>
               <ul style={{listStyle: "none", padding: 0, margin: 0}}>
-                <li>Monday – Friday by appoinment</li>
+                <li>Monday - Friday by appoinment</li>
                 <li>Saturday, 08:00-11:00 and  16:00-19:00</li>
               </ul>
             </Reveal>

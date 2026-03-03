@@ -8,6 +8,7 @@ const normalizeQuantity = (value) => {
 };
 
 const normalizeStatus = (value) => (value || "").toString().trim().toLowerCase();
+const isGiftCardProduct = (product = {}) => Boolean(product?.isGiftCard || product?.is_gift_card);
 
 const hasUsableVariantIdentity = (variant) => {
   if (!variant || typeof variant !== "object") return false;
@@ -39,10 +40,20 @@ export const getVariantStockStatus = (variant = {}, product = {}) => {
       explicitVariantStatus === "out_of_stock" ||
       (variantStatus !== "preorder" && stockQuantity === null),
     status: variantStatus,
+    isGiftCard: isGiftCardProduct(product),
   });
 };
 
 export const getProductCardStockStatus = (product = {}) => {
+  if (isGiftCardProduct(product)) {
+    return getStockStatus({
+      quantity: null,
+      forceOutOfStock: false,
+      status: "in_stock",
+      isGiftCard: true,
+    });
+  }
+
   const baseQuantity = normalizeQuantity(
     product.stock_quantity ?? product.stockQuantity ?? product.quantity,
   );
@@ -52,6 +63,7 @@ export const getProductCardStockStatus = (product = {}) => {
       product.forceOutOfStock ||
       normalizeStatus(product.stock_status || product.stockStatus) === "out_of_stock",
     status: product.stock_status || product.stockStatus,
+    isGiftCard: isGiftCardProduct(product),
   });
 
   const variants = Array.isArray(product.variants)
@@ -99,7 +111,16 @@ export const getProductCardStockStatus = (product = {}) => {
   };
 };
 
-export const getStockStatus = ({ quantity, forceOutOfStock, status } = {}) => {
+export const getStockStatus = ({ quantity, forceOutOfStock, status, isGiftCard = false } = {}) => {
+  if (isGiftCard) {
+    return {
+      state: "in",
+      label: "In stock",
+      quantity: null,
+      isForced: false,
+    };
+  }
+
   const normalizedQuantity = normalizeQuantity(quantity);
   const isForcedOut = Boolean(forceOutOfStock);
   const normalizedStatus = status ? status.toString().toLowerCase() : "";

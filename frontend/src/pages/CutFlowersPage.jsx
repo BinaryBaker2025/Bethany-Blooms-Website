@@ -55,7 +55,7 @@ function formatTimeRange(startTime, endTime) {
   if (!startLabel) return "";
   const endLabel = formatTimeValue(endTime);
   if (!endLabel) return startLabel;
-  return `${startLabel} – ${endLabel}`;
+  return `${startLabel} - ${endLabel}`;
 }
 
 function parseOptionalNumber(value) {
@@ -465,7 +465,7 @@ function CutFlowersPage() {
             </div>
           ) : (
             <p className="empty-state">
-              {classesStatus === "loading" ? "Loading sessions…" : "No farm sessions are open right now."}
+              {classesStatus === "loading" ? "Loading sessions..." : "No farm sessions are open right now."}
             </p>
           )}
         </div>

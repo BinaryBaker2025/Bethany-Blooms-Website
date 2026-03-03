@@ -5,6 +5,14 @@ import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
+import {
+  FRESH_FLOWER_DELIVERY_NOTE,
+  FRESH_FLOWER_DELIVERY_WHATSAPP_NOTE,
+  FRESH_FLOWER_DELIVERY_WHATSAPP_PREFILL,
+  getProductFreshFlowerCategoryTokens,
+  requiresFreshFlowerDeliveryContactForProduct,
+} from "../lib/freshFlowerDelivery.js";
+import { buildWhatsAppLink } from "../lib/contactInfo.js";
 import { formatPreorderSendMonth, getProductPreorderSendMonth } from "../lib/preorder.js";
 import {
   getCustomerStockLabel,
@@ -43,6 +51,20 @@ const normalizeGiftCardOptionQuantity = (value) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   return Math.min(200, parsed);
+};
+const WHOLE_CREW_MIN_QTY = 4;
+
+const normalizeGiftCardOptionKey = (value = "") =>
+  value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+
+const isWholeCrewOption = (option = {}) => {
+  const optionId = normalizeGiftCardOptionKey(option?.id || "");
+  const optionLabel = normalizeGiftCardOptionKey(option?.label || option?.name || "");
+  return optionId.includes("wholecrew") || optionLabel.includes("wholecrew");
 };
 
 const normalizeGiftCardOptions = (input = []) =>
@@ -260,6 +282,7 @@ function ProductDetailPage() {
 
   const product = useMemo(() => {
     if (!productRecord) return null;
+    const isGiftCardRecord = Boolean(productRecord.isGiftCard || productRecord.is_gift_card);
     const title = productRecord.title || productRecord.name || "Bethany Blooms Product";
     const slug = (productRecord.slug || productRecord.id || "").toString();
     const priceNumber = normalizeNumber(productRecord.price);
@@ -286,6 +309,7 @@ function ProductDetailPage() {
       quantity: productRecord.stock_quantity ?? productRecord.quantity,
       forceOutOfStock: productRecord.forceOutOfStock || productRecord.stock_status === "out_of_stock",
       status: productRecord.stock_status,
+      isGiftCard: isGiftCardRecord,
     });
     const stockBadgeLabel = getStockBadgeLabel(stockStatus);
     const preorderSendMonth = getProductPreorderSendMonth(productRecord);
@@ -376,6 +400,7 @@ function ProductDetailPage() {
       preorderSendMonth,
       preorderSendMonthLabel,
       categoryLabels,
+      categoryKeys: Array.from(categoryKeys),
       tagLabels,
       videoEmbed: productRecord.video_embed || productRecord.videoEmbed || "",
       sunlight: formatSunlightLabel(productRecord.sunlight || ""),
@@ -410,7 +435,7 @@ function ProductDetailPage() {
         : Array.isArray(productRecord.crossSellProductIds)
         ? productRecord.crossSellProductIds
         : [],
-      isGiftCard: Boolean(productRecord.isGiftCard || productRecord.is_gift_card),
+      isGiftCard: isGiftCardRecord,
       giftCardExpiryDays: normalizeGiftCardExpiryDays(
         productRecord.giftCardExpiryDays || productRecord.gift_card_expiry_days || 365,
         365,
@@ -533,6 +558,14 @@ function ProductDetailPage() {
       }, 0),
     [giftCardSelectedBreakdown],
   );
+  const wholeCrewSelection = useMemo(
+    () => giftCardSelectedBreakdown.find((option) => isWholeCrewOption(option)) || null,
+    [giftCardSelectedBreakdown],
+  );
+  const wholeCrewQuantity = normalizeGiftCardOptionQuantity(wholeCrewSelection?.quantity);
+  const wholeCrewMinimumMessage = `Whole Crew requires ${WHOLE_CREW_MIN_QTY} or more people.`;
+  const hasWholeCrewQuantityViolation =
+    wholeCrewQuantity > 0 && wholeCrewQuantity < WHOLE_CREW_MIN_QTY;
   const giftCardHasNamedRecipient = Boolean(
     (giftCardPurchaserName || "").toString().trim() || (giftCardRecipientName || "").toString().trim(),
   );
@@ -571,7 +604,10 @@ function ProductDetailPage() {
   const showOriginalPrice = product && !isGiftCardProduct && !Number.isFinite(variantPrice) ? product.originalPrice : null;
   const canPurchase = product ?
      isGiftCardProduct
-      ? giftCardSelectedCount > 0 && giftCardHasNamedRecipient && Number.isFinite(activePrice)
+      ? giftCardSelectedCount > 0 &&
+        giftCardHasNamedRecipient &&
+        Number.isFinite(activePrice) &&
+        !hasWholeCrewQuantityViolation
       : hasVariants
         ? Boolean(selectedVariant) &&
           !isSelectionOutOfStock &&
@@ -608,6 +644,14 @@ function ProductDetailPage() {
     product,
     selectedVariant,
   ]);
+  const productFreshFlowerCategoryTokens = useMemo(
+    () => getProductFreshFlowerCategoryTokens(product || {}),
+    [product],
+  );
+  const requiresFreshFlowerDeliveryContact = useMemo(
+    () => requiresFreshFlowerDeliveryContactForProduct(product || {}),
+    [product],
+  );
 
   const attributeItems = useMemo(() => {
     if (!product) return [];
@@ -676,7 +720,7 @@ function ProductDetailPage() {
     product?.metaDescription || product?.shortDescription || product?.longDescription || "";
   const pageDescription =
     stripHtml(pageDescriptionSource) ||
-    "Browse the Bethany Blooms product collection and discover curated pressed flower keepsakes.";
+    "Browse the Bethany Blooms product collection and discover curated cut flower and pressed flower keepsakes.";
   const pageKeywords = product?.metaKeywords || "";
   const canonicalProductSlug = (product?.slug || product?.id || productId || "").toString().trim();
   const canonicalProductPath = canonicalProductSlug
@@ -729,6 +773,10 @@ function ProductDetailPage() {
       }
       if (!giftCardHasNamedRecipient) {
         notifyCart("Add at least one name (purchaser or recipient) for this gift card.");
+        return;
+      }
+      if (hasWholeCrewQuantityViolation) {
+        notifyCart(wholeCrewMinimumMessage);
         return;
       }
       if (!Number.isFinite(activePrice) || activePrice <= 0) {
@@ -826,14 +874,19 @@ function ProductDetailPage() {
       metadata: {
         type: "product",
         productId: product.id,
+        productSlug: product.slug || null,
         variantId: selectedVariant?.id ?? null,
         variantLabel: selectedVariant?.label ?? null,
         variantPrice,
+        categoryId: productFreshFlowerCategoryTokens[0] || null,
+        categoryLabel: (product.categoryLabels?.[0] || product.category || "").toString().trim() || null,
+        categoryTokens: productFreshFlowerCategoryTokens,
         stockStatus: activeStockStatus?.state || null,
         stockQuantity: Number.isFinite(activeStockStatus?.quantity) ? activeStockStatus.quantity : null,
         preorderSendMonth: activeStockStatus?.state === "preorder" ? product.preorderSendMonth || null : null,
         preorderSendMonthLabel:
           activeStockStatus?.state === "preorder" ? product.preorderSendMonthLabel || null : null,
+        deliveryContactCandidate: requiresFreshFlowerDeliveryContact,
         isGiftCard: false,
       },
     });
@@ -934,6 +987,9 @@ function ProductDetailPage() {
                       <div className="product-detail__gift-card-options">
                         {effectiveGiftCardOptions.map((option) => {
                           const quantity = normalizeGiftCardOptionQuantity(giftCardOptionQuantities?.[option.id]);
+                          const wholeCrewOption = isWholeCrewOption(option);
+                          const wholeCrewOptionInvalid =
+                            wholeCrewOption && quantity > 0 && quantity < WHOLE_CREW_MIN_QTY;
                           return (
                             <div
                               key={option.id}
@@ -974,6 +1030,11 @@ function ProductDetailPage() {
                                   +
                                 </button>
                               </div>
+                              {wholeCrewOption && (
+                                <p className={wholeCrewOptionInvalid ? "admin-panel__error" : "modal__meta"}>
+                                  {wholeCrewMinimumMessage}
+                                </p>
+                              )}
                             </div>
                           );
                         })}
@@ -1033,6 +1094,9 @@ function ProductDetailPage() {
                         Add at least one name to personalize this gift card.
                       </p>
                     )}
+                    {hasWholeCrewQuantityViolation && (
+                      <p className="admin-panel__error">{wholeCrewMinimumMessage}</p>
+                    )}
                   </div>
                 )}
 
@@ -1063,6 +1127,18 @@ function ProductDetailPage() {
                 )}
 
                 {stockNote && <p className="modal__meta product-detail__stock-note">{stockNote}</p>}
+                {!isGiftCardProduct && requiresFreshFlowerDeliveryContact && (
+                  <>
+                    <p className="cart-page__notice product-detail__stock-note">{FRESH_FLOWER_DELIVERY_NOTE}</p>
+                    <p className="modal__meta product-detail__stock-note">
+                      {FRESH_FLOWER_DELIVERY_WHATSAPP_NOTE}{" "}
+                      <a href={buildWhatsAppLink(FRESH_FLOWER_DELIVERY_WHATSAPP_PREFILL)}>
+                        WhatsApp Bethany Blooms
+                      </a>
+                      .
+                    </p>
+                  </>
+                )}
 
                 <div className="product-detail__actions">
                   {isGiftCardProduct && giftCardSelectedCount <= 0 ? (
@@ -1072,6 +1148,10 @@ function ProductDetailPage() {
                   ) : isGiftCardProduct && !giftCardHasNamedRecipient ? (
                     <button className="btn btn--secondary" type="button" disabled>
                       Add purchaser or recipient name
+                    </button>
+                  ) : isGiftCardProduct && hasWholeCrewQuantityViolation ? (
+                    <button className="btn btn--secondary" type="button" disabled>
+                      Whole Crew needs 4+ people
                     </button>
                   ) : hasVariants && !selectedVariant ? (
                     <button className="btn btn--secondary" type="button" disabled>

@@ -2,7 +2,7 @@ require("dotenv").config();
 const functions = require("firebase-functions");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
@@ -215,13 +215,72 @@ const GIFT_CARD_ASSET_DIRECTORY = path.join(__dirname, "assets", "giftcard");
 const GIFT_CARD_LOGO_FILE = path.join(GIFT_CARD_ASSET_DIRECTORY, "logo.png");
 const GIFT_CARD_SIGNATURE_FILE = path.join(GIFT_CARD_ASSET_DIRECTORY, "signiture.png");
 const GIFT_CARDS_COLLECTION = "giftCards";
+const GIFT_CARD_REGISTRY_COLLECTION = "giftCardRegistry";
+const GIFT_CARD_DRAFTS_COLLECTION = "giftCardDrafts";
+const GIFT_CARD_REGISTRY_EDITS_SUBCOLLECTION = "edits";
+const ADMIN_POS_SETTINGS_COLLECTION = "adminPosSettings";
+const ADMIN_POS_CREDENTIALS_COLLECTION = "adminPosCredentials";
+const POS_SALES_COLLECTION = "posSales";
+const POS_VOIDS_SUBCOLLECTION = "voids";
+const POS_CASHUPS_COLLECTION = "posCashups";
+const POS_PIN_MIN_LENGTH = 4;
+const POS_PIN_MAX_LENGTH = 8;
+const POS_PIN_MAX_FAILED_ATTEMPTS = 5;
+const POS_PIN_LOCKOUT_MS = 15 * 60 * 1000;
+const POS_VOID_REASON_MAX_LENGTH = 500;
+const POS_SALE_STATUSES = Object.freeze({
+  COMPLETED: "completed",
+  PARTIALLY_VOIDED: "partially-voided",
+  VOIDED: "voided",
+});
+const POS_VOID_SUPPORTED_EDITABLE_TYPES = new Set([
+  "product",
+  "pos-product",
+]);
+const POS_VOID_SUPPORTED_FULL_LINE_TYPES = new Set([
+  "event",
+  "workshop",
+  "class",
+  "workshop-booking",
+  "cut-flower-booking",
+]);
 const GIFT_CARD_VALUE_CURRENCY = "ZAR";
+const GIFT_CARD_STATUS_ACTIVE = "active";
+const GIFT_CARD_STATUS_ARCHIVED = "archived";
+const GIFT_CARD_INACTIVE_STATUSES = new Set([
+  "archived",
+  "cancelled",
+  "canceled",
+  "deleted",
+  "inactive",
+  "revoked",
+]);
 const GIFT_CARD_DEFAULT_EXPIRY_DAYS = 365;
 const GIFT_CARD_MAX_EXPIRY_DAYS = 1825;
 const GIFT_CARD_MIN_EXPIRY_DAYS = 1;
 const GIFT_CARD_MAX_MESSAGE_LENGTH = 320;
 const GIFT_CARD_MAX_NAME_LENGTH = 120;
 const GIFT_CARD_MAX_TERMS_LENGTH = 1400;
+const GIFT_CARD_CODE_MAX_GENERATION_ATTEMPTS = 25;
+const GIFT_CARD_CODE_FALLBACK_SUFFIX_BYTES = 2;
+const WHOLE_CREW_MIN_QTY = 4;
+const WHOLE_CREW_OPTION_KEY = "wholecrew";
+const GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY = "admin-giveaway";
+const FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON = "fresh-flower-blooming-stems";
+const FRESH_FLOWER_DELIVERY_NOTE =
+  "A Bethany Blooms team member will contact you after checkout to confirm delivery details for fresh flowers and blooming stems.";
+const FRESH_FLOWER_DELIVERY_WHATSAPP_NOTE =
+  "For a faster response, you can also WhatsApp Bethany Blooms and include your order number and full name.";
+const FRESH_FLOWER_DELIVERY_WHATSAPP_PREFILL =
+  "Hi Bethany Blooms, I need help with delivery. Order number: [ORDER NUMBER]. Full name: [FULL NAME].";
+const FRESH_FLOWER_CATEGORY_INCLUDE_TOKENS = Object.freeze([
+  "cutflower",
+  "cutflowers",
+  "bloomingstem",
+  "bloomingstems",
+  "freshflower",
+  "freshflowers",
+]);
 const DEFAULT_TRUNCATE_TEXT_LENGTH = 240;
 const SITEMAP_STATIC_PUBLIC_PATHS = Object.freeze([
   "/",
@@ -1160,7 +1219,23 @@ function calculateSignupInvoicePlan({
     timeZone,
   });
   const nextCycleDeliveries = Number(nextCycleSchedule.totalDeliveries || 0);
+  
+  // Validate that we have delivery dates in the next cycle
+  if (nextCycleDeliveries <= 0) {
+    throw new Error(
+      `No eligible Monday delivery dates found in ${nextCycleMonth}. Please check that the selected delivery Mondays exist in that month.`,
+    );
+  }
+  
   const nextCycleAmount = roundMoney(perDeliveryAmount * nextCycleDeliveries);
+  
+  // Validate that the calculated amount is valid and positive
+  if (!Number.isFinite(nextCycleAmount) || nextCycleAmount <= 0) {
+    throw new Error(
+      `Unable to calculate valid billing amount: ${perDeliveryAmount} × ${nextCycleDeliveries} deliveries = ${nextCycleAmount}. Please contact support.`,
+    );
+  }
+  
   return {
     cycleMonth: nextCycleMonth,
     invoiceAmount: nextCycleAmount,
@@ -1169,6 +1244,8 @@ function calculateSignupInvoicePlan({
     isProrated: false,
     prorationRatio: 1,
     prorationBasis: "remaining-deliveries",
+    billingNextCycle: true,
+    deliveryCount: nextCycleDeliveries,
     deliverySchedule: nextCycleSchedule,
   };
 }
@@ -1203,6 +1280,142 @@ function buildCycleInvoicePlan({
     prorationRatio: 1,
     prorationBasis: "remaining-deliveries",
     deliverySchedule,
+  };
+}
+
+function resolveInvoicePlanForRequestedCycle({
+  tier = "",
+  monthlyAmount = 0,
+  mondaySlots = [],
+  requestedCycleMonth = "",
+  nowDate = new Date(),
+  timeZone = SUBSCRIPTION_TIMEZONE,
+} = {}) {
+  const normalizedTier = normalizeSubscriptionTier(tier);
+  const normalizedRequestedCycleMonth = normalizePreorderSendMonth(requestedCycleMonth);
+  const perDeliveryAmount = roundMoney(monthlyAmount);
+  if (
+    !normalizedTier ||
+    !normalizedRequestedCycleMonth ||
+    !Number.isFinite(perDeliveryAmount) ||
+    perDeliveryAmount <= 0
+  ) {
+    throw new Error("Subscription billing cycle is invalid.");
+  }
+
+  const normalizedSlots = normalizeMondaySlotsForTier(normalizedTier, mondaySlots, {
+    allowDefaults: true,
+  });
+  const requestedSchedule = buildDeliveryScheduleSnapshot({
+    tier: normalizedTier,
+    mondaySlots: normalizedSlots,
+    cycleMonth: normalizedRequestedCycleMonth,
+    timeZone,
+  });
+  const requestedCycleDates = Array.isArray(requestedSchedule.cycleDeliveryDates)
+    ? requestedSchedule.cycleDeliveryDates
+    : [];
+  const requestedDeliveryCount = Number(
+    requestedSchedule.totalDeliveries || requestedCycleDates.length || 0,
+  );
+  const nowParts = formatTimeZoneDateParts(nowDate, timeZone);
+  const currentMonthKey = normalizePreorderSendMonth(nowParts.monthKey || "");
+  const isCurrentMonthRequest =
+    Boolean(currentMonthKey) && normalizedRequestedCycleMonth === currentMonthKey;
+
+  if (isCurrentMonthRequest) {
+    const remainingDates = filterRemainingDeliveryDates(
+      requestedCycleDates,
+      nowDate,
+      SUBSCRIPTION_DELIVERY_CUTOFF_RULE,
+      timeZone,
+    );
+    const remainingDeliveryCount = remainingDates.length;
+    if (remainingDeliveryCount > 0 && requestedDeliveryCount > 0) {
+      const ratio = Number((remainingDeliveryCount / requestedDeliveryCount).toFixed(6));
+      const cycleAmount = roundMoney(perDeliveryAmount * requestedDeliveryCount);
+      const invoiceAmount = roundMoney(perDeliveryAmount * remainingDeliveryCount);
+      return {
+        requestedCycleMonth: normalizedRequestedCycleMonth,
+        cycleMonth: normalizedRequestedCycleMonth,
+        effectiveCycleMonth: normalizedRequestedCycleMonth,
+        shiftedCycleMonth: false,
+        shiftedFromRequested: false,
+        isCurrentMonthRequest: true,
+        hasRemainingDeliveries: true,
+        requestedDeliveryCount,
+        remainingDeliveryCount,
+        invoiceAmount,
+        cycleAmount,
+        perDeliveryAmount,
+        isProrated: remainingDeliveryCount < requestedDeliveryCount,
+        prorationRatio: ratio,
+        prorationBasis: "remaining-deliveries",
+        deliverySchedule: buildDeliveryScheduleSnapshot({
+          tier: normalizedTier,
+          mondaySlots: normalizedSlots,
+          cycleMonth: normalizedRequestedCycleMonth,
+          includedDeliveryDates: remainingDates,
+          timeZone,
+        }),
+      };
+    }
+
+    const nextCycleMonth = getNextMonthKey(normalizedRequestedCycleMonth);
+    if (!nextCycleMonth) {
+      throw new Error("Unable to resolve next billing cycle month.");
+    }
+    const shiftedSchedule = buildDeliveryScheduleSnapshot({
+      tier: normalizedTier,
+      mondaySlots: normalizedSlots,
+      cycleMonth: nextCycleMonth,
+      timeZone,
+    });
+    const shiftedDeliveryCount = Number(shiftedSchedule.totalDeliveries || 0);
+    if (shiftedDeliveryCount <= 0) {
+      throw new Error(
+        `No eligible Monday delivery dates found in ${nextCycleMonth}. Please check delivery slots.`,
+      );
+    }
+    const shiftedAmount = roundMoney(perDeliveryAmount * shiftedDeliveryCount);
+    return {
+      requestedCycleMonth: normalizedRequestedCycleMonth,
+      cycleMonth: nextCycleMonth,
+      effectiveCycleMonth: nextCycleMonth,
+      shiftedCycleMonth: true,
+      shiftedFromRequested: true,
+      isCurrentMonthRequest: true,
+      hasRemainingDeliveries: false,
+      requestedDeliveryCount,
+      remainingDeliveryCount: 0,
+      invoiceAmount: shiftedAmount,
+      cycleAmount: shiftedAmount,
+      perDeliveryAmount,
+      isProrated: false,
+      prorationRatio: 1,
+      prorationBasis: "remaining-deliveries",
+      deliverySchedule: shiftedSchedule,
+    };
+  }
+
+  const fullCycleAmount = roundMoney(perDeliveryAmount * requestedDeliveryCount);
+  return {
+    requestedCycleMonth: normalizedRequestedCycleMonth,
+    cycleMonth: normalizedRequestedCycleMonth,
+    effectiveCycleMonth: normalizedRequestedCycleMonth,
+    shiftedCycleMonth: false,
+    shiftedFromRequested: false,
+    isCurrentMonthRequest: false,
+    hasRemainingDeliveries: true,
+    requestedDeliveryCount,
+    remainingDeliveryCount: requestedDeliveryCount,
+    invoiceAmount: fullCycleAmount,
+    cycleAmount: fullCycleAmount,
+    perDeliveryAmount,
+    isProrated: false,
+    prorationRatio: 1,
+    prorationBasis: "remaining-deliveries",
+    deliverySchedule: requestedSchedule,
   };
 }
 
@@ -1256,6 +1469,62 @@ function isSubscriptionCategoryToken(value = "") {
   const normalized = normalizeSubscriptionCategoryToken(value);
   if (!normalized) return false;
   return SUBSCRIPTION_CATEGORY_TOKENS.has(normalized) || normalized.includes("subscription");
+}
+
+function normalizeFreshFlowerCategoryToken(value = "") {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (!normalized) return "";
+  return normalized.replace(/[^a-z0-9]+/g, "");
+}
+
+function collectFreshFlowerCategoryTokensFromValues(values = []) {
+  const seen = new Set();
+  const tokens = [];
+  (Array.isArray(values) ? values : [values])
+    .flatMap((entry) => (Array.isArray(entry) ? entry : [entry]))
+    .forEach((value) => {
+      const token = normalizeFreshFlowerCategoryToken(value);
+      if (!token || seen.has(token)) return;
+      seen.add(token);
+      tokens.push(token);
+    });
+  return tokens;
+}
+
+function collectOrderItemCategoryTokens(item = {}) {
+  const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const values = [];
+  if (Array.isArray(metadata.categoryTokens)) values.push(...metadata.categoryTokens);
+  if (Array.isArray(metadata.category_ids)) values.push(...metadata.category_ids);
+  if (Array.isArray(metadata.categoryIds)) values.push(...metadata.categoryIds);
+  if (metadata.categoryId) values.push(metadata.categoryId);
+  if (metadata.categoryLabel) values.push(metadata.categoryLabel);
+  if (metadata.category) values.push(metadata.category);
+  if (metadata.categorySlug) values.push(metadata.categorySlug);
+  if (metadata.categoryName) values.push(metadata.categoryName);
+  if (metadata.productCategory) values.push(metadata.productCategory);
+  return collectFreshFlowerCategoryTokensFromValues(values);
+}
+
+function isFreshFlowerOrderItem(item = {}) {
+  if (!item || item?.metadata?.type !== "product") return false;
+  if (isGiftCardOrderItem(item)) return false;
+  if (item?.metadata?.deliveryContactCandidate === false) return false;
+  if (item?.metadata?.isSubscription === true || item?.metadata?.subscriptionEnabled === true) {
+    return false;
+  }
+
+  const categoryTokens = collectOrderItemCategoryTokens(item);
+  if (categoryTokens.some((token) => isSubscriptionCategoryToken(token))) return false;
+  if (item?.metadata?.deliveryContactCandidate === true) return true;
+
+  return categoryTokens.some((token) =>
+    FRESH_FLOWER_CATEGORY_INCLUDE_TOKENS.some((includedToken) => token.includes(includedToken)),
+  );
+}
+
+function orderRequiresFreshFlowerDeliveryContact(items = []) {
+  return (Array.isArray(items) ? items : []).some((item) => isFreshFlowerOrderItem(item));
 }
 
 function normalizeSubscriptionTier(value = "") {
@@ -1764,9 +2033,18 @@ function normalizeSubscriptionInvoiceAdjustments(entries = []) {
 function recomputeSubscriptionInvoiceTotals(invoice = {}) {
   const explicitBase = Number(invoice?.baseAmount);
   const fallbackAmount = Number(invoice?.amount || 0);
-  const baseAmount = roundMoney(
+  const cycleAmount = Number(invoice?.cycleAmount || 0);
+  
+  // For signup invoices, fallback to cycleAmount if baseAmount and amount are both 0
+  let baseAmount = roundMoney(
     Number.isFinite(explicitBase) && explicitBase >= 0 ? explicitBase : fallbackAmount,
   );
+  
+  // If still 0 and cycleAmount exists, this is likely a signup invoice - use cycleAmount
+  if (baseAmount === 0 && Number.isFinite(cycleAmount) && cycleAmount > 0) {
+    baseAmount = cycleAmount;
+  }
+  
   const adjustments = normalizeSubscriptionInvoiceAdjustments(invoice?.adjustments || []);
   const adjustmentsTotal = roundMoney(
     adjustments.reduce((sum, entry) => sum + Number(entry?.amount || 0), 0),
@@ -3382,15 +3660,105 @@ function normalizeGiftCardOptionQuantity(value, fallback = 1) {
   return Math.max(1, Math.min(200, parsed));
 }
 
+function normalizeGiftCardOptionKey(value = "") {
+  return value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function isWholeCrewOption(option = {}) {
+  const optionIdKey = normalizeGiftCardOptionKey(option?.id || "");
+  const optionLabelKey = normalizeGiftCardOptionKey(option?.label || option?.name || "");
+  return optionIdKey.includes(WHOLE_CREW_OPTION_KEY) || optionLabelKey.includes(WHOLE_CREW_OPTION_KEY);
+}
+
+function coerceGiftCardSelectedOptionsList(options = []) {
+  if (Array.isArray(options)) return options;
+
+  if (typeof options === "string") {
+    const trimmed = options.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      return coerceGiftCardSelectedOptionsList(parsed);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!options || typeof options !== "object") return [];
+
+  if (Array.isArray(options.options)) {
+    return options.options;
+  }
+
+  if (Array.isArray(options.selectedOptions)) {
+    return options.selectedOptions;
+  }
+
+  const values = Object.values(options).filter((entry) => entry && typeof entry === "object");
+  return values;
+}
+
 function normalizeGiftCardSelectedOptions(options = []) {
   const mergedOptions = new Map();
-  (Array.isArray(options) ? options : []).forEach((option, index) => {
-      const label = (option?.label || option?.name || "").toString().trim();
-      const amount = normalizeGiftCardAmount(option?.amount ?? option?.price);
-      const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
+  coerceGiftCardSelectedOptionsList(options).forEach((option, index) => {
+      const label = (
+        option?.label ||
+        option?.name ||
+        option?.optionLabel ||
+        option?.optionName ||
+        option?.title ||
+        option?.displayName ||
+        option?.valueLabel ||
+        ""
+      )
+        .toString()
+        .trim();
+      const quantity = normalizeGiftCardOptionQuantity(
+        option?.quantity ??
+          option?.qty ??
+          option?.attendeeCount ??
+          option?.count ??
+          option?.units,
+        1,
+      );
+      let amount = normalizeGiftCardAmount(
+        option?.amount ??
+          option?.price ??
+          option?.unitPrice ??
+          option?.estimatedPrice ??
+          option?.value,
+      );
+      if (!Number.isFinite(amount)) {
+        const lineTotal = normalizeGiftCardAmount(
+          option?.lineTotal ??
+            option?.total ??
+            option?.estimatedTotal ??
+            option?.subtotal,
+          null,
+        );
+        if (Number.isFinite(lineTotal)) {
+          amount = normalizeGiftCardAmount(
+            lineTotal / Math.max(1, quantity),
+            null,
+          );
+        }
+      }
       if (!label || !Number.isFinite(amount)) return;
       const id =
-        (option?.id || "").toString().trim() ||
+        (
+          option?.id ||
+          option?.optionId ||
+          option?.value ||
+          option?.key ||
+          option?.slug ||
+          ""
+        )
+          .toString()
+          .trim() ||
         `option-${index + 1}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
       const key = `${id}::${label.toLowerCase()}::${amount}`;
       const existing = mergedOptions.get(key);
@@ -3416,7 +3784,386 @@ function normalizeGiftCardSelectedOptions(options = []) {
   });
 }
 
-function buildGiftCardInvitationLine({ recipientDisplay = "Gift recipient" } = {}) {
+function validateWholeCrewGiftCardSelections(items = []) {
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    if (!isGiftCardOrderItem(item)) return;
+    const giftCardMetadata = item?.metadata?.giftCard || {};
+    const selectedOptions = normalizeGiftCardSelectedOptions(giftCardMetadata.selectedOptions);
+    selectedOptions.forEach((option) => {
+      if (!isWholeCrewOption(option)) return;
+      const quantity = normalizeGiftCardOptionQuantity(option.quantity, 1);
+      if (quantity < WHOLE_CREW_MIN_QTY) {
+        throw new Error(`Whole Crew requires at least ${WHOLE_CREW_MIN_QTY} people.`);
+      }
+    });
+  });
+}
+
+function isGiveawayGiftCardPayload(giftCard = {}) {
+  const issueSource = (giftCard?.issueSource || "").toString().trim().toLowerCase();
+  return Boolean(giftCard?.isGiveaway || issueSource === GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY);
+}
+
+function buildGiftCardOptionsTotal(selectedOptions = []) {
+  return Number(
+    normalizeGiftCardSelectedOptions(selectedOptions)
+      .reduce((sum, option) => {
+        const lineTotal = Number(option?.lineTotal);
+        if (Number.isFinite(lineTotal)) return sum + lineTotal;
+        const amount = Number(option?.amount);
+        const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
+        return sum + (Number.isFinite(amount) ? amount * quantity : 0);
+      }, 0)
+      .toFixed(2),
+  );
+}
+
+function normalizeAdminGiveawaySelectedOptions(rawOptions = [], availableOptionsById = new Map()) {
+  const merged = new Map();
+  (Array.isArray(rawOptions) ? rawOptions : []).forEach((entry) => {
+    const optionId = (
+      typeof entry === "string"
+        ? entry
+        : entry?.id || entry?.optionId || entry?.value || ""
+    )
+      .toString()
+      .trim();
+    if (!optionId) return;
+    const availableOption = availableOptionsById.get(optionId);
+    if (!availableOption) {
+      throw new Error(`Gift card option "${optionId}" is not available anymore.`);
+    }
+    const quantity = normalizeGiftCardOptionQuantity(entry?.quantity, 0);
+    if (quantity <= 0) return;
+    const existing = merged.get(optionId);
+    if (existing) {
+      existing.quantity += quantity;
+      return;
+    }
+    merged.set(optionId, {
+      id: availableOption.id,
+      label: availableOption.label,
+      amount: availableOption.amount,
+      quantity,
+    });
+  });
+
+  const normalized = normalizeGiftCardSelectedOptions(Array.from(merged.values()));
+  if (!normalized.length) {
+    throw new Error("Select at least one gift card option.");
+  }
+  normalized.forEach((option) => {
+    if (!isWholeCrewOption(option)) return;
+    const quantity = normalizeGiftCardOptionQuantity(option.quantity, 1);
+    if (quantity < WHOLE_CREW_MIN_QTY) {
+      throw new Error(`Whole Crew requires at least ${WHOLE_CREW_MIN_QTY} people.`);
+    }
+  });
+  return normalized;
+}
+
+async function resolveAdminGiveawayGiftCardInput(payload = {}) {
+  const productId = (payload?.productId || "").toString().trim();
+  if (!productId) {
+    throw new Error("Gift card product is required.");
+  }
+
+  const productSnap = await db.collection("products").doc(productId).get();
+  if (!productSnap.exists) {
+    throw new Error("Gift card product could not be found.");
+  }
+  const product = productSnap.data() || {};
+  if (!product?.isGiftCard && !product?.is_gift_card) {
+    throw new Error("Selected product is not a gift card product.");
+  }
+
+  const availableOptions = await getCutFlowerGiftCardOptions();
+  if (!availableOptions.length) {
+    throw new Error("No live gift card options are available.");
+  }
+  const optionLookup = new Map(availableOptions.map((option) => [option.id, option]));
+  const selectedOptions = normalizeAdminGiveawaySelectedOptions(
+    payload?.selectedOptions,
+    optionLookup,
+  );
+  const giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+  if (!Number.isFinite(giftCardValue) || giftCardValue <= 0) {
+    throw new Error("Unable to build a valid gift card value.");
+  }
+
+  const selectedOptionCount = selectedOptions.reduce(
+    (sum, option) => sum + normalizeGiftCardOptionQuantity(option?.quantity, 1),
+    0,
+  );
+  const expiryDays = normalizeGiftCardExpiryDays(
+    payload?.expiryDays,
+    normalizeGiftCardExpiryDays(product?.giftCardExpiryDays || product?.gift_card_expiry_days, 365),
+  );
+  const message = truncateText(payload?.message || "", GIFT_CARD_MAX_MESSAGE_LENGTH);
+  const terms = truncateText(
+    product?.giftCardTerms ||
+      product?.gift_card_terms ||
+      "Gift card is redeemable for selected Bethany Blooms services or products and is not exchangeable for cash.",
+    GIFT_CARD_MAX_TERMS_LENGTH,
+  );
+  const productTitle = truncateText(
+    product?.title || product?.name || "Bethany Blooms Gift Card",
+    160,
+  );
+
+  return {
+    productId,
+    productTitle,
+    message,
+    terms,
+    expiryDays,
+    selectedOptions,
+    selectedOptionCount,
+    giftCardValue,
+  };
+}
+
+function normalizeGiftCardStatus(value = "", fallback = GIFT_CARD_STATUS_ACTIVE) {
+  const normalized = (value || fallback).toString().trim().toLowerCase();
+  return normalized || fallback;
+}
+
+function isGiftCardArchivedStatus(value = "") {
+  return normalizeGiftCardStatus(value, GIFT_CARD_STATUS_ACTIVE) === GIFT_CARD_STATUS_ARCHIVED;
+}
+
+function isGiftCardInactiveStatus(value = "") {
+  return GIFT_CARD_INACTIVE_STATUSES.has(
+    normalizeGiftCardStatus(value, GIFT_CARD_STATUS_ACTIVE),
+  );
+}
+
+function buildGiftCardSourceType(giftCard = {}) {
+  const issueSource = (giftCard?.issueSource || "").toString().trim().toLowerCase();
+  if (issueSource === GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY || giftCard?.isGiveaway) {
+    return "admin-giveaway";
+  }
+  if (giftCard?.isTest || issueSource === "admin-test") {
+    return "admin-test";
+  }
+  if ((giftCard?.orderId || "").toString().trim()) {
+    return "user-order";
+  }
+  return "unknown";
+}
+
+function buildGiftCardSelectedOptionsSummary(selectedOptions = []) {
+  const normalizedOptions = normalizeGiftCardSelectedOptions(selectedOptions);
+  if (!normalizedOptions.length) return "None";
+  return normalizedOptions
+    .map((option) => {
+      const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
+      const amount = normalizeGiftCardAmount(option?.amount, 0);
+      return `${option.label} x${quantity} (${formatCurrency(amount * quantity)})`;
+    })
+    .join(", ");
+}
+
+function resolveGiftCardPdfStoragePath({
+  giftCardId = "",
+  orderId = "",
+  issueSource = "",
+  isTest = false,
+  existingPath = "",
+} = {}) {
+  const normalizedGiftCardId = (giftCardId || "").toString().trim();
+  const normalizedExistingPath = (existingPath || "").toString().trim();
+  if (normalizedExistingPath) return normalizedExistingPath;
+  if (isTest) return `gift-cards/test/${normalizedGiftCardId}.pdf`;
+  const normalizedIssueSource = (issueSource || "").toString().trim().toLowerCase();
+  if (normalizedIssueSource === GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY) {
+    return `gift-cards/giveaways/${normalizedGiftCardId}.pdf`;
+  }
+  const normalizedOrderId = (orderId || "").toString().trim();
+  if (normalizedOrderId) {
+    return `gift-cards/${normalizedOrderId}/${normalizedGiftCardId}.pdf`;
+  }
+  return `gift-cards/manual/${normalizedGiftCardId}.pdf`;
+}
+
+function buildGiftCardRegistryPayload(giftCard = {}, giftCardId = "") {
+  const normalizedGiftCardId = (giftCardId || "").toString().trim();
+  const token = createGiftCardAccessToken(normalizedGiftCardId);
+  const publicPayload = buildGiftCardPublicPayload(giftCard, normalizedGiftCardId, token);
+  const selectedOptions = normalizeGiftCardSelectedOptions(giftCard?.selectedOptions);
+  const sourceType = buildGiftCardSourceType(giftCard);
+  const selectedOptionCount = Number(publicPayload.selectedOptionCount || 0);
+  return {
+    giftCardId: normalizedGiftCardId,
+    code: publicPayload.code,
+    status: normalizeGiftCardStatus(giftCard?.status || publicPayload.status || "active"),
+    isGiveaway: Boolean(giftCard?.isGiveaway || sourceType === "admin-giveaway"),
+    isTest: Boolean(giftCard?.isTest || sourceType === "admin-test"),
+    issueSource: (giftCard?.issueSource || "").toString().trim() || null,
+    sourceType,
+    value: Number(publicPayload.value || 0),
+    currency: (publicPayload.currency || GIFT_CARD_VALUE_CURRENCY).toString() || GIFT_CARD_VALUE_CURRENCY,
+    selectedOptions,
+    selectedOptionCount: Number.isFinite(selectedOptionCount) ? selectedOptionCount : 0,
+    selectedOptionsSummary: buildGiftCardSelectedOptionsSummary(selectedOptions),
+    recipientName: (giftCard?.recipientName || "").toString().trim(),
+    purchaserName: (giftCard?.purchaserName || "").toString().trim(),
+    message: (giftCard?.message || "").toString().trim(),
+    terms: (giftCard?.terms || "").toString().trim(),
+    accessUrl: publicPayload.accessUrl || "",
+    downloadUrl: publicPayload.downloadUrl || "",
+    printUrl: publicPayload.printUrl || "",
+    siteAccessUrl: publicPayload.siteAccessUrl || "",
+    orderId: (giftCard?.orderId || "").toString().trim() || null,
+    orderNumber: giftCard?.orderNumber ?? null,
+    productId: (giftCard?.productId || "").toString().trim() || null,
+    productTitle: (giftCard?.productTitle || "").toString().trim() || "Bethany Blooms Gift Card",
+    issuedAt: giftCard?.issuedAt || null,
+    expiresAt: giftCard?.expiresAt || null,
+    createdAt: giftCard?.createdAt || null,
+    updatedAt: giftCard?.updatedAt || null,
+    lastEditedAt: giftCard?.lastEditedAt || null,
+    lastEditedByUid: (giftCard?.lastEditedByUid || "").toString().trim() || null,
+    lastEditedByEmail: (giftCard?.lastEditedByEmail || "").toString().trim() || null,
+  };
+}
+
+function toComparableRegistryValue(value) {
+  if (value == null) return null;
+  if (Array.isArray(value)) {
+    return value.map((entry) => toComparableRegistryValue(entry));
+  }
+  if (typeof value?.toDate === "function") {
+    const date = coerceTimestampToDate(value);
+    return date ? date.toISOString() : null;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object") {
+    const normalizedObject = {};
+    Object.keys(value)
+      .sort()
+      .forEach((key) => {
+        normalizedObject[key] = toComparableRegistryValue(value[key]);
+      });
+    return normalizedObject;
+  }
+  return value;
+}
+
+function hasGiftCardRegistryPayloadDiff(existingDoc = {}, desiredDoc = {}) {
+  const normalizedDesired = desiredDoc && typeof desiredDoc === "object" ? desiredDoc : {};
+  const comparableExisting = {};
+  Object.keys(normalizedDesired).forEach((key) => {
+    comparableExisting[key] = existingDoc?.[key];
+  });
+
+  return (
+    JSON.stringify(toComparableRegistryValue(comparableExisting)) !==
+    JSON.stringify(toComparableRegistryValue(normalizedDesired))
+  );
+}
+
+async function createGiveawayGiftCardRecord({
+  resolved = null,
+  request = null,
+  draftId = "",
+} = {}) {
+  if (!resolved || typeof resolved !== "object") {
+    throw new Error("Giveaway gift card input is invalid.");
+  }
+  const giftCardId = `gc-giveaway-${crypto.randomBytes(10).toString("hex")}`;
+  const token = createGiftCardAccessToken(giftCardId);
+  const issuedAtDate = new Date();
+  const expiresAtDate = new Date(
+    issuedAtDate.getTime() + resolved.expiryDays * 24 * 60 * 60 * 1000,
+  );
+  const code = await generateUniqueGiftCardCode({
+    orderNumber: "GIVEAWAY",
+    giftCardId,
+    lineIndex: 0,
+    unitIndex: 0,
+  });
+  const pdfStoragePath = resolveGiftCardPdfStoragePath({
+    giftCardId,
+    issueSource: GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
+  });
+  const giftCardRecord = {
+    id: giftCardId,
+    orderId: null,
+    orderNumber: null,
+    orderItemIndex: null,
+    orderItemUnit: null,
+    code,
+    status: "active",
+    value: resolved.giftCardValue,
+    currency: GIFT_CARD_VALUE_CURRENCY,
+    purchaserName: "",
+    recipientName: "",
+    message: resolved.message || null,
+    productId: resolved.productId,
+    productTitle: resolved.productTitle,
+    terms: resolved.terms,
+    selectedOptions: resolved.selectedOptions,
+    selectedOptionCount: resolved.selectedOptionCount,
+    expiryDays: resolved.expiryDays,
+    issuedAt: admin.firestore.Timestamp.fromDate(issuedAtDate),
+    expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
+    pdfStoragePath,
+    isGiveaway: true,
+    issueSource: GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
+    issueMeta: {
+      createdByUid: request?.auth?.uid || null,
+      createdByEmail: (request?.auth?.token?.email || "").toString().trim() || null,
+      draftId: (draftId || "").toString().trim() || null,
+    },
+    updatedAt: FIELD_VALUE.serverTimestamp(),
+    createdAt: FIELD_VALUE.serverTimestamp(),
+  };
+
+  const pdfBytes = await createGiftCardPdfBytes({
+    ...giftCardRecord,
+    issuedAt: issuedAtDate,
+    expiresAt: expiresAtDate,
+  });
+  const bucket = admin.storage().bucket();
+  await bucket.file(pdfStoragePath).save(pdfBytes, {
+    contentType: "application/pdf",
+    resumable: false,
+    metadata: {
+      cacheControl: "private, max-age=0, no-store",
+    },
+  });
+
+  await db.collection(GIFT_CARDS_COLLECTION).doc(giftCardId).set(giftCardRecord, {
+    merge: true,
+  });
+
+  const giftCardPayload = buildGiftCardPublicPayload(giftCardRecord, giftCardId, token);
+  return {
+    giftCardId,
+    giftCardRecord,
+    giftCardPayload,
+  };
+}
+
+function toGiveawayGiftCardHttpsError(error, fallbackMessage) {
+  if (error instanceof HttpsError) return error;
+  const message = (error?.message || fallbackMessage || "Gift card request failed.").toString();
+  const normalized = message.toLowerCase();
+  const looksLikeValidationError =
+    normalized.includes("required") ||
+    normalized.includes("not found") ||
+    normalized.includes("gift card option") ||
+    normalized.includes("whole crew") ||
+    normalized.includes("select at least") ||
+    normalized.includes("not a gift card");
+  return new HttpsError(looksLikeValidationError ? "invalid-argument" : "internal", message);
+}
+
+function buildGiftCardInvitationLine({ recipientDisplay = "Gift recipient", isGiveaway = false } = {}) {
+  if (isGiveaway) return "";
   const recipient = (recipientDisplay || "Gift recipient").toString().trim() || "Gift recipient";
   return `For ${recipient} to come and join us at our farm.`;
 }
@@ -3479,6 +4226,47 @@ function buildGiftCardCode({ orderNumber = null, giftCardId = "", lineIndex = 0,
   const suffix = giftCardId.replace(/[^a-zA-Z0-9]/g, "").slice(-6).toUpperCase().padStart(6, "0");
   const indexPart = `${lineIndex + 1}${unitIndex + 1}`;
   return `BBGC-${orderPart}-${suffix}-${indexPart}`;
+}
+
+function buildGiftCardCodeCandidate(baseCode = "", attempt = 0) {
+  const normalizedBase = normalizeGiftCardLookupCode(baseCode);
+  if (!normalizedBase) return "";
+  if (attempt <= 0) return normalizedBase;
+  const randomSuffix = crypto
+    .randomBytes(GIFT_CARD_CODE_FALLBACK_SUFFIX_BYTES)
+    .toString("hex")
+    .toUpperCase();
+  return `${normalizedBase}-${randomSuffix}`;
+}
+
+async function generateUniqueGiftCardCode({
+  orderNumber = null,
+  giftCardId = "",
+  lineIndex = 0,
+  unitIndex = 0,
+} = {}) {
+  const normalizedGiftCardId = (giftCardId || "").toString().trim();
+  const baseCode = buildGiftCardCode({
+    orderNumber,
+    giftCardId: normalizedGiftCardId,
+    lineIndex,
+    unitIndex,
+  });
+  for (let attempt = 0; attempt < GIFT_CARD_CODE_MAX_GENERATION_ATTEMPTS; attempt += 1) {
+    const candidateCode = buildGiftCardCodeCandidate(baseCode, attempt);
+    if (!candidateCode) continue;
+    const snapshot = await db
+      .collection(GIFT_CARDS_COLLECTION)
+      .where("code", "==", candidateCode)
+      .limit(1)
+      .get();
+    if (snapshot.empty) return candidateCode;
+    const existingGiftCardId = snapshot.docs[0]?.id || "";
+    if (normalizedGiftCardId && existingGiftCardId === normalizedGiftCardId) {
+      return candidateCode;
+    }
+  }
+  throw new Error("Unable to generate a unique gift card code.");
 }
 
 function normalizeGiftCardLookupCode(value = "") {
@@ -3591,12 +4379,18 @@ function buildGiftCardDownloadUrl(giftCardId = "", token = "", { inline = false 
 function buildGiftCardViewerHtml(giftCard = {}) {
   const { logoDataUri, signatureDataUri } = getGiftCardDesignAssets();
   const selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
+  const isGiveaway = isGiveawayGiftCardPayload(giftCard);
   const purchaserDisplay = (giftCard.purchaserName || "Bethany Blooms Customer").toString().trim();
   const recipientDisplay = (giftCard.recipientName || purchaserDisplay || "Gift recipient").toString().trim();
   const invitationLine = buildGiftCardInvitationLine({
     recipientDisplay,
     selectedOptions,
+    isGiveaway,
   });
+  const invitationLineHtml = invitationLine
+    ? `<p class="recipient-line">${escapeHtml(invitationLine)}</p>`
+    : "";
+  const giveawayMetaHtml = "";
   const paidDateLabel =
     formatGiftCardCompactDate(giftCard.issuedAt) ||
     formatGiftCardCompactDate(new Date().toISOString()) ||
@@ -3668,11 +4462,17 @@ function buildGiftCardViewerHtml(giftCard = {}) {
       .gift-card {
         position: relative;
         overflow: hidden;
-        border-radius: 14px;
-        background: linear-gradient(180deg, rgba(247, 239, 224, 0.98) 0%, rgba(239, 232, 215, 0.98) 100%);
-        border: 1px solid rgba(47, 94, 68, 0.2);
-        box-shadow: 0 24px 40px -32px rgba(31, 47, 37, 0.6);
-        padding: 34px 42px 40px;
+        border-radius: 22px;
+        background:
+          radial-gradient(160% 120% at 0% 0%, rgba(255, 255, 255, 0.78), transparent 58%),
+          linear-gradient(180deg, rgba(248, 241, 226, 0.98) 0%, rgba(237, 229, 210, 0.98) 100%);
+        border: 1px solid rgba(47, 94, 68, 0.24);
+        box-shadow: 0 30px 52px -32px rgba(31, 47, 37, 0.65);
+        padding: 38px 44px 42px;
+      }
+      .gift-card--giveaway {
+        border-color: rgba(47, 94, 68, 0.34);
+        box-shadow: 0 34px 58px -34px rgba(31, 47, 37, 0.7);
       }
       .gift-card::before {
         content: "";
@@ -3745,6 +4545,17 @@ function buildGiftCardViewerHtml(giftCard = {}) {
         margin: 14px 0 0;
         font-size: 18px;
         letter-spacing: 0.05em;
+      }
+      .meta-line--giveaway {
+        display: inline-flex;
+        justify-content: center;
+        margin: 14px auto 0;
+        padding: 6px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(47, 94, 68, 0.25);
+        background: rgba(255, 255, 255, 0.62);
+        font-size: 14px;
+        text-transform: uppercase;
       }
       .message {
         margin: 10px auto 0;
@@ -3947,11 +4758,12 @@ function buildGiftCardViewerHtml(giftCard = {}) {
   </head>
   <body>
     <div class="shell">
-      <article class="gift-card">
+      <article class="gift-card${isGiveaway ? " gift-card--giveaway" : ""}">
         <div class="logo-wrap">${logoHtml}</div>
         <p class="headline">COME AND PICK YOUR OWN BLOOMS</p>
         <p class="gift-title">FLOWER FARM GIFT CARD</p>
-        <p class="recipient-line">${escapeHtml(invitationLine)}</p>
+        ${invitationLineHtml}
+        ${giveawayMetaHtml}
         ${messageHtml}
         <div class="options">
           <ol class="option-list">${optionRows}</ol>
@@ -4138,17 +4950,10 @@ function buildGiftCardPlanFromOrder(order = {}, orderId = "") {
 
     for (let unitIndex = 0; unitIndex < quantity; unitIndex += 1) {
       const giftCardId = buildGiftCardDocumentId(orderId, lineIndex, unitIndex);
-      const code = buildGiftCardCode({
-        orderNumber: order.orderNumber || null,
-        giftCardId,
-        lineIndex,
-        unitIndex,
-      });
       plans.push({
         giftCardId,
         lineIndex,
         unitIndex,
-        code,
         value: Number(giftCardValue.toFixed(2)),
         purchaserName,
         recipientName,
@@ -4242,11 +5047,13 @@ async function createGiftCardPdfBytes(giftCard = {}) {
   };
 
   const selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
+  const isGiveaway = isGiveawayGiftCardPayload(giftCard);
   const purchaserDisplay = (giftCard.purchaserName || "Bethany Blooms Customer").toString().trim();
   const recipientDisplay = (giftCard.recipientName || purchaserDisplay || "Gift recipient").toString().trim();
   const invitationLine = buildGiftCardInvitationLine({
     recipientDisplay,
     selectedOptions,
+    isGiveaway,
   });
   const paidDateLabel =
     formatGiftCardCompactDate(giftCard.issuedAt) ||
@@ -4321,20 +5128,21 @@ async function createGiftCardPdfBytes(giftCard = {}) {
     color: palette.text,
   });
 
-  drawCenteredPdfText({
-    page: frontPage,
-    text: invitationLine,
-    y: 444,
-    maxWidth: width - 116,
-    font: fontSerif,
-    fontSize: 17,
-    lineHeight: 23,
-    color: palette.darkText,
-  });
-
+  if (invitationLine) {
+    drawCenteredPdfText({
+      page: frontPage,
+      text: invitationLine,
+      y: 444,
+      maxWidth: width - 116,
+      font: fontSerif,
+      fontSize: 17,
+      lineHeight: 23,
+      color: palette.darkText,
+    });
+  }
   if (giftCard.message) {
     const messageLines = splitTextToPdfLines(`"${giftCard.message}"`, fontSerif, 11.5, width - 140).slice(0, 3);
-    let messageY = 364;
+    let messageY = isGiveaway ? 392 : 364;
     messageLines.forEach((line) => {
       const lineWidth = fontSerif.widthOfTextAtSize(line, 11.5);
       const x = Math.max(0, (width - lineWidth) / 2);
@@ -4349,15 +5157,16 @@ async function createGiftCardPdfBytes(giftCard = {}) {
     });
   }
 
+  const selectedOptionsLabelY = isGiveaway ? 360 : 333;
   frontPage.drawText("Selected options", {
     x: 57,
-    y: 333,
+    y: selectedOptionsLabelY,
     size: 12,
     font: fontSansBold,
     color: palette.text,
   });
   const optionBoxX = 52;
-  const optionBoxY = 235;
+  const optionBoxY = selectedOptionsLabelY - 98;
   const optionBoxWidth = width - 104;
   const optionBoxHeight = 92;
   frontPage.drawRectangle({
@@ -4371,13 +5180,13 @@ async function createGiftCardPdfBytes(giftCard = {}) {
     opacity: 0.58,
   });
 
-  let optionsCursorY = 308;
+  let optionsCursorY = selectedOptionsLabelY - 25;
   const optionsOverflow = [];
   for (let index = 0; index < optionLines.length; index += 1) {
     const numberedLine = `${index + 1}. ${optionLines[index]}`;
     const wrapped = splitTextToPdfLines(numberedLine, fontSans, 11, optionBoxWidth - 26);
     const requiredHeight = wrapped.length * 13 + 3;
-    if (optionsCursorY - requiredHeight < 248) {
+    if (optionsCursorY - requiredHeight < optionBoxY + 13) {
       for (let overflowIndex = index; overflowIndex < optionLines.length; overflowIndex += 1) {
         optionsOverflow.push(`${overflowIndex + 1}. ${optionLines[overflowIndex]}`);
       }
@@ -4602,6 +5411,7 @@ async function createGiftCardPdfBytes(giftCard = {}) {
 
 function buildGiftCardPublicPayload(giftCardDoc = {}, giftCardId = "", token = "") {
   const selectedOptions = normalizeGiftCardSelectedOptions(giftCardDoc.selectedOptions);
+  const isGiveaway = isGiveawayGiftCardPayload(giftCardDoc);
   const selectedOptionCountValue = Number(giftCardDoc.selectedOptionCount);
   const selectedOptionCount =
     Number.isFinite(selectedOptionCountValue) && selectedOptionCountValue >= 0
@@ -4616,6 +5426,8 @@ function buildGiftCardPublicPayload(giftCardDoc = {}, giftCardId = "", token = "
     status: giftCardDoc.status || "active",
     value: Number(giftCardDoc.value || 0),
     currency: giftCardDoc.currency || GIFT_CARD_VALUE_CURRENCY,
+    isGiveaway,
+    issueSource: (giftCardDoc.issueSource || "").toString().trim() || null,
     purchaserName: giftCardDoc.purchaserName || "",
     recipientName: giftCardDoc.recipientName || "",
     message: giftCardDoc.message || "",
@@ -4762,6 +5574,52 @@ function buildPreorderNoticeHtml(items = []) {
   `;
 }
 
+function buildWhatsAppChatUrl(message = "") {
+  const normalizedMessage = (message || "").toString().trim();
+  if (!normalizedMessage) return COMPANY_WHATSAPP_URL;
+  return `${COMPANY_WHATSAPP_URL}?text=${encodeURIComponent(normalizedMessage)}`;
+}
+
+function buildFreshFlowerDeliveryNoticeHtml(order = {}, orderId = "") {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const followUpRequired =
+    order?.fulfillment?.deliveryFollowUpRequired === true ||
+    orderRequiresFreshFlowerDeliveryContact(items);
+  if (!followUpRequired) return "";
+  const resolvedOrderReference = [
+    order?.orderNumber,
+    orderId,
+    order?.paymentReference,
+    "[ORDER NUMBER]",
+  ]
+    .map((value) => (value ?? "").toString().trim())
+    .find(Boolean) || "[ORDER NUMBER]";
+  const resolvedCustomerName = (order?.customer?.fullName || "").toString().trim() || "Customer";
+  const whatsappPrefill = FRESH_FLOWER_DELIVERY_WHATSAPP_PREFILL
+    .replace("[ORDER NUMBER]", resolvedOrderReference)
+    .replace("[FULL NAME]", resolvedCustomerName);
+  const whatsappUrl = buildWhatsAppChatUrl(whatsappPrefill);
+  const siteUrl = getCanonicalSiteUrl();
+  const privacyUrl = `${siteUrl}/privacy-policy`;
+  const disclaimerUrl = `${siteUrl}/disclaimer`;
+  return `
+    <div style="padding:12px 16px;border-radius:14px;background:rgba(245,234,215,0.6);margin:16px 0;">
+      <p style="margin:0 0 8px;"><strong>Delivery follow-up notice</strong></p>
+      <p style="margin:0 0 8px;">${escapeHtml(FRESH_FLOWER_DELIVERY_NOTE)}</p>
+      <p style="margin:0 0 8px;">
+        ${escapeHtml(FRESH_FLOWER_DELIVERY_WHATSAPP_NOTE)}
+        <a href="${escapeHtml(whatsappUrl)}" style="color:${EMAIL_BRAND.primary};text-decoration:none;"> WhatsApp Bethany Blooms</a>.
+      </p>
+      <p style="margin:0;font-size:13px;color:${EMAIL_BRAND.muted};">
+        Subscriptions are handled separately. Review our
+        <a href="${escapeHtml(privacyUrl)}" style="color:${EMAIL_BRAND.primary};text-decoration:none;"> Privacy Policy</a>
+        and
+        <a href="${escapeHtml(disclaimerUrl)}" style="color:${EMAIL_BRAND.primary};text-decoration:none;"> Disclaimer</a>.
+      </p>
+    </div>
+  `;
+}
+
 function buildOrderTotalsHtml(order = {}) {
   const items = Array.isArray(order.items) ? order.items : [];
   const computedSubtotal = items.reduce((sum, item) => {
@@ -4841,6 +5699,7 @@ function buildOrderEmailHtml(order = {}, orderId = "") {
   const orderNumber = order.orderNumber ? `Order #${order.orderNumber}` : `Order ${orderId}`;
   const itemsHtml = buildOrderItemsHtml(order.items || []);
   const preorderNoticeHtml = buildPreorderNoticeHtml(order.items || []);
+  const freshFlowerDeliveryNoticeHtml = buildFreshFlowerDeliveryNoticeHtml(order, orderId);
   const invoiceSummaryHtml = buildOrderInvoiceSummaryHtml(order);
   const total = formatCurrency(order.totalPrice || 0);
   const body = `
@@ -4852,6 +5711,7 @@ function buildOrderEmailHtml(order = {}, orderId = "") {
     ${invoiceSummaryHtml}
     ${itemsHtml}
     ${preorderNoticeHtml}
+    ${freshFlowerDeliveryNoticeHtml}
     <p style="margin:16px 0 0;"><strong>Total:</strong> ${total}</p>
   `;
   return wrapEmail({ title: "Order confirmation", subtitle: "We are getting everything ready.", body });
@@ -4862,6 +5722,7 @@ function buildOrderAdminEmailHtml(order = {}, orderId = "") {
   const orderNumber = order.orderNumber ? `Order #${order.orderNumber}` : `Order ${orderId}`;
   const itemsHtml = buildOrderItemsHtml(order.items || []);
   const preorderNoticeHtml = buildPreorderNoticeHtml(order.items || []);
+  const freshFlowerDeliveryNoticeHtml = buildFreshFlowerDeliveryNoticeHtml(order, orderId);
   const invoiceSummaryHtml = buildOrderInvoiceSummaryHtml(order);
   const total = formatCurrency(order.totalPrice || 0);
   const body = `
@@ -4875,6 +5736,7 @@ function buildOrderAdminEmailHtml(order = {}, orderId = "") {
     <p style="margin:0 0 16px;"><strong>Address:</strong> ${escapeHtml(customer.address || "Not provided")}</p>
     ${itemsHtml}
     ${preorderNoticeHtml}
+    ${freshFlowerDeliveryNoticeHtml}
     <p style="margin:16px 0 0;"><strong>Total:</strong> ${total}</p>
   `;
   return wrapEmail({ title: "New order received", subtitle: "Order details for the studio team.", body });
@@ -5241,6 +6103,7 @@ function buildEftPendingCustomerEmailHtml(order = {}, orderId = "") {
   const orderLabel = order.orderNumber ? `Order #${order.orderNumber}` : `Order ${orderId}`;
   const itemsHtml = buildOrderItemsHtml(order.items || []);
   const preorderNoticeHtml = buildPreorderNoticeHtml(order.items || []);
+  const freshFlowerDeliveryNoticeHtml = buildFreshFlowerDeliveryNoticeHtml(order, orderId);
   const totalsHtml = buildOrderTotalsHtml(order);
   const invoiceSummaryHtml = buildOrderInvoiceSummaryHtml(order);
   const proofLine = order.paymentProof?.fileName
@@ -5256,6 +6119,7 @@ function buildEftPendingCustomerEmailHtml(order = {}, orderId = "") {
     <p style="margin:0 0 8px;"><strong>Order items</strong></p>
     ${itemsHtml}
     ${preorderNoticeHtml}
+    ${freshFlowerDeliveryNoticeHtml}
     ${totalsHtml}
     ${proofLine}
     ${buildEftBankDetailsHtml(order)}
@@ -5273,6 +6137,7 @@ function buildEftPendingAdminEmailHtml(order = {}, orderId = "") {
   const orderLabel = order.orderNumber ? `Order #${order.orderNumber}` : `Order ${orderId}`;
   const proofPath = order.paymentProof?.storagePath || "";
   const invoiceSummaryHtml = buildOrderInvoiceSummaryHtml(order);
+  const freshFlowerDeliveryNoticeHtml = buildFreshFlowerDeliveryNoticeHtml(order, orderId);
   const proofMarkup = proofPath
     ? `<p style="margin:0 0 6px;"><strong>Proof path:</strong> ${escapeHtml(proofPath)}</p>`
     : "<p style=\"margin:0 0 6px;\"><strong>Proof path:</strong> Not provided</p>";
@@ -5288,6 +6153,7 @@ function buildEftPendingAdminEmailHtml(order = {}, orderId = "") {
     ${proofMarkup}
     <p style="margin:0 0 16px;"><strong>Status:</strong> Pending payment approval</p>
     ${buildOrderItemsHtml(order.items || [])}
+    ${freshFlowerDeliveryNoticeHtml}
   `;
   return wrapEmail({
     title: "EFT payment approval needed",
@@ -5404,7 +6270,7 @@ function buildPosReceiptHtml(sale = {}, receiptId = "") {
   const customerName = escapeHtml(sale.customer?.name || sale.customer?.fullName || "there");
   const receiptNumber = sale.receiptNumber ? `Receipt #${sale.receiptNumber}` : `Receipt ${receiptId}`;
   const itemsHtml = buildOrderItemsHtml(sale.items || []);
-  const total = formatCurrency(sale.total || sale.totalPrice || 0);
+  const amountDue = formatCurrency(sale.total || sale.totalPrice || 0);
   const paymentMethod = escapeHtml(sale.paymentMethod || "In-store");
   const cashReceived = Number(sale.cashReceived ?? 0);
   const changeDue = Number(sale.changeDue ?? 0);
@@ -5416,6 +6282,11 @@ function buildPosReceiptHtml(sale = {}, receiptId = "") {
   const discountAmount = Number(sale.discount?.amount ?? sale.discountAmount ?? 0) || 0;
   const discountType = sale.discount?.type || "";
   const discountValue = Number(sale.discount?.value ?? 0);
+  const giftCardApplied = Number(sale.giftCardApplied ?? 0) || 0;
+  const giftCardAppliedLine =
+    giftCardApplied > 0
+      ? `<p><strong>Gift cards applied:</strong> -${formatCurrency(giftCardApplied)}</p>`
+      : "";
   const discountLine =
     discountAmount > 0
       ? `<p><strong>Discount:</strong> -${formatCurrency(discountAmount)}${
@@ -5432,9 +6303,10 @@ function buildPosReceiptHtml(sale = {}, receiptId = "") {
       <strong>${escapeHtml(receiptNumber)}</strong>
     </div>
     ${itemsHtml}
+    ${giftCardAppliedLine}
     ${discountLine}
     ${giftCardMatchesHtml}
-    <p style="margin:16px 0 0;"><strong>Total:</strong> ${total}</p>
+    <p style="margin:16px 0 0;"><strong>Amount due:</strong> ${amountDue}</p>
     <p style="margin:4px 0 0;"><strong>Payment:</strong> ${paymentMethod}</p>
     ${cashLine}
   `;
@@ -5445,7 +6317,7 @@ function buildPosReceiptAdminHtml(sale = {}, receiptId = "") {
   const customer = sale.customer || {};
   const receiptNumber = sale.receiptNumber ? `Receipt #${sale.receiptNumber}` : `Receipt ${receiptId}`;
   const itemsHtml = buildOrderItemsHtml(sale.items || []);
-  const total = formatCurrency(sale.total || sale.totalPrice || 0);
+  const amountDue = formatCurrency(sale.total || sale.totalPrice || 0);
   const paymentMethod = escapeHtml(sale.paymentMethod || "In-store");
   const cashReceived = Number(sale.cashReceived ?? 0);
   const changeDue = Number(sale.changeDue ?? 0);
@@ -5457,6 +6329,11 @@ function buildPosReceiptAdminHtml(sale = {}, receiptId = "") {
   const discountAmount = Number(sale.discount?.amount ?? sale.discountAmount ?? 0) || 0;
   const discountType = sale.discount?.type || "";
   const discountValue = Number(sale.discount?.value ?? 0);
+  const giftCardApplied = Number(sale.giftCardApplied ?? 0) || 0;
+  const giftCardAppliedLine =
+    giftCardApplied > 0
+      ? `<p><strong>Gift cards applied:</strong> -${formatCurrency(giftCardApplied)}</p>`
+      : "";
   const discountLine =
     discountAmount > 0
       ? `<p><strong>Discount:</strong> -${formatCurrency(discountAmount)}${
@@ -5475,9 +6352,10 @@ function buildPosReceiptAdminHtml(sale = {}, receiptId = "") {
     <p style="margin:0 0 6px;"><strong>Phone:</strong> ${escapeHtml(customer.phone || "Not provided")}</p>
     <p style="margin:0 0 16px;"><strong>Payment:</strong> ${paymentMethod}</p>
     ${itemsHtml}
+    ${giftCardAppliedLine}
     ${discountLine}
     ${giftCardMatchesHtml}
-    <p style="margin:16px 0 0;"><strong>Total:</strong> ${total}</p>
+    <p style="margin:16px 0 0;"><strong>Amount due:</strong> ${amountDue}</p>
     ${cashLine}
   `;
   return wrapEmail({ title: "POS sale summary", subtitle: "Internal record copy.", body });
@@ -6132,6 +7010,12 @@ async function issueGiftCardsForOrder({
     for (const planned of plan) {
       const giftCardId = planned.giftCardId;
       const token = createGiftCardAccessToken(giftCardId);
+      const code = await generateUniqueGiftCardCode({
+        orderNumber: order.orderNumber || null,
+        giftCardId,
+        lineIndex: planned.lineIndex,
+        unitIndex: planned.unitIndex,
+      });
       const issuedAtDate = new Date();
       const expiresAtDate = new Date(
         issuedAtDate.getTime() + planned.expiryDays * 24 * 60 * 60 * 1000,
@@ -6144,7 +7028,7 @@ async function issueGiftCardsForOrder({
         orderNumber: order.orderNumber || null,
         orderItemIndex: planned.lineIndex,
         orderItemUnit: planned.unitIndex,
-        code: planned.code,
+        code,
         status: "active",
         value: planned.value,
         currency: GIFT_CARD_VALUE_CURRENCY,
@@ -6908,7 +7792,7 @@ function isValidFirestoreDocumentId(value) {
 function buildOrderProductAdjustments(items = []) {
   const adjustments = new Map();
   items.forEach((item) => {
-    if (!item || item.metadata?.type !== "product") return;
+    if (!item || item.metadata?.type !== "product" || isGiftCardOrderItem(item)) return;
     const metadata = item.metadata || {};
     const fallbackId =
       typeof item.id === "string" && item.id.includes(":")
@@ -7008,6 +7892,7 @@ async function applyProductInventoryForOrder(
     const missingProductIds = [];
     const untrackedProductIds = [];
     const invalidProductIds = [];
+    const giftCardProductIdsSkipped = [];
 
     const productTargets = [];
     for (const [productId, group] of groupedAdjustments.entries()) {
@@ -7038,6 +7923,11 @@ async function applyProductInventoryForOrder(
       }
 
       const product = productSnap.data() || {};
+      const isGiftCardProduct = Boolean(product?.isGiftCard || product?.is_gift_card);
+      if (isGiftCardProduct) {
+        giftCardProductIdsSkipped.push(productId);
+        continue;
+      }
       const updatePayload = { updatedAt: FIELD_VALUE.serverTimestamp() };
       let adjusted = false;
 
@@ -7104,6 +7994,7 @@ async function applyProductInventoryForOrder(
         "inventory.missingProductIds": missingProductIds,
         "inventory.untrackedProductIds": untrackedProductIds,
         "inventory.invalidProductIds": invalidProductIds,
+        "inventory.giftCardProductIdsSkipped": giftCardProductIdsSkipped,
         updatedAt: FIELD_VALUE.serverTimestamp(),
       },
       { merge: true },
@@ -7115,6 +8006,7 @@ async function applyProductInventoryForOrder(
       missingProductIds,
       untrackedProductIds,
       invalidProductIds,
+      giftCardProductIdsSkipped,
     };
   });
 }
@@ -7227,6 +8119,8 @@ function validateOrderPayload(dataInput = {}) {
   if (!items.length) {
     throw new Error("Order items are required.");
   }
+  validateWholeCrewGiftCardSelections(items);
+  const requiresFreshFlowerDeliveryContact = orderRequiresFreshFlowerDeliveryContact(items);
   const containsGiftCards = items.some((item) => isGiftCardOrderItem(item));
   const containsWorkshops = items.some((item) => item?.metadata?.type === "workshop");
   const containsPhysicalProducts = items.some(
@@ -7314,6 +8208,7 @@ function validateOrderPayload(dataInput = {}) {
     containsGiftCards,
     requiresShipping,
     giftCardOnly,
+    requiresFreshFlowerDeliveryContact,
     paymentProof: validatePaymentProofMetadata(data?.paymentProof),
   };
 }
@@ -8139,6 +9034,470 @@ exports.adminUpdateUserProfile = onCall(async (request) => {
   };
 });
 
+exports.adminSetPosPin = onCall(async (request) => {
+  await assertAdminRequest(request);
+
+  const actorUid = (request.auth?.uid || "").toString().trim();
+  const actorEmail = (request.auth?.token?.email || "").toString().trim().toLowerCase();
+  const payload = request.data && typeof request.data === "object" ? request.data : {};
+  const currentPin = normalizePosPin(payload.currentPin || "");
+  const newPin = normalizePosPin(payload.newPin || "");
+  if (!isValidPosPin(newPin)) {
+    throw new HttpsError(
+      "invalid-argument",
+      `PIN must be numeric and ${POS_PIN_MIN_LENGTH}-${POS_PIN_MAX_LENGTH} digits long.`,
+    );
+  }
+
+  const userSnap = await db.doc(`users/${actorUid}`).get();
+  const userRole = (userSnap.data()?.role || "").toString().trim().toLowerCase();
+  if (userRole !== "admin" && !isAdminContext(request.auth)) {
+    throw new HttpsError("permission-denied", "Admin role required.");
+  }
+
+  const credentialsRef = getAdminPosCredentialsRef(actorUid);
+  const settingsRef = getAdminPosSettingsRef(actorUid);
+  const existingCredentialsSnap = await credentialsRef.get();
+  const existingCredentials = existingCredentialsSnap.exists ? existingCredentialsSnap.data() || {} : {};
+  const hasExistingPin =
+    (existingCredentials.pinHash || "").toString().trim() &&
+    (existingCredentials.pinSalt || "").toString().trim();
+
+  if (hasExistingPin) {
+    await verifyAdminPosPin({ uid: actorUid, pin: currentPin });
+  }
+
+  const pinSalt = createPosPinSalt();
+  const pinHash = hashPosPin(newPin, pinSalt);
+  await Promise.all([
+    credentialsRef.set(
+      {
+        uid: actorUid,
+        pinHash,
+        pinSalt,
+        failedAttempts: 0,
+        lastFailedAt: null,
+        lockedUntil: null,
+        createdAt: existingCredentials.createdAt || FIELD_VALUE.serverTimestamp(),
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    ),
+    settingsRef.set(
+      {
+        uid: actorUid,
+        pinConfigured: true,
+        pinUpdatedAt: FIELD_VALUE.serverTimestamp(),
+        pinUpdatedByUid: actorUid || null,
+        pinUpdatedByEmail: actorEmail || null,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    ),
+  ]);
+
+  return {
+    ok: true,
+    uid: actorUid,
+    pinConfigured: true,
+    changedExistingPin: Boolean(hasExistingPin),
+  };
+});
+
+exports.adminResetUserPosPin = onCall(async (request) => {
+  await assertAdminRequest(request);
+
+  const payload = request.data && typeof request.data === "object" ? request.data : {};
+  const userId = normalizeCustomerUid(payload.userId);
+  if (!userId) {
+    throw new HttpsError("invalid-argument", "userId is required.");
+  }
+
+  const userSnap = await db.doc(`users/${userId}`).get();
+  if (!userSnap.exists) {
+    throw new HttpsError("not-found", "User not found.");
+  }
+  const userRole = (userSnap.data()?.role || "").toString().trim().toLowerCase();
+  if (userRole !== "admin") {
+    throw new HttpsError("failed-precondition", "POS PIN reset is available for admin users only.");
+  }
+
+  const actorUid = (request.auth?.uid || "").toString().trim();
+  const actorEmail = (request.auth?.token?.email || "").toString().trim().toLowerCase();
+  await Promise.all([
+    getAdminPosCredentialsRef(userId).delete().catch(() => null),
+    getAdminPosSettingsRef(userId).set(
+      {
+        uid: userId,
+        pinConfigured: false,
+        pinResetAt: FIELD_VALUE.serverTimestamp(),
+        pinResetByUid: actorUid || null,
+        pinResetByEmail: actorEmail || null,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    ),
+  ]);
+
+  return {
+    ok: true,
+    userId,
+    pinConfigured: false,
+  };
+});
+
+exports.adminVoidPosSale = onCall(async (request) => {
+  await assertAdminRequest(request);
+
+  const payload = request.data && typeof request.data === "object" ? request.data : {};
+  const saleId = (payload.saleId || "").toString().trim();
+  const reason = normalizePosVoidReason(payload.reason || "");
+  const pin = normalizePosPin(payload.pin || "");
+  const mode = (payload.mode || "full-sale").toString().trim().toLowerCase() === "line-items"
+    ? "line-items"
+    : "full-sale";
+  const rawLineItems = Array.isArray(payload.lineItems) ? payload.lineItems : [];
+  const actorUid = (request.auth?.uid || "").toString().trim();
+  const actorEmail = (request.auth?.token?.email || "").toString().trim().toLowerCase();
+
+  if (!saleId) {
+    throw new HttpsError("invalid-argument", "saleId is required.");
+  }
+  if (!reason) {
+    throw new HttpsError("invalid-argument", "A void reason is required.");
+  }
+
+  await verifyAdminPosPin({ uid: actorUid, pin });
+
+  const saleRef = db.collection(POS_SALES_COLLECTION).doc(saleId);
+  const voidResult = await db.runTransaction(async (transaction) => {
+    const saleSnap = await transaction.get(saleRef);
+    if (!saleSnap.exists) {
+      throw new HttpsError("not-found", "POS sale not found.");
+    }
+
+    const sale = saleSnap.data() || {};
+    const normalizedItems = (Array.isArray(sale.items) ? sale.items : []).map((item, index) =>
+      normalizePosSaleItem(item, index),
+    );
+    if (!normalizedItems.length) {
+      throw new HttpsError("failed-precondition", "POS sale has no items to void.");
+    }
+
+    const currentStatus = normalizePosSaleStatus(sale.status || "");
+    if (currentStatus === POS_SALE_STATUSES.VOIDED) {
+      throw new HttpsError("failed-precondition", "This receipt has already been fully voided.");
+    }
+
+    const giftCardSale = isGiftCardPosSale(sale);
+    if (mode === "line-items" && giftCardSale) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Receipts that redeemed a gift card can only be fully voided.",
+      );
+    }
+
+    const itemByLineId = new Map();
+    normalizedItems.forEach((item) => {
+      if (item.lineId) {
+        itemByLineId.set(item.lineId, item);
+      }
+    });
+
+    const requestedVoidByLineId = new Map();
+    if (mode === "full-sale") {
+      normalizedItems.forEach((item, index) => {
+        const fallbackLineId = item.lineId || `legacy-line-${index + 1}`;
+        if (item.netQuantity > 0) {
+          requestedVoidByLineId.set(fallbackLineId, item.netQuantity);
+        }
+      });
+    } else {
+      for (const entry of rawLineItems) {
+        const lineId = (entry?.lineId || "").toString().trim();
+        const quantity = clampPositiveInteger(entry?.quantity, 0);
+        if (!lineId || quantity <= 0) continue;
+        const saleItem = itemByLineId.get(lineId);
+        if (!saleItem) {
+          throw new HttpsError("invalid-argument", `Sale line ${lineId} could not be found.`);
+        }
+        if (saleItem.netQuantity <= 0) {
+          throw new HttpsError("failed-precondition", `${saleItem.name} has already been voided.`);
+        }
+        if (!canVoidPosSaleLine(saleItem)) {
+          throw new HttpsError(
+            "failed-precondition",
+            `${saleItem.name} does not support line-item voids.`,
+          );
+        }
+        if (
+          !POS_VOID_SUPPORTED_EDITABLE_TYPES.has(saleItem.type) &&
+          quantity !== saleItem.netQuantity
+        ) {
+          throw new HttpsError(
+            "failed-precondition",
+            `${saleItem.name} can only be voided as a whole line.`,
+          );
+        }
+        if (quantity > saleItem.netQuantity) {
+          throw new HttpsError(
+            "failed-precondition",
+            `${saleItem.name} only has ${saleItem.netQuantity} remaining to void.`,
+          );
+        }
+        requestedVoidByLineId.set(lineId, quantity);
+      }
+    }
+
+    if (requestedVoidByLineId.size === 0) {
+      throw new HttpsError("invalid-argument", "Select at least one sale line to void.");
+    }
+
+    const normalizedUpdatedItems = normalizedItems.map((item) => ({
+      ...item,
+      lineId: item.lineId || "",
+    }));
+    const updatedItems = getPosSaleUpdatedItems(normalizedUpdatedItems, requestedVoidByLineId);
+    const priorTotals = buildPosSaleCumulativeTotals(sale, normalizedItems);
+    const nextTotals = buildPosSaleCumulativeTotals(sale, updatedItems);
+    const requestVoidSubtotal = roundCurrency(nextTotals.voidedSubtotal - priorTotals.voidedSubtotal);
+    const requestVoidDiscountAmount = roundCurrency(
+      nextTotals.voidedDiscountAmount - priorTotals.voidedDiscountAmount,
+    );
+    const requestVoidGiftCardApplied = roundCurrency(
+      nextTotals.voidedGiftCardApplied - priorTotals.voidedGiftCardApplied,
+    );
+    const requestNetVoidTotal = roundCurrency(nextTotals.voidedTotal - priorTotals.voidedTotal);
+    if (requestVoidSubtotal <= 0) {
+      throw new HttpsError("failed-precondition", "Nothing remains to void on this receipt.");
+    }
+
+    const requestedItemEntries = [];
+    let remainingNetVoidAllocation = requestNetVoidTotal;
+    let remainingGrossAllocation = requestVoidSubtotal;
+    const requestedItems = updatedItems
+      .map((item, index) => {
+        const previousItem = normalizedItems[index];
+        const quantityVoided = Math.max(
+          0,
+          clampPositiveInteger(item.voidedQuantity, 0) - clampPositiveInteger(previousItem?.voidedQuantity, 0),
+        );
+        if (quantityVoided <= 0) return null;
+        return {
+          currentItem: item,
+          previousItem,
+          quantityVoided,
+          grossAmountVoided: roundCurrency(item.price * quantityVoided),
+        };
+      })
+      .filter(Boolean);
+
+    requestedItems.forEach((entry, index) => {
+      const isLast = index === requestedItems.length - 1;
+      const grossAmountVoided = entry.grossAmountVoided;
+      let netAmountVoided = requestNetVoidTotal;
+      if (!isLast && requestVoidSubtotal > 0) {
+        netAmountVoided = roundCurrency(
+          requestNetVoidTotal * (grossAmountVoided / requestVoidSubtotal),
+        );
+      } else if (isLast) {
+        netAmountVoided = roundCurrency(remainingNetVoidAllocation);
+      }
+      remainingNetVoidAllocation = roundCurrency(remainingNetVoidAllocation - netAmountVoided);
+      remainingGrossAllocation = roundCurrency(remainingGrossAllocation - grossAmountVoided);
+      requestedItemEntries.push({
+        lineId: entry.currentItem.lineId || null,
+        sourceId: entry.currentItem.sourceId || null,
+        type: entry.currentItem.type || null,
+        name: entry.currentItem.name,
+        quantityVoided: entry.quantityVoided,
+        grossAmountVoided,
+        netAmountVoided,
+      });
+    });
+
+    requestedItems.forEach((entry) => {
+      const item = entry.currentItem;
+      const quantityVoided = entry.quantityVoided;
+      if (quantityVoided <= 0) return;
+
+      if (item.type === "product" || item.type === "pos-product") {
+        const collectionName = item.type === "product" ? "products" : "posProducts";
+        if (item.sourceId) {
+          const itemRef = db.collection(collectionName).doc(item.sourceId);
+          transaction.set(
+            itemRef,
+            {
+              quantity: admin.firestore.FieldValue.increment(quantityVoided),
+              updatedAt: FIELD_VALUE.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+        return;
+      }
+
+      if (item.type === "workshop" || item.type === "class") {
+        const linkedCollection = (item.metadata?.linkedBookingCollection || "").toString().trim();
+        const linkedBookingId = (item.metadata?.linkedBookingId || "").toString().trim();
+        if (linkedCollection && linkedBookingId) {
+          transaction.delete(db.collection(linkedCollection).doc(linkedBookingId));
+        }
+        return;
+      }
+
+      if (item.type === "workshop-booking" || item.type === "cut-flower-booking") {
+        const collectionName = item.type === "workshop-booking" ? "bookings" : "cutFlowerBookings";
+        const bookingId = item.sourceId || (item.metadata?.bookingId || "").toString().trim();
+        if (bookingId) {
+          const restorePayload = {
+            paid: Boolean(item.metadata?.originalPaid),
+            paymentStatus: (item.metadata?.originalPaymentStatus || "").toString().trim() || "pending",
+            updatedAt: FIELD_VALUE.serverTimestamp(),
+            posSaleId: FIELD_VALUE.delete(),
+            posSaleLineId: FIELD_VALUE.delete(),
+            paidAt: FIELD_VALUE.delete(),
+            completedAt: FIELD_VALUE.delete(),
+          };
+          const originalPaymentMethod = (item.metadata?.originalPaymentMethod || "").toString().trim();
+          if (originalPaymentMethod) {
+            restorePayload.paymentMethod = originalPaymentMethod;
+          } else {
+            restorePayload.paymentMethod = FIELD_VALUE.delete();
+          }
+          const originalStatus = (item.metadata?.originalStatus || "").toString().trim();
+          if (collectionName === "cutFlowerBookings") {
+            restorePayload.status = originalStatus || "confirmed";
+          } else if (originalStatus) {
+            restorePayload.status = originalStatus;
+          } else {
+            restorePayload.status = FIELD_VALUE.delete();
+          }
+          transaction.set(db.collection(collectionName).doc(bookingId), restorePayload, { merge: true });
+        }
+      }
+    });
+
+    let giftCardAction = "none";
+    if (giftCardSale && buildPosSaleStatusFromItems(updatedItems) === POS_SALE_STATUSES.VOIDED) {
+      const giftCardMatches = Array.isArray(sale.giftCardMatches) ? sale.giftCardMatches : [];
+      giftCardMatches.forEach((match) => {
+        const giftCardId = (match?.giftCardId || "").toString().trim();
+        if (!giftCardId) return;
+        transaction.set(
+          db.collection(GIFT_CARDS_COLLECTION).doc(giftCardId),
+          {
+            status: "active",
+            isRedeemable: true,
+            redeemedAt: null,
+            redeemedByUid: null,
+            redeemedByEmail: null,
+            redemption: FIELD_VALUE.delete(),
+            updatedAt: FIELD_VALUE.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      });
+      giftCardAction = giftCardMatches.length > 0 ? "reactivated" : "none";
+    }
+
+    const saleStatusAfter = buildPosSaleStatusFromItems(updatedItems);
+    const voidRef = saleRef.collection(POS_VOIDS_SUBCOLLECTION).doc();
+    const saleUpdatePayload = {
+      dateKey: getPosSaleDateKey(sale),
+      items: updatedItems.map((item) => ({
+        ...item,
+        lineId: item.lineId || null,
+        voidedQuantity: Math.max(0, clampPositiveInteger(item.voidedQuantity, 0)),
+        netQuantity: Math.max(0, clampPositiveInteger(item.netQuantity, 0)),
+      })),
+      status: saleStatusAfter,
+      netSubtotal: nextTotals.netSubtotal,
+      netDiscountAmount: nextTotals.netDiscountAmount,
+      netGiftCardApplied: nextTotals.netGiftCardApplied,
+      netTotal: nextTotals.netTotal,
+      voidSummary: {
+        count: Math.max(0, clampPositiveInteger(sale?.voidSummary?.count, 0)) + 1,
+        status: saleStatusAfter,
+        voidedSubtotal: nextTotals.voidedSubtotal,
+        voidedDiscountAmount: nextTotals.voidedDiscountAmount,
+        voidedGiftCardApplied: nextTotals.voidedGiftCardApplied,
+        voidedTotal: nextTotals.voidedTotal,
+        lastVoidedAt: FIELD_VALUE.serverTimestamp(),
+        lastVoidedByUid: actorUid || null,
+        lastVoidedByEmail: actorEmail || null,
+      },
+      updatedAt: FIELD_VALUE.serverTimestamp(),
+    };
+
+    transaction.set(saleRef, saleUpdatePayload, { merge: true });
+    transaction.set(voidRef, {
+      saleId,
+      receiptNumber: trimToLength(sale.receiptNumber || saleId, 120),
+      mode,
+      reason,
+      voidedByUid: actorUid || null,
+      voidedByEmail: actorEmail || null,
+      createdAt: FIELD_VALUE.serverTimestamp(),
+      items: requestedItemEntries,
+      grossAmountVoided: requestVoidSubtotal,
+      discountAmountVoided: requestVoidDiscountAmount,
+      giftCardAppliedVoided: requestVoidGiftCardApplied,
+      netAmountVoided: requestNetVoidTotal,
+      giftCardAction,
+      cashupReviewTriggered: false,
+      saleStatusAfter,
+    });
+
+    return {
+      saleId,
+      voidId: voidRef.id,
+      dateKey: getPosSaleDateKey(sale),
+      saleStatusAfter,
+      grossAmountVoided: requestVoidSubtotal,
+      netAmountVoided: requestNetVoidTotal,
+      giftCardAction,
+    };
+  });
+
+  const reviewResult = await markPosCashupsReviewNeeded({
+    dateKey: voidResult.dateKey,
+    voidId: voidResult.voidId,
+    actorUid,
+    actorEmail,
+  });
+
+  await Promise.all([
+    saleRef.collection(POS_VOIDS_SUBCOLLECTION).doc(voidResult.voidId).set(
+      {
+        cashupReviewTriggered: reviewResult.reviewTriggered,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    ),
+    reviewResult.reviewTriggered
+      ? saleRef.set(
+          {
+            updatedAt: FIELD_VALUE.serverTimestamp(),
+          },
+          { merge: true },
+        )
+      : Promise.resolve(),
+  ]);
+
+  return {
+    ok: true,
+    saleId: voidResult.saleId,
+    voidId: voidResult.voidId,
+    saleStatusAfter: voidResult.saleStatusAfter,
+    grossAmountVoided: voidResult.grossAmountVoided,
+    netAmountVoided: voidResult.netAmountVoided,
+    giftCardAction: voidResult.giftCardAction,
+    cashupReviewTriggered: reviewResult.reviewTriggered,
+    reviewCurrentTotals: reviewResult.reviewCurrentTotals,
+  };
+});
+
 async function buildPayfastPaymentPayload(dataInput = {}) {
   const payfastConfig = getPayfastConfig();
 
@@ -8153,6 +9512,7 @@ async function buildPayfastPaymentPayload(dataInput = {}) {
     shippingCost,
     shipping,
     shippingAddress,
+    requiresFreshFlowerDeliveryContact,
   } = normalizedPayload;
   functions.logger.debug("createPayfastPayment called", { data });
 
@@ -8195,6 +9555,12 @@ async function buildPayfastPaymentPayload(dataInput = {}) {
     payfast: {
       mode: modeResolution.mode,
       host: resolvedCredentials.host,
+    },
+    fulfillment: {
+      deliveryFollowUpRequired: requiresFreshFlowerDeliveryContact,
+      deliveryFollowUpReason: requiresFreshFlowerDeliveryContact
+        ? FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON
+        : null,
     },
     createdAt: FIELD_VALUE.serverTimestamp(),
     updatedAt: FIELD_VALUE.serverTimestamp(),
@@ -8574,11 +9940,21 @@ function buildSubscriptionInvoicePayload({
   const cycleAmount = roundMoney(perDeliveryAmount * totalDeliveries);
   const includedAmount = roundMoney(perDeliveryAmount * includedDeliveries);
   const resolvedBaseAmount = Number(baseAmount);
-  const normalizedBaseAmount = Number.isFinite(resolvedBaseAmount)
-    ? roundMoney(Math.max(0, resolvedBaseAmount))
-    : Number.isFinite(safeAmount)
-      ? roundMoney(Math.max(0, safeAmount))
-      : Number(includedAmount.toFixed(2));
+  
+  // For signup invoices, always use the passed amount parameter (which is pre-validated)
+  // For other sources, calculate based on schedule
+  let normalizedBaseAmount;
+  if (source === "signup" && Number.isFinite(safeAmount) && safeAmount > 0) {
+    // Signup amounts are pre-validated and already correct - use them directly without fallback
+    normalizedBaseAmount = roundMoney(safeAmount);
+  } else {
+    // For other sources, use the existing calculation logic
+    normalizedBaseAmount = Number.isFinite(resolvedBaseAmount)
+      ? roundMoney(Math.max(0, resolvedBaseAmount))
+      : Number.isFinite(safeAmount)
+        ? roundMoney(Math.max(0, safeAmount))
+        : Number(includedAmount.toFixed(2));
+  }
   const normalizedAdjustments = normalizeSubscriptionInvoiceAdjustments(adjustments || []);
   const adjustmentsTotal = roundMoney(
     normalizedAdjustments.reduce((sum, entry) => sum + Number(entry?.amount || 0), 0),
@@ -8628,7 +10004,7 @@ function buildSubscriptionInvoicePayload({
     adjustments: normalizedAdjustments,
     monthlyAmount: Number.isFinite(perDeliveryAmount) ? Number(perDeliveryAmount.toFixed(2)) : 0,
     perDeliveryAmount: Number.isFinite(perDeliveryAmount) ? Number(perDeliveryAmount.toFixed(2)) : 0,
-    cycleAmount: Number.isFinite(cycleAmount) ? Number(cycleAmount.toFixed(2)) : 0,
+    cycleAmount: Number.isFinite(cycleAmount) ? Number(cycleAmount.toFixed(2)) : (source === "signup" && Number.isFinite(normalizedBaseAmount) && normalizedBaseAmount > 0 ? normalizedBaseAmount : 0),
     includedAmount: Number.isFinite(includedAmount) ? Number(includedAmount.toFixed(2)) : 0,
     currency: SUBSCRIPTION_CURRENCY,
     status: SUBSCRIPTION_INVOICE_STATUSES.PENDING,
@@ -8703,6 +10079,14 @@ async function createOrGetSubscriptionInvoice({
   }
   if (normalizedInvoiceType !== SUBSCRIPTION_INVOICE_TYPES.CYCLE) {
     throw new Error("createOrGetSubscriptionInvoice only supports cycle invoices.");
+  }
+  
+  // Validate that amount is positive for new invoices (signup source)
+  const normalizedAmount = Number(amount || 0);
+  if (source === "signup" && (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0)) {
+    throw new Error(
+      `Cannot create signup invoice with invalid amount: ${normalizedAmount}. Please ensure the billing period has eligible delivery dates.`,
+    );
   }
 
   const invoiceId = buildSubscriptionInvoiceDocumentId(normalizedSubscriptionId, normalizedCycleMonth);
@@ -9131,6 +10515,12 @@ async function issueSubscriptionInvoiceEmail({
     invoicePaymentMethod,
   );
   const attempts = Number(invoice?.email?.attempts || 0) + 1;
+  
+  // Limit emails: Only send on attempt 1 (initial) and attempt 2 (next day follow-up)
+  // Do not send on attempts 3+
+  const maxEmailAttempts = 2;
+  const shouldSkipEmail = attempts > maxEmailAttempts;
+  
   const payToken =
     invoicePaymentMethod === SUBSCRIPTION_PAYMENT_METHODS.PAYFAST
       ? createSubscriptionPayLinkToken()
@@ -9189,7 +10579,11 @@ async function issueSubscriptionInvoiceEmail({
   let emailError = null;
   let sentAt = null;
 
-  if (!customerEmail) {
+  if (shouldSkipEmail) {
+    // Skip sending emails after 2 attempts
+    emailStatus = ORDER_NOTIFICATION_STATUSES.SKIPPED;
+    emailError = `Email sending limited to ${maxEmailAttempts} attempts. Current attempt: ${attempts}`;
+  } else if (!customerEmail) {
     emailStatus = ORDER_NOTIFICATION_STATUSES.FAILED;
     emailError = "Customer email is missing.";
   } else if (!getResendClient()) {
@@ -9398,6 +10792,450 @@ function normalizeAdminSubscriptionInvoiceStatusInput(value = "") {
 
 function normalizeAdminOverrideReason(value = "") {
   return (value || "").toString().trim().slice(0, 500);
+}
+
+function normalizePosPin(value = "") {
+  return (value || "").toString().trim();
+}
+
+function isValidPosPin(pin = "") {
+  return /^\d{4,8}$/.test(normalizePosPin(pin));
+}
+
+function createPosPinSalt() {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+function hashPosPin(pin = "", salt = "") {
+  const normalizedPin = normalizePosPin(pin);
+  const normalizedSalt = (salt || "").toString().trim();
+  if (!normalizedPin || !normalizedSalt) return "";
+  return crypto.scryptSync(normalizedPin, normalizedSalt, 64).toString("hex");
+}
+
+function verifyPosPinHash(pin = "", expectedHash = "", salt = "") {
+  const normalizedHash = (expectedHash || "").toString().trim();
+  const actualHash = hashPosPin(pin, salt);
+  if (!normalizedHash || !actualHash || normalizedHash.length !== actualHash.length) {
+    return false;
+  }
+  try {
+    return crypto.timingSafeEqual(Buffer.from(actualHash), Buffer.from(normalizedHash));
+  } catch {
+    return false;
+  }
+}
+
+function getAdminPosSettingsRef(uid = "") {
+  return db.collection(ADMIN_POS_SETTINGS_COLLECTION).doc((uid || "").toString().trim());
+}
+
+function getAdminPosCredentialsRef(uid = "") {
+  return db.collection(ADMIN_POS_CREDENTIALS_COLLECTION).doc((uid || "").toString().trim());
+}
+
+function normalizePosVoidReason(value = "") {
+  return (value || "").toString().trim().slice(0, POS_VOID_REASON_MAX_LENGTH);
+}
+
+function parseTimestampDate(value = null) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value?.toDate === "function") {
+    try {
+      const converted = value.toDate();
+      return Number.isNaN(converted.getTime()) ? null : converted;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object" && typeof value.seconds === "number") {
+    const converted = new Date(value.seconds * 1000);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function roundCurrency(value = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Number(parsed.toFixed(2));
+}
+
+function clampPositiveInteger(value, fallback = 0) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.floor(parsed));
+}
+
+function normalizePosSaleStatus(value = "") {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === POS_SALE_STATUSES.VOIDED) return POS_SALE_STATUSES.VOIDED;
+  if (normalized === POS_SALE_STATUSES.PARTIALLY_VOIDED) return POS_SALE_STATUSES.PARTIALLY_VOIDED;
+  return POS_SALE_STATUSES.COMPLETED;
+}
+
+function normalizePosPaymentMethod(value = "") {
+  return (value || "").toString().trim().toLowerCase();
+}
+
+function normalizePosSaleLineId(item = {}, index = 0) {
+  const explicitLineId = (item?.lineId || "").toString().trim();
+  if (explicitLineId) return explicitLineId;
+  return "";
+}
+
+function normalizePosSaleItem(item = {}, index = 0) {
+  const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const quantity = Math.max(1, clampPositiveInteger(item?.quantity, 1));
+  const voidedQuantity = Math.min(
+    quantity,
+    Math.max(0, clampPositiveInteger(item?.voidedQuantity, 0)),
+  );
+  const lineId = normalizePosSaleLineId(item, index);
+  const type = (item?.type || metadata?.type || "").toString().trim().toLowerCase();
+  return {
+    ...item,
+    metadata,
+    lineId,
+    type,
+    sourceId: (item?.id || item?.sourceId || "").toString().trim(),
+    name: trimToLength(item?.name || "Item", 240) || "Item",
+    price: roundCurrency(item?.price || 0),
+    quantity,
+    voidedQuantity,
+    netQuantity: Math.max(0, quantity - voidedQuantity),
+  };
+}
+
+function getPosSaleOriginalSubtotal(sale = {}) {
+  const explicit = Number(sale?.subtotal);
+  if (Number.isFinite(explicit) && explicit >= 0) return roundCurrency(explicit);
+  return roundCurrency(
+    (Array.isArray(sale?.items) ? sale.items : []).reduce((sum, item) => {
+      const normalized = normalizePosSaleItem(item);
+      return sum + normalized.price * normalized.quantity;
+    }, 0),
+  );
+}
+
+function getPosSaleOriginalDiscountAmount(sale = {}) {
+  return roundCurrency(sale?.discount?.amount || sale?.netDiscountAmount || 0);
+}
+
+function getPosSaleOriginalGiftCardApplied(sale = {}) {
+  return roundCurrency(sale?.giftCardApplied || sale?.netGiftCardApplied || 0);
+}
+
+function getPosSaleOriginalTotal(sale = {}) {
+  const explicit = Number(sale?.total);
+  if (Number.isFinite(explicit) && explicit >= 0) return roundCurrency(explicit);
+  const subtotal = getPosSaleOriginalSubtotal(sale);
+  return roundCurrency(
+    subtotal - getPosSaleOriginalDiscountAmount(sale) - getPosSaleOriginalGiftCardApplied(sale),
+  );
+}
+
+function isGiftCardPosSale(sale = {}) {
+  if (roundCurrency(sale?.giftCardApplied || 0) > 0) return true;
+  if (Array.isArray(sale?.giftCardMatches) && sale.giftCardMatches.length > 0) return true;
+  return (Array.isArray(sale?.items) ? sale.items : []).some((item) => {
+    const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+    return Boolean(metadata.giftCardLinked || metadata.giftCardId);
+  });
+}
+
+function getPosSaleDateKey(sale = {}) {
+  const explicit = (sale?.dateKey || "").toString().trim();
+  if (explicit) return explicit;
+  const createdAt = parseTimestampDate(sale?.createdAt || sale?.updatedAt);
+  if (!createdAt) return "";
+  const year = createdAt.getFullYear();
+  const month = `${createdAt.getMonth() + 1}`.padStart(2, "0");
+  const day = `${createdAt.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getPosSaleUpdatedItems(items = [], requestedVoidByLineId = new Map()) {
+  return items.map((item, index) => {
+    const normalized = normalizePosSaleItem(item, index);
+    const effectiveLineId = normalized.lineId || `legacy-line-${index + 1}`;
+    const requestedQuantity = requestedVoidByLineId.get(effectiveLineId) || 0;
+    const nextVoidedQuantity = Math.min(
+      normalized.quantity,
+      normalized.voidedQuantity + requestedQuantity,
+    );
+    return {
+      ...item,
+      lineId: normalized.lineId || item?.lineId || effectiveLineId,
+      quantity: normalized.quantity,
+      voidedQuantity: nextVoidedQuantity,
+      netQuantity: Math.max(0, normalized.quantity - nextVoidedQuantity),
+    };
+  });
+}
+
+function buildPosSaleCumulativeTotals(sale = {}, updatedItems = []) {
+  const originalSubtotal = getPosSaleOriginalSubtotal(sale);
+  const originalDiscountAmount = getPosSaleOriginalDiscountAmount(sale);
+  const originalGiftCardApplied = getPosSaleOriginalGiftCardApplied(sale);
+  const voidedSubtotal = roundCurrency(
+    updatedItems.reduce((sum, item, index) => {
+      const normalized = normalizePosSaleItem(item, index);
+      return sum + normalized.price * normalized.voidedQuantity;
+    }, 0),
+  );
+  const safeSubtotal = originalSubtotal > 0 ? originalSubtotal : 0;
+  const voidRatio = safeSubtotal > 0 ? Math.min(1, voidedSubtotal / safeSubtotal) : 0;
+  const voidedDiscountAmount = roundCurrency(originalDiscountAmount * voidRatio);
+  const voidedGiftCardApplied = roundCurrency(originalGiftCardApplied * voidRatio);
+  const remainingSubtotal = roundCurrency(Math.max(0, originalSubtotal - voidedSubtotal));
+  const remainingDiscountAmount = roundCurrency(
+    Math.max(0, originalDiscountAmount - voidedDiscountAmount),
+  );
+  const remainingGiftCardApplied = roundCurrency(
+    Math.max(0, originalGiftCardApplied - voidedGiftCardApplied),
+  );
+  const remainingTotal = roundCurrency(
+    Math.max(
+      0,
+      remainingSubtotal - remainingDiscountAmount - remainingGiftCardApplied,
+    ),
+  );
+  return {
+    originalSubtotal,
+    originalDiscountAmount,
+    originalGiftCardApplied,
+    originalTotal: getPosSaleOriginalTotal(sale),
+    voidedSubtotal,
+    voidedDiscountAmount,
+    voidedGiftCardApplied,
+    voidedTotal: roundCurrency(
+      Math.max(0, voidedSubtotal - voidedDiscountAmount - voidedGiftCardApplied),
+    ),
+    netSubtotal: remainingSubtotal,
+    netDiscountAmount: remainingDiscountAmount,
+    netGiftCardApplied: remainingGiftCardApplied,
+    netTotal: remainingTotal,
+  };
+}
+
+function buildPosSaleStatusFromItems(items = []) {
+  const normalizedItems = items.map((item, index) => normalizePosSaleItem(item, index));
+  if (!normalizedItems.length) return POS_SALE_STATUSES.COMPLETED;
+  const totalRemainingQuantity = normalizedItems.reduce((sum, item) => sum + item.netQuantity, 0);
+  if (totalRemainingQuantity <= 0) return POS_SALE_STATUSES.VOIDED;
+  const anyVoided = normalizedItems.some((item) => item.voidedQuantity > 0);
+  return anyVoided ? POS_SALE_STATUSES.PARTIALLY_VOIDED : POS_SALE_STATUSES.COMPLETED;
+}
+
+function canPartiallyVoidPosSaleLine(item = {}) {
+  const normalized = normalizePosSaleItem(item);
+  if (POS_VOID_SUPPORTED_EDITABLE_TYPES.has(normalized.type)) {
+    return normalized.netQuantity > 0;
+  }
+  return false;
+}
+
+function canVoidPosSaleLine(item = {}) {
+  const normalized = normalizePosSaleItem(item);
+  if (canPartiallyVoidPosSaleLine(normalized)) return true;
+  return POS_VOID_SUPPORTED_FULL_LINE_TYPES.has(normalized.type) && normalized.netQuantity > 0;
+}
+
+function buildPosCashupReviewTotals(sales = []) {
+  const normalizedSales = (Array.isArray(sales) ? sales : []).map((sale) => {
+    const status = normalizePosSaleStatus(sale?.status);
+    const paymentMethod = normalizePosPaymentMethod(sale?.paymentMethod);
+    const netTotal = roundCurrency(
+      sale?.netTotal !== undefined ? sale.netTotal : getPosSaleOriginalTotal(sale),
+    );
+    const netDiscountAmount = roundCurrency(
+      sale?.netDiscountAmount !== undefined
+        ? sale.netDiscountAmount
+        : getPosSaleOriginalDiscountAmount(sale),
+    );
+    const voidedTotal = roundCurrency(sale?.voidSummary?.voidedTotal || 0);
+    return {
+      status,
+      paymentMethod,
+      netTotal,
+      netDiscountAmount,
+      voidedTotal,
+    };
+  });
+
+  const count = normalizedSales.filter((sale) => sale.status !== POS_SALE_STATUSES.VOIDED).length;
+  const cash = normalizedSales
+    .filter((sale) => sale.status !== POS_SALE_STATUSES.VOIDED && sale.paymentMethod === "cash")
+    .reduce((sum, sale) => sum + sale.netTotal, 0);
+  const card = normalizedSales
+    .filter((sale) => sale.status !== POS_SALE_STATUSES.VOIDED && sale.paymentMethod === "card")
+    .reduce((sum, sale) => sum + sale.netTotal, 0);
+  const discounts = normalizedSales.reduce((sum, sale) => sum + sale.netDiscountAmount, 0);
+  const total = normalizedSales
+    .filter((sale) => sale.status !== POS_SALE_STATUSES.VOIDED)
+    .reduce((sum, sale) => sum + sale.netTotal, 0);
+  const voidedCount = normalizedSales.filter((sale) => sale.voidedTotal > 0).length;
+  const voidedTotal = normalizedSales.reduce((sum, sale) => sum + sale.voidedTotal, 0);
+  return {
+    cash: roundCurrency(cash),
+    card: roundCurrency(card),
+    discounts: roundCurrency(discounts),
+    total: roundCurrency(total),
+    count,
+    voidedCount,
+    voidedTotal: roundCurrency(voidedTotal),
+  };
+}
+
+async function verifyAdminPosPin({ uid = "", pin = "" } = {}) {
+  const normalizedUid = (uid || "").toString().trim();
+  const normalizedPin = normalizePosPin(pin);
+  if (!normalizedUid) {
+    throw new HttpsError("unauthenticated", "Admin account is required.");
+  }
+  if (!normalizedPin) {
+    throw new HttpsError("invalid-argument", "PIN is required.");
+  }
+
+  const credentialsRef = getAdminPosCredentialsRef(normalizedUid);
+  const nowMs = Date.now();
+  const result = await db.runTransaction(async (transaction) => {
+    const credentialsSnap = await transaction.get(credentialsRef);
+    if (!credentialsSnap.exists) {
+      return { status: "missing" };
+    }
+    const credentials = credentialsSnap.data() || {};
+    const storedHash = (credentials.pinHash || "").toString().trim();
+    const storedSalt = (credentials.pinSalt || "").toString().trim();
+    if (!storedHash || !storedSalt) {
+      return { status: "missing" };
+    }
+
+    const lockedUntilDate = parseTimestampDate(credentials.lockedUntil);
+    if (lockedUntilDate && lockedUntilDate.getTime() > nowMs) {
+      return { status: "locked", lockedUntil: lockedUntilDate.toISOString() };
+    }
+
+    const isValid = verifyPosPinHash(normalizedPin, storedHash, storedSalt);
+    if (!isValid) {
+      const nextFailedAttempts = Math.max(
+        1,
+        clampPositiveInteger(credentials.failedAttempts, 0) + 1,
+      );
+      const lockoutApplies = nextFailedAttempts >= POS_PIN_MAX_FAILED_ATTEMPTS;
+      const updatePayload = {
+        failedAttempts: nextFailedAttempts,
+        lastFailedAt: FIELD_VALUE.serverTimestamp(),
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+        lockedUntil: lockoutApplies
+          ? admin.firestore.Timestamp.fromMillis(nowMs + POS_PIN_LOCKOUT_MS)
+          : null,
+      };
+      transaction.set(credentialsRef, updatePayload, { merge: true });
+      return {
+        status: "invalid",
+        remainingAttempts: Math.max(0, POS_PIN_MAX_FAILED_ATTEMPTS - nextFailedAttempts),
+        lockedUntil: lockoutApplies
+          ? new Date(nowMs + POS_PIN_LOCKOUT_MS).toISOString()
+          : null,
+      };
+    }
+
+    transaction.set(
+      credentialsRef,
+      {
+        failedAttempts: 0,
+        lastFailedAt: null,
+        lockedUntil: null,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return { status: "valid" };
+  });
+
+  if (result.status === "missing") {
+    throw new HttpsError("failed-precondition", "Set your POS PIN before voiding sales.");
+  }
+  if (result.status === "locked") {
+    throw new HttpsError(
+      "resource-exhausted",
+      `PIN temporarily locked. Try again after ${result.lockedUntil}.`,
+    );
+  }
+  if (result.status === "invalid") {
+    throw new HttpsError(
+      "permission-denied",
+      result.lockedUntil
+        ? `Incorrect PIN. Too many failed attempts. Locked until ${result.lockedUntil}.`
+        : `Incorrect PIN. ${result.remainingAttempts} attempt(s) remaining before lockout.`,
+    );
+  }
+
+  return true;
+}
+
+async function markPosCashupsReviewNeeded({
+  dateKey = "",
+  voidId = "",
+  actorUid = "",
+  actorEmail = "",
+} = {}) {
+  const normalizedDateKey = (dateKey || "").toString().trim();
+  if (!normalizedDateKey) {
+    return { reviewTriggered: false, cashupIds: [], reviewCurrentTotals: null };
+  }
+
+  const [salesSnap, exactDateCashupsSnap, dateKeyCashupsSnap] = await Promise.all([
+    db.collection(POS_SALES_COLLECTION).where("dateKey", "==", normalizedDateKey).get(),
+    db.collection(POS_CASHUPS_COLLECTION).where("date", "==", normalizedDateKey).get(),
+    db.collection(POS_CASHUPS_COLLECTION).where("dateKey", "==", normalizedDateKey).get(),
+  ]);
+  const currentSales = salesSnap.docs.map((docSnapshot) => ({
+    id: docSnapshot.id,
+    ...docSnapshot.data(),
+  }));
+  const reviewCurrentTotals = buildPosCashupReviewTotals(currentSales);
+  const uniqueCashups = new Map();
+  [...exactDateCashupsSnap.docs, ...dateKeyCashupsSnap.docs].forEach((docSnapshot) => {
+    if (!uniqueCashups.has(docSnapshot.id)) {
+      uniqueCashups.set(docSnapshot.id, docSnapshot.ref);
+    }
+  });
+
+  if (uniqueCashups.size === 0) {
+    return { reviewTriggered: false, cashupIds: [], reviewCurrentTotals };
+  }
+
+  const batch = db.batch();
+  uniqueCashups.forEach((cashupRef) => {
+    batch.set(
+      cashupRef,
+      {
+        status: "review-needed",
+        reviewRequired: true,
+        reviewReason: "POS sale void changed totals after cash-up save.",
+        reviewTriggeredAt: FIELD_VALUE.serverTimestamp(),
+        reviewTriggeredByVoidId: (voidId || "").toString().trim() || null,
+        reviewTriggeredByUid: (actorUid || "").toString().trim() || null,
+        reviewTriggeredByEmail: (actorEmail || "").toString().trim().toLowerCase() || null,
+        reviewCurrentTotals,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
+  await batch.commit();
+  return {
+    reviewTriggered: true,
+    cashupIds: Array.from(uniqueCashups.keys()),
+    reviewCurrentTotals,
+  };
 }
 
 async function writeSubscriptionAdminAuditLog({
@@ -9964,6 +11802,13 @@ exports.createSubscriptionPayfastPaymentHttp = onRequest((req, res) => {
       const pendingRef = db.collection(PENDING_SUBSCRIPTION_PAYFAST_COLLECTION).doc();
       const paymentReference = pendingRef.id;
       const amount = Number(invoice.amount || 0);
+      
+      // Validate that the invoice amount is valid and greater than zero
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error(
+          "Invoice amount is invalid or zero. Please contact support if this issue persists.",
+        );
+      }
       const { firstName, lastName } = splitContactName(customer.fullName);
       const planLabel = buildSubscriptionPlanLabel(subscription, invoice);
       const itemName = trimToLength(
@@ -10580,26 +12425,31 @@ exports.sendSubscriptionInvoiceEmailNow = onCall(async (request) => {
     if (!recurringAmount) {
       throw new HttpsError("failed-precondition", "Subscription plan pricing is invalid.");
     }
-    const nowParts = formatTimeZoneDateParts(new Date(), SUBSCRIPTION_TIMEZONE);
-    const cycleMonth = nowParts.monthKey;
-    if (!cycleMonth) {
+    const nowDate = new Date();
+    const nowParts = formatTimeZoneDateParts(nowDate, SUBSCRIPTION_TIMEZONE);
+    const requestedCycleMonth = nowParts.monthKey;
+    if (!requestedCycleMonth) {
       throw new HttpsError("internal", "Unable to resolve current billing cycle.");
     }
+    const deliveryPreference = resolveSubscriptionDeliveryPreference(subscription);
+    const cycleInvoicePlan = resolveInvoicePlanForRequestedCycle({
+      tier: normalizedTier,
+      monthlyAmount: recurringAmount,
+      mondaySlots: deliveryPreference.slots,
+      requestedCycleMonth,
+      nowDate,
+      timeZone: SUBSCRIPTION_TIMEZONE,
+    });
     const nextBillingMonth = normalizePreorderSendMonth(subscription?.nextBillingMonth || "");
-    if (nextBillingMonth && compareSubscriptionMonthKeys(cycleMonth, nextBillingMonth) < 0) {
+    if (
+      nextBillingMonth &&
+      compareSubscriptionMonthKeys(cycleInvoicePlan.cycleMonth, nextBillingMonth) < 0
+    ) {
       throw new HttpsError(
         "failed-precondition",
         `First invoice opens on ${formatSubscriptionBillingOpenLabel(nextBillingMonth)}.`,
       );
     }
-    const deliveryPreference = resolveSubscriptionDeliveryPreference(subscription);
-    const cycleInvoicePlan = buildCycleInvoicePlan({
-      tier: normalizedTier,
-      monthlyAmount: recurringAmount,
-      mondaySlots: deliveryPreference.slots,
-      cycleMonth,
-      timeZone: SUBSCRIPTION_TIMEZONE,
-    });
     const createdInvoice = await createOrGetSubscriptionInvoice({
       subscriptionId,
       subscription: {
@@ -11299,21 +13149,28 @@ async function ensureCycleBaseInvoiceForAdmin({
   cycleMonth = "",
   createIfMissing = false,
 } = {}) {
-  const normalizedCycleMonth = normalizePreorderSendMonth(cycleMonth || "");
-  if (!normalizedCycleMonth) {
+  const requestedCycleMonth = normalizePreorderSendMonth(cycleMonth || "");
+  if (!requestedCycleMonth) {
     throw new HttpsError("invalid-argument", "Cycle month must be in YYYY-MM format.");
   }
-  const cycleInvoices = await loadCycleInvoices(subscriptionId, normalizedCycleMonth);
-  let baseInvoice = getCycleBaseInvoice(cycleInvoices, subscriptionId, normalizedCycleMonth);
+  const requestedCycleInvoices = await loadCycleInvoices(subscriptionId, requestedCycleMonth);
+  let baseInvoice = getCycleBaseInvoice(
+    requestedCycleInvoices,
+    subscriptionId,
+    requestedCycleMonth,
+  );
   if (baseInvoice) {
     const baseInvoiceId = (baseInvoice.id || baseInvoice.invoiceId || "").toString().trim();
     return {
       baseInvoice,
       baseInvoiceId,
       baseInvoiceRef: db.collection(SUBSCRIPTION_INVOICES_COLLECTION).doc(baseInvoiceId),
-      cycleInvoices,
+      cycleInvoices: requestedCycleInvoices,
       created: false,
-      cycleMonth: normalizedCycleMonth,
+      cycleMonth: requestedCycleMonth,
+      requestedCycleMonth,
+      shiftedFromRequested: false,
+      cyclePlan: null,
     };
   }
   if (!createIfMissing) {
@@ -11321,9 +13178,12 @@ async function ensureCycleBaseInvoiceForAdmin({
       baseInvoice: null,
       baseInvoiceId: "",
       baseInvoiceRef: null,
-      cycleInvoices,
+      cycleInvoices: requestedCycleInvoices,
       created: false,
-      cycleMonth: normalizedCycleMonth,
+      cycleMonth: requestedCycleMonth,
+      requestedCycleMonth,
+      shiftedFromRequested: false,
+      cyclePlan: null,
     };
   }
 
@@ -11338,17 +13198,45 @@ async function ensureCycleBaseInvoiceForAdmin({
     throw new HttpsError("failed-precondition", "Subscription tier is invalid.");
   }
   const deliveryPreference = resolveSubscriptionDeliveryPreference(subscription);
-  const cycleInvoicePlan = buildCycleInvoicePlan({
+  const cycleInvoicePlan = resolveInvoicePlanForRequestedCycle({
     tier: normalizedTier,
     monthlyAmount: recurringAmount,
     mondaySlots: deliveryPreference.slots,
-    cycleMonth: normalizedCycleMonth,
+    requestedCycleMonth,
+    nowDate: new Date(),
     timeZone: SUBSCRIPTION_TIMEZONE,
   });
+  const effectiveCycleMonth =
+    normalizePreorderSendMonth(cycleInvoicePlan.cycleMonth || "") || requestedCycleMonth;
+  const shiftedFromRequested = effectiveCycleMonth !== requestedCycleMonth;
+  let effectiveCycleInvoices = requestedCycleInvoices;
+  if (shiftedFromRequested) {
+    effectiveCycleInvoices = await loadCycleInvoices(subscriptionId, effectiveCycleMonth);
+    baseInvoice = getCycleBaseInvoice(effectiveCycleInvoices, subscriptionId, effectiveCycleMonth);
+    if (baseInvoice) {
+      const baseInvoiceId = (baseInvoice.id || baseInvoice.invoiceId || "").toString().trim();
+      return {
+        baseInvoice,
+        baseInvoiceId,
+        baseInvoiceRef: db.collection(SUBSCRIPTION_INVOICES_COLLECTION).doc(baseInvoiceId),
+        cycleInvoices: effectiveCycleInvoices,
+        created: false,
+        cycleMonth: effectiveCycleMonth,
+        requestedCycleMonth,
+        shiftedFromRequested: true,
+        cyclePlan: {
+          ...cycleInvoicePlan,
+          requestedCycleMonth,
+          cycleMonth: effectiveCycleMonth,
+          effectiveCycleMonth,
+        },
+      };
+    }
+  }
   const createdInvoice = await createOrGetSubscriptionInvoice({
     subscriptionId,
     subscription,
-    cycleMonth: cycleInvoicePlan.cycleMonth,
+    cycleMonth: effectiveCycleMonth,
     amount: cycleInvoicePlan.invoiceAmount,
     isProrated: cycleInvoicePlan.isProrated,
     proration: null,
@@ -11364,9 +13252,17 @@ async function ensureCycleBaseInvoiceForAdmin({
     baseInvoice: refreshedInvoice,
     baseInvoiceId: createdInvoice.invoiceId,
     baseInvoiceRef: createdInvoice.invoiceRef,
-    cycleInvoices: [...cycleInvoices, refreshedInvoice],
+    cycleInvoices: [...effectiveCycleInvoices, refreshedInvoice],
     created: Boolean(createdInvoice.created),
-    cycleMonth: normalizedCycleMonth,
+    cycleMonth: effectiveCycleMonth,
+    requestedCycleMonth,
+    shiftedFromRequested,
+    cyclePlan: {
+      ...cycleInvoicePlan,
+      requestedCycleMonth,
+      cycleMonth: effectiveCycleMonth,
+      effectiveCycleMonth,
+    },
   };
 }
 
@@ -11661,6 +13557,14 @@ exports.adminAddSubscriptionInvoiceCharge = onCall(async (request) => {
   if (!baseContext?.baseInvoice || !baseContext.baseInvoiceId) {
     throw new HttpsError("failed-precondition", "No invoice exists for this cycle.");
   }
+  const requestedCycleMonth = normalizePreorderSendMonth(cycleMonth || "");
+  const effectiveCycleMonth =
+    normalizePreorderSendMonth(baseContext.cycleMonth || "") || requestedCycleMonth;
+  const shiftedCycleMonth = Boolean(
+    effectiveCycleMonth &&
+    requestedCycleMonth &&
+    effectiveCycleMonth !== requestedCycleMonth,
+  );
 
   let targetInvoice = baseContext.baseInvoice;
   let targetInvoiceId = baseContext.baseInvoiceId;
@@ -11672,7 +13576,7 @@ exports.adminAddSubscriptionInvoiceCharge = onCall(async (request) => {
     const topupContext = await ensurePendingCycleTopUpInvoice({
       subscriptionId,
       subscription: workingSubscription,
-      cycleMonth,
+      cycleMonth: effectiveCycleMonth,
       baseInvoice: baseContext.baseInvoice,
       source: "admin-extra-charge",
     });
@@ -11734,7 +13638,7 @@ exports.adminAddSubscriptionInvoiceCharge = onCall(async (request) => {
     additionalFields: {
       invoiceType: targetInvoiceType,
       ...(targetInvoiceType === SUBSCRIPTION_INVOICE_TYPES.TOPUP
-        ? { baseInvoiceId: baseContext.baseInvoiceId, cycleMonth }
+        ? { baseInvoiceId: baseContext.baseInvoiceId, cycleMonth: effectiveCycleMonth }
         : {}),
     },
   });
@@ -11749,7 +13653,7 @@ exports.adminAddSubscriptionInvoiceCharge = onCall(async (request) => {
         invoice: { id: targetInvoiceId, ...(result?.invoice || {}) },
         triggerContext: {
           trigger: SUBSCRIPTION_INVOICE_EMAIL_TRIGGERS.MANUAL,
-          cycleMonth,
+          cycleMonth: effectiveCycleMonth,
         },
       });
       emailStatus = dispatch?.emailStatus || ORDER_NOTIFICATION_STATUSES.SKIPPED;
@@ -11757,7 +13661,7 @@ exports.adminAddSubscriptionInvoiceCharge = onCall(async (request) => {
       emailStatus = ORDER_NOTIFICATION_STATUSES.FAILED;
       functions.logger.error("Subscription charge invoice email failed", {
         subscriptionId,
-        cycleMonth,
+        cycleMonth: effectiveCycleMonth,
         targetInvoiceId,
         error: error?.message || error,
       });
@@ -11770,7 +13674,7 @@ exports.adminAddSubscriptionInvoiceCharge = onCall(async (request) => {
     actorEmail,
     subscriptionId,
     invoiceId: targetInvoiceId,
-    cycleMonth,
+    cycleMonth: effectiveCycleMonth,
     fromStatus: null,
     toStatus: null,
     reason,
@@ -11783,12 +13687,18 @@ exports.adminAddSubscriptionInvoiceCharge = onCall(async (request) => {
       targetInvoiceType,
       recurringChargeId: recurringChargeEntry?.chargeId || adjustmentEntry?.chargeId || null,
       emailStatus,
+      requestedCycleMonth,
+      effectiveCycleMonth,
+      shiftedCycleMonth,
     },
   });
 
   return {
     subscriptionId,
-    cycleMonth,
+    cycleMonth: effectiveCycleMonth,
+    requestedCycleMonth,
+    effectiveCycleMonth,
+    shiftedCycleMonth,
     chargeId: recurringChargeEntry?.chargeId || adjustmentEntry?.chargeId || null,
     chargeMode,
     chargeBasis,
@@ -12135,6 +14045,173 @@ exports.adminUpdateSubscriptionStatus = onCall(async (request) => {
   };
 });
 
+exports.fixSubscriptionPricingIssue = onCall(async (request) => {
+  await assertAdminRequest(request);
+
+  const actorUid = (request.auth?.uid || "").toString().trim();
+  const actorEmail = (request.auth?.token?.email || "").toString().trim().toLowerCase();
+
+  // Query all subscriptions
+  const subscriptionsSnapshot = await db.collection(SUBSCRIPTIONS_COLLECTION).get();
+  const allSubscriptions = subscriptionsSnapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  const affectedSubscriptions = [];
+  const subscriptionUpdates = [];
+  const invoiceUpdates = [];
+  let totalAdjustmentAmount = 0;
+
+  // Step 1: Identify affected subscriptions
+  for (const subscription of allSubscriptions) {
+    const subscriptionId = subscription.id;
+    const tier = normalizeSubscriptionTier(subscription.tier || "");
+    const stems = subscription.stems || 16;
+    const currentMonthlyAmount = subscription.monthlyAmount || 0;
+
+    // Get correct pricing from matrix
+    const correctAmount = SUBSCRIPTION_PLAN_MATRIX?.[tier]?.[String(stems)] || null;
+
+    if (!correctAmount) {
+      functions.logger.warn("Unable to determine correct pricing for subscription", {
+        subscriptionId,
+        tier,
+        stems,
+      });
+      continue;
+    }
+
+    // Check if pricing is incorrect
+    if (currentMonthlyAmount !== correctAmount) {
+      affectedSubscriptions.push({
+        subscriptionId,
+        tier,
+        stems,
+        originalAmount: currentMonthlyAmount,
+        correctAmount,
+      });
+
+      subscriptionUpdates.push({
+        subscriptionId,
+        originalAmount: currentMonthlyAmount,
+        correctAmount,
+      });
+    }
+  }
+
+  // Step 2: Update affected subscriptions and their invoices
+  for (const subUpdate of subscriptionUpdates) {
+    const { subscriptionId, originalAmount, correctAmount } = subUpdate;
+
+    // Update subscription record
+    const subscriptionRef = db.collection(SUBSCRIPTIONS_COLLECTION).doc(subscriptionId);
+    await subscriptionRef.set(
+      {
+        monthlyAmount: correctAmount,
+        perDeliveryAmount: correctAmount,
+        pricing: {
+          originalAmount,
+          correctAmount,
+          fixedAt: FIELD_VALUE.serverTimestamp(),
+          fixReason: "backfilled-order-pricing-correction",
+        },
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+        adminOverride: {
+          actionType: "pricing-correction",
+          fromAmount: originalAmount,
+          toAmount: correctAmount,
+          reason: "backfilled-order-pricing-correction",
+          actorUid: actorUid || null,
+          actorEmail: actorEmail || null,
+          at: FIELD_VALUE.serverTimestamp(),
+          source: "admin-console",
+        },
+      },
+      { merge: true },
+    );
+
+    // Find and update related invoices
+    const invoicesSnapshot = await db
+      .collection(SUBSCRIPTION_INVOICES_COLLECTION)
+      .where("subscriptionId", "==", subscriptionId)
+      .get();
+
+    for (const invoiceDoc of invoicesSnapshot.docs) {
+      const invoice = invoiceDoc.data();
+      const invoiceId = invoiceDoc.id;
+      const deliveryCount = invoice.deliveryDates?.length || 1;
+      const originalInvoiceAmount = invoice.amount || invoice.baseAmount || 0;
+      const correctInvoiceAmount = correctAmount * deliveryCount;
+
+      const invoiceAdjustment = correctInvoiceAmount - originalInvoiceAmount;
+      totalAdjustmentAmount += invoiceAdjustment;
+
+      // Update invoice with correct amount
+      const invoiceRef = db.collection(SUBSCRIPTION_INVOICES_COLLECTION).doc(invoiceId);
+      await invoiceRef.set(
+        {
+          baseAmount: correctInvoiceAmount, // per-delivery price × delivery count
+          amount: correctInvoiceAmount,
+          pricing: {
+            originalAmount: originalInvoiceAmount,
+            correctAmount: correctInvoiceAmount,
+            adjustment: invoiceAdjustment,
+            fixedAt: FIELD_VALUE.serverTimestamp(),
+            fixReason: "backfilled-order-pricing-correction",
+          },
+          updatedAt: FIELD_VALUE.serverTimestamp(),
+          adminOverride: {
+            actionType: "invoice-pricing-correction",
+            fromAmount: originalInvoiceAmount,
+            toAmount: correctInvoiceAmount,
+            adjustment: invoiceAdjustment,
+            reason: "backfilled-order-pricing-correction",
+            actorUid: actorUid || null,
+            actorEmail: actorEmail || null,
+            at: FIELD_VALUE.serverTimestamp(),
+            source: "admin-console",
+          },
+        },
+        { merge: true },
+      );
+
+      invoiceUpdates.push({
+        invoiceId,
+        subscriptionId,
+        originalAmount: originalInvoiceAmount,
+        correctAmount: correctInvoiceAmount,
+        adjustment: invoiceAdjustment,
+      });
+    }
+  }
+
+  // Step 3: Create audit log
+  await writeSubscriptionAdminAuditLog({
+    actionType: "fix-subscription-pricing-issue",
+    actorUid,
+    actorEmail,
+    meta: {
+      affectedSubscriptionsCount: affectedSubscriptions.length,
+      affectedInvoicesCount: invoiceUpdates.length,
+      totalAdjustmentAmount,
+      affectedSubscriptions,
+    },
+  });
+
+  return {
+    success: true,
+    affectedSubscriptionsCount: affectedSubscriptions.length,
+    affectedInvoicesCount: invoiceUpdates.length,
+    totalAdjustmentAmount,
+    summary: `Fixed pricing for ${affectedSubscriptions.length} subscriptions and ${invoiceUpdates.length} invoices. Total adjustment: R${(totalAdjustmentAmount / 100).toFixed(2)}`,
+    details: {
+      subscriptions: affectedSubscriptions,
+      invoices: invoiceUpdates,
+    },
+  };
+});
+
 exports.adminUpsertSubscriptionInvoiceStatus = onCall(async (request) => {
   await assertAdminRequest(request);
 
@@ -12164,45 +14241,30 @@ exports.adminUpsertSubscriptionInvoiceStatus = onCall(async (request) => {
   const actorUid = (request.auth?.uid || "").toString().trim();
   const actorEmail = (request.auth?.token?.email || "").toString().trim().toLowerCase();
   const { subscriptionRef, subscription } = await resolveSubscriptionByIdForAdmin(subscriptionId);
-  let invoiceId = buildSubscriptionInvoiceDocumentId(subscriptionId, cycleMonth);
-  let invoiceRef = db.collection(SUBSCRIPTION_INVOICES_COLLECTION).doc(invoiceId);
-  let invoiceSnap = await invoiceRef.get();
-  let invoiceCreated = false;
-
-  if (!invoiceSnap.exists) {
-    if (!createIfMissing) {
-      throw new HttpsError(
-        "failed-precondition",
-        "No invoice exists for this subscription and billing cycle.",
-      );
-    }
-    const recurringAmount = resolveSubscriptionRecurringAmount(subscription);
-    if (!recurringAmount) {
-      throw new HttpsError("failed-precondition", "Subscription plan pricing is invalid.");
-    }
-    const createdInvoice = await createOrGetSubscriptionInvoice({
-      subscriptionId,
-      subscription: {
-        ...subscription,
-        monthlyAmount: recurringAmount,
-      },
-      cycleMonth,
-      amount: recurringAmount,
-      isProrated: false,
-      proration: null,
-      source: "admin-console",
-      paymentMethod: normalizeSubscriptionPaymentMethod(subscription?.paymentMethod),
-    });
-    invoiceId = createdInvoice.invoiceId;
-    invoiceRef = createdInvoice.invoiceRef;
-    invoiceCreated = Boolean(createdInvoice.created);
-    invoiceSnap = await invoiceRef.get();
+  const cycleContext = await ensureCycleBaseInvoiceForAdmin({
+    subscriptionId,
+    subscription,
+    cycleMonth,
+    createIfMissing,
+  });
+  if (!cycleContext?.baseInvoice || !cycleContext.baseInvoiceId || !cycleContext.baseInvoiceRef) {
+    throw new HttpsError(
+      "failed-precondition",
+      "No invoice exists for this subscription and billing cycle.",
+    );
   }
-
-  if (!invoiceSnap.exists) {
-    throw new HttpsError("not-found", "Unable to load subscription invoice.");
-  }
-  const invoice = invoiceSnap.data() || {};
+  const invoiceId = cycleContext.baseInvoiceId;
+  const invoiceRef = cycleContext.baseInvoiceRef;
+  const invoice = cycleContext.baseInvoice || {};
+  const invoiceCreated = Boolean(cycleContext.created);
+  const effectiveCycleMonth =
+    normalizePreorderSendMonth(cycleContext.cycleMonth || "") || cycleMonth;
+  const requestedCycleMonth = normalizePreorderSendMonth(cycleMonth || "");
+  const shiftedCycleMonth = Boolean(
+    effectiveCycleMonth &&
+    requestedCycleMonth &&
+    effectiveCycleMonth !== requestedCycleMonth,
+  );
   const currentStatus = normalizeSubscriptionInvoiceStatus(invoice.status);
   const invoicePaymentMethod = normalizeSubscriptionPaymentMethod(
     invoice?.paymentMethod || subscription?.paymentMethod,
@@ -12265,7 +14327,7 @@ exports.adminUpsertSubscriptionInvoiceStatus = onCall(async (request) => {
       actorEmail: actorEmail || null,
       at: FIELD_VALUE.serverTimestamp(),
       source: "admin-console",
-      cycleMonth,
+      cycleMonth: effectiveCycleMonth,
     },
   };
   if (nextStatus === SUBSCRIPTION_INVOICE_STATUSES.PAID) {
@@ -12282,7 +14344,7 @@ exports.adminUpsertSubscriptionInvoiceStatus = onCall(async (request) => {
 
   const subscriptionUpdate = {
     lastInvoiceId: invoiceId,
-    lastInvoiceMonth: cycleMonth,
+    lastInvoiceMonth: effectiveCycleMonth,
     paymentApprovalStatus:
       invoicePaymentMethod === SUBSCRIPTION_PAYMENT_METHODS.EFT
         ? nextPaymentApprovalStatus
@@ -12307,13 +14369,16 @@ exports.adminUpsertSubscriptionInvoiceStatus = onCall(async (request) => {
     actorEmail,
     subscriptionId,
     invoiceId,
-    cycleMonth,
+    cycleMonth: effectiveCycleMonth,
     fromStatus: currentStatus,
     toStatus: nextStatus,
     reason,
     meta: {
       invoiceCreated,
       createIfMissing,
+      requestedCycleMonth,
+      effectiveCycleMonth,
+      shiftedCycleMonth,
     },
   });
 
@@ -12322,7 +14387,10 @@ exports.adminUpsertSubscriptionInvoiceStatus = onCall(async (request) => {
   return {
     subscriptionId,
     invoiceId,
-    cycleMonth,
+    cycleMonth: effectiveCycleMonth,
+    requestedCycleMonth,
+    effectiveCycleMonth,
+    shiftedCycleMonth,
     fromStatus: currentStatus,
     status: nextStatus,
     invoiceCreated,
@@ -12356,6 +14424,7 @@ exports.createEftOrderHttp = onRequest((req, res) => {
         shippingAddress,
         totalPrice,
         containsGiftCards,
+        requiresFreshFlowerDeliveryContact,
       } = normalizedPayload;
       if (containsGiftCards) {
         throw new Error("Gift cards must be paid via PayFast and cannot be checked out with EFT.");
@@ -12394,6 +14463,12 @@ exports.createEftOrderHttp = onRequest((req, res) => {
         paymentApprovalStatus: "pending",
         paymentApproval,
         paymentProof: null,
+        fulfillment: {
+          deliveryFollowUpRequired: requiresFreshFlowerDeliveryContact,
+          deliveryFollowUpReason: requiresFreshFlowerDeliveryContact
+            ? FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON
+            : null,
+        },
         paymentProofUpload: {
           tokenHash: hashEftProofUploadToken(proofUploadToken),
           expiresAt: admin.firestore.Timestamp.fromDate(proofUploadExpiresAtDate),
@@ -12519,7 +14594,15 @@ exports.getGiftCardPublicHttp = onRequest((req, res) => {
     }
     try {
       const { giftCardId, token, giftCard } = await resolveGiftCardRequest(req);
-      if ((giftCard.status || "").toString().toLowerCase() === "cancelled") {
+      const status = normalizeGiftCardStatus(
+        giftCard.status || GIFT_CARD_STATUS_ACTIVE,
+        GIFT_CARD_STATUS_ACTIVE,
+      );
+      if (isGiftCardArchivedStatus(status)) {
+        res.status(404).json({ error: "Gift card not found." });
+        return;
+      }
+      if (isGiftCardInactiveStatus(status)) {
         res.status(403).json({ error: "Gift card is no longer active." });
         return;
       }
@@ -12545,12 +14628,21 @@ exports.viewGiftCardHttp = onRequest((req, res) => {
     }
     try {
       const { giftCardId, token, giftCard } = await resolveGiftCardRequest(req);
-      if ((giftCard.status || "").toString().toLowerCase() === "cancelled") {
+      const status = normalizeGiftCardStatus(
+        giftCard.status || GIFT_CARD_STATUS_ACTIVE,
+        GIFT_CARD_STATUS_ACTIVE,
+      );
+      if (isGiftCardArchivedStatus(status)) {
+        throw new Error("Gift card not found.");
+      }
+      if (isGiftCardInactiveStatus(status)) {
         res.status(403).send(
           buildGiftCardViewerHtml({
             code: giftCard.code || giftCardId,
             status: "cancelled",
             value: giftCard.value || 0,
+            isGiveaway: Boolean(giftCard.isGiveaway),
+            issueSource: giftCard.issueSource || null,
             recipientName: giftCard.recipientName || "",
             purchaserName: giftCard.purchaserName || "",
             expiresAt: giftCard.expiresAt || null,
@@ -12585,6 +14677,18 @@ exports.downloadGiftCardPdfHttp = onRequest((req, res) => {
     }
     try {
       const { giftCardId, giftCard } = await resolveGiftCardRequest(req);
+      const status = normalizeGiftCardStatus(
+        giftCard.status || GIFT_CARD_STATUS_ACTIVE,
+        GIFT_CARD_STATUS_ACTIVE,
+      );
+      if (isGiftCardArchivedStatus(status)) {
+        res.status(404).json({ error: "Gift card not found." });
+        return;
+      }
+      if (isGiftCardInactiveStatus(status)) {
+        res.status(403).json({ error: "Gift card is no longer active." });
+        return;
+      }
       const storagePath = (giftCard.pdfStoragePath || "").toString().trim();
       if (!storagePath) {
         res.status(404).json({ error: "Gift card PDF is not available." });
@@ -12903,6 +15007,12 @@ exports.payfastItn = onRequest(async (req, res) => {
   let orderCreated = false;
   const paymentVerified = paymentComplete && checksPassed;
   const pendingCustomerUid = normalizeCustomerUid(pending.customerUid);
+  const pendingDeliveryFollowUpRequired =
+    pending?.fulfillment?.deliveryFollowUpRequired === true ||
+    orderRequiresFreshFlowerDeliveryContact(pending.items || []);
+  const pendingDeliveryFollowUpReason = pendingDeliveryFollowUpRequired
+    ? FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON
+    : null;
 
   if (paymentVerified && !pending.orderId) {
     const orderNumber = await getNextOrderNumber();
@@ -12929,6 +15039,10 @@ exports.payfastItn = onRequest(async (req, res) => {
       paymentApprovalStatus: "not-required",
       paymentApproval,
       paidAt: FIELD_VALUE.serverTimestamp(),
+      fulfillment: {
+        deliveryFollowUpRequired: pendingDeliveryFollowUpRequired,
+        deliveryFollowUpReason: pendingDeliveryFollowUpReason,
+      },
       orderNumber,
       invoiceNumber: normalizeInvoiceSequenceNumber(orderNumber),
       trackingLink: null,
@@ -12995,6 +15109,10 @@ exports.payfastItn = onRequest(async (req, res) => {
       };
       orderUpdate.status = "order-placed";
       orderUpdate.paidAt = FIELD_VALUE.serverTimestamp();
+      orderUpdate.fulfillment = {
+        deliveryFollowUpRequired: pendingDeliveryFollowUpRequired,
+        deliveryFollowUpReason: pendingDeliveryFollowUpReason,
+      };
     }
     await orderRef.set(orderUpdate, { merge: true });
     if (paymentVerified) {
@@ -13033,6 +15151,10 @@ exports.payfastItn = onRequest(async (req, res) => {
     merchantMatches,
     validationFailures,
     paymentVerified,
+    fulfillment: {
+      deliveryFollowUpRequired: pendingDeliveryFollowUpRequired,
+      deliveryFollowUpReason: pendingDeliveryFollowUpReason,
+    },
     updatedAt: FIELD_VALUE.serverTimestamp(),
   };
   if (paymentVerified) {
@@ -13314,6 +15436,7 @@ exports.createAdminEftOrder = onCall(async (request) => {
     shippingAddress,
     totalPrice,
     containsGiftCards,
+    requiresFreshFlowerDeliveryContact,
   } = normalizedPayload;
   if (containsGiftCards) {
     throw new HttpsError(
@@ -13355,6 +15478,12 @@ exports.createAdminEftOrder = onCall(async (request) => {
     paymentApprovalStatus: "pending",
     paymentApproval,
     paymentProof: null,
+    fulfillment: {
+      deliveryFollowUpRequired: requiresFreshFlowerDeliveryContact,
+      deliveryFollowUpReason: requiresFreshFlowerDeliveryContact
+        ? FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON
+        : null,
+    },
     orderNumber,
     invoiceNumber: normalizeInvoiceSequenceNumber(orderNumber),
     trackingLink: null,
@@ -13914,6 +16043,588 @@ exports.previewSubscriptionInvoiceTemplate = onCall({ cors: true }, async (reque
   };
 });
 
+exports.previewAdminGiveawayGiftCard = onCall({ cors: true }, async (request) => {
+  await assertAdminRequest(request);
+
+  const payload = request.data || {};
+  try {
+    const resolved = await resolveAdminGiveawayGiftCardInput(payload);
+    const generatedAt = new Date();
+    const expiresAtDate = new Date(
+      generatedAt.getTime() + resolved.expiryDays * 24 * 60 * 60 * 1000,
+    );
+    const previewGiftCard = {
+      id: "gc-preview-giveaway",
+      code: "PREVIEW",
+      status: "preview",
+      value: resolved.giftCardValue,
+      currency: GIFT_CARD_VALUE_CURRENCY,
+      purchaserName: "",
+      recipientName: "",
+      message: resolved.message || null,
+      productId: resolved.productId,
+      productTitle: resolved.productTitle,
+      terms: resolved.terms,
+      selectedOptions: resolved.selectedOptions,
+      selectedOptionCount: resolved.selectedOptionCount,
+      expiryDays: resolved.expiryDays,
+      issuedAt: generatedAt.toISOString(),
+      expiresAt: expiresAtDate.toISOString(),
+      isGiveaway: true,
+      issueSource: GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
+      downloadUrl: "",
+      printUrl: "",
+      siteAccessUrl: "",
+    };
+    return {
+      ok: true,
+      preview: {
+        html: buildGiftCardViewerHtml(previewGiftCard),
+        generatedAt: generatedAt.toISOString(),
+      },
+      giftCard: previewGiftCard,
+    };
+  } catch (error) {
+    throw toGiveawayGiftCardHttpsError(
+      error,
+      "Unable to build giveaway gift card preview.",
+    );
+  }
+});
+
+exports.saveAdminGiveawayGiftCardDraft = onCall({ cors: true }, async (request) => {
+  await assertAdminRequest(request);
+  const payload = request.data || {};
+  try {
+    const resolved = await resolveAdminGiveawayGiftCardInput(payload);
+    const draftId = `gcd-${crypto.randomBytes(10).toString("hex")}`;
+    const createdByEmail = (request.auth?.token?.email || "").toString().trim() || null;
+    const draftRecord = {
+      id: draftId,
+      status: "draft",
+      source: GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
+      productId: resolved.productId,
+      productTitle: resolved.productTitle,
+      message: resolved.message || null,
+      terms: resolved.terms,
+      expiryDays: resolved.expiryDays,
+      selectedOptions: resolved.selectedOptions,
+      selectedOptionCount: resolved.selectedOptionCount,
+      giftCardValue: resolved.giftCardValue,
+      createdByUid: request.auth?.uid || null,
+      createdByEmail,
+      createdAt: FIELD_VALUE.serverTimestamp(),
+      updatedAt: FIELD_VALUE.serverTimestamp(),
+    };
+    await db.collection(GIFT_CARD_DRAFTS_COLLECTION).doc(draftId).set(draftRecord, {
+      merge: true,
+    });
+    return {
+      ok: true,
+      draft: {
+        id: draftId,
+        status: "draft",
+        productId: resolved.productId,
+        productTitle: resolved.productTitle,
+        selectedOptionCount: resolved.selectedOptionCount,
+        value: resolved.giftCardValue,
+        expiryDays: resolved.expiryDays,
+        createdByEmail,
+        createdAt: new Date().toISOString(),
+      },
+    };
+  } catch (error) {
+    throw toGiveawayGiftCardHttpsError(error, "Unable to save giveaway gift card draft.");
+  }
+});
+
+exports.createAdminGiveawayGiftCardFromDraft = onCall({ cors: true }, async (request) => {
+  await assertAdminRequest(request);
+  const payload = request.data || {};
+  const draftId = (payload?.draftId || "").toString().trim();
+  if (!draftId) {
+    throw new HttpsError("invalid-argument", "Draft ID is required.");
+  }
+
+  try {
+    const draftRef = db.collection(GIFT_CARD_DRAFTS_COLLECTION).doc(draftId);
+    const draftSnap = await draftRef.get();
+    if (!draftSnap.exists) {
+      throw new HttpsError("not-found", "Giveaway draft not found.");
+    }
+
+    const draft = draftSnap.data() || {};
+    const draftStatus = (draft.status || "draft").toString().trim().toLowerCase();
+    if (draftStatus === "consumed" && draft.createdGiftCardId) {
+      throw new HttpsError(
+        "failed-precondition",
+        "This draft has already been generated. Create a new draft to generate another gift card.",
+      );
+    }
+
+    const resolved = await resolveAdminGiveawayGiftCardInput({
+      productId: draft.productId,
+      selectedOptions: normalizeGiftCardSelectedOptions(draft.selectedOptions).map((option) => ({
+        id: option.id,
+        quantity: option.quantity,
+      })),
+      message: draft.message || "",
+      expiryDays: draft.expiryDays,
+    });
+
+    const createResult = await createGiveawayGiftCardRecord({
+      resolved,
+      request,
+      draftId,
+    });
+
+    await draftRef.set(
+      {
+        status: "consumed",
+        createdGiftCardId: createResult.giftCardId,
+        lastGeneratedCode: createResult.giftCardPayload?.code || null,
+        consumedAt: FIELD_VALUE.serverTimestamp(),
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return {
+      ok: true,
+      emailStatus: ORDER_NOTIFICATION_STATUSES.SKIPPED,
+      giftCard: createResult.giftCardPayload,
+      draft: {
+        id: draftId,
+        status: "consumed",
+        createdGiftCardId: createResult.giftCardId,
+      },
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    throw toGiveawayGiftCardHttpsError(error, "Unable to create giveaway gift card from draft.");
+  }
+});
+
+exports.createAdminGiveawayGiftCard = onCall({ cors: true }, async () => {
+  throw new HttpsError(
+    "failed-precondition",
+    "Direct giveaway creation is deprecated. Save a draft and use createAdminGiveawayGiftCardFromDraft.",
+  );
+});
+
+exports.adminUpdateGiftCard = onCall({ cors: true }, async (request) => {
+  await assertAdminRequest(request);
+  const payload = request.data || {};
+  const giftCardId = (payload?.giftCardId || "").toString().trim();
+  if (!giftCardId) {
+    throw new HttpsError("invalid-argument", "Gift card ID is required.");
+  }
+
+  const payloadHas = (field) =>
+    Object.prototype.hasOwnProperty.call(payload || {}, field);
+
+  try {
+    const giftCardRef = db.collection(GIFT_CARDS_COLLECTION).doc(giftCardId);
+    const giftCardSnap = await giftCardRef.get();
+    if (!giftCardSnap.exists) {
+      throw new HttpsError("not-found", "Gift card not found.");
+    }
+    const giftCard = giftCardSnap.data() || {};
+    const isGiveaway = isGiveawayGiftCardPayload(giftCard);
+
+    let selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
+    if (payloadHas("selectedOptions")) {
+      const liveOptions = await getCutFlowerGiftCardOptions();
+      if (!liveOptions.length) {
+        throw new Error("No live gift card options are available.");
+      }
+      const optionLookup = new Map(liveOptions.map((option) => [option.id, option]));
+      selectedOptions = normalizeAdminGiveawaySelectedOptions(
+        payload.selectedOptions,
+        optionLookup,
+      );
+    }
+    if (!selectedOptions.length) {
+      throw new Error("Select at least one gift card option.");
+    }
+    selectedOptions.forEach((option) => {
+      if (!isWholeCrewOption(option)) return;
+      const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
+      if (quantity < WHOLE_CREW_MIN_QTY) {
+        throw new Error(`Whole Crew requires at least ${WHOLE_CREW_MIN_QTY} people.`);
+      }
+    });
+
+    const selectedOptionCount = selectedOptions.reduce(
+      (sum, option) => sum + normalizeGiftCardOptionQuantity(option?.quantity, 1),
+      0,
+    );
+    const giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+    if (!Number.isFinite(giftCardValue) || giftCardValue <= 0) {
+      throw new Error("Unable to build a valid gift card value.");
+    }
+
+    const issuedAtDate = coerceTimestampToDate(giftCard.issuedAt) || new Date();
+    const fallbackExpiresAtDate =
+      coerceTimestampToDate(giftCard.expiresAt) ||
+      new Date(issuedAtDate.getTime() + GIFT_CARD_DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+    let expiresAtDate = fallbackExpiresAtDate;
+    if (payloadHas("expiresAt")) {
+      const rawExpiresAt = payload.expiresAt;
+      const normalizedExpiresAt =
+        rawExpiresAt === null || rawExpiresAt === undefined
+          ? ""
+          : rawExpiresAt.toString().trim();
+      if (normalizedExpiresAt) {
+        const parsedExpiresAt = new Date(normalizedExpiresAt);
+        if (Number.isNaN(parsedExpiresAt.getTime())) {
+          throw new Error("Expiry date is invalid.");
+        }
+        expiresAtDate = parsedExpiresAt;
+      } else {
+        expiresAtDate = fallbackExpiresAtDate;
+      }
+    }
+    const expiryDays = normalizeGiftCardExpiryDays(
+      Math.ceil((expiresAtDate.getTime() - issuedAtDate.getTime()) / (24 * 60 * 60 * 1000)),
+      giftCard.expiryDays || GIFT_CARD_DEFAULT_EXPIRY_DAYS,
+    );
+
+    const recipientName = truncateText(
+      payloadHas("recipientName") ? payload.recipientName : giftCard.recipientName || "",
+      GIFT_CARD_MAX_NAME_LENGTH,
+    );
+    const purchaserName = isGiveaway
+      ? ""
+      : truncateText(
+          payloadHas("purchaserName") ? payload.purchaserName : giftCard.purchaserName || "",
+          GIFT_CARD_MAX_NAME_LENGTH,
+        );
+    const message = truncateText(
+      payloadHas("message") ? payload.message : giftCard.message || "",
+      GIFT_CARD_MAX_MESSAGE_LENGTH,
+    );
+    const terms = truncateText(
+      payloadHas("terms") ? payload.terms : giftCard.terms || "",
+      GIFT_CARD_MAX_TERMS_LENGTH,
+    );
+    const productTitle = truncateText(
+      payloadHas("productTitle") ? payload.productTitle : giftCard.productTitle || "Bethany Blooms Gift Card",
+      160,
+    );
+    const status = normalizeGiftCardStatus(
+      payloadHas("status") ? payload.status : giftCard.status || "active",
+      "active",
+    );
+
+    const pdfStoragePath = resolveGiftCardPdfStoragePath({
+      giftCardId,
+      orderId: giftCard.orderId || "",
+      issueSource: giftCard.issueSource || "",
+      isTest: Boolean(giftCard.isTest),
+      existingPath: giftCard.pdfStoragePath || "",
+    });
+
+    const editableValues = {
+      status,
+      value: giftCardValue,
+      recipientName,
+      purchaserName,
+      message: message || null,
+      terms,
+      selectedOptions,
+      selectedOptionCount,
+      expiryDays,
+      expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
+      productTitle,
+      pdfStoragePath,
+    };
+
+    const pdfBytes = await createGiftCardPdfBytes({
+      ...giftCard,
+      ...editableValues,
+      issuedAt: issuedAtDate,
+      expiresAt: expiresAtDate,
+      code: giftCard.code || giftCardId,
+    });
+    const bucket = admin.storage().bucket();
+    await bucket.file(pdfStoragePath).save(pdfBytes, {
+      contentType: "application/pdf",
+      resumable: false,
+      metadata: {
+        cacheControl: "private, max-age=0, no-store",
+      },
+    });
+
+    await giftCardRef.set(
+      {
+        ...editableValues,
+        lastEditedAt: FIELD_VALUE.serverTimestamp(),
+        lastEditedByUid: request.auth?.uid || null,
+        lastEditedByEmail: (request.auth?.token?.email || "").toString().trim() || null,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    await db
+      .collection(GIFT_CARD_REGISTRY_COLLECTION)
+      .doc(giftCardId)
+      .collection(GIFT_CARD_REGISTRY_EDITS_SUBCOLLECTION)
+      .add({
+        giftCardId,
+        editedAt: FIELD_VALUE.serverTimestamp(),
+        editedByUid: request.auth?.uid || null,
+        editedByEmail: (request.auth?.token?.email || "").toString().trim() || null,
+        changes: {
+          status,
+          recipientName,
+          purchaserName,
+          productTitle,
+          value: giftCardValue,
+          selectedOptionCount,
+          expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
+        },
+      });
+
+    const updatedGiftCardSnap = await giftCardRef.get();
+    const updatedGiftCard = updatedGiftCardSnap.data() || {
+      ...giftCard,
+      ...editableValues,
+    };
+    const token = createGiftCardAccessToken(giftCardId);
+    return {
+      ok: true,
+      giftCard: buildGiftCardPublicPayload(updatedGiftCard, giftCardId, token),
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    const message = (error?.message || "Unable to update gift card.").toString();
+    const normalized = message.toLowerCase();
+    const isValidationError =
+      normalized.includes("required") ||
+      normalized.includes("invalid") ||
+      normalized.includes("not found") ||
+      normalized.includes("whole crew") ||
+      normalized.includes("select at least") ||
+      normalized.includes("live gift card options");
+    throw new HttpsError(isValidationError ? "invalid-argument" : "internal", message);
+  }
+});
+
+exports.adminArchiveGiftCard = onCall({ cors: true }, async (request) => {
+  await assertAdminRequest(request);
+  const payload = request.data || {};
+  const giftCardId = (payload?.giftCardId || "").toString().trim();
+  if (!giftCardId) {
+    throw new HttpsError("invalid-argument", "Gift card ID is required.");
+  }
+
+  const archivedByUid = request.auth?.uid || null;
+  const archivedByEmail = (request.auth?.token?.email || "").toString().trim() || null;
+  const archivedReason = truncateText(payload?.reason || "Archived by admin", 320) || null;
+
+  try {
+    const giftCardRef = db.collection(GIFT_CARDS_COLLECTION).doc(giftCardId);
+    const giftCardSnap = await giftCardRef.get();
+    if (!giftCardSnap.exists) {
+      throw new HttpsError("not-found", "Gift card not found.");
+    }
+
+    const giftCard = giftCardSnap.data() || {};
+    const currentStatus = normalizeGiftCardStatus(
+      giftCard.status || GIFT_CARD_STATUS_ACTIVE,
+      GIFT_CARD_STATUS_ACTIVE,
+    );
+    if (isGiftCardArchivedStatus(currentStatus)) {
+      const token = createGiftCardAccessToken(giftCardId);
+      return {
+        ok: true,
+        alreadyArchived: true,
+        giftCard: buildGiftCardPublicPayload(giftCard, giftCardId, token),
+      };
+    }
+
+    await giftCardRef.set(
+      {
+        status: GIFT_CARD_STATUS_ARCHIVED,
+        isRedeemable: false,
+        archivedAt: FIELD_VALUE.serverTimestamp(),
+        archivedByUid,
+        archivedByEmail,
+        archivedReason,
+        lastEditedAt: FIELD_VALUE.serverTimestamp(),
+        lastEditedByUid: archivedByUid,
+        lastEditedByEmail: archivedByEmail,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    await db
+      .collection(GIFT_CARD_REGISTRY_COLLECTION)
+      .doc(giftCardId)
+      .collection(GIFT_CARD_REGISTRY_EDITS_SUBCOLLECTION)
+      .add({
+        giftCardId,
+        editedAt: FIELD_VALUE.serverTimestamp(),
+        editedByUid: archivedByUid,
+        editedByEmail: archivedByEmail,
+        actionType: "archived",
+        reason: archivedReason,
+        changes: {
+          status: GIFT_CARD_STATUS_ARCHIVED,
+          isRedeemable: false,
+        },
+      });
+
+    const updatedSnap = await giftCardRef.get();
+    const updatedGiftCard = updatedSnap.data() || {
+      ...giftCard,
+      status: GIFT_CARD_STATUS_ARCHIVED,
+      isRedeemable: false,
+    };
+    const token = createGiftCardAccessToken(giftCardId);
+    return {
+      ok: true,
+      giftCard: buildGiftCardPublicPayload(updatedGiftCard, giftCardId, token),
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError(
+      "internal",
+      (error?.message || "Unable to archive gift card.").toString(),
+    );
+  }
+});
+
+exports.adminBackfillGiftCardRegistry = onCall({ cors: true }, async (request) => {
+  await assertAdminRequest(request);
+
+  const payload = request.data || {};
+  const apply = parseBooleanFlag(payload?.apply, true);
+  const limitValue = payload?.limit;
+  const hasLimit =
+    limitValue !== undefined &&
+    limitValue !== null &&
+    limitValue !== "" &&
+    limitValue !== false;
+  let limit = null;
+  if (hasLimit) {
+    const parsedLimit = Number.parseInt(limitValue, 10);
+    if (!Number.isFinite(parsedLimit) || parsedLimit <= 0) {
+      throw new HttpsError("invalid-argument", "Limit must be a positive integer.");
+    }
+    limit = Math.min(10000, parsedLimit);
+  }
+
+  try {
+    let giftCardsQuery = db.collection(GIFT_CARDS_COLLECTION);
+    if (Number.isFinite(limit) && limit > 0) {
+      giftCardsQuery = giftCardsQuery.limit(limit);
+    }
+    const giftCardsSnap = await giftCardsQuery.get();
+
+    const stats = {
+      scannedGiftCards: giftCardsSnap.size,
+      docsNeedingSync: 0,
+      docsSynced: 0,
+      docsAlreadyInSync: 0,
+    };
+    const sampleGiftCardIds = [];
+    const BATCH_LIMIT = 400;
+    let batch = db.batch();
+    let pendingWrites = 0;
+
+    const commitBatch = async (force = false) => {
+      if (!apply) return;
+      if (pendingWrites === 0) return;
+      if (!force && pendingWrites < BATCH_LIMIT) return;
+      await batch.commit();
+      batch = db.batch();
+      pendingWrites = 0;
+    };
+
+    for (const giftCardDoc of giftCardsSnap.docs) {
+      const giftCardId = (giftCardDoc.id || "").toString().trim();
+      if (!giftCardId) continue;
+
+      const giftCard = giftCardDoc.data() || {};
+      const desiredPayload = buildGiftCardRegistryPayload(giftCard, giftCardId);
+      const registryRef = db.collection(GIFT_CARD_REGISTRY_COLLECTION).doc(giftCardId);
+      const registrySnap = await registryRef.get();
+      const existingPayload = registrySnap.exists ? registrySnap.data() || {} : {};
+      const comparableSyncPayload = {
+        ...desiredPayload,
+        isDeleted: false,
+        deletedAt: null,
+        createdAt:
+          desiredPayload.createdAt ||
+          desiredPayload.issuedAt ||
+          existingPayload.createdAt ||
+          null,
+        updatedAt:
+          desiredPayload.updatedAt ||
+          existingPayload.updatedAt ||
+          desiredPayload.createdAt ||
+          desiredPayload.issuedAt ||
+          existingPayload.createdAt ||
+          null,
+      };
+      const needsSync =
+        !registrySnap.exists ||
+        hasGiftCardRegistryPayloadDiff(existingPayload, comparableSyncPayload);
+
+      if (!needsSync) {
+        stats.docsAlreadyInSync += 1;
+        continue;
+      }
+
+      stats.docsNeedingSync += 1;
+      if (sampleGiftCardIds.length < 20) {
+        sampleGiftCardIds.push(giftCardId);
+      }
+      if (!apply) continue;
+
+      batch.set(
+        registryRef,
+        {
+          ...comparableSyncPayload,
+          registrySyncedAt: FIELD_VALUE.serverTimestamp(),
+          updatedAt: comparableSyncPayload.updatedAt || FIELD_VALUE.serverTimestamp(),
+          createdAt:
+            comparableSyncPayload.createdAt || FIELD_VALUE.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      pendingWrites += 1;
+      stats.docsSynced += 1;
+
+      if (pendingWrites >= BATCH_LIMIT) {
+        await commitBatch(true);
+      }
+    }
+
+    await commitBatch(true);
+
+    return {
+      ok: true,
+      mode: apply ? "apply" : "dry-run",
+      scannedGiftCards: stats.scannedGiftCards,
+      docsNeedingSync: stats.docsNeedingSync,
+      docsSynced: stats.docsSynced,
+      docsAlreadyInSync: stats.docsAlreadyInSync,
+      sampleGiftCardIds,
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError(
+      "internal",
+      (error?.message || "Unable to sync gift card registry.").toString(),
+    );
+  }
+});
+
 exports.sendTestEmail = onCall({ cors: true }, async (request) => {
   if (!getResendClient()) {
     throw new HttpsError("failed-precondition", "Email service is not configured.");
@@ -14052,7 +16763,7 @@ exports.sendTestGiftCard = onCall({ cors: true }, async (request) => {
   const expiresAtDate = new Date(
     issuedAtDate.getTime() + expiryDays * 24 * 60 * 60 * 1000,
   );
-  const code = buildGiftCardCode({
+  const code = await generateUniqueGiftCardCode({
     orderNumber: `TEST${Date.now().toString().slice(-4)}`,
     giftCardId,
     lineIndex: 0,
@@ -14186,9 +16897,99 @@ exports.lookupGiftCardByCode = onCall(async (request) => {
   const giftCardSnap = snapshot.docs[0];
   const giftCard = giftCardSnap.data() || {};
   const status = (giftCard.status || "active").toString().trim().toLowerCase() || "active";
+  if (isGiftCardArchivedStatus(status)) {
+    throw new HttpsError("not-found", "Gift card not found.");
+  }
+  if (status !== "active") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Gift card is no longer active and cannot be redeemed.",
+    );
+  }
   const expiresAtDate = coerceTimestampToDate(giftCard.expiresAt);
   const isExpired = Boolean(expiresAtDate && expiresAtDate.getTime() < Date.now());
-  const selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
+  if (isExpired) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Gift card has expired and cannot be redeemed.",
+    );
+  }
+  let selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
+  let selectedOptionsSummary = (giftCard.selectedOptionsSummary || "").toString().trim();
+  const giftCardId = (giftCardSnap.id || "").toString().trim();
+  const orderId = (giftCard.orderId || "").toString().trim();
+
+  if (!selectedOptions.length && orderId) {
+    try {
+      const orderSnap = await db.collection("orders").doc(orderId).get();
+      if (orderSnap.exists) {
+        const order = orderSnap.data() || {};
+        const orderItems = Array.isArray(order.items) ? order.items : [];
+        const preferredLineIndex = Number.parseInt(giftCard.orderItemIndex, 10);
+        const candidateItems = [];
+        if (
+          Number.isFinite(preferredLineIndex) &&
+          preferredLineIndex >= 0 &&
+          preferredLineIndex < orderItems.length
+        ) {
+          candidateItems.push(orderItems[preferredLineIndex]);
+        }
+        candidateItems.push(...orderItems);
+        for (const item of candidateItems) {
+          const giftCardMetadata =
+            item?.metadata?.giftCard && typeof item.metadata.giftCard === "object"
+              ? item.metadata.giftCard
+              : {};
+          const resolvedFromItem = normalizeGiftCardSelectedOptions(
+            giftCardMetadata?.selectedOptions ||
+              item?.metadata?.selectedOptions ||
+              giftCardMetadata?.options ||
+              item?.metadata?.giftCardOptions ||
+              item?.selectedOptions ||
+              [],
+          );
+          if (!resolvedFromItem.length) continue;
+          selectedOptions = resolvedFromItem;
+          if (!selectedOptionsSummary) {
+            selectedOptionsSummary = (
+              giftCardMetadata?.selectedOptionsSummary ||
+              item?.metadata?.selectedOptionsSummary ||
+              ""
+            )
+              .toString()
+              .trim();
+          }
+          break;
+        }
+      }
+    } catch {
+      // Best-effort only.
+    }
+  }
+
+  if (!selectedOptions.length || !selectedOptionsSummary) {
+    try {
+      const registrySnap = await db.collection(GIFT_CARD_REGISTRY_COLLECTION).doc(giftCardId).get();
+      if (registrySnap.exists) {
+        const registryDoc = registrySnap.data() || {};
+        if (!selectedOptions.length) {
+          selectedOptions = normalizeGiftCardSelectedOptions(
+            registryDoc.selectedOptions || registryDoc.giftCard?.selectedOptions || [],
+          );
+        }
+        if (!selectedOptionsSummary) {
+          selectedOptionsSummary = (registryDoc.selectedOptionsSummary || "").toString().trim();
+        }
+      }
+    } catch {
+      // Ignore registry lookup failures for POS matching.
+    }
+  }
+
+  if (!selectedOptionsSummary) {
+    const derivedSummary = buildGiftCardSelectedOptionsSummary(selectedOptions);
+    selectedOptionsSummary = derivedSummary !== "None" ? derivedSummary : "";
+  }
   const selectedOptionCountValue = Number(giftCard.selectedOptionCount);
   const selectedOptionCount =
     Number.isFinite(selectedOptionCountValue) && selectedOptionCountValue >= 0
@@ -14211,6 +17012,8 @@ exports.lookupGiftCardByCode = onCall(async (request) => {
       value: Number(giftCard.value || 0),
       currency: (giftCard.currency || GIFT_CARD_VALUE_CURRENCY).toString() || GIFT_CARD_VALUE_CURRENCY,
       expiresAt: toIsoString(giftCard.expiresAt),
+      selectedOptions,
+      selectedOptionsSummary,
       selectedOptionCount,
     },
   };
@@ -14429,3 +17232,44 @@ exports.onOrderCreated = onDocumentCreated("orders/{orderId}", async (event) => 
     reason: "order-created-trigger",
   });
 });
+
+exports.onGiftCardWrittenSyncRegistry = onDocumentWritten(
+  `${GIFT_CARDS_COLLECTION}/{giftCardId}`,
+  async (event) => {
+    const giftCardId = (event.params?.giftCardId || "").toString().trim();
+    if (!giftCardId) return;
+
+    const registryRef = db.collection(GIFT_CARD_REGISTRY_COLLECTION).doc(giftCardId);
+    const afterSnap = event.data?.after;
+    if (afterSnap?.exists) {
+      const giftCard = afterSnap.data() || {};
+      const registryPayload = buildGiftCardRegistryPayload(giftCard, giftCardId);
+      await registryRef.set(
+        {
+          ...registryPayload,
+          isDeleted: false,
+          deletedAt: null,
+          registrySyncedAt: FIELD_VALUE.serverTimestamp(),
+          updatedAt: registryPayload.updatedAt || FIELD_VALUE.serverTimestamp(),
+          createdAt: registryPayload.createdAt || registryPayload.issuedAt || FIELD_VALUE.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return;
+    }
+
+    const beforeGiftCard = event.data?.before?.data() || {};
+    const fallbackPayload = buildGiftCardRegistryPayload(beforeGiftCard, giftCardId);
+    await registryRef.set(
+      {
+        ...fallbackPayload,
+        isDeleted: true,
+        deletedAt: FIELD_VALUE.serverTimestamp(),
+        status: "deleted",
+        registrySyncedAt: FIELD_VALUE.serverTimestamp(),
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  },
+);

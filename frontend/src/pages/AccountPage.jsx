@@ -118,6 +118,113 @@ const formatSubscriptionPaymentApprovalLabel = (status = "") => {
   return "Not required";
 };
 
+const formatPaymentStatusBadge = (invoiceStatus, paymentMethod, approvalStatus) => {
+  const normalizedStatus = normalizeSubscriptionInvoiceStatus(invoiceStatus);
+  const normalizedMethod = normalizeSubscriptionPaymentMethod(paymentMethod);
+  const normalizedApproval = normalizeSubscriptionPaymentApprovalStatus(approvalStatus, normalizedMethod);
+  
+  // Paid - green badge
+  if (normalizedStatus === "paid") {
+    return { label: "Paid ✓", className: "badge--stock-in" };
+  }
+  
+  // Pending payment with EFT - check approval status
+  if (normalizedStatus === "pending-payment" && normalizedMethod === PAYMENT_METHODS.EFT) {
+    if (normalizedApproval === PAYMENT_APPROVAL_STATUSES.APPROVED) {
+      return { label: "Approved ✓", className: "badge--stock-in" };
+    }
+    if (normalizedApproval === PAYMENT_APPROVAL_STATUSES.REJECTED) {
+      return { label: "Rejected ✗", className: "badge--stock-out" };
+    }
+    return { label: "Awaiting EFT Approval", className: "badge--stock-pending" };
+  }
+  
+  // Pending payment with PayFast
+  if (normalizedStatus === "pending-payment" && normalizedMethod === PAYMENT_METHODS.PAYFAST) {
+    return { label: "Pending Payment", className: "badge--stock-pending" };
+  }
+  
+  // Cancelled
+  if (normalizedStatus === "cancelled") {
+    return { label: "Cancelled", className: "badge--stock-out" };
+  }
+  
+  // Default fallback
+  return { label: "Pending Payment", className: "badge--stock-pending" };
+};
+
+const getPaymentMethodDisplay = (paymentMethod) => {
+  const normalized = normalizeSubscriptionPaymentMethod(paymentMethod);
+  return normalized === PAYMENT_METHODS.EFT ? "EFT" : "PayFast";
+};
+
+const formatPaidDate = (invoice) => {
+  // Check various possible paid date fields
+  const paidAt = invoice?.paidAt || invoice?.paymentReceivedAt || invoice?.paidDate || invoice?.completedAt;
+  if (!paidAt) return null;
+  
+  const date = toDate(paidAt);
+  if (!date) return null;
+  
+  return new Intl.DateTimeFormat("en-ZA", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+};
+
+const getPayFastTransactionId = (invoice) => {
+  // Check various possible transaction ID fields
+  return (
+    invoice?.payFastTransactionId ||
+    invoice?.transactionId ||
+    invoice?.payfastTransactionId ||
+    invoice?.paymentTransactionId ||
+    invoice?.pfTransactionId ||
+    ""
+  );
+};
+
+const getLastPaymentDate = (invoices = []) => {
+  // Find the most recent paid invoice
+  const paidInvoices = invoices
+    .filter((inv) => normalizeSubscriptionInvoiceStatus(inv?.status) === "paid")
+    .sort((a, b) => {
+      const dateA = toDate(a?.paidAt || a?.paymentReceivedAt || a?.paidDate || a?.completedAt)?.getTime() || 0;
+      const dateB = toDate(b?.paidAt || b?.paymentReceivedAt || b?.paidDate || b?.completedAt)?.getTime() || 0;
+      return dateB - dateA;
+    });
+  
+  if (paidInvoices.length === 0) return null;
+  
+  const lastPaid = paidInvoices[0];
+  return formatPaidDate(lastPaid);
+};
+
+const getTopUpStats = (invoices = [], subscriptionId) => {
+  const subscriptionInvoices = invoices.filter((inv) => 
+    (inv?.subscriptionId || "").toString().trim() === (subscriptionId || "").toString().trim()
+  );
+  
+  const topUps = subscriptionInvoices.filter((inv) => 
+    normalizeSubscriptionInvoiceType(inv?.invoiceType) === SUBSCRIPTION_INVOICE_TYPES.topup
+  );
+  
+  const pendingTopUps = topUps.filter((inv) => 
+    normalizeSubscriptionInvoiceStatus(inv?.status) === "pending-payment"
+  );
+  
+  const pendingTopUpAmount = pendingTopUps.reduce((sum, inv) => sum + Number(inv?.amount || 0), 0);
+  
+  return {
+    count: topUps.length,
+    pendingCount: pendingTopUps.length,
+    pendingAmount: pendingTopUpAmount,
+  };
+};
+
 const SUBSCRIPTION_MONDAY_SLOTS = Object.freeze([
   { value: "first", label: "1st Monday" },
   { value: "second", label: "2nd Monday" },
@@ -1965,6 +2072,17 @@ function AccountPage() {
                             ? "Request EFT invoice"
                             : "Request pay link";
 
+                      // Get additional payment info
+                      const paymentStatusBadge = formatPaymentStatusBadge(
+                        pendingInvoice?.status || latestInvoice?.status,
+                        effectivePaymentMethod,
+                        pendingInvoice?.paymentApprovalStatus || pendingInvoice?.paymentApproval?.decision || latestInvoice?.paymentApprovalStatus || latestInvoice?.paymentApproval?.decision,
+                      );
+                      const paidDate = latestInvoice ? formatPaidDate(latestInvoice) : null;
+                      const payFastTransactionId = latestInvoice ? getPayFastTransactionId(latestInvoice) : "";
+                      const topUpStats = getTopUpStats(subscriptionInvoices, subscription.id);
+                      const lastPaymentDate = getLastPaymentDate(subscriptionInvoices);
+
                       return (
                         <article key={subscription.id} className="account-subscription-card">
                           <div className="account-subscription-card__head">
@@ -1978,13 +2096,53 @@ function AccountPage() {
                           <div className="account-subscription-card__amount">
                             <span className="account-subscription-card__amount-label">Amount due now</span>
                             <strong>{amountDueNowLabel}</strong>
-                            <span
-                              className={`account-subscription-card__payment-state${isPendingInvoice ? " is-pending" : ""}`}
-                            >
-                              {paymentStateLabel}
+                            <span className={`badge ${paymentStatusBadge.className}`}>
+                              {paymentStatusBadge.label}
                             </span>
                             <p className="modal__meta">{amountDueMeta}</p>
                             {amountDueExtraMeta && <p className="modal__meta">{amountDueExtraMeta}</p>}
+                          </div>
+                          {/* Payment Details Section */}
+                          <div className="account-subscription-card__payment-details">
+                            <div className="account-subscription-fact">
+                              <span>Payment Method</span>
+                              <strong>{getPaymentMethodDisplay(effectivePaymentMethod)}</strong>
+                            </div>
+                            {effectivePaymentMethod === PAYMENT_METHODS.EFT && (
+                              <div className="account-subscription-fact">
+                                <span>EFT Approval Status</span>
+                                <strong>{paymentApprovalLabel}</strong>
+                              </div>
+                            )}
+                            {payFastTransactionId && (
+                              <div className="account-subscription-fact">
+                                <span>PayFast Transaction ID</span>
+                                <strong>{payFastTransactionId}</strong>
+                              </div>
+                            )}
+                            {paidDate && latestInvoiceStatus === "paid" && (
+                              <div className="account-subscription-fact">
+                                <span>Paid Date</span>
+                                <strong>{paidDate}</strong>
+                              </div>
+                            )}
+                            {lastPaymentDate && (
+                              <div className="account-subscription-fact">
+                                <span>Last Payment Date</span>
+                                <strong>{lastPaymentDate}</strong>
+                              </div>
+                            )}
+                            {topUpStats.count > 0 && (
+                              <div className="account-subscription-fact">
+                                <span>Top-ups</span>
+                                <strong>{topUpStats.count} total</strong>
+                                {topUpStats.pendingCount > 0 && (
+                                  <p className="modal__meta">
+                                    {topUpStats.pendingCount} pending ({formatCurrency(topUpStats.pendingAmount)})
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
 
                           <div className="account-subscription-card__facts">
@@ -2508,5 +2666,4 @@ function AccountPage() {
 }
 
 export default AccountPage;
-
 

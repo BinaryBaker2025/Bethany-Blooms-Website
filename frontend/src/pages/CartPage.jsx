@@ -6,6 +6,14 @@ import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { useCustomerProfile } from "../hooks/useCustomerProfile.js";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import {
+  FRESH_FLOWER_DELIVERY_NOTE,
+  FRESH_FLOWER_DELIVERY_WHATSAPP_NOTE,
+  FRESH_FLOWER_DELIVERY_WHATSAPP_PREFILL,
+  getCartItemFreshFlowerCategoryTokens,
+  requiresFreshFlowerDeliveryContactForCartItem,
+} from "../lib/freshFlowerDelivery.js";
+import { buildWhatsAppLink } from "../lib/contactInfo.js";
+import {
   EFT_BANK_DETAILS,
   PAYMENT_METHODS,
 } from "../lib/paymentMethods.js";
@@ -192,6 +200,44 @@ function CartPage() {
     () => items.some((item) => item?.metadata?.type === "product" && !isGiftCardCartItem(item)),
     [items],
   );
+  const cartRequiresFreshFlowerDeliveryContact = useMemo(
+    () =>
+      items.some((item) => {
+        if (!item || item.metadata?.type !== "product" || isGiftCardCartItem(item)) return false;
+        const productId = item.metadata?.productId || item.metadata?.productID || item.metadata?.product || "";
+        const product = productLookup.get(productId) || null;
+        return requiresFreshFlowerDeliveryContactForCartItem(item, product);
+      }),
+    [items, productLookup],
+  );
+  const orderSummaryNotices = useMemo(() => {
+    const notices = [];
+    if (cartTypeLabel) {
+      notices.push({
+        key: "cart-type",
+        content: `Your cart currently contains ${cartTypeLabel}. Clear it before switching between workshops and products.`,
+      });
+    }
+    if (cartRequiresFreshFlowerDeliveryContact) {
+      notices.push({
+        key: "fresh-flower",
+        content: FRESH_FLOWER_DELIVERY_NOTE,
+      });
+      notices.push({
+        key: "fresh-flower-whatsapp",
+        content: (
+          <>
+            {FRESH_FLOWER_DELIVERY_WHATSAPP_NOTE}{" "}
+            <a href={buildWhatsAppLink(FRESH_FLOWER_DELIVERY_WHATSAPP_PREFILL)}>
+              WhatsApp Bethany Blooms
+            </a>
+            .
+          </>
+        ),
+      });
+    }
+    return notices;
+  }, [cartTypeLabel, cartRequiresFreshFlowerDeliveryContact]);
   const savedAddresses = useMemo(() => {
     if (!Array.isArray(customerProfile?.addresses)) return [];
     return customerProfile.addresses
@@ -400,7 +446,7 @@ function CartPage() {
   useEffect(() => {
     if (!cartHasGiftCards || paymentMethod !== PAYMENT_METHODS.EFT) return;
     setPaymentMethod(PAYMENT_METHODS.PAYFAST);
-    setOrderError("Gift cards can only be paid through PayFast.");
+    setOrderError("Gift cards can only be paid with PayFast.");
   }, [cartHasGiftCards, paymentMethod]);
 
   const handleContactChange = (field) => (event) => {
@@ -448,7 +494,7 @@ function CartPage() {
         ok: false,
         message:
           paymentMethod === PAYMENT_METHODS.PAYFAST
-            ? "Please confirm the PayFast payment step to continue."
+            ? "Tick the PayFast confirmation box to continue."
             : "Please choose your payment method to continue.",
       };
     }
@@ -604,7 +650,7 @@ function CartPage() {
           step: "payment",
           message:
             paymentMethod === PAYMENT_METHODS.PAYFAST
-              ? "Please confirm the PayFast payment step before checkout."
+              ? "Tick the PayFast confirmation box before checkout."
               : "Please choose your payment method before checkout.",
         };
       }
@@ -671,13 +717,48 @@ function CartPage() {
     setOrderError(null);
     setPlacingOrder(true);
 
-    const orderItems = items.map((item) => ({
-      id: item.id,
-      name: item.name,
-      quantity: item.quantity,
-      price: typeof item.price === "number" ? item.price : Number(item.price) || 0,
-      metadata: item.metadata ?? null,
-    }));
+    const orderItems = items.map((item) => {
+      const metadata = item?.metadata && typeof item.metadata === "object"
+        ? { ...item.metadata }
+        : null;
+      if (metadata?.type === "product" && !isGiftCardCartItem(item)) {
+        const productId = metadata.productId || metadata.productID || metadata.product || "";
+        const product = productLookup.get(productId) || null;
+        const categoryTokens = getCartItemFreshFlowerCategoryTokens(item, product);
+        const categoryLabel = (
+          metadata.categoryLabel ||
+          metadata.category ||
+          product?.categoryName ||
+          product?.category ||
+          (Array.isArray(product?.categoryLabels) ? product.categoryLabels[0] : "") ||
+          ""
+        )
+          .toString()
+          .trim();
+        const categoryId = (
+          metadata.categoryId ||
+          product?.categoryId ||
+          product?.categorySlug ||
+          (Array.isArray(product?.categoryKeys) ? product.categoryKeys[0] : "") ||
+          categoryTokens[0] ||
+          ""
+        )
+          .toString()
+          .trim();
+        if (categoryTokens.length) metadata.categoryTokens = categoryTokens;
+        if (categoryId && !metadata.categoryId) metadata.categoryId = categoryId;
+        if (categoryLabel && !metadata.categoryLabel) metadata.categoryLabel = categoryLabel;
+        if (!metadata.productSlug && product?.slug) metadata.productSlug = product.slug;
+        metadata.deliveryContactCandidate = requiresFreshFlowerDeliveryContactForCartItem(item, product);
+      }
+      return {
+        id: item.id,
+        name: item.name,
+        quantity: item.quantity,
+        price: typeof item.price === "number" ? item.price : Number(item.price) || 0,
+        metadata,
+      };
+    });
 
     const orderTotal = orderItems.reduce((sum, entry) => sum + entry.price * entry.quantity, 0);
     const finalTotal = orderTotal + shippingCost;
@@ -783,7 +864,7 @@ function CartPage() {
         if (proofUploadToken) orderQuery.set("proofUploadToken", proofUploadToken);
         if (proofUploadExpiresAt) orderQuery.set("proofUploadExpiresAt", proofUploadExpiresAt);
         const orderSearch = orderQuery.toString() ? `?${orderQuery.toString()}` : "";
-        setOrderSuccess("EFT order submitted. Awaiting admin payment approval.");
+        setOrderSuccess("EFT order placed. We will verify payment before delivery.");
         clearCart();
         navigate(`/payment/eft-submitted${orderSearch}`, {
           state: {
@@ -846,11 +927,6 @@ function CartPage() {
         </div>
         <div className="cart-page__grid">
           <div className="cart-page__panel cart-page__items">
-            {cartTypeLabel && (
-              <p className="cart-page__notice">
-                Your cart currently contains {cartTypeLabel}. Clear it before switching between workshops and products.
-              </p>
-            )}
             {cartHasGiftCards && (
               <p className="cart-page__notice">
                 Gift cards are digital and PayFast-only. EFT is disabled for this order.
@@ -1306,7 +1382,7 @@ function CartPage() {
                               <p className="modal__meta">Select a province to view available couriers.</p>
                             )}
                             {shippingAddress.province && courierStatus === "loading" && (
-                              <p className="modal__meta">Loading courier options…</p>
+                              <p className="modal__meta">Loading courier options...</p>
                             )}
                             {shippingAddress.province &&
                               courierStatus !== "loading" &&
@@ -1388,7 +1464,7 @@ function CartPage() {
                                 disabled={cartHasGiftCards}
                                 onChange={() => {
                                   if (cartHasGiftCards) {
-                                    setOrderError("Gift cards can only be paid through PayFast.");
+                                    setOrderError("Gift cards can only be paid with PayFast.");
                                     return;
                                   }
                                   setPaymentMethod(PAYMENT_METHODS.EFT);
@@ -1397,7 +1473,7 @@ function CartPage() {
                                 }}
                               />
                               <span>
-                                EFT (Manual admin approval required)
+                                EFT bank transfer (admin confirms payment)
                                 {cartHasGiftCards ? " - unavailable for gift cards" : ""}
                               </span>
                             </label>
@@ -1405,7 +1481,7 @@ function CartPage() {
 
                           {cartHasGiftCards && (
                             <p className="modal__meta">
-                              Gift cards must be paid via PayFast. EFT is disabled for orders containing gift cards.
+                              Gift cards must be paid with PayFast. EFT is disabled for orders that include gift cards.
                             </p>
                           )}
 
@@ -1421,7 +1497,7 @@ function CartPage() {
                                   checked={payfastConsent}
                                   onChange={(event) => setPayfastConsent(event.target.checked)}
                                 />
-                                <span>I understand I&apos;ll be redirected to PayFast to complete payment.</span>
+                                <span>I understand I will be redirected to PayFast to complete payment.</span>
                               </label>
                               <p className="modal__meta">
                                 Supported cards and instant EFT options will appear on the PayFast screen.
@@ -1432,11 +1508,10 @@ function CartPage() {
                           {paymentMethod === PAYMENT_METHODS.EFT && (
                             <div className="checkout-eft">
                               <p className="modal__meta">
-                                Admin must verify and approve EFT payment before your order can be fulfilled.
+                                We verify EFT payment before we prepare or deliver your order.
                               </p>
                               <p className="modal__meta">
-                                Banking details and your exact order reference are shown after you place the EFT
-                                order.
+                                Banking details and your exact order reference appear right after you place the order.
                               </p>
                             </div>
                           )}
@@ -1476,7 +1551,7 @@ function CartPage() {
                               <h3>Payment</h3>
                               <p>
                                 {paymentMethod === PAYMENT_METHODS.EFT
-                                  ? "EFT with admin approval"
+                                  ? "EFT bank transfer"
                                   : payfastConsent
                                     ? "PayFast redirect confirmed"
                                     : "Confirm PayFast step"}
@@ -1485,8 +1560,8 @@ function CartPage() {
                                 {cartHasGiftCards
                                   ? "Gift cards are PayFast only."
                                   : paymentMethod === PAYMENT_METHODS.EFT
-                                  ? "After order placement, you will receive exact EFT transfer details and reference."
-                                  : "Secure PayFast checkout."}
+                                  ? "After placing your order, we show your EFT transfer details and reference."
+                                  : "Secure checkout through PayFast."}
                               </p>
                             </div>
                           </div>
@@ -1502,6 +1577,11 @@ function CartPage() {
           <aside className="cart-page__summary">
             <div className="cart-page__panel cart-page__summary-inner">
               <h2>Order summary</h2>
+              {orderSummaryNotices.map((notice) => (
+                <p key={notice.key} className="cart-page__notice">
+                  {notice.content}
+                </p>
+              ))}
               <div className="cart-page__totals">
                 <div className="cart-page__total-row">
                   <span>Items</span>

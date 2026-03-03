@@ -63,6 +63,17 @@ const NAV_SECTIONS = [
         label: "Subscription Ops",
       },
       { type: "link", id: "shipping", to: "/admin/shipping", label: "Shipping & Courier" },
+      {
+        type: "group",
+        id: "commerce-gift-cards",
+        label: "Gift Cards",
+        to: "/admin/commerce/gift-cards/preview",
+        end: true,
+        children: [
+          { to: "/admin/commerce/gift-cards/preview", label: "Preview", end: true },
+          { to: "/admin/commerce/gift-cards/generate", label: "Generate & Manage", end: true },
+        ],
+      },
     ],
   },
   {
@@ -299,8 +310,8 @@ function AdminLayout() {
           <Reveal as="div" className="admin-auth__card">
             <div className="admin-auth__header">
               <img className="admin-auth__logo" src={logo} alt="Bethany Blooms logo" loading="lazy" decoding="async"/>
-              <h2>Admin Sign In</h2>
-              <p>Secure access to orders, workshops, and the full product catalog.</p>
+              <h2>Admin sign in</h2>
+              <p>Sign in to manage orders, subscriptions, products, and customer records.</p>
             </div>
             {initError && (
               <p className="admin-auth__notice" role="alert">

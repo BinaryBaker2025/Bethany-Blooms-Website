@@ -19,7 +19,7 @@ function TestimonialCarousel({ testimonials }) {
           as="figure"
           className={`testimonial ${idx === index ? "is-active" : ""}`}
         >
-          <blockquote className="testimonial__quote">“{testimonial.quote}”</blockquote>
+          <blockquote className="testimonial__quote">"{testimonial.quote}"</blockquote>
           <figcaption className="testimonial__name">{testimonial.author}</figcaption>
         </Reveal>
       ))}

@@ -69,6 +69,11 @@ const writeCachedProductCategories = (categories = []) => {
   }
 };
 
+const supportsFineHoverInput = () => {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+};
+
 function Header() {
   const { totalCount } = useCart();
   const { openCart } = useModal();
@@ -82,6 +87,7 @@ function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState(null);
   const [collapseActionsIntoMenu, setCollapseActionsIntoMenu] = useState(false);
+  const [supportsHover, setSupportsHover] = useState(() => supportsFineHoverInput());
   const closeTimer = useRef(null);
   const headerRef = useRef(null);
   const navRef = useRef(null);
@@ -95,6 +101,11 @@ function Header() {
     () => normalizeCategoryList(categoryItems),
     [categoryItems],
   );
+  const clearCloseTimer = () => {
+    if (!closeTimer.current) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
 
   useEffect(() => {
     if (!normalizedCategoryItems.length) return;
@@ -153,17 +164,41 @@ function Header() {
   );
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
+    const hoverQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const syncHoverCapability = () => setSupportsHover(hoverQuery.matches);
+    syncHoverCapability();
+    if (typeof hoverQuery.addEventListener === "function") {
+      hoverQuery.addEventListener("change", syncHoverCapability);
+    } else if (typeof hoverQuery.addListener === "function") {
+      hoverQuery.addListener(syncHoverCapability);
+    }
+    return () => {
+      if (typeof hoverQuery.removeEventListener === "function") {
+        hoverQuery.removeEventListener("change", syncHoverCapability);
+      } else if (typeof hoverQuery.removeListener === "function") {
+        hoverQuery.removeListener(syncHoverCapability);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     setMenuOpen(false);
     setOpenDropdown(null);
+    clearCloseTimer();
   }, [location.pathname, location.search, location.hash]);
 
   useEffect(() => {
     return () => {
-      if (closeTimer.current) {
-        clearTimeout(closeTimer.current);
-      }
+      clearCloseTimer();
     };
   }, []);
+
+  useEffect(() => {
+    if (!supportsHover) {
+      clearCloseTimer();
+    }
+  }, [supportsHover]);
 
   useEffect(() => {
     const syncHeaderHeight = () => {
@@ -290,36 +325,47 @@ function Header() {
   }, [totalCount, menuOpen, user]);
 
   const toggleDropdown = (label) => {
+    clearCloseTimer();
     setOpenDropdown((current) => (current === label ? null : label));
   };
 
-  const closeDropdown = () => setOpenDropdown(null);
   const closeAllMenus = () => {
+    clearCloseTimer();
     setMenuOpen(false);
     setOpenDropdown(null);
   };
+  const handleMenuToggle = () => {
+    clearCloseTimer();
+    if (menuOpen) {
+      closeAllMenus();
+      return;
+    }
+    setMenuOpen(true);
+  };
+
   const openCartFromMenu = () => {
     closeAllMenus();
     openCart();
   };
 
   const handleEnter = (label) => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-    }
+    if (!supportsHover) return;
+    clearCloseTimer();
     setOpenDropdown(label);
   };
 
   const handleLeave = () => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-    }
-    closeTimer.current = setTimeout(() => setOpenDropdown(null), 100);
+    if (!supportsHover) return;
+    clearCloseTimer();
+    closeTimer.current = setTimeout(() => {
+      setOpenDropdown(null);
+      closeTimer.current = null;
+    }, 100);
   };
 
   return (
     <header ref={headerRef} className="site-header">
-      <nav ref={navRef} className="nav" onMouseLeave={handleLeave}>
+      <nav ref={navRef} className="nav" onMouseLeave={supportsHover ? handleLeave : undefined}>
         <NavLink ref={brandRef} to="/" className="brand" aria-label="Bethany Blooms home">
           <img
             src={logo}
@@ -332,7 +378,7 @@ function Header() {
         <button
           className={`nav__overlay ${menuOpen ? "is-open" : ""}`}
           type="button"
-          onClick={() => setMenuOpen(false)}
+          onClick={closeAllMenus}
           aria-label="Close navigation"
         />
         <div
@@ -342,7 +388,7 @@ function Header() {
         >
           <div className="nav__mobile-header">
             <span>Menu</span>
-            <button className="nav__mobile-close" type="button" onClick={() => setMenuOpen(false)} aria-label="Close menu">
+            <button className="nav__mobile-close" type="button" onClick={closeAllMenus} aria-label="Close menu">
               &times;
             </button>
           </div>
@@ -390,17 +436,15 @@ function Header() {
                 return matchPath({ path: matchTarget, end: link.end ?? false }, location.pathname);
               });
               const dropdownId = `${item.label.toLowerCase().replace(/\s+/g, "-")}-menu`;
-
+              
               return (
                 <div
                   key={item.label}
                   className={`nav__item nav__item--dropdown ${isOpen ? "is-open" : ""} ${
                     isActive ? "is-active" : ""
                   }`}
-                  onMouseEnter={() => handleEnter(item.label)}
-                  onMouseLeave={handleLeave}
-                  onFocus={() => handleEnter(item.label)}
-                  onBlur={handleLeave}
+                  onMouseEnter={supportsHover ? () => handleEnter(item.label) : undefined}
+                  onMouseLeave={supportsHover ? handleLeave : undefined}
                 >
                   <button
                     className="nav__trigger"
@@ -481,9 +525,10 @@ function Header() {
             ref={menuToggleRef}
             className={`menu-toggle ${menuOpen ? "is-open" : ""}`}
             type="button"
-            onClick={() => setMenuOpen((prev) => !prev)}
+            onClick={handleMenuToggle}
             aria-expanded={menuOpen ? "true" : "false"}
             aria-controls="mobile-navigation"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
           >
             <span className="sr-only">Toggle navigation</span>
             <span className="menu-toggle__icon" aria-hidden="true"></span>

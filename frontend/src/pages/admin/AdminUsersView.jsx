@@ -20,6 +20,252 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-ZA", {
   timeStyle: "short",
 });
 
+// Subscription helper functions
+const SUBSCRIPTION_STATUS_LABELS = {
+  active: "Active",
+  paused: "Paused",
+  cancelled: "Cancelled",
+};
+
+const SUBSCRIPTION_INVOICE_STATUS_LABELS = {
+  "pending-payment": "Pending",
+  paid: "Paid",
+  cancelled: "Cancelled",
+};
+
+// Payment status types for visual display
+const PAYMENT_STATUS = {
+  PAID: "paid",
+  PENDING: "pending",
+  AWAITING_EFT: "awaiting_eft",
+  APPROVED: "approved",
+  REJECTED: "rejected",
+  OVERDUE: "overdue",
+  CANCELLED: "cancelled",
+};
+
+const normalizeSubscriptionStatus = (value = "") =>
+  (value || "").toString().trim().toLowerCase() || "active";
+
+const normalizeSubscriptionInvoiceStatus = (value = "") => {
+  const normalized = (value || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+  if (normalized === "paid" || normalized === "complete" || normalized === "completed") {
+    return "paid";
+  }
+  if (normalized === "cancelled" || normalized === "canceled") {
+    return "cancelled";
+  }
+  if (normalized === "overdue") {
+    return "overdue";
+  }
+  return "pending-payment";
+};
+
+const normalizePaymentMethod = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "eft") return "eft";
+  return "payfast";
+};
+
+const normalizeSubscriptionPaymentApprovalStatus = (value = "", paymentMethod = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "pending") return "pending";
+  if (normalized === "approved") return "approved";
+  if (normalized === "rejected") return "rejected";
+  return normalizePaymentMethod(paymentMethod) === "eft" ? "pending" : "not_required";
+};
+
+// Get payment status with detailed information
+const getSubscriptionPaymentStatus = (subscription, invoices = []) => {
+  if (!subscription) return { status: null, label: "No subscription", class: "" };
+  
+  const subStatus = normalizeSubscriptionStatus(subscription.status);
+  
+  // Get the latest invoice for payment status
+  const subInvoices = invoices.filter(inv => 
+    (inv.subscriptionId || "").toString().trim() === (subscription.id || "").toString().trim()
+  );
+  
+  // Sort invoices by creation date (newest first)
+  const sortedInvoices = [...subInvoices].sort((a, b) => {
+    const dateA = a.createdAt?.toDate?.()?.getTime() || 0;
+    const dateB = b.createdAt?.toDate?.()?.getTime() || 0;
+    return dateB - dateA;
+  });
+  
+  const latestInvoice = sortedInvoices[0];
+  const invoiceStatus = latestInvoice ? normalizeSubscriptionInvoiceStatus(latestInvoice.status) : "pending-payment";
+  
+  const paymentMethod = normalizePaymentMethod(subscription.paymentMethod || latestInvoice?.paymentMethod);
+  const approvalStatus = normalizeSubscriptionPaymentApprovalStatus(
+    latestInvoice?.paymentApprovalStatus || latestInvoice?.paymentApproval?.decision,
+    paymentMethod
+  );
+  
+  // Determine payment status and CSS class
+  let statusType = "";
+  let label = "";
+  let cssClass = "";
+  
+  if (invoiceStatus === "paid") {
+    statusType = PAYMENT_STATUS.PAID;
+    label = "Paid";
+    cssClass = "payment-paid";
+  } else if (invoiceStatus === "cancelled" || subStatus === "cancelled") {
+    statusType = PAYMENT_STATUS.CANCELLED;
+    label = "Cancelled";
+    cssClass = "payment-cancelled";
+  } else if (invoiceStatus === "overdue") {
+    statusType = PAYMENT_STATUS.OVERDUE;
+    label = "Overdue";
+    cssClass = "payment-overdue";
+  } else {
+    // Pending payment
+    if (paymentMethod === "eft") {
+      if (approvalStatus === "approved") {
+        statusType = PAYMENT_STATUS.APPROVED;
+        label = "EFT Approved";
+        cssClass = "payment-approved";
+      } else if (approvalStatus === "rejected") {
+        statusType = PAYMENT_STATUS.REJECTED;
+        label = "EFT Rejected";
+        cssClass = "payment-rejected";
+      } else {
+        statusType = PAYMENT_STATUS.AWAITING_EFT;
+        label = "Awaiting EFT";
+        cssClass = "payment-awaiting-eft";
+      }
+    } else {
+      statusType = PAYMENT_STATUS.PENDING;
+      label = "Payment Pending";
+      cssClass = "payment-pending";
+    }
+  }
+  
+  return { status: statusType, label, cssClass };
+};
+
+// Get full subscription status display (combines payment + subscription state)
+const getSubscriptionStatusDisplay = (subscription, invoices = []) => {
+  if (!subscription) return null;
+  
+  const subStatus = normalizeSubscriptionStatus(subscription.status);
+  const statusLabel = SUBSCRIPTION_STATUS_LABELS[subStatus] || subStatus || "Active";
+  
+  const { label: paymentLabel } = getSubscriptionPaymentStatus(subscription, invoices);
+  
+  // Combine payment status with subscription status
+  const isActiveOrPaused = subStatus === "active" || subStatus === "paused";
+  if (isActiveOrPaused) {
+    return `${paymentLabel} - ${statusLabel}`;
+  }
+  
+  return statusLabel;
+};
+
+// Helper function to get badge class from payment info for use in render
+const getBadgeClassFromPaymentInfo = (paymentInfo) => {
+  if (!paymentInfo) return "";
+  const { cssClass } = paymentInfo;
+  if (cssClass === "payment-paid" || cssClass === "payment-approved") {
+    return "badge--stock-in";
+  }
+  if (cssClass === "payment-pending" || cssClass === "payment-awaiting-eft") {
+    return "badge--stock-pending";
+  }
+  if (cssClass === "payment-overdue" || cssClass === "payment-rejected") {
+    return "badge--stock-out";
+  }
+  if (cssClass === "payment-cancelled") {
+    return "badge--muted";
+  }
+  return "badge--stock-pending";
+};
+
+const formatSubscriptionPlanLabel = (subscription) => {
+  if (!subscription) return "Subscription";
+  
+  // Try to get plan name from various sources
+  const planName = subscription.planName || subscription.subscriptionPlan?.name || "";
+  if (planName) return planName;
+  
+  const tier = (subscription.tier || "").toString().trim();
+  if (tier) {
+    const tierCapitalized = tier.charAt(0).toUpperCase() + tier.slice(1);
+    return `${tierCapitalized} Plan`;
+  }
+  
+  return "Flower Subscription";
+};
+
+// Helper to format paid date from invoice
+const formatPaidDate = (invoice) => {
+  if (!invoice) return null;
+  // Check various possible paid date fields
+  const paidAt = invoice?.paidAt || invoice?.paymentReceivedAt || invoice?.paidDate || invoice?.completedAt;
+  if (!paidAt) return null;
+  
+  let date = null;
+  if (typeof paidAt.toDate === "function") {
+    date = paidAt.toDate();
+  } else if (paidAt instanceof Date) {
+    date = paidAt;
+  } else {
+    date = new Date(paidAt);
+  }
+  
+  if (!date || Number.isNaN(date.getTime())) return null;
+  
+  return new Intl.DateTimeFormat("en-ZA", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+};
+
+// Get last payment date from invoices
+const getLastPaymentDate = (invoices = [], subscriptionId) => {
+  const subscriptionInvoices = invoices.filter(inv => 
+    (inv.subscriptionId || "").toString().trim() === (subscriptionId || "").toString().trim()
+  );
+  
+  const paidInvoices = subscriptionInvoices
+    .filter(inv => normalizeSubscriptionInvoiceStatus(inv?.status) === "paid")
+    .sort((a, b) => {
+      const dateA = formatPaidDate(a)?.getTime?.() || new Date(a?.paidAt || a?.paymentReceivedAt || a?.paidDate || a?.completedAt || 0).getTime() || 0;
+      const dateB = formatPaidDate(b)?.getTime?.() || new Date(b?.paidAt || b?.paymentReceivedAt || b?.paidDate || b?.completedAt || 0).getTime() || 0;
+      return dateB - dateA;
+    });
+  
+  if (paidInvoices.length === 0) return null;
+  
+  return formatPaidDate(paidInvoices[0]);
+};
+
+// Resolve subscription invoice financials
+const resolveSubscriptionInvoiceFinancials = (invoice = {}) => {
+  const amount = Number(invoice?.amount || 0);
+  const baseAmountRaw = Number(invoice?.baseAmount);
+  const baseAmount = Number.isFinite(baseAmountRaw) ? baseAmountRaw : amount;
+  const adjustmentsTotalRaw = Number(invoice?.adjustmentsTotal);
+  const adjustmentsTotal = Number.isFinite(adjustmentsTotalRaw) ? adjustmentsTotalRaw : Math.max(0, amount - baseAmount);
+  const adjustments = Array.isArray(invoice?.adjustments) ? invoice.adjustments : [];
+  return {
+    amount: Number(amount.toFixed(2)),
+    baseAmount: Number(baseAmount.toFixed(2)),
+    adjustmentsTotal: Number(adjustmentsTotal.toFixed(2)),
+    adjustments,
+  };
+};
+
+const formatCurrency = (value) => `R${Number(value || 0).toFixed(2)}`;
+
 const ROLE_FILTER_OPTIONS = [
   { value: "all", label: "All roles" },
   { value: "admin", label: "Admin" },
@@ -207,6 +453,22 @@ export function AdminUsersView() {
     orderByField: null,
     orderDirection: null,
   });
+  const { items: adminPosSettings } = useFirestoreCollection("adminPosSettings", {
+    orderByField: null,
+    orderDirection: null,
+  });
+
+  // Fetch subscriptions for subscription status display
+  const { items: subscriptions } = useFirestoreCollection("subscriptions", {
+    orderByField: null,
+    orderDirection: null,
+  });
+
+  // Fetch subscription invoices for payment status
+  const { items: subscriptionInvoices } = useFirestoreCollection("subscriptionInvoices", {
+    orderByField: null,
+    orderDirection: null,
+  });
 
   const [updatingId, setUpdatingId] = useState(null);
   const [error, setError] = useState(null);
@@ -226,6 +488,7 @@ export function AdminUsersView() {
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [eftEligibilitySaving, setEftEligibilitySaving] = useState(false);
+  const [posPinResetSaving, setPosPinResetSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [profileStatusMessage, setProfileStatusMessage] = useState("");
   const [editingUserId, setEditingUserId] = useState("");
@@ -265,11 +528,70 @@ export function AdminUsersView() {
     return map;
   }, [subscriptionCustomerSettings]);
 
+  const adminPosSettingsByUid = useMemo(() => {
+    const map = new Map();
+    for (const settings of adminPosSettings) {
+      const key = toText(settings.uid || settings.id || "", 120);
+      if (!key) continue;
+      map.set(key, settings);
+    }
+    return map;
+  }, [adminPosSettings]);
+
+  // Map subscriptions by customerUid
+  const subscriptionsByUid = useMemo(() => {
+    const map = new Map();
+    for (const sub of subscriptions) {
+      const key = toText(sub.customerUid || sub.userId || sub.uid || "", 120);
+      if (!key) continue;
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key).push(sub);
+    }
+    return map;
+  }, [subscriptions]);
+
+  // Get user's subscriptions with their payment status and invoices
+  const getUserSubscriptions = (uid) => {
+    const userSubs = subscriptionsByUid.get(uid) || [];
+    return userSubs.map(sub => {
+      // Get invoices for this subscription
+      const subInvoices = subscriptionInvoices.filter(inv => 
+        (inv.subscriptionId || "").toString().trim() === (sub.id || "").toString().trim()
+      );
+      // Sort by creation date (newest first)
+      const sortedInvoices = [...subInvoices].sort((a, b) => {
+        const dateA = a.createdAt?.toDate?.()?.getTime() || 0;
+        const dateB = b.createdAt?.toDate?.()?.getTime() || 0;
+        return dateB - dateA;
+      });
+      // Get latest paid invoice for payment info
+      const latestInvoice = sortedInvoices[0];
+      const latestPaidInvoice = sortedInvoices.find(inv => 
+        normalizeSubscriptionInvoiceStatus(inv.status) === "paid"
+      );
+      
+      return {
+        ...sub,
+        statusDisplay: getSubscriptionStatusDisplay(sub, subscriptionInvoices),
+        paymentInfo: getSubscriptionPaymentStatus(sub, subscriptionInvoices),
+        invoices: sortedInvoices,
+        latestInvoice,
+        latestPaidInvoice,
+        lastPaymentDate: latestPaidInvoice ? formatPaidDate(latestPaidInvoice) : null,
+        lastPaymentAmount: latestPaidInvoice ? resolveSubscriptionInvoiceFinancials(latestPaidInvoice).amount : null,
+      };
+    });
+  };
+
   const mergedUsers = useMemo(() => {
     return users.map((userDoc) => {
       const uid = toText(userDoc.uid || userDoc.id || "", 120) || userDoc.id;
       const profile = profileByUid.get(uid) || {};
       const subscriptionSettings = subscriptionSettingsByUid.get(uid) || {};
+      const posSettings = adminPosSettingsByUid.get(uid) || {};
+      const userSubscriptions = getUserSubscriptions(uid);
       const addresses = sanitizeAddresses(profile.addresses || []);
       const requestedDefaultAddressId = toText(profile.defaultAddressId || "", 120);
       const defaultAddressId = addresses.some((entry) => entry.id === requestedDefaultAddressId)
@@ -281,6 +603,11 @@ export function AdminUsersView() {
         userDoc.createdAt?.toDate?.() ||
         profile.createdAt?.toDate?.() ||
         null;
+
+      // Get primary subscription (most recent active one)
+      const primarySubscription = userSubscriptions.find(sub => 
+        normalizeSubscriptionStatus(sub.status) !== "cancelled"
+      ) || userSubscriptions[0];
 
       return {
         id: uid,
@@ -299,9 +626,17 @@ export function AdminUsersView() {
         defaultAddressId,
         updatedDate,
         updatedMs: updatedDate instanceof Date ? updatedDate.getTime() : 0,
+        subscriptions: userSubscriptions,
+        primarySubscription,
+        subscriptionStatusDisplay: primarySubscription?.statusDisplay || "No subscription",
+        posPinConfigured: Boolean(posSettings?.pinConfigured),
+        posPinUpdatedAt: posSettings?.pinUpdatedAt || null,
+        posPinResetAt: posSettings?.pinResetAt || null,
+        posPinResetByEmail: toText(posSettings?.pinResetByEmail || "", 200),
+        posPinUpdatedByEmail: toText(posSettings?.pinUpdatedByEmail || "", 200),
       };
     });
-  }, [profileByUid, subscriptionSettingsByUid, users]);
+  }, [adminPosSettingsByUid, profileByUid, subscriptionSettingsByUid, subscriptions, subscriptionInvoices, users]);
 
   const filteredUsers = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -714,12 +1049,51 @@ export function AdminUsersView() {
     }
   };
 
+  const formatPosPinTimestamp = (value) => {
+    const date =
+      typeof value?.toDate === "function"
+        ? value.toDate()
+        : value instanceof Date
+          ? value
+          : value?.seconds
+            ? new Date(value.seconds * 1000)
+            : value
+              ? new Date(value)
+              : null;
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Not set";
+    return DATE_FORMATTER.format(date);
+  };
+
+  const handleResetPosPin = async () => {
+    if (!functionsInstance) {
+      setProfileError("Cloud Functions not available.");
+      return;
+    }
+    if (!editingUserId) {
+      setProfileError("No user selected.");
+      return;
+    }
+    setPosPinResetSaving(true);
+    setProfileError("");
+    setProfileStatusMessage("");
+    try {
+      const callable = httpsCallable(functionsInstance, "adminResetUserPosPin");
+      await callable({ userId: editingUserId });
+      setProfileStatusMessage("POS PIN reset. The admin must set a new PIN from their profile.");
+      setMessage(`POS PIN reset for user ${editingUserId}.`);
+    } catch (err) {
+      setProfileError(err?.message || "Unable to reset POS PIN.");
+    } finally {
+      setPosPinResetSaving(false);
+    }
+  };
+
   return (
     <div className="admin-panel admin-panel--full">
       <div className="admin-panel__header">
         <div>
           <h2>Users</h2>
-          <p className="admin-panel__note">Manage account roles, profile details, communication preferences, and addresses.</p>
+          <p className="admin-panel__note">Manage account roles, profiles, subscriptions, and addresses.</p>
         </div>
         <div className="admin-panel__header-actions">
           <button className="btn btn--primary" type="button" onClick={() => setUserModalOpen(true)}>
@@ -780,6 +1154,7 @@ export function AdminUsersView() {
               <tr>
                 <th scope="col">Email / UID</th>
                 <th scope="col">Role</th>
+                <th scope="col">Subscription</th>
                 <th scope="col">Sub EFT</th>
                 <th scope="col">Name</th>
                 <th scope="col">Phone</th>
@@ -793,6 +1168,7 @@ export function AdminUsersView() {
                 const updated = userDoc.updatedDate ? DATE_FORMATTER.format(userDoc.updatedDate) : "-";
                 const roleLabel = userDoc.role === "admin" ? "Admin" : "Customer";
                 const preferencesSummary = `${userDoc.preferences?.marketingEmails !== false ? "Marketing on" : "Marketing off"} | ${userDoc.preferences?.orderUpdates !== false ? "Order updates on" : "Order updates off"}`;
+                const hasSubscription = userDoc.subscriptions && userDoc.subscriptions.length > 0;
                 return (
                   <tr
                     key={userDoc.id}
@@ -811,6 +1187,14 @@ export function AdminUsersView() {
                     <td>
                       <span className={`admin-users-role-chip ${userDoc.role === "admin" ? "is-admin" : "is-customer"}`}>
                         {roleLabel}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        className={`admin-users-role-chip ${hasSubscription ? "is-admin" : "is-customer"}`}
+                        title={userDoc.subscriptionStatusDisplay}
+                      >
+                        {hasSubscription ? userDoc.subscriptionStatusDisplay : "None"}
                       </span>
                     </td>
                     <td>
@@ -934,6 +1318,29 @@ export function AdminUsersView() {
               <p><strong>Email:</strong> {activeEditUser?.email || "No email"}</p>
               <p><strong>Role:</strong> {(activeEditUser?.role || "customer").toString()}</p>
             </div>
+            {activeEditUser?.role === "admin" && (
+              <div className="admin-users-pos-pin">
+                <p className="modal__meta">
+                  <strong>POS PIN:</strong> {activeEditUser?.posPinConfigured ? "Configured" : "Not configured"}
+                </p>
+                <p className="modal__meta">
+                  <strong>Last update:</strong> {formatPosPinTimestamp(activeEditUser?.posPinUpdatedAt)}
+                  {activeEditUser?.posPinUpdatedByEmail ? ` by ${activeEditUser.posPinUpdatedByEmail}` : ""}
+                </p>
+                <p className="modal__meta">
+                  <strong>Last reset:</strong> {formatPosPinTimestamp(activeEditUser?.posPinResetAt)}
+                  {activeEditUser?.posPinResetByEmail ? ` by ${activeEditUser.posPinResetByEmail}` : ""}
+                </p>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={handleResetPosPin}
+                  disabled={!editingUserId || posPinResetSaving}
+                >
+                  {posPinResetSaving ? "Resetting PIN..." : "Reset POS PIN"}
+                </button>
+              </div>
+            )}
             <div className="admin-users-eft-approval">
               <label className="admin-users-checkbox">
                 <input
@@ -998,6 +1405,81 @@ export function AdminUsersView() {
               </button>
             </div>
           </section>
+
+          {/* Subscription Details Section */}
+          {activeEditUser?.subscriptions && activeEditUser.subscriptions.length > 0 && (
+            <section className="admin-users-modal__section">
+              <h4>Subscriptions</h4>
+              <div className="admin-users-subscription-list">
+                {activeEditUser.subscriptions.map((sub) => (
+                  <div key={sub.id} className="admin-users-subscription-card">
+                    <div className="admin-users-subscription-card__header">
+                      <strong>{formatSubscriptionPlanLabel(sub)}</strong>
+                      <span className={`badge ${sub.statusDisplay?.includes("Paid") ? "badge--stock-in" : sub.statusDisplay?.includes("Pending") || sub.statusDisplay?.includes("Awaiting") ? "badge--stock-pending" : "badge--stock-out"}`}>
+                        {sub.statusDisplay || "Unknown"}
+                      </span>
+                    </div>
+                    <p className="modal__meta">
+                      Price: {formatCurrency(sub.monthlyAmount)} per delivery
+                    </p>
+                    {sub.paymentMethod && (
+                      <p className="modal__meta">
+                        Payment: {sub.paymentMethod === "eft" ? "EFT" : "PayFast"}
+                      </p>
+                    )}
+                    {sub.address && (
+                      <p className="modal__meta">
+                        Delivery: {formatShippingAddress(sub.address)}
+                      </p>
+                    )}
+                    
+                    {/* Payment Details for Admins */}
+                    {sub.lastPaymentDate && (
+                      <div className="admin-users-subscription-card__payment-info">
+                        <p className="modal__meta">
+                          <strong>Last Payment:</strong> {formatCurrency(sub.lastPaymentAmount)} on {sub.lastPaymentDate}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* Invoices List */}
+                    {sub.invoices && sub.invoices.length > 0 && (
+                      <div className="admin-users-subscription-card__invoices">
+                        <p className="modal__meta" style={{ marginTop: '0.75rem', marginBottom: '0.5rem' }}>
+                          <strong>Invoices ({sub.invoices.length})</strong>
+                        </p>
+                        <div className="admin-users-invoice-list">
+                          {sub.invoices.slice(0, 10).map((invoice) => {
+                            const invoiceStatus = normalizeSubscriptionInvoiceStatus(invoice.status);
+                            const invoiceFinancials = resolveSubscriptionInvoiceFinancials(invoice);
+                            const paidDate = formatPaidDate(invoice);
+                            const isPaid = invoiceStatus === "paid";
+                            
+                            return (
+                              <div key={invoice.id} className="admin-users-invoice-row">
+                                <span className={`badge ${isPaid ? "badge--stock-in" : invoiceStatus === "cancelled" ? "badge--muted" : "badge--stock-pending"}`}>
+                                  {SUBSCRIPTION_INVOICE_STATUS_LABELS[invoiceStatus] || "Pending"}
+                                </span>
+                                <span className="modal__meta">
+                                  {invoice.cycleMonth || "Current"} - {formatCurrency(invoiceFinancials.amount)}
+                                </span>
+                                {isPaid && paidDate && (
+                                  <span className="modal__meta">{paidDate}</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {sub.invoices.length > 10 && (
+                            <p className="modal__meta">...and {sub.invoices.length - 10} more invoices</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="admin-users-modal__section">
             <h4>Customer information</h4>

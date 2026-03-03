@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import logo from "../assets/BethanyBloomsLogo.png";
 
@@ -19,14 +20,23 @@ const InstagramIcon = () => (
 );
 
 function Footer() {
+  const [newsletterStatus, setNewsletterStatus] = useState("");
+
   const navLinks = [
     { to: "/", label: "Home" },
     { to: "/workshops", label: "Workshops" },
     { to: "/products", label: "Products" },
     { to: "/gallery", label: "Gallery" },
     { to: "/contact", label: "Contact" },
+    { to: "/privacy-policy", label: "Privacy Policy" },
+    { to: "/disclaimer", label: "Disclaimer" },
     { to: "/admin", label: "Admin" },
   ];
+
+  const handleNewsletterSubmit = (event) => {
+    event.preventDefault();
+    setNewsletterStatus("Newsletter sign-up opens soon. Use Contact or WhatsApp for updates today.");
+  };
 
   return (
     <footer className="footer">
@@ -42,7 +52,7 @@ function Footer() {
               height="60" decoding="async"/>
           </NavLink>
           <p className="footer__scripture">
-            “You will be like a well-watered garden…” – Isaiah 58:11
+            "You will be like a well-watered garden..." - Isaiah 58:11
           </p>
         </div>
         <nav className="footer__nav" aria-label="Footer navigation">
@@ -56,7 +66,7 @@ function Footer() {
           <p>
             <strong>Stay in Bloom</strong>
           </p>
-          <form className="newsletter" action="#" method="post">
+          <form className="newsletter" onSubmit={handleNewsletterSubmit} noValidate>
             <label className="sr-only" htmlFor="newsletter-email">
               Email address
             </label>
@@ -66,12 +76,21 @@ function Footer() {
               id="newsletter-email"
               name="email"
               placeholder="Email address"
+              autoComplete="email"
               required
             />
             <button className="btn btn--primary" type="submit">
-              Subscribe
+              Notify me
             </button>
           </form>
+          <p className="modal__meta">
+            Newsletter sign-up is opening soon.
+          </p>
+          {newsletterStatus && (
+            <p className="modal__meta" role="status" aria-live="polite">
+              {newsletterStatus}
+            </p>
+          )}
         </div>
         <div>
           <p>
@@ -98,7 +117,7 @@ function Footer() {
         </div>
       </div>
       <p className="credits">
-        © <span>{new Date().getFullYear()}</span> Bethany Blooms. Crafted with
+        � <span>{new Date().getFullYear()}</span> Bethany Blooms. Crafted with
         care in South Africa.
       </p>
     </footer>

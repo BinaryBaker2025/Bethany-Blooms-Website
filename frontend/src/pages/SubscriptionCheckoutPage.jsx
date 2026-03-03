@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { collection, doc, onSnapshot } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useCustomerProfile } from "../hooks/useCustomerProfile.js";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
+import { AddressManagementModal } from "../components/AddressManagementModal.jsx";
 import { buildWhatsAppLink } from "../lib/contactInfo.js";
 import { getFirebaseDb, getFirebaseFunctions } from "../lib/firebase.js";
 import { PAYMENT_METHODS, normalizePaymentMethod } from "../lib/paymentMethods.js";
@@ -39,12 +40,12 @@ const SUBSCRIPTION_PAYMENT_METHOD_OPTIONS = Object.freeze([
   {
     value: PAYMENT_METHODS.PAYFAST,
     label: "PayFast",
-    description: "Instant pay-now link by email.",
+    description: "Secure pay-now link sent by email.",
   },
   {
     value: PAYMENT_METHODS.EFT,
-    label: "EFT",
-    description: "Manual EFT invoice, then admin approval.",
+    label: "EFT bank transfer",
+    description: "Invoice by email. Delivery starts after admin confirms payment.",
   },
 ]);
 
@@ -420,12 +421,14 @@ function SubscriptionCheckoutPage() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [addressId, setAddressId] = useState("");
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
 
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
   const [successDialog, setSuccessDialog] = useState(null);
   const [blockedSubmitReason, setBlockedSubmitReason] = useState("");
+  const addressSelectRef = useRef(null);
 
   const db = useMemo(() => {
     try {
@@ -463,14 +466,27 @@ function SubscriptionCheckoutPage() {
   const accountSignUpUrl = `/account?mode=signup&next=${encodeURIComponent(checkoutPath)}`;
 
   const addressOptions = useMemo(
-    () =>
-      (Array.isArray(profile?.addresses) ? profile.addresses : [])
-        .map((entry) => ({
-          id: (entry?.id || "").toString().trim(),
-          label: (entry?.label || "Saved address").toString().trim() || "Saved address",
-          value: formatShippingAddress(entry),
-        }))
-        .filter((entry) => entry.id && entry.value),
+    () => {
+      try {
+        return (Array.isArray(profile?.addresses) ? profile.addresses : [])
+          .map((entry) => {
+            try {
+              return {
+                id: (entry?.id || "").toString().trim(),
+                label: (entry?.label || "Saved address").toString().trim() || "Saved address",
+                value: formatShippingAddress(entry),
+              };
+            } catch (e) {
+              console.warn("Failed to process address entry", entry, e);
+              return null;
+            }
+          })
+          .filter((entry) => entry && entry.id && entry.value);
+      } catch (error) {
+        console.warn("Failed to build address options", error);
+        return [];
+      }
+    },
     [profile?.addresses],
   );
 
@@ -636,7 +652,7 @@ function SubscriptionCheckoutPage() {
         console.warn("Failed to load subscription EFT settings", error);
         setEftApproved(false);
         setEftSettingsLoading(false);
-        setEftSettingsError("Unable to verify EFT approval right now.");
+        setEftSettingsError("We could not check EFT approval right now. Please try again.");
       },
     );
     return unsubscribe;
@@ -668,6 +684,27 @@ function SubscriptionCheckoutPage() {
   useEffect(() => {
     if (canCreateSubscription) setBlockedSubmitReason("");
   }, [canCreateSubscription]);
+
+  const handleAddressChange = (event) => {
+    try {
+      const nextValue = (event.target.value || "").toString().trim();
+      setAddressId(nextValue);
+    } catch (error) {
+      console.error("Error handling address change:", error);
+      setCheckoutError("Unable to select that address right now. Please try again.");
+    }
+  };
+
+  const handleAddressAdded = (newAddress) => {
+    try {
+      if (newAddress?.id) {
+        setAddressId(newAddress.id);
+        setTimeout(() => setAddressModalOpen(false), 500);
+      }
+    } catch (error) {
+      console.error("Error handling new address:", error);
+    }
+  };
 
   const handlePlanChange = (event) => {
     const nextId = (event.target.value || "").toString().trim();
@@ -743,7 +780,7 @@ function SubscriptionCheckoutPage() {
     }
     if (selectedPaymentMethod === PAYMENT_METHODS.EFT && !eftApproved) {
       setCheckoutError(
-        "EFT is admin-approved only for subscriptions. Please contact us on WhatsApp for approval.",
+        "EFT bank transfer is not enabled for this account yet. Message us on WhatsApp to enable it.",
       );
       return;
     }
@@ -763,8 +800,8 @@ function SubscriptionCheckoutPage() {
       ) {
         throw new Error(
           normalizedTier === "bi-weekly"
-            ? "Select exactly 2 Monday delivery slots."
-            : "Select exactly 1 Monday delivery slot.",
+            ? "Choose exactly 2 Monday delivery dates."
+            : "Choose exactly 1 Monday delivery date.",
         );
       }
 
@@ -826,17 +863,19 @@ function SubscriptionCheckoutPage() {
       const deliveryDatesLabel = formatDeliveryDateList(data.deliveryDates || data.cycleDeliveryDates || []);
       const emailNote =
         resolvedPaymentMethod === PAYMENT_METHODS.EFT
-          ? "EFT invoice email with bank details has been sent immediately."
-          : "Pay-now link has been sent to your email immediately.";
-      const pricingNote = isProrated ? "This invoice is prorated by remaining Mondays." : "This invoice is full cycle.";
+          ? "Check your email for bank details and your invoice reference."
+          : "Check your email for your PayFast pay-now link.";
+      const pricingNote = isProrated
+        ? "Amount due now is prorated for the remaining Mondays in this cycle."
+        : "Amount due now covers the full cycle.";
       const timingNote = invoiceTargetsNextMonth
-        ? "No eligible Mondays remain this month, so this invoice is for next month."
-        : "Deliveries still remain this month, so billing starts immediately for this cycle.";
+        ? "No Mondays remain this month, so your first invoice is for next month."
+        : "You still have Mondays left this month, so billing starts in the current cycle.";
       const paymentMethodNote =
         resolvedPaymentMethod === PAYMENT_METHODS.EFT
-          ? "Payment method: EFT (admin approval required after payment)."
+          ? "Payment method: EFT bank transfer (admin confirms payment)."
           : "Payment method: PayFast.";
-      const successMessage = `${createdPlanLabel} created. ${cycleLabel} amount due now: ${invoiceAmountLabel}. Price per delivery: ${perDeliveryAmountLabel}. Full cycle amount: ${cycleAmountLabel}. ${pricingNote}${deliveryDatesLabel ? ` Deliveries: ${deliveryDatesLabel}.` : ""} ${timingNote} ${paymentMethodNote} ${emailNote}`;
+      const successMessage = `${createdPlanLabel} created. Amount due now: ${invoiceAmountLabel}. Price per delivery: ${perDeliveryAmountLabel}. Full cycle amount: ${cycleAmountLabel}. ${pricingNote} ${deliveryDatesLabel ? `Delivery dates: ${deliveryDatesLabel}.` : ""} ${timingNote} ${paymentMethodNote} ${emailNote}`;
       setCheckoutStatus(successMessage);
       setSuccessDialog({
         title: "Subscription created",
@@ -870,8 +909,8 @@ function SubscriptionCheckoutPage() {
           <span className="badge">Subscription checkout</span>
           <h1>Start your flower subscription</h1>
           <p className="modal__meta">
-            Review your plan and Monday delivery slots first, then sign in when you are ready to subscribe.
-            PayFast sends a pay-now link by email, while EFT sends manual bank details email after admin approval.
+            Choose your plan, pick your Monday delivery dates, then complete signup.
+            PayFast sends a pay-now link by email. EFT sends bank details by email after it is enabled for your account.
           </p>
         </div>
 
@@ -974,29 +1013,41 @@ function SubscriptionCheckoutPage() {
                   </label>
                 </div>
 
-                <h2>4. Delivery address</h2>
-                <label>
-                  Saved address
-                  <select
-                    className="input"
-                    value={addressId}
-                    onChange={(event) => setAddressId(event.target.value)}
-                    disabled={checkoutBusy}
-                    required
-                  >
-                    <option value="">
-                      {profileLoading ? "Loading addresses..." : addressOptions.length ? "Select saved address" : "No saved addresses"}
-                    </option>
-                    {addressOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label} - {option.value}
+                <h2>4. Delivery address *</h2>
+                <div className="subscription-address-manager">
+                  <label>
+                    Select address
+                    <select
+                      ref={addressSelectRef}
+                      className="input"
+                      value={addressId}
+                      onChange={handleAddressChange}
+                      disabled={checkoutBusy || profileLoading}
+                      required
+                    >
+                      <option value="">
+                        {profileLoading ? "Loading addresses..." : addressOptions.length ? "Select saved address" : "No saved addresses"}
                       </option>
-                    ))}
-                  </select>
-                </label>
-                {addressOptions.length === 0 && (
+                      {addressOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label} - {option.value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    onClick={() => setAddressModalOpen(true)}
+                    disabled={checkoutBusy || profileLoading}
+                    title="Add, edit, or delete delivery addresses"
+                  >
+                    Manage addresses
+                  </button>
+                </div>
+                {addressOptions.length === 0 && !profileLoading && (
                   <p className="admin-panel__error">
-                    Add a delivery address in <Link to="/account">your account</Link> before continuing.
+                    Click "Manage addresses" to add your first delivery address.
                   </p>
                 )}
 
@@ -1030,15 +1081,15 @@ function SubscriptionCheckoutPage() {
                 </div>
                 <div className="subscription-checkout__eft-guidance">
                   <p>
-                    EFT is admin-approved only. Contact us on{" "}
+                    EFT bank transfer must be enabled on your account first. Contact us on{" "}
                     <a href={eftApprovalWhatsappUrl} target="_blank" rel="noreferrer">
                       WhatsApp
                     </a>{" "}
-                    to enable EFT for your account.
+                    to enable it.
                   </p>
                   {!eftApproved && (
                     <p className="modal__meta">
-                      EFT is currently disabled for this account.
+                      EFT is currently disabled for this account. You can still pay with PayFast now.
                     </p>
                   )}
                   {eftSettingsLoading && <p className="modal__meta">Checking EFT approval...</p>}
@@ -1047,7 +1098,7 @@ function SubscriptionCheckoutPage() {
               </>
             ) : (
               <>
-                <h2>3. Account required</h2>
+                <h2>3. Sign in to continue</h2>
                 <div className="subscription-checkout__guest-lock">
                   <p className="modal__meta">
                     {isGuest
@@ -1065,9 +1116,9 @@ function SubscriptionCheckoutPage() {
 
             <h2>6. Confirm subscription</h2>
             <p className="modal__meta">
-              Your invoice is created immediately. If eligible Mondays remain this month, the invoice is prorated by
-              remaining deliveries; if not, the first invoice is for next month. Ongoing invoices are emailed in the
-              last 5 days of each month. EFT invoices require admin payment approval before delivery eligibility.
+              Your first invoice is created right away. If Mondays are still available this month, the amount is
+              prorated to those dates. If not, your first invoice is for next month. Future invoices are emailed in
+              the last 5 days of each month.
             </p>
             <button
               className="btn btn--primary"
@@ -1092,7 +1143,7 @@ function SubscriptionCheckoutPage() {
                   : "Customer account required"
                 : checkoutBusy
                   ? "Subscribing..."
-                  : "Subscribe"}
+                  : "Subscribe now"}
             </button>
             {blockedSubmitReason === "guest" && (
               <div className="subscription-checkout__guest-prompt">
@@ -1180,7 +1231,11 @@ function SubscriptionCheckoutPage() {
                     )}
                     {invoicePreview.startsNextCycle && (
                       <p className="modal__meta">
-                        No eligible Monday deliveries remain this month. First invoice is for the next cycle.
+                        ⚠️ No eligible Mondays remain this month. Your first delivery will be in{" "}
+                        {formatMonthKeyLabel(invoicePreview.cycleMonth) || invoicePreview.cycleMonth}, and you
+                        will be charged{" "}
+                        <strong>{formatCurrency(invoicePreview.invoiceAmount)}</strong> today for upfront
+                        payment.
                       </p>
                     )}
                   </>
@@ -1232,14 +1287,14 @@ function SubscriptionCheckoutPage() {
       >
         <article className="modal__content" role="dialog" aria-modal="true" aria-labelledby="subscription-success-title">
           <button className="modal__close" type="button" onClick={() => setSuccessDialog(null)} aria-label="Close success dialog">
-            x
+            &times;
           </button>
           <span className="badge badge--success">Success</span>
           <h2 id="subscription-success-title">Subscription successful</h2>
           <p className="modal__meta">
             {successDialog?.paymentMethod === PAYMENT_METHODS.EFT
-              ? "Your subscription is active and an EFT invoice email has been sent. Upload proof (optional) from your account and wait for admin approval."
-              : "Your subscription is active and the PayFast pay-now link has been sent to your email. You can manage it from your account page."}
+              ? "Your subscription is active. An EFT invoice email has been sent. Upload proof (optional) in your account."
+              : "Your subscription is active. Your PayFast pay-now link has been sent to your email."}
           </p>
           {successDialog && (
             <div className="subscription-checkout__summary-list">
@@ -1268,9 +1323,18 @@ function SubscriptionCheckoutPage() {
           </div>
         </article>
       </div>
+
+      {addressModalOpen && (
+        <AddressManagementModal
+          userId={user?.uid || ""}
+          addresses={profile?.addresses || []}
+          onSave={() => {}}
+          onClose={() => setAddressModalOpen(false)}
+          onAddressAdded={handleAddressAdded}
+        />
+      )}
     </section>
   );
 }
 
 export default SubscriptionCheckoutPage;
-

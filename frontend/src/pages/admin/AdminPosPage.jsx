@@ -4,14 +4,26 @@ import {
   collection,
   deleteDoc,
   doc,
+  runTransaction,
   serverTimestamp,
+  setDoc,
   updateDoc,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
+import PosVoidDialog from "../../components/admin/PosVoidDialog.jsx";
 import { useAdminData } from "../../context/AdminDataContext.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
 import { useFirestoreCollection } from "../../hooks/useFirestoreCollection.js";
 import { usePageMetadata } from "../../hooks/usePageMetadata.js";
 import { getFirebaseFunctions } from "../../lib/firebase.js";
+import {
+  formatPosSaleStatusLabel,
+  getPosSaleDateKey,
+  getPosSaleNetTotal,
+  getPosSaleStatusBadgeClass,
+  normalizePosSaleStatus,
+  parsePosDateValue,
+} from "../../lib/posSales.js";
 import { getStockStatus } from "../../lib/stockStatus.js";
 
 const POS_TABS = [
@@ -134,6 +146,12 @@ const normalizeGiftCardCode = (value = "") =>
     .replace(/\s+/g, "")
     .trim();
 
+const normalizeGiftCardStatus = (value = "") =>
+  (value || "").toString().trim().toLowerCase();
+
+const isGiftCardLinkedLineItem = (item = {}) =>
+  Boolean(item?.metadata?.giftCardLinked && item?.metadata?.giftCardId);
+
 const normalizeCategoryValue = (value) =>
   value
     .toString()
@@ -142,11 +160,20 @@ const normalizeCategoryValue = (value) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 
+const coerceGiftCardOptionsList = (options) => {
+  if (Array.isArray(options)) return options;
+  if (!options || typeof options !== "object") return [];
+  if (Array.isArray(options.selectedOptions)) return options.selectedOptions;
+  if (Array.isArray(options.options)) return options.options;
+  return Object.values(options).filter((entry) => entry && typeof entry === "object");
+};
+
 function AdminPosPage() {
   usePageMetadata({
     title: "Admin - POS",
     description: "Process in-person sales for products, workshops, events, and classes.",
   });
+  const { user } = useAuth();
 
   const {
     db,
@@ -163,6 +190,10 @@ function AdminPosPage() {
   } = useAdminData();
 
   const { items: posProducts } = useFirestoreCollection("posProducts", {
+    orderByField: "createdAt",
+    orderDirection: "desc",
+  });
+  const { items: posSales } = useFirestoreCollection("posSales", {
     orderByField: "createdAt",
     orderDirection: "desc",
   });
@@ -183,6 +214,8 @@ function AdminPosPage() {
   const [notes, setNotes] = useState("");
   const [sendEmailReceipt, setSendEmailReceipt] = useState(false);
   const [showPrintableReceipt, setShowPrintableReceipt] = useState(false);
+  const [showDiscountSection, setShowDiscountSection] = useState(false);
+  const [showGiftCardSection, setShowGiftCardSection] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState("idle");
   const [checkoutError, setCheckoutError] = useState(null);
   const [receiptData, setReceiptData] = useState(null);
@@ -195,6 +228,7 @@ function AdminPosPage() {
   const [giftCardLookupError, setGiftCardLookupError] = useState(null);
   const [changeConfirmOpen, setChangeConfirmOpen] = useState(false);
   const changeConfirmRef = useRef(false);
+  const [voidSaleTarget, setVoidSaleTarget] = useState(null);
 
   const [posProductForm, setPosProductForm] = useState(INITIAL_POS_PRODUCT);
   const [posProductSaving, setPosProductSaving] = useState(false);
@@ -214,6 +248,27 @@ function AdminPosPage() {
   const [bookingEdits, setBookingEdits] = useState({});
   const [bookingSavingId, setBookingSavingId] = useState(null);
   const [bookingError, setBookingError] = useState(null);
+
+  const handleDiscountSectionToggle = (nextValue = "no") => {
+    const shouldShow = nextValue === "yes";
+    setShowDiscountSection(shouldShow);
+    if (!shouldShow) {
+      setDiscountType("none");
+      setDiscountValue("");
+    }
+  };
+
+  const handleGiftCardSectionToggle = (nextValue = "no") => {
+    const shouldShow = nextValue === "yes";
+    setShowGiftCardSection(shouldShow);
+    if (!shouldShow) {
+      setGiftCardCodeInput("");
+      setGiftCardMatches([]);
+      setGiftCardLookupLoading(false);
+      setGiftCardLookupError(null);
+      setCartItems((prev) => prev.filter((item) => !isGiftCardLinkedLineItem(item)));
+    }
+  };
 
   const normalizedProducts = useMemo(() => {
     return (products || []).map((product) => {
@@ -236,6 +291,7 @@ function AdminPosPage() {
         quantity: product.stock_quantity ?? product.quantity,
         forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
         status: product.stock_status,
+        isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
       });
       return {
         ...product,
@@ -255,6 +311,7 @@ function AdminPosPage() {
         quantity: product.stock_quantity ?? product.quantity,
         forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
         status: product.stock_status,
+        isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
       });
       return {
         ...product,
@@ -632,46 +689,84 @@ function AdminPosPage() {
   const requiresCustomerDetails = sendEmailReceipt;
 
   const pricing = useMemo(() => {
-    const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const cartSubtotal = cartItems.reduce(
+      (sum, item) => sum + parseNumber(item.price, 0) * Math.max(1, Number.parseInt(item.quantity, 10) || 1),
+      0,
+    );
+    const giftCardCoverableTotal = cartItems.reduce((sum, item) => {
+      if (!isGiftCardLinkedLineItem(item)) return sum;
+      const quantity = Math.max(1, Number.parseInt(item.quantity, 10) || 1);
+      return sum + parseNumber(item.price, 0) * quantity;
+    }, 0);
+    const giftCardCreditTotal = giftCardMatches.reduce(
+      (sum, entry) => sum + Math.max(0, parseNumber(entry?.value, 0)),
+      0,
+    );
+    const giftCardApplied = Math.min(giftCardCreditTotal, giftCardCoverableTotal);
+    const outOfPocketBeforeDiscount = Math.max(0, cartSubtotal - giftCardApplied);
     const rawDiscount = parseNumber(discountValue, 0);
     let discountAmount = 0;
     let discountPercent = null;
 
     if (discountType === "amount") {
       const safeAmount = Math.max(0, rawDiscount);
-      discountAmount = Math.min(subtotal, safeAmount);
+      discountAmount = Math.min(outOfPocketBeforeDiscount, safeAmount);
     }
 
     if (discountType === "percent") {
       const safePercent = Math.min(100, Math.max(0, rawDiscount));
       discountPercent = safePercent;
-      discountAmount = subtotal * (safePercent / 100);
+      discountAmount = outOfPocketBeforeDiscount * (safePercent / 100);
     }
 
-    const total = Math.max(0, subtotal - discountAmount);
+    const amountDue = Math.max(0, outOfPocketBeforeDiscount - discountAmount);
     return {
-      subtotal,
-      total,
+      cartSubtotal,
+      giftCardCoverableTotal,
+      giftCardCreditTotal,
+      giftCardApplied,
+      outOfPocketBeforeDiscount,
       discountAmount,
       discountPercent,
+      amountDue,
     };
-  }, [cartItems, discountType, discountValue]);
+  }, [cartItems, discountType, discountValue, giftCardMatches]);
 
   const cashStats = useMemo(() => {
     const cashNumber = parseNumber(cashReceived, null);
     if (paymentMethod !== "cash") {
       return { cashReceived: cashNumber, changeDue: null, isValid: true };
     }
+    if (pricing.amountDue <= 0) {
+      return { cashReceived: cashNumber, changeDue: 0, isValid: true };
+    }
     if (!Number.isFinite(cashNumber)) {
       return { cashReceived: cashNumber, changeDue: null, isValid: false };
     }
-    const changeDue = Math.max(0, cashNumber - pricing.total);
+    const changeDue = Math.max(0, cashNumber - pricing.amountDue);
     return {
       cashReceived: cashNumber,
       changeDue,
-      isValid: cashNumber >= pricing.total,
+      isValid: cashNumber >= pricing.amountDue,
     };
-  }, [cashReceived, paymentMethod, pricing.total]);
+  }, [cashReceived, paymentMethod, pricing.amountDue]);
+
+  const recentSales = useMemo(() => {
+    const todayKey = formatDateKey(new Date());
+    return (posSales || [])
+      .map((sale) => {
+        const createdAt = parsePosDateValue(sale.createdAt || sale.updatedAt);
+        return {
+          ...sale,
+          createdAt,
+          dateKey: getPosSaleDateKey(sale) || (createdAt ? formatDateKey(createdAt) : ""),
+          status: normalizePosSaleStatus(sale.status),
+          netTotal: getPosSaleNetTotal(sale),
+        };
+      })
+      .filter((sale) => sale.dateKey === todayKey)
+      .slice(0, 12);
+  }, [posSales]);
 
   const updateCustomerField = (field) => (event) => {
     const value = event.target.value;
@@ -709,11 +804,83 @@ function AdminPosPage() {
       if (!giftCard?.id || !giftCard?.code) {
         throw new Error("Gift card lookup returned incomplete data.");
       }
+      const resolvedGiftCardCode = normalizeGiftCardCode(giftCard.code);
+      const selectedOptionsSummaryRaw = (giftCard.selectedOptionsSummary || "").toString().trim();
+      const selectedOptionsSummary =
+        selectedOptionsSummaryRaw.toLowerCase() === "none" ? "" : selectedOptionsSummaryRaw;
+      const normalizedSelectedOptions = coerceGiftCardOptionsList(giftCard.selectedOptions)
+        .map((option, index) => {
+          const label = (
+            option?.label ||
+            option?.name ||
+            option?.optionLabel ||
+            option?.optionName ||
+            option?.title ||
+            option?.displayName ||
+            ""
+          )
+            .toString()
+            .trim();
+          const quantity = Math.max(
+            1,
+            Number.parseInt(
+              option?.quantity ??
+                option?.qty ??
+                option?.attendeeCount ??
+                option?.count ??
+                option?.units,
+              10,
+            ) || 1,
+          );
+          let amount = parseNumber(
+            option?.amount ??
+              option?.price ??
+              option?.unitPrice ??
+              option?.estimatedPrice ??
+              option?.value,
+            null,
+          );
+          if (!Number.isFinite(amount)) {
+            const lineTotal = parseNumber(
+              option?.lineTotal ??
+                option?.total ??
+                option?.estimatedTotal ??
+                option?.subtotal,
+              null,
+            );
+            if (Number.isFinite(lineTotal)) {
+              amount = parseNumber(lineTotal / Math.max(1, quantity), null);
+            }
+          }
+          if (!label || !Number.isFinite(amount) || amount < 0) return null;
+          const rawOptionId = (
+            option?.id ||
+            option?.optionId ||
+            option?.value ||
+            option?.key ||
+            option?.slug ||
+            ""
+          )
+            .toString()
+            .trim();
+          const optionId =
+            rawOptionId ||
+            `gift-card-option-${index + 1}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+          return {
+            id: optionId,
+            label,
+            amount,
+            quantity,
+            lineTotal: Number((amount * quantity).toFixed(2)),
+          };
+        })
+        .filter(Boolean);
+
       setGiftCardMatches((prev) => [
         ...prev,
         {
           giftCardId: giftCard.id,
-          code: normalizeGiftCardCode(giftCard.code),
+          code: resolvedGiftCardCode,
           status: (giftCard.status || "unknown").toString().trim().toLowerCase(),
           isExpired: Boolean(giftCard.isExpired),
           isActive: Boolean(giftCard.isActive),
@@ -722,9 +889,77 @@ function AdminPosPage() {
           value: parseNumber(giftCard.value, 0),
           currency: (giftCard.currency || "ZAR").toString().trim() || "ZAR",
           expiresAt: giftCard.expiresAt || null,
+          selectedOptions: normalizedSelectedOptions,
+          selectedOptionsSummary,
           matchedAtIso: new Date().toISOString(),
         },
       ]);
+
+      setCartItems((prev) => {
+        const next = [...prev];
+        const linkedMetadataBase = {
+          type: "gift-card-redemption",
+          giftCardLinked: true,
+          giftCardId: (giftCard.id || "").toString().trim(),
+          giftCardCode: resolvedGiftCardCode,
+        };
+
+        if (normalizedSelectedOptions.length > 0) {
+          normalizedSelectedOptions.forEach((option) => {
+            const key = buildCartKey({
+              type: "gift-card-redemption",
+              sourceId: giftCard.id,
+              variantId: option.id,
+            });
+            const existingIndex = next.findIndex((entry) => entry.key === key);
+            const linkedLine = {
+              key,
+              sourceId: giftCard.id,
+              type: "gift-card-redemption",
+              name: `${option.label} (${resolvedGiftCardCode})`,
+              price: parseNumber(option.amount, 0),
+              quantity: Math.max(1, Number.parseInt(option.quantity, 10) || 1),
+              metadata: {
+                ...linkedMetadataBase,
+                giftCardOptionId: option.id,
+                optionLabel: option.label,
+              },
+            };
+            if (existingIndex === -1) {
+              next.push(linkedLine);
+            } else {
+              next[existingIndex] = linkedLine;
+            }
+          });
+          return next;
+        }
+
+        const fallbackKey = buildCartKey({
+          type: "gift-card-redemption",
+          sourceId: giftCard.id,
+          variantId: "base",
+        });
+        const fallbackLine = {
+          key: fallbackKey,
+          sourceId: giftCard.id,
+          type: "gift-card-redemption",
+          name: `${selectedOptionsSummary || "Gift card redemption"} (${resolvedGiftCardCode})`,
+          price: parseNumber(giftCard.value, 0),
+          quantity: 1,
+          metadata: {
+            ...linkedMetadataBase,
+            giftCardOptionId: "base",
+            optionLabel: selectedOptionsSummary || "Gift card redemption",
+          },
+        };
+        const fallbackIndex = next.findIndex((entry) => entry.key === fallbackKey);
+        if (fallbackIndex === -1) {
+          next.push(fallbackLine);
+        } else {
+          next[fallbackIndex] = fallbackLine;
+        }
+        return next;
+      });
       setGiftCardCodeInput("");
     } catch (error) {
       setGiftCardLookupError(
@@ -737,11 +972,34 @@ function AdminPosPage() {
 
   const handleRemoveGiftCardMatch = (code) => {
     const normalizedCode = normalizeGiftCardCode(code);
-    setGiftCardMatches((prev) =>
-      prev.filter(
-        (entry) => normalizeGiftCardCode(entry.code || "") !== normalizedCode,
-      ),
-    );
+    setGiftCardMatches((prev) => {
+      const removedGiftCardIds = new Set();
+      const removedCodes = new Set();
+      const nextMatches = prev.filter((entry) => {
+        const entryCode = normalizeGiftCardCode(entry.code || "");
+        const shouldRemove = entryCode === normalizedCode;
+        if (shouldRemove) {
+          removedCodes.add(entryCode);
+          const entryGiftCardId = (entry.giftCardId || "").toString().trim();
+          if (entryGiftCardId) {
+            removedGiftCardIds.add(entryGiftCardId);
+          }
+        }
+        return !shouldRemove;
+      });
+
+      if (removedGiftCardIds.size > 0 || removedCodes.size > 0) {
+        setCartItems((cartPrev) =>
+          cartPrev.filter((item) => {
+            if (!isGiftCardLinkedLineItem(item)) return true;
+            const linkedGiftCardId = (item?.metadata?.giftCardId || "").toString().trim();
+            const linkedGiftCardCode = normalizeGiftCardCode(item?.metadata?.giftCardCode || "");
+            return !removedGiftCardIds.has(linkedGiftCardId) && !removedCodes.has(linkedGiftCardCode);
+          }),
+        );
+      }
+      return nextMatches;
+    });
     setGiftCardLookupError(null);
   };
 
@@ -761,7 +1019,12 @@ function AdminPosPage() {
   };
 
   const handleRemoveCartItem = (key) => {
-    setCartItems((prev) => prev.filter((item) => item.key !== key));
+    setCartItems((prev) =>
+      prev.filter((item) => {
+        if (item.key !== key) return true;
+        return isGiftCardLinkedLineItem(item);
+      }),
+    );
   };
 
   const handleCartQuantityChange = (key, value) => {
@@ -998,6 +1261,10 @@ function AdminPosPage() {
         sessionLabel,
         optionId: type === "cut-flower" ? editState.optionId || null : null,
         attendeeOptions: type === "cut-flower" ? editState.attendeeOptions || [] : null,
+        originalStatus: booking.status || null,
+        originalPaid: booking.paid === true,
+        originalPaymentStatus: booking.paymentStatus || booking.payment_status || null,
+        originalPaymentMethod: booking.paymentMethod || null,
       },
     });
   };
@@ -1007,6 +1274,8 @@ function AdminPosPage() {
     setCustomer(DEFAULT_CUSTOMER);
     setNotes("");
     setPaymentMethod("card");
+    setShowDiscountSection(false);
+    setShowGiftCardSection(false);
     setDiscountType("none");
     setDiscountValue("");
     setCashReceived("");
@@ -1017,6 +1286,11 @@ function AdminPosPage() {
     setGiftCardLookupLoading(false);
     setGiftCardLookupError(null);
     setCheckoutStatus("idle");
+    setCheckoutError(null);
+  };
+
+  const handleVoidCompleted = () => {
+    setVoidSaleTarget(null);
     setCheckoutError(null);
   };
 
@@ -1131,14 +1405,39 @@ function AdminPosPage() {
       return;
     }
 
+    const normalizedGiftCardMatches = giftCardMatches
+      .map((entry) => {
+        const code = normalizeGiftCardCode(entry.code || "");
+        const giftCardId = (entry.giftCardId || "").toString().trim();
+        if (!code || !giftCardId) return null;
+        return {
+          giftCardId,
+          code,
+          status: normalizeGiftCardStatus(entry.status || "unknown"),
+          isExpired: Boolean(entry.isExpired),
+          isActive: Boolean(entry.isActive),
+          recipientName: (entry.recipientName || "").toString().trim(),
+          purchaserName: (entry.purchaserName || "").toString().trim(),
+          value: parseNumber(entry.value, 0),
+          currency: (entry.currency || "ZAR").toString().trim() || "ZAR",
+          expiresAt: entry.expiresAt || null,
+          selectedOptions: Array.isArray(entry.selectedOptions) ? entry.selectedOptions : [],
+          matchedAtIso: (entry.matchedAtIso || new Date().toISOString()).toString(),
+        };
+      })
+      .filter(Boolean);
+    const hasMatchedGiftCards = normalizedGiftCardMatches.length > 0;
+    const resolvedPaymentMethod =
+      pricing.amountDue <= 0 && hasMatchedGiftCards ? "gift-card" : paymentMethod;
+
     let confirmedChange = null;
-    if (paymentMethod === "cash") {
+    if (resolvedPaymentMethod === "cash" && pricing.amountDue > 0) {
       if (!Number.isFinite(cashStats.cashReceived)) {
         setCheckoutError("Enter the cash amount received.");
         return;
       }
       if (!cashStats.isValid) {
-        setCheckoutError("Cash received is less than the total.");
+        setCheckoutError("Cash received is less than the amount due.");
         return;
       }
       if (!changeConfirmRef.current) {
@@ -1172,6 +1471,8 @@ function AdminPosPage() {
     setCheckoutError(null);
 
     const receiptNumber = `POS-${Date.now().toString().slice(-6)}`;
+    const saleDateKey = formatDateKey(new Date());
+    const saleRef = doc(collection(db, "posSales"));
     const discountPayload = {
       type: discountType,
       value:
@@ -1182,45 +1483,74 @@ function AdminPosPage() {
             : 0,
       amount: pricing.discountAmount,
     };
-    const normalizedGiftCardMatches = giftCardMatches
-      .map((entry) => {
-        const code = normalizeGiftCardCode(entry.code || "");
-        const giftCardId = (entry.giftCardId || "").toString().trim();
-        if (!code || !giftCardId) return null;
-        return {
-          giftCardId,
-          code,
-          status: (entry.status || "unknown").toString().trim().toLowerCase(),
-          isExpired: Boolean(entry.isExpired),
-          isActive: Boolean(entry.isActive),
-          recipientName: (entry.recipientName || "").toString().trim(),
-          purchaserName: (entry.purchaserName || "").toString().trim(),
-          value: parseNumber(entry.value, 0),
-          currency: (entry.currency || "ZAR").toString().trim() || "ZAR",
-          expiresAt: entry.expiresAt || null,
-          matchedAtIso: (entry.matchedAtIso || new Date().toISOString()).toString(),
-        };
-      })
-      .filter(Boolean);
-    const salePayload = {
-      receiptNumber,
-      customer: trimmedCustomer,
-      paymentMethod,
-      notes: notes.trim(),
-      items: cartItems.map((item) => ({
+    const linkedBookingRefsByLineId = new Map();
+    const saleItems = cartItems.map((item) => {
+      const lineId = (item.key || `${item.type}:${item.sourceId}`).toString();
+      const metadata = {
+        ...(item.metadata || {}),
+      };
+      if (item.type === "workshop") {
+        const bookingRef = doc(collection(db, "bookings"));
+        linkedBookingRefsByLineId.set(lineId, bookingRef);
+        metadata.linkedBookingCollection = "bookings";
+        metadata.linkedBookingId = bookingRef.id;
+      }
+      if (item.type === "class") {
+        const bookingRef = doc(collection(db, "cutFlowerBookings"));
+        linkedBookingRefsByLineId.set(lineId, bookingRef);
+        metadata.linkedBookingCollection = "cutFlowerBookings";
+        metadata.linkedBookingId = bookingRef.id;
+      }
+      return {
+        lineId,
         id: item.sourceId,
+        sourceId: item.sourceId,
         name: item.name,
         quantity: item.quantity,
+        voidedQuantity: 0,
+        netQuantity: item.quantity,
         price: item.price,
         type: item.type,
-        metadata: item.metadata || null,
-      })),
-      subtotal: pricing.subtotal,
-      total: pricing.total,
+        metadata,
+      };
+    });
+    const saleItemByLineId = new Map(saleItems.map((item) => [item.lineId, item]));
+    const salePayload = {
+      receiptNumber,
+      dateKey: saleDateKey,
+      status: "completed",
+      createdBy: {
+        uid: (user?.uid || "").toString().trim() || null,
+        email: (user?.email || "").toString().trim() || null,
+      },
+      customer: trimmedCustomer,
+      paymentMethod: resolvedPaymentMethod,
+      notes: notes.trim(),
+      items: saleItems,
+      subtotal: Number(pricing.cartSubtotal.toFixed(2)),
+      netSubtotal: Number(pricing.cartSubtotal.toFixed(2)),
+      giftCardApplied: Number(pricing.giftCardApplied.toFixed(2)),
+      netGiftCardApplied: Number(pricing.giftCardApplied.toFixed(2)),
+      giftCardCreditTotal: Number(pricing.giftCardCreditTotal.toFixed(2)),
+      giftCardCoverableTotal: Number(pricing.giftCardCoverableTotal.toFixed(2)),
+      total: Number(pricing.amountDue.toFixed(2)),
+      netTotal: Number(pricing.amountDue.toFixed(2)),
       discount: discountPayload,
-      cashReceived: paymentMethod === "cash" ? cashStats.cashReceived : null,
-      changeDue: paymentMethod === "cash" ? cashStats.changeDue : null,
-      changeConfirmed: paymentMethod === "cash" ? confirmedChange : null,
+      netDiscountAmount: Number(pricing.discountAmount.toFixed(2)),
+      voidSummary: {
+        count: 0,
+        status: "completed",
+        voidedSubtotal: 0,
+        voidedDiscountAmount: 0,
+        voidedGiftCardApplied: 0,
+        voidedTotal: 0,
+        lastVoidedAt: null,
+        lastVoidedByUid: null,
+        lastVoidedByEmail: null,
+      },
+      cashReceived: resolvedPaymentMethod === "cash" ? cashStats.cashReceived : null,
+      changeDue: resolvedPaymentMethod === "cash" ? cashStats.changeDue : null,
+      changeConfirmed: resolvedPaymentMethod === "cash" ? confirmedChange : null,
       ...(normalizedGiftCardMatches.length > 0
         ? {
             giftCardMatches: normalizedGiftCardMatches,
@@ -1232,7 +1562,56 @@ function AdminPosPage() {
     };
 
     try {
-      const saleRef = await addDoc(collection(db, "posSales"), salePayload);
+      const redeemedByUid = (user?.uid || "").toString().trim() || null;
+      const redeemedByEmail = (user?.email || "").toString().trim() || null;
+      await runTransaction(db, async (transaction) => {
+        const nowMs = Date.now();
+        const giftCardRefs = [];
+
+        for (const match of normalizedGiftCardMatches) {
+          const giftCardRef = doc(db, "giftCards", match.giftCardId);
+          const giftCardSnap = await transaction.get(giftCardRef);
+          if (!giftCardSnap.exists()) {
+            throw new Error(`Gift card ${match.code} could not be found.`);
+          }
+          const giftCardData = giftCardSnap.data() || {};
+          const giftCardStatus = normalizeGiftCardStatus(giftCardData.status || "active");
+          if (giftCardStatus === "archived") {
+            throw new Error(`Gift card ${match.code} could not be found.`);
+          }
+          if (giftCardStatus !== "active" || giftCardData?.isRedeemable === false) {
+            throw new Error(`Gift card ${match.code} is no longer active and cannot be redeemed.`);
+          }
+          const expiresAtDate = parseDateValue(giftCardData?.expiresAt);
+          if (expiresAtDate && expiresAtDate.getTime() < nowMs) {
+            throw new Error(`Gift card ${match.code} has expired and cannot be redeemed.`);
+          }
+          giftCardRefs.push({ ref: giftCardRef, match });
+        }
+
+        transaction.set(saleRef, salePayload);
+
+        giftCardRefs.forEach(({ ref, match }) => {
+          transaction.set(
+            ref,
+            {
+              status: "redeemed",
+              isRedeemable: false,
+              redeemedAt: serverTimestamp(),
+              redeemedByUid,
+              redeemedByEmail,
+              redemption: {
+                via: "pos",
+                posSaleId: saleRef.id,
+                receiptNumber,
+                matchedAtIso: match.matchedAtIso || new Date().toISOString(),
+              },
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        });
+      });
 
       const stockUpdates = cartItems.reduce((map, item) => {
         if (item.type !== "product" && item.type !== "pos-product") return map;
@@ -1258,8 +1637,10 @@ function AdminPosPage() {
       const bookingPromises = cartItems
         .filter((item) => item.type === "workshop")
         .map((item) => {
+          const saleItem = saleItemByLineId.get(item.key);
+          const bookingRef = linkedBookingRefsByLineId.get(item.key);
           const notesValue = [
-            `POS sale (${paymentMethod})`,
+            `POS sale (${resolvedPaymentMethod})`,
             notes.trim() || null,
           ]
             .filter(Boolean)
@@ -1272,19 +1653,24 @@ function AdminPosPage() {
             sessionDate: item.metadata?.sessionDate || "TBC",
             sessionLabel: item.metadata?.sessionLabel || "TBC",
             workshopId: item.sourceId,
+            posSaleId: saleRef.id,
+            posSaleLineId: saleItem?.lineId || item.key,
             createdAt: serverTimestamp(),
           };
           if (notesValue) {
             payload.notes = notesValue;
           }
-          return addDoc(collection(db, "bookings"), payload);
+          if (!bookingRef) return null;
+          return setDoc(bookingRef, payload);
         });
 
       const classBookingPromises = cartItems
         .filter((item) => item.type === "class")
         .map((item) => {
+          const saleItem = saleItemByLineId.get(item.key);
+          const bookingRef = linkedBookingRefsByLineId.get(item.key);
           const notesValue = [
-            `POS sale (${paymentMethod})`,
+            `POS sale (${resolvedPaymentMethod})`,
             notes.trim() || null,
           ]
             .filter(Boolean)
@@ -1303,6 +1689,8 @@ function AdminPosPage() {
             classId: item.sourceId,
             sessionLabel: item.metadata?.sessionLabel || null,
             attendeeCount: item.quantity,
+            posSaleId: saleRef.id,
+            posSaleLineId: saleItem?.lineId || item.key,
           };
           if (notesValue) {
             payload.notes = notesValue;
@@ -1313,7 +1701,8 @@ function AdminPosPage() {
           if (item.metadata?.optionId) {
             payload.optionValue = item.metadata.optionId;
           }
-          return addDoc(collection(db, "cutFlowerBookings"), payload);
+          if (!bookingRef) return null;
+          return setDoc(bookingRef, payload);
         });
 
       const bookingUpdatePromises = cartItems
@@ -1322,22 +1711,24 @@ function AdminPosPage() {
           const isWorkshop = item.type === "workshop-booking";
           const collectionName = isWorkshop ? "bookings" : "cutFlowerBookings";
           const statusValue = isWorkshop ? "completed" : "fulfilled";
+          const saleItem = saleItemByLineId.get(item.key);
           return updateDoc(doc(db, collectionName, item.sourceId), {
             paid: true,
             paymentStatus: "paid",
-            paymentMethod,
+            paymentMethod: resolvedPaymentMethod,
             paidAt: serverTimestamp(),
             completedAt: serverTimestamp(),
             status: statusValue,
             posSaleId: saleRef.id,
+            posSaleLineId: saleItem?.lineId || item.key,
             updatedAt: serverTimestamp(),
           });
         });
 
       await Promise.all([
         ...stockPromises.filter(Boolean),
-        ...bookingPromises,
-        ...classBookingPromises,
+        ...bookingPromises.filter(Boolean),
+        ...classBookingPromises.filter(Boolean),
         ...bookingUpdatePromises,
       ]);
 
@@ -1351,8 +1742,9 @@ function AdminPosPage() {
             items: salePayload.items,
             subtotal: salePayload.subtotal,
             total: salePayload.total,
+            giftCardApplied: salePayload.giftCardApplied,
             discount: salePayload.discount,
-            paymentMethod,
+            paymentMethod: resolvedPaymentMethod,
             cashReceived: salePayload.cashReceived,
             changeDue: salePayload.changeDue,
             giftCardMatches: normalizedGiftCardMatches,
@@ -1371,8 +1763,9 @@ function AdminPosPage() {
         items: salePayload.items,
         subtotal: salePayload.subtotal,
         total: salePayload.total,
+        giftCardApplied: salePayload.giftCardApplied,
         discount: salePayload.discount,
-        paymentMethod,
+        paymentMethod: resolvedPaymentMethod,
         cashReceived: salePayload.cashReceived,
         changeDue: salePayload.changeDue,
         giftCardMatches: normalizedGiftCardMatches,
@@ -1442,92 +1835,122 @@ function AdminPosPage() {
               &times;
             </button>
           </div>
-          <div className="pos-toolbar pos-print-hide">
-            <div className="pos-toolbar__row">
-              <div className="admin-tabs">
-                {POS_TABS.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    className={`admin-tab ${activeTab === tab.id ? "is-active" : ""}`}
-                    onClick={() => setActiveTab(tab.id)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="pos-toolbar__row pos-toolbar__row--search">
-              <input
-                className="input pos-search"
-                type="search"
-                placeholder="Search items"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-              />
-              <span className="modal__meta pos-toolbar__count">Showing {activeCount} items</span>
-            </div>
-            {activeTab === "bookings" && (
+          <div className="pos-catalog__sticky">
+            <div className="pos-toolbar pos-print-hide">
               <div className="pos-toolbar__row">
                 <div className="admin-tabs">
+                  {POS_TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      className={`admin-tab ${activeTab === tab.id ? "is-active" : ""}`}
+                      onClick={() => setActiveTab(tab.id)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="pos-toolbar__row pos-toolbar__row--search">
+                <input
+                  className="input pos-search"
+                  type="search"
+                  placeholder="Search items"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
+                {searchTerm.trim().length > 0 && (
                   <button
+                    className="btn btn--secondary btn--small pos-search__clear"
                     type="button"
-                    className={`admin-tab ${bookingTab === "workshop" ? "is-active" : ""}`}
-                    onClick={() => setBookingTab("workshop")}
+                    onClick={() => setSearchTerm("")}
+                    aria-label="Clear item search"
                   >
-                    Workshops
+                    Clear
                   </button>
+                )}
+                <span className="modal__meta pos-toolbar__count">Showing {activeCount} items</span>
+              </div>
+              {activeTab === "bookings" && (
+                <div className="pos-toolbar__row">
+                  <div className="admin-tabs">
+                    <button
+                      type="button"
+                      className={`admin-tab ${bookingTab === "workshop" ? "is-active" : ""}`}
+                      onClick={() => setBookingTab("workshop")}
+                    >
+                      Workshops
+                    </button>
+                    <button
+                      type="button"
+                      className={`admin-tab ${bookingTab === "cut-flower" ? "is-active" : ""}`}
+                      onClick={() => setBookingTab("cut-flower")}
+                    >
+                      Cut flower
+                    </button>
+                  </div>
+                  <label className="modal__meta">
+                    Booking date
+                    <input
+                      className="input"
+                      type="date"
+                      value={bookingDateFilter}
+                      onChange={(event) => setBookingDateFilter(event.target.value)}
+                    />
+                  </label>
                   <button
+                    className="btn btn--secondary"
                     type="button"
-                    className={`admin-tab ${bookingTab === "cut-flower" ? "is-active" : ""}`}
-                    onClick={() => setBookingTab("cut-flower")}
+                    onClick={() => setBookingDateFilter(formatDateKey(new Date()))}
                   >
-                    Cut flower
+                    Today
                   </button>
                 </div>
-                <label className="modal__meta">
-                  Booking date
-                  <input
-                    className="input"
-                    type="date"
-                    value={bookingDateFilter}
-                    onChange={(event) => setBookingDateFilter(event.target.value)}
-                  />
-                </label>
-                <button
-                  className="btn btn--secondary"
-                  type="button"
-                  onClick={() => setBookingDateFilter(formatDateKey(new Date()))}
-                >
-                  Today
-                </button>
-              </div>
-            )}
-            {activeTab === "products" && categoryOptions.length > 0 && (
-              <div className="pos-toolbar__categories">
-                <button
-                  className={`pos-category-chip ${activeCategoryId === "all" ? "is-active" : ""}`}
-                  type="button"
-                  onClick={() => setActiveCategoryId("all")}
-                >
-                  All categories
-                </button>
-                {categoryOptions.map((category) => (
+              )}
+              {activeTab === "products" && categoryOptions.length > 0 && (
+                <div className="pos-toolbar__categories">
                   <button
                     className={`pos-category-chip ${
-                      activeCategoryId === category.id ? "is-active" : ""
+                      activeCategoryId === "all" ? "is-active" : ""
                     }`}
                     type="button"
-                    key={category.id}
-                    onClick={() => setActiveCategoryId(category.id)}
+                    onClick={() => setActiveCategoryId("all")}
                   >
-                    {category.name}
+                    All categories
                   </button>
-                ))}
-              </div>
-            )}
+                  {categoryOptions.map((category) => (
+                    <button
+                      className={`pos-category-chip ${
+                        activeCategoryId === category.id ? "is-active" : ""
+                      }`}
+                      type="button"
+                      key={category.id}
+                      onClick={() => setActiveCategoryId(category.id)}
+                    >
+                      {category.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          {inventoryLoading && <p className="modal__meta">Loading inventory...</p>}
+          <div className="pos-catalog__scroll">
+            {inventoryLoading && <p className="modal__meta">Loading inventory...</p>}
+            {activeTab === "products" && filteredProducts.length === 0 && !inventoryLoading && (
+              <p className="empty-state">No products match your search or selected category.</p>
+            )}
+            {activeTab === "pos-products" && filteredPosProducts.length === 0 && !inventoryLoading && (
+              <p className="empty-state">No POS-only items match your search.</p>
+            )}
+            {activeTab === "workshops" && filteredWorkshops.length === 0 && !inventoryLoading && (
+              <p className="empty-state">No workshops match your search.</p>
+            )}
+            {activeTab === "classes" && filteredClasses.length === 0 && !inventoryLoading && (
+              <p className="empty-state">No classes match your search.</p>
+            )}
+            {activeTab === "events" && filteredEvents.length === 0 && !inventoryLoading && (
+              <p className="empty-state">No events match your search.</p>
+            )}
 
           {activeTab === "products" && (
             <div className="pos-grid">
@@ -2079,6 +2502,7 @@ function AdminPosPage() {
               })}
             </div>
           )}
+          </div>
         </section>
         <section className="pos-cart">
           <div className="pos-cart__panel">
@@ -2096,6 +2520,7 @@ function AdminPosPage() {
                           {item.metadata?.variantLabel && <span>Variant: {item.metadata.variantLabel}</span>}
                           {item.metadata?.optionLabel && <span>Option: {item.metadata.optionLabel}</span>}
                           {item.metadata?.sessionLabel && <span>Session: {item.metadata.sessionLabel}</span>}
+                          {item.metadata?.giftCardCode && <span>Gift card: {item.metadata.giftCardCode}</span>}
                         </div>
                       </div>
                       <div className="pos-cart__line-total">
@@ -2131,29 +2556,31 @@ function AdminPosPage() {
                           </button>
                         </div>
                       </div>
-                      <button
-                        className="icon-btn icon-btn--danger pos-cart__remove"
-                        type="button"
-                        onClick={() => handleRemoveCartItem(item.key)}
-                        aria-label={`Remove ${item.name}`}
-                      >
-                        <svg
-                          aria-hidden="true"
-                          viewBox="0 0 24 24"
-                          width="18"
-                          height="18"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
+                      {!isGiftCardLinkedLineItem(item) && (
+                        <button
+                          className="icon-btn icon-btn--danger pos-cart__remove"
+                          type="button"
+                          onClick={() => handleRemoveCartItem(item.key)}
+                          aria-label={`Remove ${item.name}`}
                         >
-                          <path d="M3 6h18" />
-                          <path d="M8 6v-2a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                          <path d="M10 11v6M14 11v6" />
-                        </svg>
-                      </button>
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 24 24"
+                            width="18"
+                            height="18"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M3 6h18" />
+                            <path d="M8 6v-2a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -2163,40 +2590,70 @@ function AdminPosPage() {
 
           <div className="pos-cart__panel">
             <h3>Checkout</h3>
-            <div className="pos-checkout__section">
-              <div className="pos-checkout__section-title">
-                <h4>Discount</h4>
-                <p className="modal__meta">Apply a once-off discount to this sale.</p>
-              </div>
-              <div className="pos-discount">
+            <div className="pos-block-visibility">
+              <p className="modal__meta">Select yes or no for gift card and discount options.</p>
+              <div className="pos-block-visibility__grid">
                 <label className="modal__meta">
-                  Discount type
+                  Use gift card?
                   <select
                     className="input"
-                    value={discountType}
-                    onChange={(event) => setDiscountType(event.target.value)}
+                    value={showGiftCardSection ? "yes" : "no"}
+                    onChange={(event) => handleGiftCardSectionToggle(event.target.value)}
                   >
-                    <option value="none">None</option>
-                    <option value="amount">Amount (R)</option>
-                    <option value="percent">Percent (%)</option>
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
                   </select>
                 </label>
-                {discountType !== "none" && (
-                  <label className="modal__meta">
-                    {discountType === "amount" ? "Discount amount" : "Discount percent"}
-                    <input
-                      className="input"
-                      type="number"
-                      min="0"
-                      step={discountType === "amount" ? "0.01" : "1"}
-                      max={discountType === "percent" ? "100" : undefined}
-                      value={discountValue}
-                      onChange={(event) => setDiscountValue(event.target.value)}
-                    />
-                  </label>
-                )}
+                <label className="modal__meta">
+                  Apply discount?
+                  <select
+                    className="input"
+                    value={showDiscountSection ? "yes" : "no"}
+                    onChange={(event) => handleDiscountSectionToggle(event.target.value)}
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
+                </label>
               </div>
             </div>
+
+            {showDiscountSection && (
+              <div className="pos-checkout__section">
+                <div className="pos-checkout__section-title">
+                  <h4>Discount</h4>
+                  <p className="modal__meta">Apply a once-off discount to this sale.</p>
+                </div>
+                <div className="pos-discount">
+                  <label className="modal__meta">
+                    Discount type
+                    <select
+                      className="input"
+                      value={discountType}
+                      onChange={(event) => setDiscountType(event.target.value)}
+                    >
+                      <option value="none">None</option>
+                      <option value="amount">Amount (R)</option>
+                      <option value="percent">Percent (%)</option>
+                    </select>
+                  </label>
+                  {discountType !== "none" && (
+                    <label className="modal__meta">
+                      {discountType === "amount" ? "Discount amount" : "Discount percent"}
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step={discountType === "amount" ? "0.01" : "1"}
+                        max={discountType === "percent" ? "100" : undefined}
+                        value={discountValue}
+                        onChange={(event) => setDiscountValue(event.target.value)}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="pos-checkout__section">
               <div className="pos-checkout__section-title">
@@ -2205,8 +2662,14 @@ function AdminPosPage() {
               <div className="pos-checkout__totals">
                 <div>
                   <span>Subtotal</span>
-                  <strong>{formatCurrency(pricing.subtotal)}</strong>
+                  <strong>{formatCurrency(pricing.cartSubtotal)}</strong>
                 </div>
+              {pricing.giftCardApplied > 0 && (
+                <div>
+                  <span>Gift cards applied</span>
+                  <strong>-{formatCurrency(pricing.giftCardApplied)}</strong>
+                </div>
+              )}
               {pricing.discountAmount > 0 && (
                 <div>
                   <span>
@@ -2219,8 +2682,8 @@ function AdminPosPage() {
                 </div>
               )}
                 <div>
-                  <span>Total</span>
-                  <strong>{formatCurrency(pricing.total)}</strong>
+                  <span>Amount due</span>
+                  <strong>{formatCurrency(pricing.amountDue)}</strong>
                 </div>
               </div>
             </div>
@@ -2237,7 +2700,7 @@ function AdminPosPage() {
                   <option value="cash">Cash</option>
                 </select>
               </label>
-              {paymentMethod === "cash" && (
+              {paymentMethod === "cash" && !(pricing.amountDue <= 0 && giftCardMatches.length > 0) && (
                 <div className="pos-cash">
                   <label className="modal__meta">
                     Cash received
@@ -2257,84 +2720,91 @@ function AdminPosPage() {
                   <p className="modal__meta">Confirm the change amount at checkout.</p>
                 </div>
               )}
+              {pricing.amountDue <= 0 && giftCardMatches.length > 0 && (
+                <p className="modal__meta">
+                  Amount due is fully covered by gift card value. Payment method will be saved as gift-card.
+                </p>
+              )}
             </div>
 
-            <div className="pos-checkout__section">
-              <div className="pos-checkout__section-title">
-                <h4>Gift card code matching</h4>
+            {showGiftCardSection && (
+              <div className="pos-checkout__section">
+                <div className="pos-checkout__section-title">
+                  <h4>Gift card code matching</h4>
+                  <p className="modal__meta">
+                    Validate a gift card code to auto-add its included options to cart.
+                  </p>
+                </div>
+                <div className="pos-checkout__fields">
+                  <input
+                    className="input"
+                    placeholder="Gift card code (e.g. BBGC-1234-ABCDE1-11)"
+                    value={giftCardCodeInput}
+                    onChange={(event) => {
+                      setGiftCardCodeInput(normalizeGiftCardCode(event.target.value));
+                      setGiftCardLookupError(null);
+                    }}
+                  />
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    onClick={handleGiftCardCodeLookup}
+                    disabled={giftCardLookupLoading || !functionsInstance || !inventoryEnabled}
+                  >
+                    {giftCardLookupLoading ? "Checking..." : "Validate & Add"}
+                  </button>
+                </div>
                 <p className="modal__meta">
-                  Validate gift card codes and log them on this POS sale.
+                  Gift cards are redeemed on checkout and become single-use after a successful sale.
                 </p>
-              </div>
-              <div className="pos-checkout__fields">
-                <input
-                  className="input"
-                  placeholder="Gift card code (e.g. BBGC-1234-ABCDE1-11)"
-                  value={giftCardCodeInput}
-                  onChange={(event) => {
-                    setGiftCardCodeInput(normalizeGiftCardCode(event.target.value));
-                    setGiftCardLookupError(null);
-                  }}
-                />
-                <button
-                  className="btn btn--secondary"
-                  type="button"
-                  onClick={handleGiftCardCodeLookup}
-                  disabled={giftCardLookupLoading || !functionsInstance || !inventoryEnabled}
-                >
-                  {giftCardLookupLoading ? "Checking..." : "Validate & Add"}
-                </button>
-              </div>
-              <p className="modal__meta">
-                Gift cards are validated and logged only. Redemption state and value are not changed here.
-              </p>
-              {giftCardLookupError && (
-                <p className="admin-panel__error">{giftCardLookupError}</p>
-              )}
-              {giftCardMatches.length > 0 && (
-                <ul className="pos-cart__list">
-                  {giftCardMatches.map((match) => {
-                    const normalizedStatus = (match.status || "unknown")
-                      .toString()
-                      .trim()
-                      .toLowerCase();
-                    const statusLabel = normalizedStatus
-                      ? normalizedStatus.replace(/_/g, " ")
-                      : "unknown";
-                    return (
-                      <li key={`${match.giftCardId}-${match.code}`} className="pos-cart__item">
-                        <div className="pos-cart__row">
-                          <div className="pos-cart__info">
-                            <p className="pos-cart__name">{match.code}</p>
-                            <div className="pos-cart__meta">
-                              <span>
-                                Status: {statusLabel}
-                                {match.isExpired ? " (expired)" : ""}
-                                {match.isActive ? " (active)" : ""}
-                              </span>
-                              {match.recipientName && <span>Recipient: {match.recipientName}</span>}
-                              {match.purchaserName && <span>Purchased by: {match.purchaserName}</span>}
+                {giftCardLookupError && (
+                  <p className="admin-panel__error">{giftCardLookupError}</p>
+                )}
+                {giftCardMatches.length > 0 && (
+                  <ul className="pos-cart__list">
+                    {giftCardMatches.map((match) => {
+                      const normalizedStatus = (match.status || "unknown")
+                        .toString()
+                        .trim()
+                        .toLowerCase();
+                      const statusLabel = normalizedStatus
+                        ? normalizedStatus.replace(/_/g, " ")
+                        : "unknown";
+                      return (
+                        <li key={`${match.giftCardId}-${match.code}`} className="pos-cart__item">
+                          <div className="pos-cart__row">
+                            <div className="pos-cart__info">
+                              <p className="pos-cart__name">{match.code}</p>
+                              <div className="pos-cart__meta">
+                                <span>
+                                  Status: {statusLabel}
+                                  {match.isExpired ? " (expired)" : ""}
+                                  {match.isActive ? " (active)" : ""}
+                                </span>
+                                {match.recipientName && <span>Recipient: {match.recipientName}</span>}
+                                {match.purchaserName && <span>Purchased by: {match.purchaserName}</span>}
+                              </div>
+                            </div>
+                            <div className="pos-cart__line-total">
+                              {formatCurrency(match.value || 0)}
                             </div>
                           </div>
-                          <div className="pos-cart__line-total">
-                            {formatCurrency(match.value || 0)}
+                          <div className="pos-cart__controls">
+                            <button
+                              className="btn btn--secondary btn--small"
+                              type="button"
+                              onClick={() => handleRemoveGiftCardMatch(match.code)}
+                            >
+                              Remove
+                            </button>
                           </div>
-                        </div>
-                        <div className="pos-cart__controls">
-                          <button
-                            className="btn btn--secondary btn--small"
-                            type="button"
-                            onClick={() => handleRemoveGiftCardMatch(match.code)}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
 
             <div className="pos-checkout__section">
               <div className="pos-checkout__section-title">
@@ -2434,8 +2904,64 @@ function AdminPosPage() {
               </button>
             </div>
           </div>
+
+          <div className="pos-cart__panel pos-recent-sales">
+            <div className="pos-recent-sales__header">
+              <div>
+                <h3>Recent sales</h3>
+                <p className="modal__meta">Today&apos;s receipts can be voided here if an admin needs to correct a sale.</p>
+              </div>
+              <span className="modal__meta">{recentSales.length} shown</span>
+            </div>
+            {recentSales.length === 0 ? (
+              <p className="empty-state">No sales recorded yet today.</p>
+            ) : (
+              <div className="pos-recent-sales__list">
+                {recentSales.map((sale) => (
+                  <article className="pos-recent-sales__item" key={sale.id || sale.receiptNumber}>
+                    <div className="pos-recent-sales__item-header">
+                      <div>
+                        <strong>{sale.receiptNumber || sale.id}</strong>
+                        <p className="modal__meta">
+                          {sale.createdAt
+                            ? sale.createdAt.toLocaleTimeString("en-ZA", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "Time unavailable"}
+                        </p>
+                      </div>
+                      <span className={`badge ${getPosSaleStatusBadgeClass(sale.status)}`}>
+                        {formatPosSaleStatusLabel(sale.status)}
+                      </span>
+                    </div>
+                    <div className="pos-recent-sales__meta">
+                      <span>{(sale.paymentMethod || "-").toString()}</span>
+                      <strong>{formatCurrency(getPosSaleNetTotal(sale))}</strong>
+                    </div>
+                    <button
+                      className="btn btn--secondary btn--small"
+                      type="button"
+                      onClick={() => setVoidSaleTarget(sale)}
+                      disabled={!functionsInstance}
+                    >
+                      Void / Correct
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       </div>
+
+      <PosVoidDialog
+        open={Boolean(voidSaleTarget)}
+        sale={voidSaleTarget}
+        functionsInstance={functionsInstance}
+        onClose={() => setVoidSaleTarget(null)}
+        onVoided={handleVoidCompleted}
+      />
 
       {posItemsOpen && (
         <div
@@ -2586,6 +3112,7 @@ function AdminPosPage() {
             <h3 className="modal__title" id="change-confirm-title">
               Confirm change given
             </h3>
+            <p className="modal__meta">Amount due: {formatCurrency(pricing.amountDue || 0)}</p>
             <p className="modal__meta">Cash received: {formatCurrency(cashStats.cashReceived || 0)}</p>
             <p className="modal__meta">Change due: {formatCurrency(cashStats.changeDue || 0)}</p>
             <div className="admin-form__actions" style={{ marginTop: "1.5rem" }}>
@@ -2663,6 +3190,11 @@ function AdminPosPage() {
                     {receiptData.giftCardMatches.length}
                   </p>
                 )}
+              {Number(receiptData.giftCardApplied || 0) > 0 && (
+                <p>
+                  <strong>Gift cards applied:</strong> -{formatCurrency(receiptData.giftCardApplied)}
+                </p>
+              )}
             </div>
             {Array.isArray(receiptData.giftCardMatches) &&
               receiptData.giftCardMatches.length > 0 && (
@@ -2701,7 +3233,7 @@ function AdminPosPage() {
                 </p>
               )}
               <p>
-                <strong>Total:</strong> {formatCurrency(receiptData.total)}
+                <strong>Amount due:</strong> {formatCurrency(receiptData.total)}
               </p>
             </div>
           </div>

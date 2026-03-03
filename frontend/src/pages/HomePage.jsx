@@ -64,9 +64,9 @@ const stripHtml = (value = "") =>
 
 function HomePage() {
   usePageMetadata({
-    title: "Bethany Blooms | Pressed Flower Art, Made Beautifully Simple",
+    title: "Bethany Blooms | Cut & Pressed Flowers, Made Beautifully Simple",
     description:
-      "Bethany Blooms offers artisanal pressed flower workshops, DIY kits, and custom floral art from Vereeniging, South Africa.",
+      "Bethany Blooms offers fresh cut flowers, artisanal pressed flower workshops, DIY kits, and custom floral art from Vereeniging, South Africa.",
   });
 
   const { items: remoteProducts, status: productsStatus } = useFirestoreCollection("products", {
@@ -350,12 +350,14 @@ function HomePage() {
             })}
           </div>
           {normalizedProducts.length === 0 && productsStatus !== "loading" && (
-            <p className="empty-state">No products are available just yet.</p>
+            <p className="empty-state">No products are available right now. Please check back soon.</p>
           )}
-          {productsStatus === "loading" && <p className="empty-state">Loading featured products…</p>}
-          {productsStatus === "empty" && <p className="empty-state">No products are available just yet.</p>}
+          {productsStatus === "loading" && <p className="empty-state">Loading featured products...</p>}
+          {productsStatus === "empty" && (
+            <p className="empty-state">No products are available right now. Please check back soon.</p>
+          )}
           {productsStatus === "error" && (
-            <p className="empty-state">We couldn’t load products from the server. Please refresh to try again.</p>
+            <p className="empty-state">We couldn't load products right now. Please refresh and try again.</p>
           )}
         </div>
       </section>

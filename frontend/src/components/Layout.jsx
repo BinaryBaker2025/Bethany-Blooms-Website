@@ -13,7 +13,7 @@ function Layout() {
 
   useEffect(() => {
     closeBooking();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "auto" });
   }, [location.pathname, closeBooking]);
 
   useEffect(() => {
@@ -26,8 +26,11 @@ function Layout() {
 
   return (
     <div className="layout">
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <Header />
-      <main>
+      <main id="main-content" tabIndex="-1">
         <Outlet />
       </main>
       <Footer />

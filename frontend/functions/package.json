@@ -6,7 +6,11 @@
     "shell": "firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "normalize:giftcard-stock:dry": "node scripts/normalizeGiftCardStock.js",
+    "normalize:giftcard-stock:apply": "node scripts/normalizeGiftCardStock.js --apply",
+    "registry:giftcards:backfill:dry": "node scripts/backfillGiftCardRegistry.js",
+    "registry:giftcards:backfill:apply": "node scripts/backfillGiftCardRegistry.js --apply"
   },
   "engines": {
     "node": "20"

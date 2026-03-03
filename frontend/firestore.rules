@@ -348,7 +348,7 @@ service cloud.firestore {
     }
 
     match /bookings/{bookingId} {
-      allow create: if validBooking(request.resource.data);
+      allow create: if isAdmin() || validBooking(request.resource.data);
       allow read, update, delete: if isAdmin();
     }
 
@@ -400,12 +400,27 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
-    match /posSales/{document=**} {
+    match /posSales/{saleId} {
       allow read, write: if isAdmin();
+
+      match /voids/{voidId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
     }
 
     match /posCashups/{document=**} {
       allow read, write: if isAdmin();
+    }
+
+    match /adminPosSettings/{userId} {
+      allow get: if isSelf(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+
+    match /adminPosCredentials/{userId} {
+      allow read, write: if false;
     }
 
     match /siteVisits/{document=**} {
@@ -414,6 +429,21 @@ service cloud.firestore {
 
     match /giftCards/{document=**} {
       allow read, write: if isAdmin();
+    }
+
+    match /giftCardRegistry/{giftCardId} {
+      allow read: if isAdmin();
+      allow write: if false;
+
+      match /edits/{editId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /giftCardDrafts/{draftId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     match /pendingPayfastOrders/{document=**} {

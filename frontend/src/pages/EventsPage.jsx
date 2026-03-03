@@ -56,7 +56,7 @@ function formatTimeRange(startTime, endTime) {
   if (!startLabel) return "";
   const endLabel = formatTimeValue(endTime);
   if (!endLabel) return startLabel;
-  return `${startLabel} – ${endLabel}`;
+  return `${startLabel} - ${endLabel}`;
 }
 
 function buildEventWhatsAppLink(event) {
@@ -248,7 +248,7 @@ function EventsPage() {
             </div>
           ) : (
             <p className="empty-state">
-              {status === "loading" ? "Loading events…" : "We’re planning new events. Check back soon!"}
+              {status === "loading" ? "Loading events..." : "We're planning new events. Check back soon!"}
             </p>
           )}
         </div>

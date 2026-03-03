@@ -79,6 +79,7 @@ function GiftCardPage() {
     () => (Array.isArray(giftCard?.selectedOptions) ? giftCard.selectedOptions : []),
     [giftCard?.selectedOptions],
   );
+  const isGiveawayCard = Boolean(giftCard?.isGiveaway);
   const optionCount = useMemo(() => {
     if (Number.isFinite(Number(giftCard?.selectedOptionCount))) {
       return Math.max(0, Math.floor(Number(giftCard.selectedOptionCount)));
@@ -103,12 +104,16 @@ function GiftCardPage() {
               </div>
               <p className="gift-card-sheet__value">{currency(giftCard.value)}</p>
               <div className="gift-card-sheet__meta">
-                <p>
-                  <strong>Recipient:</strong> {giftCard.recipientName || "Gift recipient"}
-                </p>
-                <p>
-                  <strong>Purchased by:</strong> {giftCard.purchaserName || "Customer"}
-                </p>
+                {!isGiveawayCard && (
+                  <p>
+                    <strong>Recipient:</strong> {giftCard.recipientName || "Gift recipient"}
+                  </p>
+                )}
+                {!isGiveawayCard && (
+                  <p>
+                    <strong>Purchased by:</strong> {giftCard.purchaserName || "Customer"}
+                  </p>
+                )}
                 <p>
                   <strong>Expiry:</strong> {giftCard.expiresAt ? new Date(giftCard.expiresAt).toLocaleDateString("en-ZA") : "N/A"}
                 </p>

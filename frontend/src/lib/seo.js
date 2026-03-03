@@ -10,6 +10,8 @@ const INDEXABLE_ROUTE_PATTERNS = Object.freeze([
   /^\/products\/[^/]+$/,
   /^\/gallery$/,
   /^\/contact$/,
+  /^\/privacy-policy$/,
+  /^\/disclaimer$/,
   /^\/subscriptions\/checkout$/,
 ]);
 

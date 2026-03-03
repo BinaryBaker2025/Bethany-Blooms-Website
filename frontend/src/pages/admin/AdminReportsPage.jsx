@@ -8,6 +8,13 @@ import {
   normalizePaymentApprovalStatus,
   normalizePaymentMethod,
 } from "../../lib/paymentMethods.js";
+import {
+  formatPosSaleStatusLabel,
+  getPosSaleNetTotal,
+  getPosSaleStatusBadgeClass,
+  getPosSaleVoidSummary,
+  normalizePosSaleStatus,
+} from "../../lib/posSales.js";
 
 const moneyFormatter = new Intl.NumberFormat("en-ZA", {
   style: "currency",
@@ -141,6 +148,9 @@ function AdminReportsPage() {
     return (posSales || []).map((sale) => ({
       ...sale,
       createdAt: parseDateValue(sale.createdAt || sale.updatedAt),
+      status: normalizePosSaleStatus(sale.status),
+      netTotal: getPosSaleNetTotal(sale),
+      voidSummary: getPosSaleVoidSummary(sale),
     }));
   }, [posSales]);
 
@@ -167,15 +177,21 @@ function AdminReportsPage() {
     (sum, order) => sum + parseNumber(order.totalPrice, 0),
     0,
   );
-  const posRevenue = filteredSales.reduce((sum, sale) => sum + parseNumber(sale.total, 0), 0);
+  const posRevenue = filteredSales.reduce((sum, sale) => sum + parseNumber(sale.netTotal, 0), 0);
   const combinedRevenue = onlineRevenue + posRevenue;
 
   const posCashTotal = filteredSales
     .filter((sale) => sale.paymentMethod === "cash")
-    .reduce((sum, sale) => sum + parseNumber(sale.total, 0), 0);
+    .reduce((sum, sale) => sum + parseNumber(sale.netTotal, 0), 0);
   const posCardTotal = filteredSales
     .filter((sale) => sale.paymentMethod === "card")
-    .reduce((sum, sale) => sum + parseNumber(sale.total, 0), 0);
+    .reduce((sum, sale) => sum + parseNumber(sale.netTotal, 0), 0);
+  const voidedReceiptCount = filteredSales.filter((sale) => sale.voidSummary.voidedTotal > 0).length;
+  const voidedAmount = filteredSales.reduce(
+    (sum, sale) => sum + parseNumber(sale.voidSummary.voidedTotal, 0),
+    0,
+  );
+  const activeReceiptCount = filteredSales.filter((sale) => sale.status !== "voided").length;
 
   const productTotalsRaw = useMemo(() => {
     const map = new Map();
@@ -327,7 +343,7 @@ function AdminReportsPage() {
           </div>
           <div className="report-stat">
             <span>POS transactions</span>
-            <strong>{filteredSales.length}</strong>
+            <strong>{activeReceiptCount}</strong>
           </div>
         </div>
 
@@ -344,6 +360,24 @@ function AdminReportsPage() {
           <div className="report-stat">
             <span>Total transactions</span>
             <strong>{filteredOrders.length + filteredSales.length}</strong>
+          </div>
+        </div>
+
+        <div className="report-card">
+          <h3>POS Voids</h3>
+          <div className="report-stat">
+            <span>Voided receipts</span>
+            <strong>{voidedReceiptCount}</strong>
+          </div>
+          <div className="report-stat">
+            <span>Voided amount</span>
+            <strong>{moneyFormatter.format(voidedAmount)}</strong>
+          </div>
+          <div className="report-stat">
+            <span>Latest status mix</span>
+            <strong className={`badge ${filteredSales[0] ? getPosSaleStatusBadgeClass(filteredSales[0].status) : "badge--muted"}`}>
+              {filteredSales[0] ? formatPosSaleStatusLabel(filteredSales[0].status) : "No receipts"}
+            </strong>
           </div>
         </div>
 

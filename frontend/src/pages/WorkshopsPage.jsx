@@ -103,12 +103,14 @@ function WorkshopsPage() {
             ))}
           </div>
           {normalizedWorkshops.length === 0 && status !== "loading" && (
-            <p className="empty-state">No workshops scheduled just yet.</p>
+            <p className="empty-state">No workshops are scheduled right now. Please check back soon.</p>
           )}
-          {status === "loading" && <p className="empty-state">Loading workshop schedule…</p>}
-          {status === "empty" && <p className="empty-state">No workshops scheduled just yet.</p>}
+          {status === "loading" && <p className="empty-state">Loading workshop schedule...</p>}
+          {status === "empty" && (
+            <p className="empty-state">No workshops are scheduled right now. Please check back soon.</p>
+          )}
           {status === "error" && (
-            <p className="empty-state">We couldn’t load workshops right now. Please refresh to try again.</p>
+            <p className="empty-state">We couldn't load workshops right now. Please refresh and try again.</p>
           )}
         </div>
       </section>

@@ -23,10 +23,26 @@ import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { getFirebaseFunctions } from "../lib/firebase.js";
 import { getFirebaseDb } from "../lib/firebase.js";
 import {
+  collectFreshFlowerCategoryTokens,
+  requiresFreshFlowerDeliveryContactForCategoryTokens,
+} from "../lib/freshFlowerDelivery.js";
+import {
+  buildSelectedGiftCardOptions,
+  collectLiveCutFlowerGiftCardOptions,
+  getWholeCrewSelectionValidation,
+  isWholeCrewOption,
+  normalizeGiftCardOptionQuantity,
+  summarizeGiftCardSelectedOptions,
+} from "../lib/giftCardStudio.js";
+import {
   formatPreorderSendMonth,
   getProductPreorderSendMonth,
   normalizePreorderSendMonth,
 } from "../lib/preorder.js";
+import {
+  downloadSubscriptionOpsRosterPdf,
+  printSubscriptionOpsRosterPdf,
+} from "../lib/subscriptionOpsRosterPdf.js";
 import {
   PAYMENT_APPROVAL_STATUSES,
   PAYMENT_METHODS,
@@ -558,6 +574,89 @@ const IconCheck = ({ title = "Success", ...props }) => (
   </svg>
 );
 
+const IconDownload = ({ title = "Download", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="M12 4v10" />
+    <path d="m8 10 4 4 4-4" />
+    <path d="M5 19h14" />
+  </svg>
+);
+
+const IconFileText = ({ title = "Document", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+    <path d="M14 3v5h5" />
+    <path d="M9 13h6" />
+    <path d="M9 17h6" />
+  </svg>
+);
+
+const IconPrinter = ({ title = "Print", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="M7 8V4h10v4" />
+    <path d="M7 17H5a2 2 0 0 1-2-2v-4a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v4a2 2 0 0 1-2 2h-2" />
+    <path d="M7 14h10v6H7z" />
+    <path d="M17 11h.01" />
+  </svg>
+);
+
+const IconSliders = ({ title = "Controls", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="M4 7h16" />
+    <path d="M4 17h16" />
+    <circle cx="9" cy="7" r="2" />
+    <circle cx="15" cy="17" r="2" />
+  </svg>
+);
+
 const IconClose = ({ title = "Close", ...props }) => (
   <svg
     aria-hidden="true"
@@ -826,6 +925,26 @@ const SUBSCRIPTION_OPS_MANAGE_TABS = Object.freeze([
   { id: "plan-charges", label: "Plan & charges" },
 ]);
 const SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB = SUBSCRIPTION_OPS_MANAGE_TABS[0].id;
+const SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS = Object.freeze([
+  { value: "ready", label: "Ready list" },
+  { value: "filtered", label: "Filtered view" },
+]);
+const SUBSCRIPTION_OPS_ROSTER_OPTIONS = Object.freeze([
+  { value: "cycle", label: "Cycle roster" },
+  { value: "monday", label: "Monday delivery" },
+]);
+const SUBSCRIPTION_OPS_PDF_SCOPE_OPTIONS = Object.freeze([
+  { value: "all-cycle", label: "All customers" },
+  { value: "filtered", label: "Filtered view" },
+  { value: "ready-filtered", label: "Ready list" },
+]);
+const SUBSCRIPTION_OPS_PDF_SCOPE_EXPORT_LABELS = Object.freeze([
+  { value: "all-cycle", label: "All cycle customers" },
+  { value: "filtered", label: "Current filtered" },
+  { value: "ready-filtered", label: "Ready to send (filtered)" },
+]);
+const SUBSCRIPTION_BILLING_TIMEZONE = "Africa/Johannesburg";
+const SUBSCRIPTION_PREBILL_LEAD_DAYS = 5;
 
 const SUBSCRIPTION_EXPECTED_DELIVERIES_BY_TIER = Object.freeze({
   weekly: 4,
@@ -898,19 +1017,73 @@ const normalizeCycleMonthValue = (value = "") => {
   return `${year}-${String(month).padStart(2, "0")}`;
 };
 
-const getCurrentJohannesburgCycleMonth = () => {
+const getJohannesburgDateParts = (value = new Date()) => {
+  const safeDate = value instanceof Date ? value : new Date(value);
   const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Africa/Johannesburg",
+    timeZone: SUBSCRIPTION_BILLING_TIMEZONE,
     year: "numeric",
     month: "2-digit",
+    day: "2-digit",
   });
-  const parts = formatter.formatToParts(new Date());
-  const year = parts.find((part) => part.type === "year")?.value || "";
-  const month = parts.find((part) => part.type === "month")?.value || "";
-  const normalized = normalizeCycleMonthValue(`${year}-${month}`);
+  const parts = formatter.formatToParts(safeDate);
+  const year = Number(parts.find((part) => part.type === "year")?.value || 0);
+  const month = Number(parts.find((part) => part.type === "month")?.value || 0);
+  const day = Number(parts.find((part) => part.type === "day")?.value || 0);
+  const monthKey = normalizeCycleMonthValue(`${year}-${String(month).padStart(2, "0")}`);
+  const dateKey = normalizeIsoDateValue(
+    `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+  );
+  return {
+    year,
+    month,
+    day,
+    monthKey,
+    dateKey,
+  };
+};
+
+const getNextCycleMonthKey = (value = "") => {
+  const normalized = normalizeCycleMonthValue(value);
+  if (!normalized) return "";
+  const [yearText, monthText] = normalized.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return "";
+  }
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  return `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+};
+
+const isInJohannesburgPrebillWindow = (value = new Date()) => {
+  const nowParts = getJohannesburgDateParts(value);
+  if (!nowParts.monthKey || !Number.isFinite(nowParts.day) || nowParts.day < 1) {
+    return false;
+  }
+  const daysInMonth = new Date(Date.UTC(nowParts.year, nowParts.month, 0)).getUTCDate();
+  const windowStartDay = Math.max(1, daysInMonth - (SUBSCRIPTION_PREBILL_LEAD_DAYS - 1));
+  return nowParts.day >= windowStartDay;
+};
+
+const getCurrentJohannesburgCycleMonth = (value = new Date()) => {
+  const normalized = getJohannesburgDateParts(value).monthKey;
   if (normalized) return normalized;
   const fallback = new Date();
   return `${fallback.getUTCFullYear()}-${String(fallback.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+const getCurrentJohannesburgDateKey = (value = new Date()) => {
+  const normalized = getJohannesburgDateParts(value).dateKey;
+  if (normalized) return normalized;
+  return normalizeIsoDateValue(new Date().toISOString().slice(0, 10));
+};
+
+const getDefaultSubscriptionOpsCycleMonth = (value = new Date()) => {
+  const currentCycleMonth = getCurrentJohannesburgCycleMonth(value);
+  if (!currentCycleMonth) return "";
+  if (!isInJohannesburgPrebillWindow(value)) return currentCycleMonth;
+  return getNextCycleMonthKey(currentCycleMonth) || currentCycleMonth;
 };
 
 const formatCycleMonthLabel = (monthKey = "") => {
@@ -934,6 +1107,44 @@ const formatSubscriptionInvoiceStatusLabel = (status = "") => {
   const normalized = normalizeSubscriptionOpsInvoiceStatus(status);
   return normalized.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 };
+
+const resolveSubscriptionInvoicePaidAmount = (invoice = {}) => {
+  const amountCandidates = [
+    invoice?.payfast?.amount,
+    invoice?.amountPaid,
+    invoice?.paymentAmount,
+    invoice?.amount,
+  ];
+  for (const candidate of amountCandidates) {
+    if (candidate === undefined || candidate === null || candidate === "") continue;
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Number(parsed.toFixed(2));
+    }
+  }
+  return null;
+};
+
+const resolveSubscriptionInvoicePaidDate = (invoice = {}) => {
+  const dateCandidates = [
+    invoice?.paidAt,
+    invoice?.paymentReceivedAt,
+    invoice?.paidDate,
+    invoice?.completedAt,
+    invoice?.payfast?.updatedAt,
+  ];
+  for (const candidate of dateCandidates) {
+    const parsed = parseDateValue(candidate);
+    if (parsed) return parsed;
+  }
+  return null;
+};
+
+const resolveInvoiceTimestamp = (invoice = {}) =>
+  resolveSubscriptionInvoicePaidDate(invoice) ||
+  parseDateValue(invoice?.updatedAt) ||
+  parseDateValue(invoice?.createdAt) ||
+  null;
 
 const resolveExpectedCycleDeliveries = (tier = "") => {
   const normalized = normalizeSubscriptionPlanTierValue(tier);
@@ -1055,6 +1266,85 @@ const resolveSubscriptionCycleDeliveryDates = ({ tier = "", slots = [], cycleMon
         .filter(Boolean),
     ),
   ).sort((a, b) => compareIsoDateValues(a, b));
+};
+
+const normalizeUniqueDeliveryDates = (values = []) =>
+  Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((entry) => normalizeIsoDateValue(entry))
+        .filter(Boolean),
+    ),
+  ).sort((leftDate, rightDate) => compareIsoDateValues(leftDate, rightDate));
+
+const resolveCurrentCycleBillableDeliveryDates = ({
+  deliveryDates = [],
+  cycleMonth = "",
+  currentCycleMonth = "",
+  todayDateKey = "",
+} = {}) => {
+  const normalizedDates = normalizeUniqueDeliveryDates(deliveryDates);
+  const normalizedCycleMonth = normalizeCycleMonthValue(cycleMonth);
+  const normalizedCurrentCycleMonth = normalizeCycleMonthValue(
+    currentCycleMonth || getCurrentJohannesburgCycleMonth(),
+  );
+  if (!normalizedCycleMonth || normalizedCycleMonth !== normalizedCurrentCycleMonth) {
+    return normalizedDates;
+  }
+  const normalizedTodayDateKey = normalizeIsoDateValue(
+    todayDateKey || getCurrentJohannesburgDateKey(),
+  );
+  if (!normalizedTodayDateKey) return normalizedDates;
+  return normalizedDates.filter(
+    (dateKey) => compareIsoDateValues(dateKey, normalizedTodayDateKey) > 0,
+  );
+};
+
+const resolveNextUpcomingIncludedDeliveryDate = (row = {}, selectedCycleMonth = "") => {
+  const normalizedSelectedCycleMonth = normalizeCycleMonthValue(selectedCycleMonth);
+  if (!normalizedSelectedCycleMonth) return "";
+
+  const sourceDates =
+    Array.isArray(row?.includedDeliveryDates) && row.includedDeliveryDates.length > 0
+      ? row.includedDeliveryDates
+      : row?.cycleDeliveryDates;
+  const normalizedDates = normalizeUniqueDeliveryDates(sourceDates);
+  if (!normalizedDates.length) return "";
+
+  const currentCycleMonth = normalizeCycleMonthValue(getCurrentJohannesburgCycleMonth());
+  if (!currentCycleMonth) {
+    return normalizedDates[0] || "";
+  }
+  if (normalizedSelectedCycleMonth < currentCycleMonth) {
+    return "";
+  }
+  if (normalizedSelectedCycleMonth > currentCycleMonth) {
+    return normalizedDates[0] || "";
+  }
+
+  const todayDateKey = normalizeIsoDateValue(getCurrentJohannesburgDateKey());
+  if (!todayDateKey) return normalizedDates[0] || "";
+  return normalizedDates.find((dateKey) => compareIsoDateValues(dateKey, todayDateKey) >= 0) || "";
+};
+
+const resolveSubscriptionRosterDeliveryDates = (row = {}) => {
+  const sourceDates =
+    Array.isArray(row?.includedDeliveryDates) && row.includedDeliveryDates.length > 0
+      ? row.includedDeliveryDates
+      : row?.cycleDeliveryDates;
+  return normalizeUniqueDeliveryDates(sourceDates);
+};
+
+const collectSubscriptionRosterMondays = (rows = [], cycleMonth = "") => {
+  const deliveryDates = Array.from(
+    new Set(
+      (Array.isArray(rows) ? rows : []).flatMap((row) => resolveSubscriptionRosterDeliveryDates(row)),
+    ),
+  ).sort((leftDate, rightDate) => compareIsoDateValues(leftDate, rightDate));
+  if (deliveryDates.length > 0) {
+    return deliveryDates;
+  }
+  return listSubscriptionMondaysForCycle(cycleMonth);
 };
 
 const resolveSubscriptionDisplayPlanName = (entry = {}) => {
@@ -1635,6 +1925,7 @@ export function AdminProductsView() {
     quantity: productForm.stockQuantity,
     forceOutOfStock: productForm.stockStatus === "out_of_stock",
     status: productForm.stockStatus,
+    isGiftCard: productForm.isGiftCard,
   });
   const getProductGalleryUrls = (source = productForm.galleryImages) =>
     (Array.isArray(source) ? source : [])
@@ -3675,10 +3966,12 @@ export function AdminProductsView() {
                     const updatedAt = product.updatedAt?.toDate?.()
                       ? bookingDateFormatter.format(product.updatedAt.toDate())
                       : "-";
+                    const isGiftCardProduct = Boolean(product.isGiftCard || product.is_gift_card);
                     const stockStatus = getStockStatus({
                       quantity: product.stock_quantity ?? product.quantity,
                       forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
                       status: product.stock_status,
+                      isGiftCard: isGiftCardProduct,
                     });
                     const stockLabel =
                       stockStatus.state === "preorder" ?
@@ -3686,6 +3979,7 @@ export function AdminProductsView() {
                         : stockStatus.isForced ?
                          "Out of stock (manual)"
                         : stockStatus.label;
+                    const stockQuantityLabel = isGiftCardProduct ? "Unlimited" : stockStatus.quantity ?? "-";
                     const preorderSendMonth = getProductPreorderSendMonth(product);
                     const preorderSendMonthLabel = formatPreorderSendMonth(preorderSendMonth);
                     const imageCandidates = [
@@ -3769,7 +4063,7 @@ export function AdminProductsView() {
                             {stockLabel}
                           </span>
                           <p className="modal__meta">
-                            Qty: {stockStatus.quantity ?? "-"}
+                            Qty: {stockQuantityLabel}
                           </p>
                           {stockStatus.state === "preorder" && preorderSendMonthLabel && (
                             <p className="modal__meta">Send month: {preorderSendMonthLabel}</p>
@@ -4690,6 +4984,14 @@ export function AdminSubscriptionsView() {
     description: "Create and manage flower subscription plans.",
   });
 
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+
   const {
     db,
     user,
@@ -4895,6 +5197,39 @@ export function AdminSubscriptionsView() {
     }
   };
 
+  const [fixPricingInProgress, setFixPricingInProgress] = useState(false);
+  const [fixPricingResult, setFixPricingResult] = useState(null);
+
+  const handleFixSubscriptionPricing = async () => {
+    if (!functionsInstance) {
+      setPlanError("Cloud Functions are not available.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "This will recalculate and fix pricing for all subscriptions with incorrect monthly amounts. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setFixPricingInProgress(true);
+      setPlanError(null);
+      const callable = httpsCallable(functionsInstance, "fixSubscriptionPricingIssue");
+      const result = await callable({});
+      setFixPricingResult(result.data);
+      setStatusMessage(result.data?.summary || "Pricing fix completed.");
+    } catch (error) {
+      setPlanError(
+        error.message || "Unable to fix subscription pricing. Check the server logs for details."
+      );
+    } finally {
+      setFixPricingInProgress(false);
+    }
+  };
+
   return (
     <div className="admin-panel admin-panel--full">
       <div className="admin-panel__header">
@@ -4905,6 +5240,15 @@ export function AdminSubscriptionsView() {
           </p>
         </div>
         <div className="admin-panel__header-actions">
+          <button
+            className="btn btn--secondary"
+            type="button"
+            onClick={handleFixSubscriptionPricing}
+            disabled={!inventoryEnabled || fixPricingInProgress}
+            title="Fix pricing for subscriptions created when the system was broken"
+          >
+            {fixPricingInProgress ? "Fixing pricing..." : "Fix Subscription Pricing"}
+          </button>
           <button
             className="btn btn--primary"
             type="button"
@@ -4926,6 +5270,18 @@ export function AdminSubscriptionsView() {
           {plansError && <p className="admin-panel__error">{plansError.message || "Unable to load plans."}</p>}
           {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
           {planError && <p className="admin-panel__error">{planError}</p>}
+          
+          {fixPricingResult && (
+            <div className="admin-panel__status" style={{ marginBottom: "1.5rem", padding: "1rem", backgroundColor: "#f0f8f0", borderRadius: "4px" }}>
+              <strong>Pricing Fix Report:</strong>
+              <ul style={{ margin: "0.5rem 0 0 1.5rem" }}>
+                <li>Subscriptions fixed: {fixPricingResult.affectedSubscriptionsCount}</li>
+                <li>Invoices updated: {fixPricingResult.affectedInvoicesCount}</li>
+                <li>Total adjustment: R{(fixPricingResult.totalAdjustmentAmount / 100).toFixed(2)}</li>
+              </ul>
+            </div>
+          )}
+          
           {subscriptionPlans.length > 0 ? (
             <table className="admin-table">
               <thead>
@@ -5242,7 +5598,7 @@ export function AdminSubscriptionOpsView() {
   });
 
   const [selectedCycleMonth, setSelectedCycleMonth] = useState(() =>
-    getCurrentJohannesburgCycleMonth(),
+    getDefaultSubscriptionOpsCycleMonth(),
   );
   const [searchTerm, setSearchTerm] = useState("");
   const [subscriptionStatusFilter, setSubscriptionStatusFilter] = useState("all");
@@ -5258,6 +5614,12 @@ export function AdminSubscriptionOpsView() {
   const [errorMessage, setErrorMessage] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const [manageSubscriptionId, setManageSubscriptionId] = useState("");
+  const [csvExportScope, setCsvExportScope] = useState("ready");
+  const [pdfExportScope, setPdfExportScope] = useState("all-cycle");
+  const [exportRosterMode, setExportRosterMode] = useState("cycle");
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportDialogFormat, setExportDialogFormat] = useState("pdf");
+  const [selectedDeliveryMonday, setSelectedDeliveryMonday] = useState("");
   const [activeManageTab, setActiveManageTab] = useState(
     SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB,
   );
@@ -5329,9 +5691,42 @@ export function AdminSubscriptionOpsView() {
       }
     });
     return map;
-  }, [cycleInvoicesBySubscription, selectedCycleMonth]);
+  }, [cycleInvoicesBySubscription]);
+
+  const latestPaidInvoiceBySubscription = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach((invoice) => {
+      const subscriptionId = (invoice?.subscriptionId || "").toString().trim();
+      if (!subscriptionId) return;
+      if (normalizeSubscriptionOpsInvoiceStatus(invoice?.status || "") !== "paid") return;
+      const existing = map.get(subscriptionId);
+      const existingTime = resolveInvoiceTimestamp(existing)?.getTime() || 0;
+      const candidateTime = resolveInvoiceTimestamp(invoice)?.getTime() || 0;
+      if (!existing || candidateTime > existingTime) {
+        map.set(subscriptionId, invoice);
+      }
+    });
+    return map;
+  }, [subscriptionInvoices]);
+
+  const latestInvoiceBySubscription = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach((invoice) => {
+      const subscriptionId = (invoice?.subscriptionId || "").toString().trim();
+      if (!subscriptionId) return;
+      const existing = map.get(subscriptionId);
+      const existingTime = resolveInvoiceTimestamp(existing)?.getTime() || 0;
+      const candidateTime = resolveInvoiceTimestamp(invoice)?.getTime() || 0;
+      if (!existing || candidateTime > existingTime) {
+        map.set(subscriptionId, invoice);
+      }
+    });
+    return map;
+  }, [subscriptionInvoices]);
 
   const allRows = useMemo(() => {
+    const currentJohannesburgCycleMonth = getCurrentJohannesburgCycleMonth();
+    const currentJohannesburgDateKey = getCurrentJohannesburgDateKey();
     return (Array.isArray(subscriptions) ? subscriptions : [])
       .map((subscription) => {
         const subscriptionId = (subscription?.id || "").toString().trim();
@@ -5347,6 +5742,9 @@ export function AdminSubscriptionOpsView() {
         const invoiceStatus = invoice
           ? normalizeSubscriptionOpsInvoiceStatus(invoice?.status)
           : "missing";
+        const cyclePaymentStatusLabel = invoice
+          ? formatSubscriptionInvoiceStatusLabel(invoiceStatus)
+          : "Missing invoice";
         const invoiceType = invoice ? normalizeSubscriptionInvoiceType(invoice?.invoiceType || "") : "missing";
         const paymentMethod = normalizeSubscriptionOpsPaymentMethod(
           invoice?.paymentMethod || subscription?.paymentMethod || PAYMENT_METHODS.PAYFAST,
@@ -5376,6 +5774,54 @@ export function AdminSubscriptionOpsView() {
         const invoiceAmount = Number(invoice?.amount || 0);
         const invoiceBaseAmount = Number(invoice?.baseAmount || invoice?.amount || 0);
         const invoiceAdjustmentsTotal = Number(invoice?.adjustmentsTotal || 0);
+        const cyclePaidAmount =
+          invoice && invoiceStatus === "paid"
+            ? resolveSubscriptionInvoicePaidAmount(invoice)
+            : null;
+        const cyclePaidAt =
+          invoice && invoiceStatus === "paid"
+            ? resolveSubscriptionInvoicePaidDate(invoice)
+            : null;
+        const latestInvoice = latestInvoiceBySubscription.get(subscriptionId) || null;
+        const latestInvoiceStatus = latestInvoice
+          ? normalizeSubscriptionOpsInvoiceStatus(latestInvoice?.status || "")
+          : "missing";
+        const latestInvoiceStatusLabel = latestInvoice
+          ? formatSubscriptionInvoiceStatusLabel(latestInvoiceStatus)
+          : "No invoices yet";
+        const latestInvoiceAmount = latestInvoice
+          ? Number(latestInvoice?.amount || 0)
+          : null;
+        const latestInvoiceBaseAmount = latestInvoice
+          ? Number(latestInvoice?.baseAmount || latestInvoice?.amount || 0)
+          : null;
+        const latestInvoiceAdjustmentsTotal = latestInvoice
+          ? Number(latestInvoice?.adjustmentsTotal || 0)
+          : null;
+        const latestInvoiceNumber =
+          Number.isFinite(Number(latestInvoice?.invoiceNumber))
+            ? Number(latestInvoice.invoiceNumber)
+            : null;
+        const latestInvoiceId = (latestInvoice?.id || latestInvoice?.invoiceId || "").toString().trim();
+        const latestInvoiceCycleMonth = normalizeCycleMonthValue(latestInvoice?.cycleMonth || "");
+        const latestInvoicePaymentMethod = normalizeSubscriptionOpsPaymentMethod(
+          latestInvoice?.paymentMethod || subscription?.paymentMethod || PAYMENT_METHODS.PAYFAST,
+        );
+        const latestInvoicePaymentApprovalStatus = normalizeSubscriptionOpsPaymentApprovalStatus(
+          latestInvoice?.paymentApprovalStatus ||
+            latestInvoice?.paymentApproval?.decision ||
+            subscription?.paymentApprovalStatus ||
+            subscription?.paymentApproval?.decision ||
+            "",
+          latestInvoicePaymentMethod,
+        );
+        const latestPaidInvoice = latestPaidInvoiceBySubscription.get(subscriptionId) || null;
+        const lastPaidAmount = latestPaidInvoice
+          ? resolveSubscriptionInvoicePaidAmount(latestPaidInvoice)
+          : null;
+        const subscriptionLastPaymentAt = parseDateValue(subscription?.lastPaymentAt);
+        const lastPaidAt =
+          resolveSubscriptionInvoicePaidDate(latestPaidInvoice) || subscriptionLastPaymentAt;
         const invoiceNumber =
           Number.isFinite(Number(invoice?.invoiceNumber))
             ? Number(invoice.invoiceNumber)
@@ -5397,47 +5843,60 @@ export function AdminSubscriptionOpsView() {
           subscription?.subscriptionProduct?.productId ||
           ""
         ).toString().trim();
-        const lastPaymentAt = parseDateValue(subscription?.lastPaymentAt);
-        const paidAt = parseDateValue(invoice?.paidAt);
+        const lastPaymentAt = subscriptionLastPaymentAt;
+        const paidAt = cyclePaidAt;
         const readyToSend = subscriptionStatus === "active" && invoiceStatus === "paid";
         const mondaySlots = normalizeSubscriptionMondaySlotsForTier(
           tier,
           invoice?.deliverySchedule?.slots || subscription?.deliveryPreference?.slots || [],
         );
-        const cycleDeliveryDates =
+        const hasInvoiceCycleDeliveryDates =
           Array.isArray(invoice?.deliverySchedule?.cycleDeliveryDates) &&
-          invoice.deliverySchedule.cycleDeliveryDates.length
-            ? Array.from(
-                new Set(
-                  invoice.deliverySchedule.cycleDeliveryDates
-                    .map((entry) => normalizeIsoDateValue(entry))
-                    .filter(Boolean),
-                ),
-              ).sort((leftDate, rightDate) => compareIsoDateValues(leftDate, rightDate))
-            : resolveSubscriptionCycleDeliveryDates({
-                tier,
-                slots: mondaySlots,
+          invoice.deliverySchedule.cycleDeliveryDates.length > 0;
+        const cycleDeliveryDatesRaw = hasInvoiceCycleDeliveryDates
+          ? normalizeUniqueDeliveryDates(invoice.deliverySchedule.cycleDeliveryDates)
+          : resolveSubscriptionCycleDeliveryDates({
+              tier,
+              slots: mondaySlots,
+              cycleMonth: selectedCycleMonth,
+            });
+        const cycleDeliveryDates =
+          !invoice && !hasInvoiceCycleDeliveryDates
+            ? resolveCurrentCycleBillableDeliveryDates({
+                deliveryDates: cycleDeliveryDatesRaw,
                 cycleMonth: selectedCycleMonth,
-              });
-        const includedDeliveryDates =
+                currentCycleMonth: currentJohannesburgCycleMonth,
+                todayDateKey: currentJohannesburgDateKey,
+              })
+            : cycleDeliveryDatesRaw;
+        const hasInvoiceIncludedDeliveryDates =
           Array.isArray(invoice?.deliverySchedule?.includedDeliveryDates) &&
-          invoice.deliverySchedule.includedDeliveryDates.length
-            ? Array.from(
-                new Set(
-                  invoice.deliverySchedule.includedDeliveryDates
-                    .map((entry) => normalizeIsoDateValue(entry))
-                    .filter(Boolean),
-                ),
-              ).sort((leftDate, rightDate) => compareIsoDateValues(leftDate, rightDate))
-            : cycleDeliveryDates;
+          invoice.deliverySchedule.includedDeliveryDates.length > 0;
+        const includedDeliveryDatesRaw = hasInvoiceIncludedDeliveryDates
+          ? normalizeUniqueDeliveryDates(invoice.deliverySchedule.includedDeliveryDates)
+          : cycleDeliveryDates;
+        const includedDeliveryDates =
+          !invoice && !hasInvoiceIncludedDeliveryDates
+            ? resolveCurrentCycleBillableDeliveryDates({
+                deliveryDates: includedDeliveryDatesRaw,
+                cycleMonth: selectedCycleMonth,
+                currentCycleMonth: currentJohannesburgCycleMonth,
+                todayDateKey: currentJohannesburgDateKey,
+              })
+            : includedDeliveryDatesRaw;
         const mondaySlotLabel = mondaySlots
           .map((slot) => formatSubscriptionMondaySlotLabel(slot))
           .filter(Boolean)
           .join(", ");
-        const cycleDeliveryLabel = formatSubscriptionDeliveryDateList(cycleDeliveryDates);
-        const includedDeliveryLabel = formatSubscriptionDeliveryDateList(includedDeliveryDates);
+        const cycleDeliveryLabel = formatSubscriptionDeliveryDateList(cycleDeliveryDates) || "None";
+        const includedDeliveryLabel =
+          formatSubscriptionDeliveryDateList(includedDeliveryDates) || "None";
+        const isCurrentCycleSelection =
+          normalizeCycleMonthValue(selectedCycleMonth) ===
+          normalizeCycleMonthValue(currentJohannesburgCycleMonth);
         const expectedDeliveries =
-          cycleDeliveryDates.length || resolveExpectedCycleDeliveries(tier);
+          includedDeliveryDates.length ||
+          (!invoice && isCurrentCycleSelection ? 0 : resolveExpectedCycleDeliveries(tier));
 
         const searchText = [
           subscriptionId,
@@ -5454,10 +5913,19 @@ export function AdminSubscriptionOpsView() {
           invoiceNumber ? `INV-${invoiceNumber}` : "",
           invoiceType,
           invoiceStatus,
+          cyclePaymentStatusLabel,
           paymentMethod,
           paymentApprovalStatus,
           subscriptionStatus,
           subscriptionPlanId,
+          latestInvoiceId,
+          latestInvoiceStatus,
+          latestInvoiceStatusLabel,
+          latestInvoiceNumber ? `INV-${latestInvoiceNumber}` : "",
+          latestInvoiceCycleMonth,
+          latestInvoiceAmount !== null ? `${latestInvoiceAmount}` : "",
+          cyclePaidAmount !== null ? `${cyclePaidAmount}` : "",
+          lastPaidAmount !== null ? `${lastPaidAmount}` : "",
           topupCount ? `topups ${topupCount}` : "",
           topupPendingAmount ? `${topupPendingAmount}` : "",
           recurringCharges.map((entry) => entry?.label || "").join(" "),
@@ -5480,8 +5948,20 @@ export function AdminSubscriptionOpsView() {
           invoiceId,
           invoiceNumber,
           invoiceStatus,
+          cyclePaymentStatusLabel,
           paymentMethod,
           paymentApprovalStatus,
+          latestInvoice,
+          latestInvoiceId,
+          latestInvoiceStatus,
+          latestInvoiceStatusLabel,
+          latestInvoiceNumber,
+          latestInvoiceCycleMonth,
+          latestInvoiceAmount,
+          latestInvoiceBaseAmount,
+          latestInvoiceAdjustmentsTotal,
+          latestInvoicePaymentMethod,
+          latestInvoicePaymentApprovalStatus,
           subscriptionPlanId,
           recurringCharges,
           subscriptionStatus,
@@ -5498,6 +5978,10 @@ export function AdminSubscriptionOpsView() {
           invoiceAmount,
           invoiceBaseAmount,
           invoiceAdjustmentsTotal,
+          cyclePaidAmount,
+          cyclePaidAt,
+          lastPaidAmount,
+          lastPaidAt,
           lastPaymentAt,
           paidAt,
           mondaySlots,
@@ -5521,7 +6005,14 @@ export function AdminSubscriptionOpsView() {
         if (leftName !== rightName) return leftName.localeCompare(rightName);
         return left.subscriptionId.localeCompare(right.subscriptionId);
       });
-  }, [baseInvoiceBySubscription, cycleInvoicesBySubscription, selectedCycleMonth, subscriptions]);
+  }, [
+    baseInvoiceBySubscription,
+    cycleInvoicesBySubscription,
+    latestInvoiceBySubscription,
+    latestPaidInvoiceBySubscription,
+    selectedCycleMonth,
+    subscriptions,
+  ]);
 
   const manageRow = useMemo(
     () =>
@@ -5591,6 +6082,48 @@ export function AdminSubscriptionOpsView() {
     () => visibleRows.filter((row) => row.readyToSend),
     [visibleRows],
   );
+
+  const mondayRosterOptions = useMemo(
+    () =>
+      collectSubscriptionRosterMondays(allRows, selectedCycleMonth).map((dateKey) => ({
+        value: dateKey,
+        label: formatSubscriptionDeliveryDateLabel(dateKey) || dateKey,
+      })),
+    [allRows, selectedCycleMonth],
+  );
+
+  const mondayRosterRows = useMemo(() => {
+    const normalizedMonday = normalizeIsoDateValue(selectedDeliveryMonday);
+    if (!normalizedMonday) return [];
+    return readyToSendRows.filter((row) =>
+      resolveSubscriptionRosterDeliveryDates(row).includes(normalizedMonday),
+    );
+  }, [readyToSendRows, selectedDeliveryMonday]);
+
+  useEffect(() => {
+    if (!mondayRosterOptions.length) {
+      if (selectedDeliveryMonday) {
+        setSelectedDeliveryMonday("");
+      }
+      return;
+    }
+    if (mondayRosterOptions.some((option) => option.value === selectedDeliveryMonday)) {
+      return;
+    }
+    const normalizedSelectedCycleMonth = normalizeCycleMonthValue(selectedCycleMonth);
+    const normalizedCurrentCycleMonth = normalizeCycleMonthValue(getCurrentJohannesburgCycleMonth());
+    const normalizedTodayDateKey = normalizeIsoDateValue(getCurrentJohannesburgDateKey());
+    const defaultOption =
+      normalizedSelectedCycleMonth &&
+      normalizedCurrentCycleMonth &&
+      normalizedSelectedCycleMonth === normalizedCurrentCycleMonth &&
+      normalizedTodayDateKey
+        ? mondayRosterOptions.find(
+            (option) => compareIsoDateValues(option.value, normalizedTodayDateKey) >= 0,
+          ) || mondayRosterOptions[0]
+        : mondayRosterOptions[0];
+    setSelectedDeliveryMonday(defaultOption?.value || "");
+  }, [mondayRosterOptions, selectedCycleMonth, selectedDeliveryMonday]);
 
   const metrics = useMemo(() => {
     const activeCount = allRows.filter((row) => row.subscriptionStatus === "active").length;
@@ -5666,6 +6199,68 @@ export function AdminSubscriptionOpsView() {
     setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_TABS[nextIndex].id);
   };
 
+  const getCsvScopeLabel = (scopeValue = "ready") =>
+    SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS.find((entry) => entry.value === scopeValue)?.label ||
+    SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS[0].label;
+
+  const getPdfScopeLabel = (scopeValue = "all-cycle") =>
+    SUBSCRIPTION_OPS_PDF_SCOPE_EXPORT_LABELS.find((entry) => entry.value === scopeValue)?.label ||
+    SUBSCRIPTION_OPS_PDF_SCOPE_EXPORT_LABELS[0].label;
+
+  const resolveCsvSourceRows = () => {
+    if (csvExportScope === "filtered") return visibleRows;
+    return readyToSendRows;
+  };
+
+  const resolvePdfSourceRows = () => {
+    if (pdfExportScope === "filtered") return visibleRows;
+    if (pdfExportScope === "ready-filtered") return readyToSendRows;
+    return allRows;
+  };
+
+  const buildSubscriptionOpsPdfRows = (rows = [], { selectedMonday = "" } = {}) =>
+    rows.map((row) => {
+      const nextUpcomingDate = selectedMonday || resolveNextUpcomingIncludedDeliveryDate(row, selectedCycleMonth);
+      const nextUpcomingLabel = nextUpcomingDate
+        ? formatSubscriptionDeliveryDateLabel(nextUpcomingDate)
+        : "No upcoming date in selected cycle";
+      const invoiceStatusLabel =
+        row.invoiceStatus === "missing"
+          ? "Missing"
+          : formatSubscriptionInvoiceStatusLabel(row.invoiceStatus);
+      return {
+        customer: [
+          row.customerName || "Customer",
+          row.customerEmail || "No email",
+        ].join("\n"),
+        phone: row.customerPhone || "No phone",
+        delivery: [
+          row.addressLabel || "No delivery address",
+          `${row.city || "-"} | ${row.province || "-"}`,
+        ].join("\n"),
+        nextDelivery: [
+          selectedMonday ? `Delivery: ${nextUpcomingLabel}` : `Next: ${nextUpcomingLabel}`,
+          `Monday slots: ${row.mondaySlotLabel || "-"}`,
+        ].join("\n"),
+        plan: [
+          row.planName || "Subscription",
+          `Tier: ${formatSubscriptionPlanTierLabel(row.tier)}`,
+          `Stems: ${row.stems || "-"}`,
+          `Expected deliveries: ${row.expectedDeliveries || 0}`,
+        ].join("\n"),
+        cycleInvoice: [
+          row.invoiceNumber ? `Invoice: INV-${row.invoiceNumber}` : `Missing for ${selectedCycleLabel}`,
+          `Status: ${row.cyclePaymentStatusLabel || invoiceStatusLabel}`,
+          `Total: ${row.invoice ? formatPriceLabel(row.invoiceAmount) : "-"}`,
+        ].join("\n"),
+        status: [
+          row.readyToSend ? "Ready to send" : "Not ready",
+          `Paid: ${row.invoiceStatus === "paid" ? "Yes" : "No"}`,
+          `Paid for ${selectedCycleLabel}: ${row.invoiceStatus === "paid" ? "Yes" : "No"}`,
+        ].join("\n"),
+      };
+    });
+
   const buildExportRows = (rows) => {
     const header = [
       "Cycle",
@@ -5685,6 +6280,7 @@ export function AdminSubscriptionOpsView() {
       "Invoice Type",
       "Payment Method",
       "Payment Approval",
+      "Cycle Payment Status",
       "Paid for Cycle",
       "Delivery Eligible",
       "Invoice Number",
@@ -5698,7 +6294,9 @@ export function AdminSubscriptionOpsView() {
       "Address",
       "City",
       "Province",
-      "Paid At",
+      "Cycle Paid Amount",
+      "Cycle Paid At",
+      "Last Paid Amount",
       "Last Payment At",
     ];
     const body = rows.map((row) => [
@@ -5719,6 +6317,7 @@ export function AdminSubscriptionOpsView() {
       row.invoice ? formatSubscriptionInvoiceTypeLabel(row.invoiceType) : "",
       formatSubscriptionPaymentMethodLabel(row.paymentMethod),
       formatSubscriptionPaymentApprovalLabel(row.paymentApprovalStatus, row.paymentMethod),
+      row.cyclePaymentStatusLabel || "Missing invoice",
       row.invoiceStatus === "paid" ? "Yes" : "No",
       row.readyToSend ? "Yes" : "No",
       row.invoiceNumber ? `INV-${row.invoiceNumber}` : "",
@@ -5732,8 +6331,14 @@ export function AdminSubscriptionOpsView() {
       row.addressLabel || "",
       row.city || "",
       row.province || "",
-      row.paidAt ? bookingDateFormatter.format(row.paidAt) : "",
-      row.lastPaymentAt ? bookingDateFormatter.format(row.lastPaymentAt) : "",
+      row.cyclePaidAmount !== null && row.cyclePaidAmount !== undefined
+        ? Number(row.cyclePaidAmount).toFixed(2)
+        : "",
+      row.cyclePaidAt ? bookingDateFormatter.format(row.cyclePaidAt) : "",
+      row.lastPaidAmount !== null && row.lastPaidAmount !== undefined
+        ? Number(row.lastPaidAmount).toFixed(2)
+        : "",
+      row.lastPaidAt ? bookingDateFormatter.format(row.lastPaidAt) : "",
     ]);
     return [header, ...body];
   };
@@ -5741,21 +6346,236 @@ export function AdminSubscriptionOpsView() {
   const handleExportFiltered = () => {
     if (!visibleRows.length) {
       setErrorMessage("No rows to export for current filters.");
-      return;
+      return false;
     }
     setErrorMessage(null);
     const rows = buildExportRows(visibleRows);
     downloadCsvFile(rows, `subscription-ops-filtered-${selectedCycleMonth}.csv`);
+    return true;
   };
 
   const handleExportReadyToSend = () => {
     if (!readyToSendRows.length) {
       setErrorMessage("No delivery-ready subscriptions for this cycle.");
-      return;
+      return false;
     }
     setErrorMessage(null);
     const rows = buildExportRows(readyToSendRows);
     downloadCsvFile(rows, `subscription-ops-ready-to-send-${selectedCycleMonth}.csv`);
+    return true;
+  };
+
+  const handleExportCsv = () => {
+    if (csvExportScope === "filtered") {
+      return handleExportFiltered();
+    }
+    return handleExportReadyToSend();
+  };
+
+  const handleExportMondayCsv = () => {
+    const normalizedMonday = normalizeIsoDateValue(selectedDeliveryMonday);
+    if (!normalizedMonday) {
+      setErrorMessage("Select a Monday delivery before exporting.");
+      return false;
+    }
+    if (!mondayRosterRows.length) {
+      setErrorMessage("No ready-to-send customers are scheduled for that Monday.");
+      return false;
+    }
+    setErrorMessage(null);
+    const rows = buildExportRows(mondayRosterRows);
+    downloadCsvFile(rows, `subscription-ops-monday-${normalizedMonday}.csv`);
+    return true;
+  };
+
+  const runSubscriptionOpsPdfAction = async ({
+    rows = [],
+    action = "download",
+    title = "Subscription Delivery Roster",
+    scopeLabel = "",
+    scopeKey = "",
+    selectedMonday = "",
+    errorMessageText = "Unable to export the subscription roster PDF.",
+  } = {}) => {
+    setErrorMessage(null);
+    try {
+      const pdfRows = buildSubscriptionOpsPdfRows(rows, { selectedMonday });
+      const payload = {
+        title,
+        cycleLabel: selectedCycleLabel,
+        cycleMonth: selectedCycleMonth,
+        scopeLabel,
+        scopeKey,
+        rowCount: rows.length,
+        rows: pdfRows,
+      };
+      if (selectedMonday) {
+        payload.contextLabel = "Delivery date";
+        payload.contextValue = formatSubscriptionDeliveryDateLabel(selectedMonday);
+      }
+      if (action === "print") {
+        await printSubscriptionOpsRosterPdf(payload);
+      } else {
+        await downloadSubscriptionOpsRosterPdf(payload);
+      }
+      return true;
+    } catch (error) {
+      setErrorMessage(error?.message || errorMessageText);
+      return false;
+    }
+  };
+
+  const handleExportPdf = async () => {
+    const sourceRows = resolvePdfSourceRows();
+    if (!sourceRows.length) {
+      if (pdfExportScope === "filtered") {
+        setErrorMessage("No rows match the current filters for PDF export.");
+        return false;
+      }
+      if (pdfExportScope === "ready-filtered") {
+        setErrorMessage("No delivery-ready rows match the current filters for PDF export.");
+        return false;
+      }
+      setErrorMessage("No subscription rows found for this cycle.");
+      return false;
+    }
+
+    return runSubscriptionOpsPdfAction({
+      rows: sourceRows,
+      action: "download",
+      scopeLabel: getPdfScopeLabel(pdfExportScope),
+      scopeKey: pdfExportScope,
+    });
+  };
+
+  const handlePrintPdf = async () => {
+    const sourceRows = resolvePdfSourceRows();
+    if (!sourceRows.length) {
+      if (pdfExportScope === "filtered") {
+        setErrorMessage("No rows match the current filters for PDF print.");
+        return false;
+      }
+      if (pdfExportScope === "ready-filtered") {
+        setErrorMessage("No delivery-ready rows match the current filters for PDF print.");
+        return false;
+      }
+      setErrorMessage("No subscription rows found for this cycle.");
+      return false;
+    }
+
+    return runSubscriptionOpsPdfAction({
+      rows: sourceRows,
+      action: "print",
+      scopeLabel: getPdfScopeLabel(pdfExportScope),
+      scopeKey: pdfExportScope,
+      errorMessageText: "Unable to open the subscription roster for printing.",
+    });
+  };
+
+  const handleExportMondayPdf = async () => {
+    const normalizedMonday = normalizeIsoDateValue(selectedDeliveryMonday);
+    if (!normalizedMonday) {
+      setErrorMessage("Select a Monday delivery before exporting.");
+      return false;
+    }
+    if (!mondayRosterRows.length) {
+      setErrorMessage("No ready-to-send customers are scheduled for that Monday.");
+      return false;
+    }
+
+    return runSubscriptionOpsPdfAction({
+      rows: mondayRosterRows,
+      action: "download",
+      title: "Monday Delivery Roster",
+      scopeLabel: "Ready to send",
+      scopeKey: `monday-${normalizedMonday}`,
+      selectedMonday: normalizedMonday,
+      errorMessageText: "Unable to export the Monday delivery roster PDF.",
+    });
+  };
+
+  const handlePrintMondayPdf = async () => {
+    const normalizedMonday = normalizeIsoDateValue(selectedDeliveryMonday);
+    if (!normalizedMonday) {
+      setErrorMessage("Select a Monday delivery before printing.");
+      return false;
+    }
+    if (!mondayRosterRows.length) {
+      setErrorMessage("No ready-to-send customers are scheduled for that Monday.");
+      return false;
+    }
+
+    return runSubscriptionOpsPdfAction({
+      rows: mondayRosterRows,
+      action: "print",
+      title: "Monday Delivery Roster",
+      scopeLabel: "Ready to send",
+      scopeKey: `monday-${normalizedMonday}`,
+      selectedMonday: normalizedMonday,
+      errorMessageText: "Unable to open the Monday delivery roster for printing.",
+    });
+  };
+
+  const openExportDialog = (format = "pdf", rosterMode = "cycle") => {
+    setErrorMessage(null);
+    setExportDialogFormat(format);
+    setExportRosterMode(rosterMode);
+    setExportDialogOpen(true);
+  };
+
+  const closeExportDialog = () => setExportDialogOpen(false);
+
+  const selectedExportScopeOptions = exportDialogFormat === "csv"
+    ? SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS
+    : SUBSCRIPTION_OPS_PDF_SCOPE_OPTIONS;
+
+  const selectedExportScope = exportDialogFormat === "csv" ? csvExportScope : pdfExportScope;
+
+  const selectedExportRows = exportRosterMode === "monday"
+    ? mondayRosterRows
+    : exportDialogFormat === "csv"
+      ? resolveCsvSourceRows()
+      : resolvePdfSourceRows();
+
+  const selectedDeliveryMondayLabel = formatSubscriptionDeliveryDateLabel(selectedDeliveryMonday) || "Not selected";
+
+  const selectedExportScopeLabel = exportDialogFormat === "csv"
+    ? getCsvScopeLabel(selectedExportScope)
+    : getPdfScopeLabel(selectedExportScope);
+
+  const exportDialogActionDisabled =
+    exportRosterMode === "monday" && !normalizeIsoDateValue(selectedDeliveryMonday);
+
+  const handleExportDialogScopeChange = (nextScope) => {
+    setErrorMessage(null);
+    if (exportDialogFormat === "csv") {
+      setCsvExportScope(nextScope);
+      return;
+    }
+    setPdfExportScope(nextScope);
+  };
+
+  const handleConfirmExportDialog = async () => {
+    const wasSuccessful = exportRosterMode === "monday"
+      ? exportDialogFormat === "csv"
+        ? handleExportMondayCsv()
+        : await handleExportMondayPdf()
+      : exportDialogFormat === "csv"
+        ? handleExportCsv()
+        : await handleExportPdf();
+    if (wasSuccessful) {
+      setExportDialogOpen(false);
+    }
+  };
+
+  const handlePrintExportDialog = async () => {
+    if (exportDialogFormat !== "pdf") return;
+    const wasSuccessful = exportRosterMode === "monday"
+      ? await handlePrintMondayPdf()
+      : await handlePrintPdf();
+    if (wasSuccessful) {
+      setExportDialogOpen(false);
+    }
   };
 
   const executeSubscriptionStatusOverride = async ({ row, nextStatus, reason }) => {
@@ -5763,11 +6583,12 @@ export function AdminSubscriptionOpsView() {
       throw new Error("Cloud Functions are not available.");
     }
     const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionStatus");
-    await callable({
+    const result = await callable({
       subscriptionId: row.subscriptionId,
       status: nextStatus,
       reason,
     });
+    return result?.data || {};
   };
 
   const executeInvoiceStatusOverride = async ({
@@ -5780,13 +6601,14 @@ export function AdminSubscriptionOpsView() {
       throw new Error("Cloud Functions are not available.");
     }
     const callable = httpsCallable(functionsInstance, "adminUpsertSubscriptionInvoiceStatus");
-    await callable({
+    const result = await callable({
       subscriptionId: row.subscriptionId,
       cycleMonth: selectedCycleMonth,
       status: nextStatus,
       reason,
       createIfMissing,
     });
+    return result?.data || {};
   };
 
   const executeSubscriptionPaymentMethodOverride = async ({
@@ -5799,12 +6621,13 @@ export function AdminSubscriptionOpsView() {
       throw new Error("Cloud Functions are not available.");
     }
     const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionPaymentMethod");
-    await callable({
+    const result = await callable({
       subscriptionId: row.subscriptionId,
       paymentMethod,
       reason,
       applyToPendingInvoice,
     });
+    return result?.data || {};
   };
 
   const executeSubscriptionPlanAssignment = async ({
@@ -5816,7 +6639,7 @@ export function AdminSubscriptionOpsView() {
       throw new Error("Cloud Functions are not available.");
     }
     const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionPlanAssignment");
-    await callable({
+    const result = await callable({
       subscriptionId: row.subscriptionId,
       planId,
       cycleMonth: selectedCycleMonth,
@@ -5824,6 +6647,7 @@ export function AdminSubscriptionOpsView() {
       applyToCurrentCycle: true,
       sendUpdatedInvoiceEmail: true,
     });
+    return result?.data || {};
   };
 
   const executeSubscriptionInvoiceCharge = async ({
@@ -5838,7 +6662,7 @@ export function AdminSubscriptionOpsView() {
       throw new Error("Cloud Functions are not available.");
     }
     const callable = httpsCallable(functionsInstance, "adminAddSubscriptionInvoiceCharge");
-    await callable({
+    const result = await callable({
       subscriptionId: row.subscriptionId,
       cycleMonth: selectedCycleMonth,
       amount,
@@ -5849,6 +6673,7 @@ export function AdminSubscriptionOpsView() {
       createInvoiceIfMissing: true,
       sendUpdatedInvoiceEmail: true,
     });
+    return result?.data || {};
   };
 
   const executeSubscriptionRecurringChargeRemoval = async ({
@@ -5860,13 +6685,28 @@ export function AdminSubscriptionOpsView() {
       throw new Error("Cloud Functions are not available.");
     }
     const callable = httpsCallable(functionsInstance, "adminRemoveSubscriptionRecurringCharge");
-    await callable({
+    const result = await callable({
       subscriptionId: row.subscriptionId,
       chargeId,
       cycleMonth: selectedCycleMonth,
       reason,
       sendUpdatedInvoiceEmail: true,
     });
+    return result?.data || {};
+  };
+
+  const resolveActionResultCycleMonth = (value = {}) => {
+    const normalizedDirectCycle = normalizeCycleMonthValue(value?.cycleMonth || "");
+    if (normalizedDirectCycle) return normalizedDirectCycle;
+    const normalizedEffectiveCycle = normalizeCycleMonthValue(
+      value?.effectiveCycleMonth || "",
+    );
+    if (normalizedEffectiveCycle) return normalizedEffectiveCycle;
+    const normalizedInvoiceCycle = normalizeCycleMonthValue(
+      value?.invoice?.cycleMonth || "",
+    );
+    if (normalizedInvoiceCycle) return normalizedInvoiceCycle;
+    return "";
   };
 
   const runConfirmedAction = async () => {
@@ -5889,47 +6729,43 @@ export function AdminSubscriptionOpsView() {
     setErrorMessage(null);
     setStatusMessage(null);
     try {
+      let actionResult = {};
+      let nextStatusMessage = "";
       if (actionType === "subscription-status") {
-        await executeSubscriptionStatusOverride({
+        actionResult = await executeSubscriptionStatusOverride({
           row,
           nextStatus,
           reason,
         });
-        setStatusMessage(
-          `${row.customerName || "Subscription"} updated to ${formatSubscriptionStatusLabel(nextStatus)}.`,
-        );
+        nextStatusMessage = `${row.customerName || "Subscription"} updated to ${formatSubscriptionStatusLabel(nextStatus)}.`;
       } else if (actionType === "invoice-status") {
-        await executeInvoiceStatusOverride({
+        actionResult = await executeInvoiceStatusOverride({
           row,
           nextStatus,
           reason,
           createIfMissing: true,
         });
-        setStatusMessage(
-          `Invoice for ${row.customerName || "subscription"} set to ${formatSubscriptionInvoiceStatusLabel(nextStatus)}.`,
-        );
+        nextStatusMessage = `Invoice for ${row.customerName || "subscription"} set to ${formatSubscriptionInvoiceStatusLabel(nextStatus)}.`;
       } else if (actionType === "create-invoice") {
-        await executeInvoiceStatusOverride({
+        actionResult = await executeInvoiceStatusOverride({
           row,
           nextStatus: "pending-payment",
           reason,
           createIfMissing: true,
         });
-        setStatusMessage(`Cycle invoice created for ${row.customerName || row.subscriptionId}.`);
+        nextStatusMessage = `Cycle invoice created for ${row.customerName || row.subscriptionId}.`;
       } else if (actionType === "payment-method") {
-        await executeSubscriptionPaymentMethodOverride({
+        actionResult = await executeSubscriptionPaymentMethodOverride({
           row,
           paymentMethod: nextPaymentMethod,
           reason,
           applyToPendingInvoice,
         });
-        setStatusMessage(
-          `${row.customerName || "Subscription"} payment method set to ${formatSubscriptionPaymentMethodLabel(
-            nextPaymentMethod,
-          )}.`,
-        );
+        nextStatusMessage = `${row.customerName || "Subscription"} payment method set to ${formatSubscriptionPaymentMethodLabel(
+          nextPaymentMethod,
+        )}.`;
       } else if (actionType === "plan-assignment") {
-        await executeSubscriptionPlanAssignment({
+        actionResult = await executeSubscriptionPlanAssignment({
           row,
           planId: nextPlanId,
           reason,
@@ -5937,11 +6773,9 @@ export function AdminSubscriptionOpsView() {
         const selectedPlan = liveSubscriptionPlans.find(
           (plan) => (plan?.id || "").toString().trim() === (nextPlanId || "").toString().trim(),
         );
-        setStatusMessage(
-          `${row.customerName || "Subscription"} switched to ${selectedPlan?.name || "selected plan"}.`,
-        );
+        nextStatusMessage = `${row.customerName || "Subscription"} switched to ${selectedPlan?.name || "selected plan"}.`;
       } else if (actionType === "invoice-charge-add") {
-        await executeSubscriptionInvoiceCharge({
+        actionResult = await executeSubscriptionInvoiceCharge({
           row,
           amount: chargeAmount,
           label: chargeLabel,
@@ -5949,18 +6783,30 @@ export function AdminSubscriptionOpsView() {
           chargeMode,
           chargeBasis,
         });
-        setStatusMessage(
-          `${row.customerName || "Subscription"} invoice updated with ${formatPriceLabel(
-            chargeAmount,
-          )} ${chargeMode === "recurring" ? "recurring" : "one-time"} charge.`,
-        );
+        nextStatusMessage = `${row.customerName || "Subscription"} invoice updated with ${formatPriceLabel(
+          chargeAmount,
+        )} ${chargeMode === "recurring" ? "recurring" : "one-time"} charge.`;
       } else if (actionType === "recurring-charge-remove") {
-        await executeSubscriptionRecurringChargeRemoval({
+        actionResult = await executeSubscriptionRecurringChargeRemoval({
           row,
           chargeId,
           reason,
         });
-        setStatusMessage(`${row.customerName || "Subscription"} recurring charge removed.`);
+        nextStatusMessage = `${row.customerName || "Subscription"} recurring charge removed.`;
+      }
+
+      const effectiveCycleMonth = resolveActionResultCycleMonth(actionResult);
+      if (effectiveCycleMonth && effectiveCycleMonth !== selectedCycleMonth) {
+        const requestedLabel = formatCycleMonthLabel(selectedCycleMonth);
+        const effectiveLabel = formatCycleMonthLabel(effectiveCycleMonth);
+        setSelectedCycleMonth(effectiveCycleMonth);
+        const shiftMessage = `Cycle changed from ${requestedLabel} to ${effectiveLabel} to use billable delivery dates.`;
+        nextStatusMessage = nextStatusMessage
+          ? `${nextStatusMessage} ${shiftMessage}`
+          : shiftMessage;
+      }
+      if (nextStatusMessage) {
+        setStatusMessage(nextStatusMessage);
       }
     } catch (error) {
       setErrorMessage(error?.message || "Unable to update subscription operations state.");
@@ -6173,24 +7019,169 @@ export function AdminSubscriptionOpsView() {
   return (
     <div className="admin-panel admin-panel--full admin-subscription-ops">
       <Reveal as="div" className="admin-panel__header">
-        <div>
+        <div className="admin-subscription-ops__hero-copy">
           <h2>Subscription Ops</h2>
           <p className="admin-panel__note">
-            Track paid active subscriptions and export your delivery-ready roster for {selectedCycleLabel}.
+            Track paid subscriptions and export delivery rosters for {selectedCycleLabel}.
           </p>
         </div>
-        <div className="admin-panel__header-actions">
-          <button className="btn btn--secondary" type="button" onClick={handleExportReadyToSend}>
-            Export ready to send
+        <div className="admin-panel__header-actions admin-subscription-ops__hero-actions">
+          <button
+            className="btn btn--primary admin-subscription-ops__hero-btn"
+            type="button"
+            onClick={() => openExportDialog("pdf")}
+          >
+            <IconDownload className="btn__icon" aria-hidden="true" />
+            Export
           </button>
-          <button className="btn btn--secondary" type="button" onClick={handleExportFiltered}>
-            Export filtered
-          </button>
-          <Link className="btn btn--secondary" to="/admin/subscriptions">
-            Manage plans
+          <Link className="btn btn--secondary admin-subscription-ops__hero-btn" to="/admin/subscriptions">
+            <IconSliders className="btn__icon" aria-hidden="true" />
+            Plans
           </Link>
         </div>
       </Reveal>
+
+      {exportDialogOpen ? (
+        <div className="modal is-active admin-modal admin-subscription-ops-export" role="dialog" aria-modal="true" aria-labelledby="subscription-ops-export-title">
+          <div className="modal__content admin-modal__content admin-subscription-ops-export__content">
+            <button className="modal__close" type="button" onClick={closeExportDialog} aria-label="Close export options">
+              x
+            </button>
+            <div className="admin-subscription-ops-export__header">
+              <h3 className="modal__title" id="subscription-ops-export-title">
+                Export roster
+              </h3>
+              <p className="admin-panel__note">
+                Choose a format and scope for the {selectedCycleLabel} roster.
+              </p>
+            </div>
+            <div className="admin-subscription-ops-export__grid">
+              <label className="admin-form__field">
+                Format
+                <select
+                  className="input"
+                  value={exportDialogFormat}
+                  onChange={(event) => {
+                    setErrorMessage(null);
+                    setExportDialogFormat(event.target.value);
+                  }}
+                >
+                  <option value="pdf">PDF roster</option>
+                  <option value="csv">CSV sheet</option>
+                </select>
+              </label>
+              <label className="admin-form__field">
+                Roster
+                <select
+                  className="input"
+                  value={exportRosterMode}
+                  onChange={(event) => {
+                    setErrorMessage(null);
+                    setExportRosterMode(event.target.value);
+                  }}
+                >
+                  {SUBSCRIPTION_OPS_ROSTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {exportRosterMode === "monday" ? (
+                <label className="admin-form__field admin-subscription-ops-export__field-full">
+                  Monday delivery
+                  <select
+                    className="input"
+                    value={selectedDeliveryMonday}
+                    onChange={(event) => {
+                      setErrorMessage(null);
+                      setSelectedDeliveryMonday(event.target.value);
+                    }}
+                  >
+                    {mondayRosterOptions.length ? (
+                      mondayRosterOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No Monday dates available</option>
+                    )}
+                  </select>
+                </label>
+              ) : (
+              <label className="admin-form__field">
+                Scope
+                <select
+                  className="input"
+                  value={selectedExportScope}
+                  onChange={(event) => handleExportDialogScopeChange(event.target.value)}
+                >
+                  {selectedExportScopeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              )}
+            </div>
+            <div className="admin-subscription-ops-export__summary">
+              <div className="admin-subscription-ops-export__summary-item">
+                <span className="admin-subscription-ops-export__summary-label">Cycle</span>
+                <strong>{selectedCycleLabel}</strong>
+              </div>
+              <div className="admin-subscription-ops-export__summary-item">
+                <span className="admin-subscription-ops-export__summary-label">
+                  {exportRosterMode === "monday" ? "Delivery" : "Scope"}
+                </span>
+                <strong>{exportRosterMode === "monday" ? selectedDeliveryMondayLabel : selectedExportScopeLabel}</strong>
+              </div>
+              <div className="admin-subscription-ops-export__summary-item">
+                <span className="admin-subscription-ops-export__summary-label">Rows</span>
+                <strong>{selectedExportRows.length}</strong>
+              </div>
+            </div>
+            <p className="admin-subscription-ops-export__note">
+              {exportRosterMode === "monday"
+                ? "Monday delivery rosters include ready-to-send customers scheduled for the selected Monday."
+                : exportDialogFormat === "pdf"
+                  ? "PDF works best for printing or handing a delivery roster to staff."
+                  : "CSV works best if you need to sort, edit, or share the roster in a spreadsheet."}
+            </p>
+            {errorMessage ? <p className="admin-panel__error">{errorMessage}</p> : null}
+            <div className="admin-form__actions admin-subscription-ops-export__actions">
+              <button className="btn btn--secondary" type="button" onClick={closeExportDialog}>
+                Cancel
+              </button>
+              {exportDialogFormat === "pdf" ? (
+                <button
+                  className="btn btn--secondary admin-subscription-ops__hero-btn"
+                  type="button"
+                  onClick={handlePrintExportDialog}
+                  disabled={exportDialogActionDisabled}
+                >
+                  <IconPrinter className="btn__icon" aria-hidden="true" />
+                  Print PDF
+                </button>
+              ) : null}
+              <button
+                className="btn btn--primary admin-subscription-ops__hero-btn"
+                type="button"
+                onClick={handleConfirmExportDialog}
+                disabled={exportDialogActionDisabled}
+              >
+                {exportDialogFormat === "pdf" ? (
+                  <IconFileText className="btn__icon" aria-hidden="true" />
+                ) : (
+                  <IconDownload className="btn__icon" aria-hidden="true" />
+                )}
+                {exportDialogFormat === "pdf" ? "Save PDF" : "Download CSV"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="admin-subscription-ops__kpis">
         {metrics.map((metric) => (
@@ -6350,87 +7341,168 @@ export function AdminSubscriptionOpsView() {
 
       <div className="admin-table__wrapper">
         {visibleRows.length > 0 ? (
-          <table className="admin-table admin-table--compact admin-subscription-ops__table">
-            <thead>
-              <tr>
-                <th scope="col">Customer</th>
-                <th scope="col">Delivery</th>
-                <th scope="col">Plan</th>
-                <th scope="col">Cycle invoice</th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.map((row) => {
-                const invoiceStatusLabel = row.isMissingInvoice
-                  ? "Missing"
-                  : formatSubscriptionInvoiceStatusLabel(row.invoiceStatus);
-                return (
-                  <tr
-                    key={row.subscriptionId}
-                    className="admin-subscription-ops__row admin-table__row--clickable"
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Open subscription details for ${row.customerName || row.subscriptionId}`}
-                    onClick={() => handleOpenManageSubscription(row)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        handleOpenManageSubscription(row);
-                      }
-                    }}
-                  >
-                    <td data-label="Customer">
-                      <strong>{row.customerName || "Customer"}</strong>
-                      <p className="modal__meta">{row.customerEmail || "No email"}</p>
-                      <p className="modal__meta">{row.customerPhone || "No phone"}</p>
-                    </td>
-                    <td data-label="Delivery">
-                      <p className="modal__meta">
-                        {row.city || "-"} | {row.province || "-"}
-                      </p>
-                      <p className="modal__meta">
-                        Mondays: {row.includedDeliveryLabel || row.cycleDeliveryLabel || "None"}
-                      </p>
-                    </td>
-                    <td data-label="Plan">
-                      <strong>{row.planName}</strong>
-                      <p className="modal__meta">
-                        {formatSubscriptionPlanTierLabel(row.tier)} | {row.expectedDeliveries} deliveries
-                      </p>
-                      <p className="modal__meta">Recurring charges: {row.recurringCharges.length || 0}</p>
-                    </td>
-                    <td data-label="Cycle invoice">
-                      <p className="modal__meta">
-                        Invoice: {row.invoiceNumber ? `INV-${row.invoiceNumber}` : "-"}
-                      </p>
-                      <p className="modal__meta">
-                        Status: {invoiceStatusLabel}
-                      </p>
-                      <p className="modal__meta">
-                        Total: {row.invoice ? formatPriceLabel(row.invoiceAmount) : "-"}
-                      </p>
-                      {row.topupPendingAmount > 0 && (
+          <>
+            <table className="admin-table admin-table--compact admin-subscription-ops__table admin-subscription-ops__table--desktop">
+              <thead>
+                <tr>
+                  <th scope="col">Customer</th>
+                  <th scope="col">Delivery</th>
+                  <th scope="col">Plan</th>
+                  <th scope="col">Cycle invoice</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((row) => {
+                  const invoiceStatusLabel = row.isMissingInvoice
+                    ? "Missing"
+                    : formatSubscriptionInvoiceStatusLabel(row.invoiceStatus);
+                  return (
+                    <tr
+                      key={row.subscriptionId}
+                      className="admin-subscription-ops__row admin-table__row--clickable"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open subscription details for ${row.customerName || row.subscriptionId}`}
+                      onClick={() => handleOpenManageSubscription(row)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleOpenManageSubscription(row);
+                        }
+                      }}
+                    >
+                      <td data-label="Customer">
+                        <strong>{row.customerName || "Customer"}</strong>
+                        <p className="modal__meta">{row.customerEmail || "No email"}</p>
+                        <p className="modal__meta">{row.customerPhone || "No phone"}</p>
+                      </td>
+                      <td data-label="Delivery">
                         <p className="modal__meta">
-                          Pending top-up: {formatPriceLabel(row.topupPendingAmount)}
+                          {row.city || "-"} | {row.province || "-"}
                         </p>
-                      )}
-                    </td>
-                    <td data-label="Status">
-                      <span className={`badge badge--stock-${row.readyToSend ? "in" : "out"}`} style={{ marginBottom: "0.45rem" }}>
-                        {row.readyToSend ? "Ready to send" : "Not ready"}
+                        <p className="modal__meta">
+                          Mondays: {row.includedDeliveryLabel || row.cycleDeliveryLabel || "None"}
+                        </p>
+                      </td>
+                      <td data-label="Plan">
+                        <strong>{row.planName}</strong>
+                        <p className="modal__meta">
+                          {formatSubscriptionPlanTierLabel(row.tier)} | {row.expectedDeliveries} deliveries
+                        </p>
+                        <p className="modal__meta">Recurring charges: {row.recurringCharges.length || 0}</p>
+                      </td>
+                      <td data-label="Cycle invoice">
+                        <p className="modal__meta">
+                          Invoice: {row.invoiceNumber ? `INV-${row.invoiceNumber}` : `Missing for ${selectedCycleLabel}`}
+                        </p>
+                        <p className="modal__meta">
+                          Payment status: {row.cyclePaymentStatusLabel || invoiceStatusLabel}
+                        </p>
+                        <p className="modal__meta">
+                          Total: {row.invoice ? formatPriceLabel(row.invoiceAmount) : "-"}
+                        </p>
+                        <p className="modal__meta">
+                          Paid amount: {row.cyclePaidAmount !== null ? formatPriceLabel(row.cyclePaidAmount) : "-"}
+                        </p>
+                        <p className="modal__meta">
+                          Paid at: {row.cyclePaidAt ? bookingDateFormatter.format(row.cyclePaidAt) : "-"}
+                        </p>
+                        <p className="modal__meta">
+                          Last paid amount: {row.lastPaidAmount !== null ? formatPriceLabel(row.lastPaidAmount) : "-"}
+                        </p>
+                        <p className="modal__meta">
+                          Last payment at: {row.lastPaidAt ? bookingDateFormatter.format(row.lastPaidAt) : "-"}
+                        </p>
+                        {row.isMissingInvoice && row.latestInvoiceId && (
+                          <>
+                            <p className="modal__meta">
+                              Latest invoice: {row.latestInvoiceNumber ? `INV-${row.latestInvoiceNumber}` : row.latestInvoiceId}
+                              {row.latestInvoiceCycleMonth ? ` (${formatCycleMonthLabel(row.latestInvoiceCycleMonth)})` : ""}
+                            </p>
+                            <p className="modal__meta">Latest status: {row.latestInvoiceStatusLabel}</p>
+                            <p className="modal__meta">
+                              Latest total: {row.latestInvoiceAmount !== null ? formatPriceLabel(row.latestInvoiceAmount) : "-"}
+                            </p>
+                          </>
+                        )}
+                        {row.topupPendingAmount > 0 && (
+                          <p className="modal__meta">
+                            Pending top-up: {formatPriceLabel(row.topupPendingAmount)}
+                          </p>
+                        )}
+                      </td>
+                      <td data-label="Status">
+                        <span className={`badge badge--stock-${row.readyToSend ? "in" : "out"}`} style={{ marginBottom: "0.45rem" }}>
+                          {row.readyToSend ? "Ready to send" : "Not ready"}
+                        </span>
+                        <span className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`} style={{ marginBottom: "0.45rem" }}>
+                          Paid for {selectedCycleLabel}: {row.invoiceStatus === "paid" ? "Yes" : "No"}
+                        </span>
+                        <p className="modal__meta">Subscription: {formatSubscriptionStatusLabel(row.subscriptionStatus)}</p>
+                        <p className="modal__meta">Payment status: {row.cyclePaymentStatusLabel || invoiceStatusLabel}</p>
+                        <p className="modal__meta">Method: {formatSubscriptionPaymentMethodLabel(row.paymentMethod)}</p>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <div className="admin-subscription-ops__cards" aria-label="Subscription roster cards">
+              {visibleRows.map((row) => {
+                return (
+                  <button
+                    key={`${row.subscriptionId}-card`}
+                    className="admin-subscription-ops__card"
+                    type="button"
+                    onClick={() => handleOpenManageSubscription(row)}
+                    aria-label={`Open subscription details for ${row.customerName || row.subscriptionId}`}
+                  >
+                    <div className="admin-subscription-ops__card-header">
+                      <div className="admin-subscription-ops__card-title">
+                        <span className="admin-subscription-ops__card-eyebrow">Customer</span>
+                        <strong>{row.customerName || "Customer"}</strong>
+                        <p className="modal__meta">{row.customerPhone || "No phone"}</p>
+                      </div>
+                      <div className="admin-subscription-ops__card-badges">
+                        <span className={`badge badge--stock-${row.readyToSend ? "in" : "out"}`}>
+                          {row.readyToSend ? "Ready" : "Not ready"}
+                        </span>
+                        <span className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`}>
+                          {row.invoiceStatus === "paid" ? "Paid" : "Unpaid"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="admin-subscription-ops__card-summary">
+                      <div className="admin-subscription-ops__card-summary-item">
+                        <span className="admin-subscription-ops__card-summary-label">Plan</span>
+                        <strong>{row.planName}</strong>
+                        <p className="modal__meta">
+                          {formatSubscriptionPlanTierLabel(row.tier)} | {row.expectedDeliveries} deliveries
+                        </p>
+                      </div>
+                      <div className="admin-subscription-ops__card-summary-item">
+                        <span className="admin-subscription-ops__card-summary-label">Status</span>
+                        <strong>{formatSubscriptionStatusLabel(row.subscriptionStatus)}</strong>
+                        <p className="modal__meta">
+                          Paid for {selectedCycleLabel}: {row.invoiceStatus === "paid" ? "Yes" : "No"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="admin-subscription-ops__card-footer">
+                      <span className="admin-subscription-ops__card-footer-text">
+                        Tap to manage subscription
                       </span>
-                      <span className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`} style={{ marginBottom: "0.45rem" }}>
-                        Paid for {selectedCycleLabel}: {row.invoiceStatus === "paid" ? "Yes" : "No"}
-                      </span>
-                      <p className="modal__meta">Subscription: {formatSubscriptionStatusLabel(row.subscriptionStatus)}</p>
-                      <p className="modal__meta">Method: {formatSubscriptionPaymentMethodLabel(row.paymentMethod)}</p>
-                    </td>
-                  </tr>
+                      <IconChevronRight className="btn__icon" aria-hidden="true" />
+                    </div>
+                  </button>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+          </>
         ) : (
           <p className="admin-panel__notice">
             No subscriptions match the current cycle and filters.
@@ -6599,19 +7671,31 @@ export function AdminSubscriptionOpsView() {
                     </dl>
                   </article>
 
-                  <article className="admin-subscription-ops-manage__card">
+                  <article className="admin-subscription-ops-manage__card admin-subscription-ops-manage__card--cycle-invoice">
                     <h4>Cycle invoice</h4>
                     <dl className="admin-subscription-ops-manage__card-body">
                       <div className="admin-subscription-ops-manage__kv-row">
                         <dt className="admin-subscription-ops-manage__kv-label">Invoice</dt>
                         <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.invoiceNumber ? `INV-${manageRow.invoiceNumber}` : "-"}
+                          {manageRow.invoiceNumber ? `INV-${manageRow.invoiceNumber}` : `Missing for ${selectedCycleLabel}`}
                         </dd>
                       </div>
                       <div className="admin-subscription-ops-manage__kv-row">
                         <dt className="admin-subscription-ops-manage__kv-label">Status</dt>
                         <dd className="admin-subscription-ops-manage__kv-value">
                           {invoiceStatusLabel}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Payment status</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.cyclePaymentStatusLabel || invoiceStatusLabel}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Payment method</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {formatSubscriptionPaymentMethodLabel(manageRow.paymentMethod)}
                         </dd>
                       </div>
                       <div className="admin-subscription-ops-manage__kv-row">
@@ -6627,9 +7711,35 @@ export function AdminSubscriptionOpsView() {
                         </dd>
                       </div>
                       <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Paid amount (cycle)</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                          {manageRow.cyclePaidAmount !== null ? formatPriceLabel(manageRow.cyclePaidAmount) : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Paid at (cycle)</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.cyclePaidAt ? bookingDateFormatter.format(manageRow.cyclePaidAt) : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Last paid amount</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                          {manageRow.lastPaidAmount !== null ? formatPriceLabel(manageRow.lastPaidAmount) : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Last payment at</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.lastPaidAt ? bookingDateFormatter.format(manageRow.lastPaidAt) : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
                         <dt className="admin-subscription-ops-manage__kv-label">Base / Adjustments</dt>
                         <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.invoice ? formatPriceLabel(manageRow.invoiceBaseAmount) : "-"} | {manageRow.invoice ? formatPriceLabel(manageRow.invoiceAdjustmentsTotal) : "-"}
+                          {manageRow.invoice
+                            ? `${formatPriceLabel(manageRow.invoiceBaseAmount)} | ${formatPriceLabel(manageRow.invoiceAdjustmentsTotal)}`
+                            : "-"}
                         </dd>
                       </div>
                       <div className="admin-subscription-ops-manage__kv-row">
@@ -6641,7 +7751,69 @@ export function AdminSubscriptionOpsView() {
                       <div className="admin-subscription-ops-manage__kv-row">
                         <dt className="admin-subscription-ops-manage__kv-label">Approval</dt>
                         <dd className="admin-subscription-ops-manage__kv-value">
-                          {formatSubscriptionPaymentApprovalLabel(manageRow.paymentApprovalStatus, manageRow.paymentMethod)}
+                          {manageRow.invoice
+                            ? formatSubscriptionPaymentApprovalLabel(
+                                manageRow.paymentApprovalStatus,
+                                manageRow.paymentMethod,
+                              )
+                            : manageRow.latestInvoiceId
+                              ? formatSubscriptionPaymentApprovalLabel(
+                                  manageRow.latestInvoicePaymentApprovalStatus,
+                                  manageRow.latestInvoicePaymentMethod,
+                                )
+                              : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Latest invoice</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.latestInvoiceNumber
+                            ? `INV-${manageRow.latestInvoiceNumber}`
+                            : manageRow.latestInvoiceId || "-"}
+                          {manageRow.latestInvoiceCycleMonth
+                            ? ` (${formatCycleMonthLabel(manageRow.latestInvoiceCycleMonth)})`
+                            : ""}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Latest status</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.latestInvoiceId ? manageRow.latestInvoiceStatusLabel : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Latest amount</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                          {manageRow.latestInvoiceAmount !== null
+                            ? formatPriceLabel(manageRow.latestInvoiceAmount)
+                            : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Latest base / adjustments</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.latestInvoiceAmount !== null
+                            ? `${formatPriceLabel(manageRow.latestInvoiceBaseAmount)} | ${formatPriceLabel(manageRow.latestInvoiceAdjustmentsTotal)}`
+                            : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Latest payment method</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.latestInvoiceId
+                            ? formatSubscriptionPaymentMethodLabel(manageRow.latestInvoicePaymentMethod)
+                            : "-"}
+                        </dd>
+                      </div>
+                      <div className="admin-subscription-ops-manage__kv-row">
+                        <dt className="admin-subscription-ops-manage__kv-label">Latest approval</dt>
+                        <dd className="admin-subscription-ops-manage__kv-value">
+                          {manageRow.latestInvoiceId
+                            ? formatSubscriptionPaymentApprovalLabel(
+                                manageRow.latestInvoicePaymentApprovalStatus,
+                                manageRow.latestInvoicePaymentMethod,
+                              )
+                            : "-"}
                         </dd>
                       </div>
                     </dl>
@@ -10144,6 +11316,1678 @@ export function AdminInvoicePreviewView() {
   );
 }
 
+const GIFT_CARD_STUDIO_CALLABLE_HELP_MESSAGE =
+  "Gift card studio functions are unreachable. Deploy `previewAdminGiveawayGiftCard`, " +
+  "`saveAdminGiveawayGiftCardDraft`, `createAdminGiveawayGiftCardFromDraft`, `adminUpdateGiftCard`, and " +
+  "`adminArchiveGiftCard`, `adminBackfillGiftCardRegistry` " +
+  "or run the Functions emulator (`firebase emulators:start --only functions`) with " +
+  "`VITE_USE_LOCAL_FUNCTIONS=true` in `frontend/.env.local`.";
+
+const resolveGiftCardStudioCallableError = (callableError, fallbackMessage) => {
+  const rawMessage = (callableError?.message || "").toString();
+  const normalizedMessage = rawMessage.trim().toLowerCase();
+  const normalizedCode = (callableError?.code || "").toString().trim().toLowerCase();
+  const isLocalHost =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const likelyUnreachableCallable =
+    normalizedMessage.includes("failed to fetch") ||
+    normalizedMessage.includes("network") ||
+    normalizedMessage.includes("cors") ||
+    normalizedMessage.includes("access-control-allow-origin") ||
+    normalizedCode.includes("unavailable") ||
+    normalizedCode.includes("not-found");
+  if (isLocalHost && likelyUnreachableCallable) {
+    return GIFT_CARD_STUDIO_CALLABLE_HELP_MESSAGE;
+  }
+  return rawMessage || fallbackMessage;
+};
+
+const copyTextWithFallback = async (value = "") => {
+  const text = (value || "").toString().trim();
+  if (!text) return false;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    const tempArea = document.createElement("textarea");
+    tempArea.value = text;
+    tempArea.setAttribute("readonly", "true");
+    tempArea.style.position = "absolute";
+    tempArea.style.left = "-9999px";
+    document.body.appendChild(tempArea);
+    tempArea.select();
+    document.execCommand("copy");
+    document.body.removeChild(tempArea);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export function AdminGiftCardPreviewView() {
+  usePageMetadata({
+    title: "Admin - Gift Card Preview",
+    description: "Preview giveaway gift cards and save drafts for generation.",
+  });
+
+  const {
+    products,
+    cutFlowerClasses,
+    inventoryEnabled,
+    inventoryLoading,
+    inventoryError,
+  } = useAdminData();
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [optionQuantities, setOptionQuantities] = useState({});
+  const [message, setMessage] = useState("");
+  const [expiryDays, setExpiryDays] = useState("365");
+  const [previewState, setPreviewState] = useState({
+    html: "",
+    generatedAt: "",
+  });
+  const [savedDraft, setSavedDraft] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [error, setError] = useState(null);
+
+  const giftCardProducts = useMemo(() => {
+    return (Array.isArray(products) ? products : [])
+      .filter((product) => {
+        const isGiftCard = Boolean(product?.isGiftCard || product?.is_gift_card);
+        if (!isGiftCard) return false;
+        const status = (product?.status || "live").toString().trim().toLowerCase();
+        return status !== "archived";
+      })
+      .map((product) => ({
+        id: (product.id || "").toString().trim(),
+        title: (product.title || product.name || "Gift Card").toString().trim(),
+        expiryDays: normalizeGiftCardExpiryDays(
+          product?.giftCardExpiryDays || product?.gift_card_expiry_days || 365,
+          365,
+        ),
+      }))
+      .filter((product) => product.id)
+      .sort((left, right) =>
+        left.title.localeCompare(right.title, undefined, { sensitivity: "base" }),
+      );
+  }, [products]);
+
+  const selectedProduct = useMemo(
+    () => giftCardProducts.find((product) => product.id === selectedProductId) || null,
+    [giftCardProducts, selectedProductId],
+  );
+
+  useEffect(() => {
+    if (!giftCardProducts.length) {
+      if (selectedProductId) setSelectedProductId("");
+      return;
+    }
+    const stillExists = giftCardProducts.some((product) => product.id === selectedProductId);
+    if (!stillExists) {
+      setSelectedProductId(giftCardProducts[0].id);
+    }
+  }, [giftCardProducts, selectedProductId]);
+
+  useEffect(() => {
+    if (!selectedProduct) return;
+    setExpiryDays(String(selectedProduct.expiryDays || 365));
+  }, [selectedProduct]);
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 3200);
+    return () => clearTimeout(timeout);
+  }, [statusMessage]);
+
+  const liveGiftCardOptions = useMemo(
+    () => collectLiveCutFlowerGiftCardOptions(cutFlowerClasses),
+    [cutFlowerClasses],
+  );
+
+  const selectedOptions = useMemo(
+    () => buildSelectedGiftCardOptions(liveGiftCardOptions, optionQuantities),
+    [liveGiftCardOptions, optionQuantities],
+  );
+  const selectionSummary = useMemo(
+    () => summarizeGiftCardSelectedOptions(selectedOptions),
+    [selectedOptions],
+  );
+  const selectedOptionCount = selectionSummary.selectedCount;
+  const selectedGiftCardValue = Number(selectionSummary.total.toFixed(2));
+  const wholeCrewValidation = useMemo(
+    () => getWholeCrewSelectionValidation(selectedOptions),
+    [selectedOptions],
+  );
+
+  const selectedOptionsPayload = useMemo(
+    () =>
+      selectedOptions.map((option) => ({
+        id: option.id,
+        quantity: normalizeGiftCardOptionQuantity(option.quantity, 1),
+      })),
+    [selectedOptions],
+  );
+
+  const normalizedExpiryDays = normalizeGiftCardExpiryDays(
+    expiryDays,
+    selectedProduct?.expiryDays || 365,
+  );
+
+  const canGenerateGiftCard =
+    Boolean(selectedProductId) &&
+    selectedOptionsPayload.length > 0 &&
+    selectedGiftCardValue > 0 &&
+    !wholeCrewValidation.hasViolation;
+
+  const canCallFunctions =
+    inventoryEnabled &&
+    Boolean(functionsInstance) &&
+    canGenerateGiftCard;
+
+  const handleOptionQuantityChange = (optionId, value) => {
+    if (!optionId) return;
+    const quantity = normalizeGiftCardOptionQuantity(value, 0);
+    setOptionQuantities((prev) => {
+      const next = { ...(prev || {}) };
+      if (quantity <= 0) {
+        delete next[optionId];
+      } else {
+        next[optionId] = quantity;
+      }
+      return next;
+    });
+  };
+
+  const buildRequestPayload = () => ({
+    productId: selectedProductId,
+    selectedOptions: selectedOptionsPayload,
+    message: message.toString().trim(),
+    expiryDays: normalizedExpiryDays,
+  });
+
+  const handleRefreshPreview = async (event) => {
+    if (event) event.preventDefault();
+    if (!functionsInstance) {
+      setError("Gift card functions are not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setError("Admin access is required to preview gift cards.");
+      return;
+    }
+    if (!canGenerateGiftCard) {
+      setError(wholeCrewValidation.hasViolation ? wholeCrewValidation.minimumMessage : "Select valid gift card options.");
+      return;
+    }
+    setLoadingPreview(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const callable = httpsCallable(functionsInstance, "previewAdminGiveawayGiftCard");
+      const response = await callable(buildRequestPayload());
+      const data = response?.data || {};
+      const preview = data.preview || {};
+      setPreviewState({
+        html: (preview.html || "").toString(),
+        generatedAt: (preview.generatedAt || "").toString(),
+      });
+      const generatedLabel = preview?.generatedAt
+        ? new Date(preview.generatedAt).toLocaleString("en-ZA")
+        : "";
+      setStatusMessage(
+        generatedLabel
+          ? `Preview generated at ${generatedLabel}.`
+          : "Preview generated.",
+      );
+    } catch (previewError) {
+      setError(
+        resolveGiftCardStudioCallableError(
+          previewError,
+          "Unable to generate gift card preview.",
+        ),
+      );
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!functionsInstance) {
+      setError("Gift card functions are not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setError("Admin access is required to save giveaway drafts.");
+      return;
+    }
+    if (!canGenerateGiftCard) {
+      setError(wholeCrewValidation.hasViolation ? wholeCrewValidation.minimumMessage : "Select valid gift card options.");
+      return;
+    }
+
+    setSavingDraft(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const callable = httpsCallable(functionsInstance, "saveAdminGiveawayGiftCardDraft");
+      const response = await callable(buildRequestPayload());
+      const draft = response?.data?.draft || null;
+      setSavedDraft(draft);
+      setStatusMessage(`Draft saved${draft?.id ? ` (${draft.id})` : ""}.`);
+    } catch (draftError) {
+      setError(
+        resolveGiftCardStudioCallableError(
+          draftError,
+          "Unable to save giveaway gift card draft.",
+        ),
+      );
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  return (
+    <div className="admin-panel admin-panel--full admin-giftcard-studio">
+      <Reveal as="div" className="admin-panel__header">
+        <div>
+          <h2>Gift Cards - Preview</h2>
+          <p className="admin-panel__note">
+            Build a gift card preview and save a draft. Generation is handled separately in Generate & Manage.
+          </p>
+        </div>
+      </Reveal>
+
+      <div className="admin-giftcard-studio__layout">
+        <form className="admin-giftcard-studio__controls" onSubmit={handleRefreshPreview}>
+          <label className="admin-form__field" htmlFor="giftcard-studio-product">
+            <span>Gift card product</span>
+            <select
+              className="input"
+              id="giftcard-studio-product"
+              value={selectedProductId}
+              onChange={(event) => {
+                setSelectedProductId(event.target.value);
+                setSavedDraft(null);
+                setError(null);
+              }}
+              disabled={!giftCardProducts.length}
+            >
+              {!giftCardProducts.length && <option value="">No gift card products found</option>}
+              {giftCardProducts.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.title}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="admin-form__field" htmlFor="giftcard-studio-expiry">
+            <span>Expiry days</span>
+            <input
+              className="input"
+              id="giftcard-studio-expiry"
+              type="number"
+              min="1"
+              max="1825"
+              step="1"
+              value={expiryDays}
+              onChange={(event) => setExpiryDays(event.target.value)}
+            />
+          </label>
+
+          <label className="admin-form__field" htmlFor="giftcard-studio-message">
+            <span>Optional message</span>
+            <textarea
+              className="input textarea"
+              id="giftcard-studio-message"
+              rows="3"
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder="Optional giveaway note"
+            />
+          </label>
+
+          <div className="admin-giftcard-studio__options">
+            <div className="admin-giftcard-studio__options-head">
+              <h3>Live option selection</h3>
+              <p className="modal__meta">
+                Option quantities set the giveaway value.
+              </p>
+            </div>
+            {liveGiftCardOptions.length === 0 ? (
+              <p className="admin-panel__note">
+                No live cut-flower options were found. Add options in Cut Flower Classes.
+              </p>
+            ) : (
+              <div className="admin-giftcard-studio__options-grid">
+                {liveGiftCardOptions.map((option) => {
+                  const quantity = normalizeGiftCardOptionQuantity(optionQuantities?.[option.id], 0);
+                  const optionIsSelected = quantity > 0;
+                  const isWholeCrew = isWholeCrewOption(option);
+                  const optionHasWholeCrewViolation =
+                    isWholeCrew &&
+                    getWholeCrewSelectionValidation([
+                      {
+                        ...option,
+                        quantity,
+                      },
+                    ]).hasViolation;
+                  return (
+                    <article
+                      key={option.id}
+                      className={`admin-giftcard-studio__option-card${optionIsSelected ? " is-selected" : ""}${optionHasWholeCrewViolation ? " is-invalid" : ""}`}
+                    >
+                      <div className="admin-giftcard-studio__option-main">
+                        <h4>{option.label}</h4>
+                        <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                      </div>
+                      <label
+                        className="admin-giftcard-studio__option-qty"
+                        htmlFor={`giftcard-option-${option.id}`}
+                      >
+                        <span>Quantity</span>
+                        <input
+                          className="input"
+                          id={`giftcard-option-${option.id}`}
+                          type="number"
+                          min="0"
+                          max="200"
+                          step="1"
+                          value={quantity}
+                          onChange={(event) => handleOptionQuantityChange(option.id, event.target.value)}
+                        />
+                      </label>
+                      {isWholeCrew && (
+                        <p className="modal__meta admin-giftcard-studio__whole-crew-note">
+                          {wholeCrewValidation.minimumMessage}
+                        </p>
+                      )}
+                      {isWholeCrew && optionHasWholeCrewViolation && (
+                        <p className="admin-panel__error admin-giftcard-studio__whole-crew-error">
+                          Select at least 4 for Whole Crew.
+                        </p>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="admin-giftcard-studio__summary">
+            <p className="modal__meta">
+              Selected options: <strong>{selectedOptionCount}</strong>
+            </p>
+            <p className="modal__meta">
+              Giveaway value: <strong>{formatPriceLabel(selectedGiftCardValue)}</strong>
+            </p>
+            {wholeCrewValidation.hasViolation && (
+              <p className="admin-panel__error">{wholeCrewValidation.minimumMessage}</p>
+            )}
+          </div>
+
+          <div className="admin-form__actions">
+            <button
+              className="btn btn--secondary"
+              type="submit"
+              disabled={loadingPreview || !canCallFunctions}
+            >
+              {loadingPreview ? "Generating preview..." : "Refresh Preview"}
+            </button>
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={handleSaveDraft}
+              disabled={savingDraft || !canCallFunctions}
+            >
+              {savingDraft ? "Saving draft..." : "Save Draft For Generation"}
+            </button>
+          </div>
+
+          {savedDraft?.id && (
+            <p className="modal__meta">
+              Saved draft: <strong>{savedDraft.id}</strong>
+            </p>
+          )}
+          {inventoryLoading && <p className="modal__meta">Loading admin inventory...</p>}
+          {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+          {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+          {error && <p className="admin-panel__error">{error}</p>}
+        </form>
+
+        <div className="admin-email-preview__panel admin-giftcard-studio__preview-panel">
+          <div className="admin-email-preview__meta">
+            <p className="modal__meta">
+              <strong>Preview</strong>
+            </p>
+            {previewState.generatedAt && (
+              <p className="modal__meta">
+                Generated: {new Date(previewState.generatedAt).toLocaleString("en-ZA")}
+              </p>
+            )}
+          </div>
+          <div className="admin-email-preview__frame-wrap">
+            {previewState.html ? (
+              <iframe
+                className="admin-email-preview__frame admin-giftcard-studio__frame"
+                title="Giveaway gift card preview"
+                srcDoc={previewState.html}
+              />
+            ) : (
+              <p className="modal__meta" style={{ padding: "1rem" }}>
+                Generate a preview to inspect the final card layout.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AdminGiftCardGenerateManageView() {
+  usePageMetadata({
+    title: "Admin - Gift Card Generate & Manage",
+    description: "Generate gift cards instantly or from drafts, and manage issued cards.",
+  });
+
+  const {
+    products,
+    cutFlowerClasses,
+    inventoryEnabled,
+    inventoryLoading,
+    inventoryError,
+  } = useAdminData();
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+  const {
+    items: giftCardRegistry = [],
+    status: registryStatus,
+    error: registryError,
+  } = useFirestoreCollection("giftCardRegistry", {
+    orderByField: "createdAt",
+    orderDirection: "desc",
+    fallback: [],
+  });
+
+  const [quickCreateDialogOpen, setQuickCreateDialogOpen] = useState(false);
+  const [quickSelectedProductId, setQuickSelectedProductId] = useState("");
+  const [quickOptionQuantities, setQuickOptionQuantities] = useState({});
+  const [quickMessage, setQuickMessage] = useState("");
+  const [quickExpiryDays, setQuickExpiryDays] = useState("365");
+  const [quickCreatingGiftCard, setQuickCreatingGiftCard] = useState(false);
+  const [copiedKey, setCopiedKey] = useState("");
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [error, setError] = useState(null);
+  const [searchValue, setSearchValue] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("created-desc");
+  const [editState, setEditState] = useState({
+    open: false,
+    giftCardId: "",
+    code: "",
+    status: "active",
+    recipientName: "",
+    purchaserName: "",
+    message: "",
+    terms: "",
+    productTitle: "",
+    expiresAt: "",
+    optionQuantities: {},
+    isGiveaway: false,
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [archivingGiftCardId, setArchivingGiftCardId] = useState("");
+  const [syncingRegistry, setSyncingRegistry] = useState(false);
+  const [lastSyncSummary, setLastSyncSummary] = useState(null);
+
+  const liveGiftCardOptions = useMemo(
+    () => collectLiveCutFlowerGiftCardOptions(cutFlowerClasses),
+    [cutFlowerClasses],
+  );
+  const giftCardProducts = useMemo(() => {
+    return (Array.isArray(products) ? products : [])
+      .filter((product) => {
+        const isGiftCard = Boolean(product?.isGiftCard || product?.is_gift_card);
+        if (!isGiftCard) return false;
+        const status = (product?.status || "live").toString().trim().toLowerCase();
+        return status !== "archived";
+      })
+      .map((product) => ({
+        id: (product.id || "").toString().trim(),
+        title: (product.title || product.name || "Gift Card").toString().trim(),
+        expiryDays: normalizeGiftCardExpiryDays(
+          product?.giftCardExpiryDays || product?.gift_card_expiry_days || 365,
+          365,
+        ),
+      }))
+      .filter((product) => product.id)
+      .sort((left, right) =>
+        left.title.localeCompare(right.title, undefined, { sensitivity: "base" }),
+      );
+  }, [products]);
+  const quickSelectedProduct = useMemo(
+    () => giftCardProducts.find((product) => product.id === quickSelectedProductId) || null,
+    [giftCardProducts, quickSelectedProductId],
+  );
+  const quickSelectedOptions = useMemo(
+    () => buildSelectedGiftCardOptions(liveGiftCardOptions, quickOptionQuantities),
+    [liveGiftCardOptions, quickOptionQuantities],
+  );
+  const quickSummary = useMemo(
+    () => summarizeGiftCardSelectedOptions(quickSelectedOptions),
+    [quickSelectedOptions],
+  );
+  const quickWholeCrewValidation = useMemo(
+    () => getWholeCrewSelectionValidation(quickSelectedOptions),
+    [quickSelectedOptions],
+  );
+  const quickSelectedOptionsPayload = useMemo(
+    () =>
+      quickSelectedOptions.map((option) => ({
+        id: option.id,
+        quantity: normalizeGiftCardOptionQuantity(option.quantity, 1),
+      })),
+    [quickSelectedOptions],
+  );
+  const normalizedQuickExpiryDays = normalizeGiftCardExpiryDays(
+    quickExpiryDays,
+    quickSelectedProduct?.expiryDays || 365,
+  );
+  const canQuickCreateGiftCard =
+    Boolean(quickSelectedProductId) &&
+    quickSelectedOptionsPayload.length > 0 &&
+    quickSummary.total > 0 &&
+    !quickWholeCrewValidation.hasViolation;
+  const liveOptionIdSet = useMemo(
+    () => new Set(liveGiftCardOptions.map((option) => option.id)),
+    [liveGiftCardOptions],
+  );
+
+  useEffect(() => {
+    if (!giftCardProducts.length) {
+      if (quickSelectedProductId) setQuickSelectedProductId("");
+      return;
+    }
+    if (!giftCardProducts.some((product) => product.id === quickSelectedProductId)) {
+      setQuickSelectedProductId(giftCardProducts[0].id);
+    }
+  }, [giftCardProducts, quickSelectedProductId]);
+
+  useEffect(() => {
+    if (!quickSelectedProduct) return;
+    setQuickExpiryDays(String(quickSelectedProduct.expiryDays || 365));
+  }, [quickSelectedProduct]);
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timeout = setTimeout(() => setStatusMessage(null), 3200);
+    return () => clearTimeout(timeout);
+  }, [statusMessage]);
+
+  useEffect(() => {
+    if (!copiedKey) return undefined;
+    const timeout = setTimeout(() => setCopiedKey(""), 2400);
+    return () => clearTimeout(timeout);
+  }, [copiedKey]);
+
+  const registryRows = useMemo(() => {
+    return (Array.isArray(giftCardRegistry) ? giftCardRegistry : [])
+      .map((row) => ({
+        ...row,
+        id: (row.id || row.giftCardId || "").toString().trim(),
+        giftCardId: (row.giftCardId || row.id || "").toString().trim(),
+        code: (row.code || "").toString().trim(),
+        status: (row.status || "active").toString().trim().toLowerCase() || "active",
+        sourceType: (row.sourceType || "unknown").toString().trim().toLowerCase() || "unknown",
+        value: Number(row.value || 0),
+        selectedOptions: Array.isArray(row.selectedOptions) ? row.selectedOptions : [],
+        isGiveaway: Boolean(row.isGiveaway || row.sourceType === "admin-giveaway"),
+        isDeleted: Boolean(row.isDeleted),
+      }))
+      .filter((row) => !row.isDeleted && row.status !== "deleted");
+  }, [giftCardRegistry]);
+  const availableStatuses = useMemo(() => {
+    return Array.from(new Set(registryRows.map((row) => row.status).filter(Boolean))).sort();
+  }, [registryRows]);
+  const availableSources = useMemo(() => {
+    return Array.from(new Set(registryRows.map((row) => row.sourceType).filter(Boolean))).sort();
+  }, [registryRows]);
+  const filteredRegistryRows = useMemo(() => {
+    const normalizedSearch = searchValue.toString().trim().toLowerCase();
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const resolveComparableTime = (value) => parseDateValue(value)?.getTime() || 0;
+    const createdOrIssuedTime = (row) =>
+      resolveComparableTime(row.createdAt) ||
+      resolveComparableTime(row.issuedAt) ||
+      resolveComparableTime(row.updatedAt);
+    const expiresTime = (row) => resolveComparableTime(row.expiresAt);
+
+    const filteredRows = registryRows.filter((row) => {
+      if (statusFilter !== "all" && row.status !== statusFilter) return false;
+      if (sourceFilter !== "all" && row.sourceType !== sourceFilter) return false;
+
+      if (dateFilter === "last7" && createdOrIssuedTime(row) < now - 7 * dayMs) return false;
+      if (dateFilter === "last30" && createdOrIssuedTime(row) < now - 30 * dayMs) return false;
+      if (dateFilter === "expired") {
+        const expiry = expiresTime(row);
+        if (!expiry || expiry >= now) return false;
+      }
+      if (dateFilter === "expiring30") {
+        const expiry = expiresTime(row);
+        if (!expiry || expiry < now || expiry > now + 30 * dayMs) return false;
+      }
+
+      if (!normalizedSearch) return true;
+      const haystack = [
+        row.code,
+        row.giftCardId,
+        row.orderNumber,
+        row.recipientName,
+        row.purchaserName,
+      ]
+        .map((value) => (value || "").toString().toLowerCase())
+        .join(" ");
+      return haystack.includes(normalizedSearch);
+    });
+
+    return filteredRows.sort((left, right) => {
+      const leftCreated = createdOrIssuedTime(left);
+      const rightCreated = createdOrIssuedTime(right);
+      const leftUpdated = resolveComparableTime(left.updatedAt);
+      const rightUpdated = resolveComparableTime(right.updatedAt);
+      const leftExpiry = expiresTime(left);
+      const rightExpiry = expiresTime(right);
+      const leftCode = (left.code || "").toString();
+      const rightCode = (right.code || "").toString();
+      const leftValue = Number(left.value || 0);
+      const rightValue = Number(right.value || 0);
+
+      switch (sortBy) {
+        case "created-asc":
+          return leftCreated - rightCreated;
+        case "updated-desc":
+          return rightUpdated - leftUpdated;
+        case "updated-asc":
+          return leftUpdated - rightUpdated;
+        case "value-desc":
+          return rightValue - leftValue;
+        case "value-asc":
+          return leftValue - rightValue;
+        case "expiry-desc":
+          return rightExpiry - leftExpiry;
+        case "expiry-asc":
+          return leftExpiry - rightExpiry;
+        case "code-desc":
+          return rightCode.localeCompare(leftCode, undefined, { sensitivity: "base" });
+        case "code-asc":
+          return leftCode.localeCompare(rightCode, undefined, { sensitivity: "base" });
+        case "created-desc":
+        default:
+          return rightCreated - leftCreated;
+      }
+    });
+  }, [registryRows, searchValue, statusFilter, sourceFilter, dateFilter, sortBy]);
+  const hasActiveRegistryFilters =
+    Boolean(searchValue.toString().trim()) ||
+    statusFilter !== "all" ||
+    sourceFilter !== "all" ||
+    dateFilter !== "all" ||
+    sortBy !== "created-desc";
+  const clearRegistryFilters = () => {
+    setSearchValue("");
+    setStatusFilter("all");
+    setSourceFilter("all");
+    setDateFilter("all");
+    setSortBy("created-desc");
+  };
+  const formatRegistryDateLabel = (value) => {
+    const parsed = parseDateValue(value);
+    if (!parsed) return "-";
+    return parsed.toLocaleDateString("en-ZA", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+  const getRegistryCreatedOrIssuedLabel = (row) =>
+    formatRegistryDateLabel(row?.createdAt || row?.issuedAt || row?.updatedAt);
+
+  const handleQuickOptionQuantityChange = (optionId, value) => {
+    if (!optionId) return;
+    const quantity = normalizeGiftCardOptionQuantity(value, 0);
+    setQuickOptionQuantities((previous) => {
+      const next = { ...(previous || {}) };
+      if (quantity <= 0) {
+        delete next[optionId];
+      } else {
+        next[optionId] = quantity;
+      }
+      return next;
+    });
+  };
+
+  const handleQuickCreateGiftCard = async () => {
+    if (!functionsInstance) {
+      setError("Gift card functions are not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setError("Admin access is required to generate gift cards.");
+      return;
+    }
+    if (!canQuickCreateGiftCard) {
+      setError(
+        quickWholeCrewValidation.hasViolation
+          ? quickWholeCrewValidation.minimumMessage
+          : "Select valid gift card options before generating.",
+      );
+      return;
+    }
+
+    setQuickCreatingGiftCard(true);
+    setStatusMessage(null);
+    setError(null);
+    try {
+      const payload = {
+        productId: quickSelectedProductId,
+        selectedOptions: quickSelectedOptionsPayload,
+        message: quickMessage.toString().trim(),
+        expiryDays: normalizedQuickExpiryDays,
+      };
+      const saveDraftCallable = httpsCallable(functionsInstance, "saveAdminGiveawayGiftCardDraft");
+      const draftResponse = await saveDraftCallable(payload);
+      const draftId = (draftResponse?.data?.draft?.id || "").toString().trim();
+      if (!draftId) {
+        throw new Error("Draft could not be created for quick generation.");
+      }
+
+      const createCallable = httpsCallable(functionsInstance, "createAdminGiveawayGiftCardFromDraft");
+      const createResponse = await createCallable({ draftId });
+      const giftCard = createResponse?.data?.giftCard || null;
+      if (!giftCard) throw new Error("Gift card was created, but no card payload was returned.");
+      setStatusMessage(`Gift card created: ${giftCard.code || "Code unavailable"}.`);
+      setQuickCreateDialogOpen(false);
+    } catch (quickCreateError) {
+      setError(
+        resolveGiftCardStudioCallableError(
+          quickCreateError,
+          "Unable to create giveaway gift card.",
+        ),
+      );
+    } finally {
+      setQuickCreatingGiftCard(false);
+    }
+  };
+
+  const copyValue = async (value, key) => {
+    const text = (value || "").toString().trim();
+    if (!text) return;
+    const copied = await copyTextWithFallback(text);
+    if (!copied) {
+      setError("Unable to copy automatically. Please copy manually.");
+      return;
+    }
+    setCopiedKey(key);
+    setStatusMessage("Copied to clipboard.");
+  };
+
+  const openEditModal = (row) => {
+    const optionQuantities = {};
+    (Array.isArray(row.selectedOptions) ? row.selectedOptions : []).forEach((option) => {
+      const optionId = (option?.id || "").toString().trim();
+      const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 0);
+      if (!optionId || quantity <= 0) return;
+      optionQuantities[optionId] = quantity;
+    });
+    const expiresDate = parseDateValue(row.expiresAt);
+    setEditState({
+      open: true,
+      giftCardId: row.giftCardId,
+      code: row.code || "",
+      status: row.status || "active",
+      recipientName: (row.recipientName || "").toString(),
+      purchaserName: (row.purchaserName || "").toString(),
+      message: (row.message || "").toString(),
+      terms: (row.terms || "").toString(),
+      productTitle: (row.productTitle || "").toString(),
+      expiresAt: expiresDate ? expiresDate.toISOString().slice(0, 10) : "",
+      optionQuantities,
+      isGiveaway: Boolean(row.isGiveaway),
+    });
+    setError(null);
+  };
+  const closeEditModal = () =>
+    setEditState({
+      open: false,
+      giftCardId: "",
+      code: "",
+      status: "active",
+      recipientName: "",
+      purchaserName: "",
+      message: "",
+      terms: "",
+      productTitle: "",
+      expiresAt: "",
+      optionQuantities: {},
+      isGiveaway: false,
+    });
+
+  const handleArchiveGiftCard = async (row) => {
+    if (!functionsInstance) {
+      setError("Gift card functions are not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setError("Admin access is required to archive gift cards.");
+      return;
+    }
+    const giftCardId = (row?.giftCardId || row?.id || "").toString().trim();
+    if (!giftCardId) {
+      setError("Gift card ID is missing.");
+      return;
+    }
+    const displayCode = (row?.code || giftCardId).toString().trim();
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        `Archive gift card ${displayCode}? This keeps it on record and makes it non-redeemable.`,
+      );
+    if (!confirmed) return;
+
+    setArchivingGiftCardId(giftCardId);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const callable = httpsCallable(functionsInstance, "adminArchiveGiftCard");
+      await callable({ giftCardId });
+      if (editState.open && editState.giftCardId === giftCardId) {
+        closeEditModal();
+      }
+      setStatusMessage(`Gift card archived: ${displayCode}.`);
+    } catch (archiveError) {
+      setError(resolveGiftCardStudioCallableError(archiveError, "Unable to archive gift card."));
+    } finally {
+      setArchivingGiftCardId("");
+    }
+  };
+
+  const handleSyncLegacyGiftCards = async () => {
+    if (!functionsInstance) {
+      setError("Gift card functions are not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setError("Admin access is required to sync legacy gift cards.");
+      return;
+    }
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        "Sync all canonical gift cards into the registry now? This may take a moment for large datasets.",
+      );
+    if (!confirmed) return;
+
+    setSyncingRegistry(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const callable = httpsCallable(functionsInstance, "adminBackfillGiftCardRegistry");
+      const response = await callable({ apply: true });
+      const data = response?.data || {};
+      const summary = {
+        mode: data?.mode === "dry-run" ? "dry-run" : "apply",
+        scannedGiftCards: Number(data?.scannedGiftCards || 0),
+        docsNeedingSync: Number(data?.docsNeedingSync || 0),
+        docsSynced: Number(data?.docsSynced || 0),
+        docsAlreadyInSync: Number(data?.docsAlreadyInSync || 0),
+      };
+      setLastSyncSummary(summary);
+      setStatusMessage(
+        `Legacy sync complete. Synced ${summary.docsSynced} card(s); ${summary.docsAlreadyInSync} already in sync.`,
+      );
+    } catch (syncError) {
+      setError(
+        resolveGiftCardStudioCallableError(
+          syncError,
+          "Unable to sync legacy gift cards into the registry.",
+        ),
+      );
+    } finally {
+      setSyncingRegistry(false);
+    }
+  };
+
+  const editSelectedOptions = useMemo(
+    () => buildSelectedGiftCardOptions(liveGiftCardOptions, editState.optionQuantities),
+    [liveGiftCardOptions, editState.optionQuantities],
+  );
+  const editSummary = useMemo(
+    () => summarizeGiftCardSelectedOptions(editSelectedOptions),
+    [editSelectedOptions],
+  );
+  const editWholeCrewValidation = useMemo(
+    () => getWholeCrewSelectionValidation(editSelectedOptions),
+    [editSelectedOptions],
+  );
+  const editMissingOptionIds = useMemo(() => {
+    return Object.entries(editState.optionQuantities || {})
+      .filter(([, quantity]) => normalizeGiftCardOptionQuantity(quantity, 0) > 0)
+      .map(([optionId]) => optionId)
+      .filter((optionId) => !liveOptionIdSet.has(optionId));
+  }, [editState.optionQuantities, liveOptionIdSet]);
+
+  const canSaveEdit =
+    editState.open &&
+    editSelectedOptions.length > 0 &&
+    !editWholeCrewValidation.hasViolation &&
+    editMissingOptionIds.length === 0 &&
+    !savingEdit;
+
+  const handleEditOptionQuantityChange = (optionId, value) => {
+    const quantity = normalizeGiftCardOptionQuantity(value, 0);
+    setEditState((previous) => {
+      const next = { ...(previous.optionQuantities || {}) };
+      if (quantity <= 0) {
+        delete next[optionId];
+      } else {
+        next[optionId] = quantity;
+      }
+      return { ...previous, optionQuantities: next };
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!functionsInstance) {
+      setError("Gift card functions are not available.");
+      return;
+    }
+    if (!inventoryEnabled) {
+      setError("Admin access is required to edit gift cards.");
+      return;
+    }
+    if (!canSaveEdit) {
+      setError(
+        editWholeCrewValidation.hasViolation
+          ? editWholeCrewValidation.minimumMessage
+          : "Fix selection errors before saving.",
+      );
+      return;
+    }
+
+    setSavingEdit(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const callable = httpsCallable(functionsInstance, "adminUpdateGiftCard");
+      await callable({
+        giftCardId: editState.giftCardId,
+        status: editState.status,
+        recipientName: editState.recipientName,
+        purchaserName: editState.isGiveaway ? "" : editState.purchaserName,
+        message: editState.message,
+        terms: editState.terms,
+        productTitle: editState.productTitle,
+        expiresAt: editState.expiresAt
+          ? new Date(`${editState.expiresAt}T23:59:59+02:00`).toISOString()
+          : null,
+        selectedOptions: editSelectedOptions.map((option) => ({
+          id: option.id,
+          quantity: normalizeGiftCardOptionQuantity(option.quantity, 1),
+        })),
+      });
+      setStatusMessage(`Gift card updated: ${editState.code || editState.giftCardId}.`);
+      closeEditModal();
+    } catch (saveError) {
+      setError(resolveGiftCardStudioCallableError(saveError, "Unable to update gift card."));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  return (
+    <div className="admin-panel admin-panel--full admin-giftcard-studio">
+      <Reveal as="div" className="admin-panel__header">
+        <div className="admin-giftcard-manage__hero">
+          <h2>Gift Cards - Generate & Manage</h2>
+          <p className="admin-panel__note">
+            Create gift cards quickly and manage everything from one place.
+          </p>
+        </div>
+      </Reveal>
+
+      <section className="admin-panel__card admin-giftcard-manage__create-card">
+        <h3>Create gift card</h3>
+        <p className="modal__meta">
+          Open the creator dialog to choose options and issue a new gift card.
+        </p>
+        <div className="admin-form__actions">
+          <button
+            className="btn btn--primary admin-giftcard-manage__create-btn"
+            type="button"
+            onClick={() => {
+              setQuickCreateDialogOpen(true);
+              setError(null);
+            }}
+            disabled={!inventoryEnabled || !functionsInstance}
+          >
+            Create Gift Card Now
+          </button>
+        </div>
+      </section>
+
+      <section className="admin-panel__card admin-giftcard-registry">
+        <h3>Gift card registry</h3>
+        <div className="admin-giftcard-registry__toolbar">
+          <p className="modal__meta admin-giftcard-registry__count">
+            Showing <strong>{filteredRegistryRows.length}</strong> of{" "}
+            <strong>{registryRows.length}</strong> cards
+          </p>
+          <div className="admin-giftcard-registry__toolbar-actions">
+            <button
+              className="btn btn--secondary btn--small"
+              type="button"
+              onClick={handleSyncLegacyGiftCards}
+              disabled={syncingRegistry || !functionsInstance || !inventoryEnabled}
+            >
+              {syncingRegistry ? "Syncing..." : "Sync legacy cards"}
+            </button>
+            <button
+              className="btn btn--secondary btn--small"
+              type="button"
+              onClick={clearRegistryFilters}
+              disabled={!hasActiveRegistryFilters || syncingRegistry}
+            >
+              Reset filters
+            </button>
+          </div>
+        </div>
+        {lastSyncSummary && (
+          <p className="modal__meta admin-giftcard-registry__sync-summary">
+            Last sync: scanned {lastSyncSummary.scannedGiftCards} card(s), synced{" "}
+            {lastSyncSummary.docsSynced}, already in sync {lastSyncSummary.docsAlreadyInSync}.
+          </p>
+        )}
+        <div className="admin-form__grid admin-giftcard-registry__filters">
+          <label className="admin-form__field" htmlFor="giftcard-registry-search">
+            <span>Search</span>
+            <input
+              className="input"
+              id="giftcard-registry-search"
+              type="search"
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.target.value)}
+              placeholder="Code, order no, recipient, purchaser"
+            />
+          </label>
+          <label className="admin-form__field" htmlFor="giftcard-registry-status">
+            <span>Status</span>
+            <select
+              className="input"
+              id="giftcard-registry-status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
+              <option value="all">All statuses</option>
+              {availableStatuses.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="admin-form__field" htmlFor="giftcard-registry-source">
+            <span>Source</span>
+            <select
+              className="input"
+              id="giftcard-registry-source"
+              value={sourceFilter}
+              onChange={(event) => setSourceFilter(event.target.value)}
+            >
+              <option value="all">All sources</option>
+              {availableSources.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="admin-form__field" htmlFor="giftcard-registry-date">
+            <span>Date filter</span>
+            <select
+              className="input"
+              id="giftcard-registry-date"
+              value={dateFilter}
+              onChange={(event) => setDateFilter(event.target.value)}
+            >
+              <option value="all">All dates</option>
+              <option value="last7">Last 7 days</option>
+              <option value="last30">Last 30 days</option>
+              <option value="expired">Expired cards</option>
+              <option value="expiring30">Expiring in 30 days</option>
+            </select>
+          </label>
+          <label className="admin-form__field" htmlFor="giftcard-registry-sort">
+            <span>Sort by</span>
+            <select
+              className="input"
+              id="giftcard-registry-sort"
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value)}
+            >
+              <option value="created-desc">Newest first</option>
+              <option value="created-asc">Oldest first</option>
+              <option value="updated-desc">Recently updated</option>
+              <option value="updated-asc">Least recently updated</option>
+              <option value="value-desc">Highest value</option>
+              <option value="value-asc">Lowest value</option>
+              <option value="expiry-asc">Expiry soonest</option>
+              <option value="expiry-desc">Expiry latest</option>
+              <option value="code-asc">Code A-Z</option>
+              <option value="code-desc">Code Z-A</option>
+            </select>
+          </label>
+        </div>
+        {filteredRegistryRows.length === 0 ? (
+          <p className="modal__meta">No gift cards match the current filters.</p>
+        ) : (
+          <div className="admin-giftcard-registry__mobile-list">
+            {filteredRegistryRows.map((row) => (
+              <article className="admin-giftcard-registry-card" key={`mobile-${row.giftCardId || row.id}`}>
+                <div className="admin-giftcard-registry-card__head">
+                  <strong>{row.code || "-"}</strong>
+                  <span className="admin-giftcard-registry-card__status">{row.status || "active"}</span>
+                </div>
+                <div className="admin-giftcard-registry-card__meta">
+                  <span>Source: {row.sourceType || "unknown"}</span>
+                  <span>Value: {formatPriceLabel(row.value)}</span>
+                  <span>Recipient: {row.recipientName || "-"}</span>
+                  <span>Purchaser: {row.purchaserName || "-"}</span>
+                  <span>Order: {row.orderNumber || "-"}</span>
+                  <span>Created: {getRegistryCreatedOrIssuedLabel(row)}</span>
+                </div>
+                <div className="admin-giftcard-registry-card__actions">
+                  <button
+                    className="btn btn--secondary btn--small"
+                    type="button"
+                    onClick={() => copyValue(row.code || "", `mobile-code-${row.giftCardId}`)}
+                  >
+                    Copy code
+                  </button>
+                  {row.siteAccessUrl && (
+                    <a className="btn btn--secondary btn--small" href={row.siteAccessUrl} target="_blank" rel="noreferrer">
+                      View
+                    </a>
+                  )}
+                  <button
+                    className="btn btn--secondary btn--small"
+                    type="button"
+                    onClick={() => openEditModal(row)}
+                    disabled={archivingGiftCardId === (row.giftCardId || row.id)}
+                  >
+                    Edit
+                  </button>
+                  {row.status !== "archived" && (
+                    <button
+                      className="btn btn--danger btn--small"
+                      type="button"
+                      onClick={() => handleArchiveGiftCard(row)}
+                      disabled={archivingGiftCardId === (row.giftCardId || row.id)}
+                    >
+                      {archivingGiftCardId === (row.giftCardId || row.id) ? "Archiving..." : "Archive"}
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        <div className="admin-table-wrapper admin-giftcard-registry__table-wrap">
+          <table className="admin-table admin-giftcard-registry__table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Source</th>
+                <th>Status</th>
+                <th>Value</th>
+                <th>Recipient</th>
+                <th>Purchaser</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRegistryRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8}>
+                    <p className="modal__meta">No gift cards match the current filters.</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredRegistryRows.map((row) => (
+                  <tr key={row.giftCardId || row.id}>
+                    <td>{row.code || "-"}</td>
+                    <td>{row.sourceType || "unknown"}</td>
+                    <td>{row.status || "active"}</td>
+                    <td>{formatPriceLabel(row.value)}</td>
+                    <td>{row.recipientName || "-"}</td>
+                    <td>{row.purchaserName || "-"}</td>
+                    <td>{getRegistryCreatedOrIssuedLabel(row)}</td>
+                    <td>
+                      <div className="admin-table__actions">
+                        <button
+                          className="btn btn--secondary btn--small"
+                          type="button"
+                          onClick={() => copyValue(row.code || "", `code-${row.giftCardId}`)}
+                        >
+                          Copy code
+                        </button>
+                        {row.siteAccessUrl && (
+                          <a className="btn btn--secondary btn--small" href={row.siteAccessUrl} target="_blank" rel="noreferrer">
+                            View
+                          </a>
+                        )}
+                        <button
+                          className="btn btn--secondary btn--small"
+                          type="button"
+                          onClick={() => openEditModal(row)}
+                          disabled={archivingGiftCardId === (row.giftCardId || row.id)}
+                        >
+                          Edit
+                        </button>
+                        {row.status !== "archived" && (
+                          <button
+                            className="btn btn--danger btn--small"
+                            type="button"
+                            onClick={() => handleArchiveGiftCard(row)}
+                            disabled={archivingGiftCardId === (row.giftCardId || row.id)}
+                          >
+                            {archivingGiftCardId === (row.giftCardId || row.id) ? "Archiving..." : "Archive"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {(inventoryLoading || registryStatus === "loading") && (
+        <p className="modal__meta">Loading gift card data...</p>
+      )}
+      {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+      {registryError && <p className="admin-panel__error">{registryError.message || "Unable to load registry."}</p>}
+      {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+      {error && <p className="admin-panel__error">{error}</p>}
+
+      {quickCreateDialogOpen && (
+        <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="giftcard-create-title">
+          <div className="modal__content">
+            <button
+              className="modal__close"
+              type="button"
+              onClick={() => setQuickCreateDialogOpen(false)}
+              aria-label="Close"
+            >
+              x
+            </button>
+            <h3 className="modal__title" id="giftcard-create-title">
+              Create Gift Card
+            </h3>
+            <div className="admin-form__grid">
+              <label className="admin-form__field" htmlFor="giftcard-generate-product">
+                <span>Gift card product</span>
+                <select
+                  className="input"
+                  id="giftcard-generate-product"
+                  value={quickSelectedProductId}
+                  onChange={(event) => {
+                    setQuickSelectedProductId(event.target.value);
+                    setError(null);
+                  }}
+                  disabled={!giftCardProducts.length}
+                >
+                  {!giftCardProducts.length && <option value="">No gift card products found</option>}
+                  {giftCardProducts.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="admin-form__field" htmlFor="giftcard-generate-expiry">
+                <span>Expiry days</span>
+                <input
+                  className="input"
+                  id="giftcard-generate-expiry"
+                  type="number"
+                  min="1"
+                  max="1825"
+                  step="1"
+                  value={quickExpiryDays}
+                  onChange={(event) => setQuickExpiryDays(event.target.value)}
+                />
+              </label>
+              <label className="admin-form__field" htmlFor="giftcard-generate-message">
+                <span>Optional message</span>
+                <textarea
+                  className="input textarea"
+                  id="giftcard-generate-message"
+                  rows="2"
+                  value={quickMessage}
+                  onChange={(event) => setQuickMessage(event.target.value)}
+                  placeholder="Optional giveaway note"
+                />
+              </label>
+            </div>
+            <div className="admin-giftcard-studio__options">
+              <div className="admin-giftcard-studio__options-head">
+                <h3>Live option selection</h3>
+                <p className="modal__meta">Option quantities determine card value.</p>
+              </div>
+              {liveGiftCardOptions.length === 0 ? (
+                <p className="admin-panel__note">
+                  No live cut-flower options were found. Add options in Cut Flower Classes.
+                </p>
+              ) : (
+                <div className="admin-giftcard-studio__options-grid">
+                  {liveGiftCardOptions.map((option) => {
+                    const quantity = normalizeGiftCardOptionQuantity(
+                      quickOptionQuantities?.[option.id],
+                      0,
+                    );
+                    const optionIsSelected = quantity > 0;
+                    const isWholeCrew = isWholeCrewOption(option);
+                    const optionHasWholeCrewViolation =
+                      isWholeCrew &&
+                      getWholeCrewSelectionValidation([
+                        {
+                          ...option,
+                          quantity,
+                        },
+                      ]).hasViolation;
+                    return (
+                      <article
+                        key={option.id}
+                        className={`admin-giftcard-studio__option-card${optionIsSelected ? " is-selected" : ""}${optionHasWholeCrewViolation ? " is-invalid" : ""}`}
+                      >
+                        <div className="admin-giftcard-studio__option-main">
+                          <h4>{option.label}</h4>
+                          <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                        </div>
+                        <label
+                          className="admin-giftcard-studio__option-qty"
+                          htmlFor={`giftcard-generate-option-${option.id}`}
+                        >
+                          <span>Quantity</span>
+                          <input
+                            className="input"
+                            id={`giftcard-generate-option-${option.id}`}
+                            type="number"
+                            min="0"
+                            max="200"
+                            step="1"
+                            value={quantity}
+                            onChange={(event) =>
+                              handleQuickOptionQuantityChange(option.id, event.target.value)
+                            }
+                          />
+                        </label>
+                        {isWholeCrew && (
+                          <p className="modal__meta admin-giftcard-studio__whole-crew-note">
+                            {quickWholeCrewValidation.minimumMessage}
+                          </p>
+                        )}
+                        {isWholeCrew && optionHasWholeCrewViolation && (
+                          <p className="admin-panel__error admin-giftcard-studio__whole-crew-error">
+                            Select at least 4 for Whole Crew.
+                          </p>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="admin-giftcard-studio__summary">
+              <p className="modal__meta">
+                Selected options: <strong>{quickSummary.selectedCount}</strong>
+              </p>
+              <p className="modal__meta">
+                Giveaway value: <strong>{formatPriceLabel(quickSummary.total)}</strong>
+              </p>
+              {quickWholeCrewValidation.hasViolation && (
+                <p className="admin-panel__error">{quickWholeCrewValidation.minimumMessage}</p>
+              )}
+            </div>
+            <div className="admin-form__actions">
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={() => setQuickCreateDialogOpen(false)}
+                disabled={quickCreatingGiftCard}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={handleQuickCreateGiftCard}
+                disabled={
+                  quickCreatingGiftCard || !canQuickCreateGiftCard || !inventoryEnabled || !functionsInstance
+                }
+              >
+                {quickCreatingGiftCard ? "Creating..." : "Create Gift Card Now"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editState.open && (
+        <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="giftcard-edit-title">
+          <div className="modal__content">
+            <button className="modal__close" type="button" onClick={closeEditModal} aria-label="Close">
+              x
+            </button>
+            <h3 className="modal__title" id="giftcard-edit-title">
+              Edit Gift Card {editState.code ? `- ${editState.code}` : ""}
+            </h3>
+            <div className="admin-form__grid">
+              <label className="admin-form__field" htmlFor="giftcard-edit-status">
+                <span>Status</span>
+                <input
+                  className="input"
+                  id="giftcard-edit-status"
+                  value={editState.status}
+                  onChange={(event) =>
+                    setEditState((previous) => ({ ...previous, status: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="admin-form__field" htmlFor="giftcard-edit-expiry">
+                <span>Expiry date</span>
+                <input
+                  className="input"
+                  id="giftcard-edit-expiry"
+                  type="date"
+                  value={editState.expiresAt}
+                  onChange={(event) =>
+                    setEditState((previous) => ({ ...previous, expiresAt: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="admin-form__field" htmlFor="giftcard-edit-recipient">
+                <span>Recipient name</span>
+                <input
+                  className="input"
+                  id="giftcard-edit-recipient"
+                  value={editState.recipientName}
+                  onChange={(event) =>
+                    setEditState((previous) => ({
+                      ...previous,
+                      recipientName: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="admin-form__field" htmlFor="giftcard-edit-purchaser">
+                <span>Purchaser name</span>
+                <input
+                  className="input"
+                  id="giftcard-edit-purchaser"
+                  value={editState.isGiveaway ? "" : editState.purchaserName}
+                  onChange={(event) =>
+                    setEditState((previous) => ({
+                      ...previous,
+                      purchaserName: event.target.value,
+                    }))
+                  }
+                  disabled={editState.isGiveaway}
+                />
+              </label>
+              <label className="admin-form__field" htmlFor="giftcard-edit-title-field">
+                <span>Product title</span>
+                <input
+                  className="input"
+                  id="giftcard-edit-title-field"
+                  value={editState.productTitle}
+                  onChange={(event) =>
+                    setEditState((previous) => ({ ...previous, productTitle: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="admin-form__field" htmlFor="giftcard-edit-message-field">
+                <span>Message</span>
+                <textarea
+                  className="input textarea"
+                  id="giftcard-edit-message-field"
+                  rows="2"
+                  value={editState.message}
+                  onChange={(event) =>
+                    setEditState((previous) => ({ ...previous, message: event.target.value }))
+                  }
+                />
+              </label>
+            </div>
+            <label className="admin-form__field" htmlFor="giftcard-edit-terms-field">
+              <span>Terms</span>
+              <textarea
+                className="input textarea"
+                id="giftcard-edit-terms-field"
+                rows="3"
+                value={editState.terms}
+                onChange={(event) =>
+                  setEditState((previous) => ({ ...previous, terms: event.target.value }))
+                }
+              />
+            </label>
+            <div className="admin-giftcard-studio__options">
+              <div className="admin-giftcard-studio__options-head">
+                <h3>Live option selection</h3>
+                <p className="modal__meta">Option quantities determine card value.</p>
+              </div>
+              <div className="admin-giftcard-studio__options-grid">
+                {liveGiftCardOptions.map((option) => {
+                  const quantity = normalizeGiftCardOptionQuantity(
+                    editState.optionQuantities?.[option.id],
+                    0,
+                  );
+                  const wholeCrewOptionSelectedInvalid =
+                    isWholeCrewOption(option) &&
+                    getWholeCrewSelectionValidation([{ ...option, quantity }]).hasViolation;
+                  return (
+                    <article
+                      key={option.id}
+                      className={`admin-giftcard-studio__option-card${quantity > 0 ? " is-selected" : ""}${wholeCrewOptionSelectedInvalid ? " is-invalid" : ""}`}
+                    >
+                      <div className="admin-giftcard-studio__option-main">
+                        <h4>{option.label}</h4>
+                        <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                      </div>
+                      <label className="admin-giftcard-studio__option-qty" htmlFor={`giftcard-edit-option-${option.id}`}>
+                        <span>Quantity</span>
+                        <input
+                          className="input"
+                          id={`giftcard-edit-option-${option.id}`}
+                          type="number"
+                          min="0"
+                          max="200"
+                          step="1"
+                          value={quantity}
+                          onChange={(event) => handleEditOptionQuantityChange(option.id, event.target.value)}
+                        />
+                      </label>
+                      {isWholeCrewOption(option) && (
+                        <p className="modal__meta admin-giftcard-studio__whole-crew-note">
+                          {editWholeCrewValidation.minimumMessage}
+                        </p>
+                      )}
+                      {isWholeCrewOption(option) && wholeCrewOptionSelectedInvalid && (
+                        <p className="admin-panel__error admin-giftcard-studio__whole-crew-error">
+                          Select at least 4 for Whole Crew.
+                        </p>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="modal__meta">
+              Recalculated value: <strong>{formatPriceLabel(editSummary.total)}</strong>
+            </p>
+            <p className="modal__meta">
+              Selected options: <strong>{editSummary.selectedCount}</strong>
+            </p>
+            {editWholeCrewValidation.hasViolation && (
+              <p className="admin-panel__error">{editWholeCrewValidation.minimumMessage}</p>
+            )}
+            {editMissingOptionIds.length > 0 && (
+              <p className="admin-panel__error">
+                Options no longer live: {editMissingOptionIds.join(", ")}.
+              </p>
+            )}
+            <div className="admin-form__actions" style={{ marginTop: "1rem" }}>
+              <button className="btn btn--secondary" type="button" onClick={closeEditModal}>
+                Cancel
+              </button>
+              <button className="btn btn--primary" type="button" disabled={!canSaveEdit} onClick={handleSaveEdit}>
+                {savingEdit ? "Saving..." : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AdminGiftCardStudioView() {
+  return <AdminGiftCardPreviewView />;
+}
+
 export function AdminCutFlowerClassesView() {
   usePageMetadata({
     title: "Admin - Cut Flower Classes",
@@ -12486,12 +15330,14 @@ export function AdminOrdersView() {
           : Number.isFinite(numericPrice) ?
              numericPrice
             : null;
+        const isGiftCard = Boolean(product.isGiftCard || product.is_gift_card);
         const stockStatus = getStockStatus({
           quantity: product.stock_quantity ?? product.quantity,
           forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
           status: product.stock_status,
+          isGiftCard,
         });
-        const stockStatusKey = (product.stock_status || product.stockStatus || "")
+        const stockStatusKey = (isGiftCard ? "in_stock" : (product.stock_status || product.stockStatus || ""))
           .toString()
           .trim()
           .toLowerCase();
@@ -12537,6 +15383,10 @@ export function AdminOrdersView() {
         if (categoryId && !categoryTokens.includes(categoryId)) {
           categoryTokens.push(categoryId);
         }
+        const freshFlowerCategoryTokens = collectFreshFlowerCategoryTokens(categoryTokens);
+        const deliveryContactCandidate = requiresFreshFlowerDeliveryContactForCategoryTokens(
+          freshFlowerCategoryTokens,
+        );
 
         return {
           id: product.id,
@@ -12548,11 +15398,14 @@ export function AdminOrdersView() {
           variants,
           stockStatus,
           stockStatusKey,
+          isGiftCard,
           preorderSendMonth,
           filterPrice,
           categoryId,
           categoryLabel,
           categoryTokens,
+          freshFlowerCategoryTokens,
+          deliveryContactCandidate,
         };
       })
       .filter(Boolean);
@@ -12683,11 +15536,20 @@ export function AdminOrdersView() {
       source: "admin-created-order",
       productId: product.id,
       productSlug: product.slug || null,
+      categoryId: product.categoryId || null,
+      categoryLabel: product.categoryLabel || null,
+      categoryTokens: product.freshFlowerCategoryTokens || collectFreshFlowerCategoryTokens(product.categoryTokens),
       variantId: selectedVariant?.id || null,
       variantLabel: selectedVariant?.label || null,
       stockStatus: product.stockStatusKey || null,
       preorderSendMonth: product.preorderSendMonth || null,
+      deliveryContactCandidate: !product.isGiftCard && Boolean(product.deliveryContactCandidate),
     };
+    if (product.isGiftCard) {
+      metadata.isGiftCard = true;
+      metadata.giftCard = { isGiftCard: true };
+      metadata.stockStatus = "in_stock";
+    }
 
     setCreateOrderForm((prev) => {
       const existingIndex = prev.items.findIndex((item) => item.key === itemKey);
@@ -15325,7 +18187,46 @@ export function AdminProfileView() {
   const { user, role, signOut, refreshRole } = useAuth();
   const [statusMessage, setStatusMessage] = useState(null);
   const [roleLoading, setRoleLoading] = useState(false);
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinSaving, setPinSaving] = useState(false);
+  const [pinError, setPinError] = useState("");
+  const [pinStatusMessage, setPinStatusMessage] = useState("");
   const navigate = useNavigate();
+
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const { items: adminPosSettings } = useFirestoreCollection("adminPosSettings", {
+    orderByField: null,
+    orderDirection: null,
+  });
+
+  const activePosSettings = useMemo(
+    () => adminPosSettings.find((entry) => entry.uid === user?.uid || entry.id === user?.uid) || null,
+    [adminPosSettings, user?.uid],
+  );
+
+  const formatPinTimestamp = (value) => {
+    const date =
+      typeof value?.toDate === "function"
+        ? value.toDate()
+        : value instanceof Date
+          ? value
+          : value?.seconds
+            ? new Date(value.seconds * 1000)
+            : value
+              ? new Date(value)
+              : null;
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Not set";
+    return date.toLocaleString("en-ZA", { dateStyle: "medium", timeStyle: "short" });
+  };
 
   const handleRefreshRole = async () => {
     setRoleLoading(true);
@@ -15344,6 +18245,44 @@ export function AdminProfileView() {
       await signOut();
     } finally {
       navigate("/", { replace: true });
+    }
+  };
+
+  const handleSavePosPin = async () => {
+    if (!functionsInstance) {
+      setPinError("Cloud Functions are unavailable.");
+      return;
+    }
+    if (!/^\d{4,8}$/.test(newPin)) {
+      setPinError("PINs must be 4 to 8 digits.");
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setPinError("New PIN and confirmation do not match.");
+      return;
+    }
+    if (activePosSettings?.pinConfigured && !/^\d{4,8}$/.test(currentPin)) {
+      setPinError("Enter your current PIN to change it.");
+      return;
+    }
+
+    setPinSaving(true);
+    setPinError("");
+    setPinStatusMessage("");
+    try {
+      const callable = httpsCallable(functionsInstance, "adminSetPosPin");
+      await callable({
+        currentPin: activePosSettings?.pinConfigured ? currentPin : undefined,
+        newPin,
+      });
+      setCurrentPin("");
+      setNewPin("");
+      setConfirmPin("");
+      setPinStatusMessage(activePosSettings?.pinConfigured ? "POS PIN updated." : "POS PIN set.");
+    } catch (error) {
+      setPinError(error?.message || "Unable to save POS PIN.");
+    } finally {
+      setPinSaving(false);
     }
   };
 
@@ -15377,6 +18316,69 @@ export function AdminProfileView() {
         {statusMessage && (
           <p className="admin-panel__status">{statusMessage}</p>
         )}
+      </Reveal>
+      <Reveal as="section" className="admin-panel" delay={60}>
+        <h3>POS PIN</h3>
+        <div className="admin-profile__pin-status">
+          <p className="modal__meta">
+            <strong>Status:</strong> {activePosSettings?.pinConfigured ? "Configured" : "Not configured"}
+          </p>
+          <p className="modal__meta">
+            <strong>Last updated:</strong> {formatPinTimestamp(activePosSettings?.pinUpdatedAt)}
+          </p>
+          {activePosSettings?.pinResetAt && (
+            <p className="modal__meta">
+              <strong>Last reset:</strong> {formatPinTimestamp(activePosSettings.pinResetAt)}
+            </p>
+          )}
+        </div>
+        <div className="admin-profile__pin-form">
+          {activePosSettings?.pinConfigured && (
+            <label className="modal__meta">
+              Current PIN
+              <input
+                className="input"
+                type="password"
+                inputMode="numeric"
+                maxLength={8}
+                value={currentPin}
+                onChange={(event) => setCurrentPin(event.target.value.replace(/\D+/g, ""))}
+                placeholder="Current PIN"
+              />
+            </label>
+          )}
+          <label className="modal__meta">
+            New PIN
+            <input
+              className="input"
+              type="password"
+              inputMode="numeric"
+              maxLength={8}
+              value={newPin}
+              onChange={(event) => setNewPin(event.target.value.replace(/\D+/g, ""))}
+              placeholder="4 to 8 digits"
+            />
+          </label>
+          <label className="modal__meta">
+            Confirm PIN
+            <input
+              className="input"
+              type="password"
+              inputMode="numeric"
+              maxLength={8}
+              value={confirmPin}
+              onChange={(event) => setConfirmPin(event.target.value.replace(/\D+/g, ""))}
+              placeholder="Repeat PIN"
+            />
+          </label>
+        </div>
+        <div className="admin-profile__actions">
+          <button className="btn btn--primary" type="button" onClick={handleSavePosPin} disabled={pinSaving}>
+            {pinSaving ? "Saving..." : activePosSettings?.pinConfigured ? "Change POS PIN" : "Set POS PIN"}
+          </button>
+        </div>
+        {pinStatusMessage && <p className="admin-panel__status">{pinStatusMessage}</p>}
+        {pinError && <p className="admin-panel__error">{pinError}</p>}
       </Reveal>
     </div>
   );
@@ -15418,11 +18420,3 @@ function AdminPagination({ page, total, onPageChange, pageSize = ADMIN_PAGE_SIZE
     </div>
   );
 }
-
-
-
-
-
-
-
-

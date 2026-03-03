@@ -347,10 +347,10 @@ function ProductsPage() {
   }, [activeCategoryParam, categoryOptions]);
   const metaTitle = activeCategory
     ? `${activeCategory.name} | Bethany Blooms Products`
-    : "Bethany Blooms Products | Pressed Floral Gifting & Decor";
+    : "Bethany Blooms Products | Cut & Pressed Floral Gifting & Decor";
   const metaDescription = activeCategory?.description
     ? activeCategory.description
-    : "Shop curated pressed flower products, bespoke arrangements, and keepsakes handcrafted in the Bethany Blooms studio.";
+    : "Shop curated cut flower bunches, pressed flower products, bespoke arrangements, and keepsakes handcrafted by Bethany Blooms.";
 
   usePageMetadata({
     title: metaTitle,
@@ -516,18 +516,18 @@ function ProductsPage() {
             (!hasCategoryFilter || subscriptionPlansStatus !== "loading") && (
             <p className="empty-state">
               {hasCategoryFilter
-                ? "No items found in this category yet."
-                : "No products available yet. Create one from the admin dashboard."}
+                ? "No items are available in this category right now."
+                : "No products are available right now. Please check back soon."}
             </p>
           )}
           {(status === "loading" || (hasCategoryFilter && subscriptionPlansStatus === "loading")) && (
-            <p className="empty-state">Loading products…</p>
+            <p className="empty-state">Loading products...</p>
           )}
           {status === "empty" && !hasCategoryFilter && (
-            <p className="empty-state">No products available yet. Check back soon!</p>
+            <p className="empty-state">No products are available right now. Please check back soon.</p>
           )}
           {(status === "error" || (hasCategoryFilter && subscriptionPlansStatus === "error")) && (
-            <p className="empty-state">We couldn’t load products from the server. Please refresh to try again.</p>
+            <p className="empty-state">We couldn't load products right now. Please refresh and try again.</p>
           )}
         </div>
       </section>
@@ -536,7 +536,7 @@ function ProductsPage() {
         <div className="section__inner">
           <Reveal as="div">
             <span className="badge">Thoughtfully Made</span>
-            <h2>What You’ll Find</h2>
+            <h2>What You'll Find</h2>
           </Reveal>
           <div className="cards-grid">
             <Reveal as="article" className="card">
@@ -566,7 +566,7 @@ function ProductsPage() {
             <h2>From Fresh Stem to Framed Heirloom</h2>
             <p>
               Start with a fresh arrangement, then preserve your favourite stems in a bespoke artwork or DIY creation.
-              We’re here for every step—concept, styling, and keepsake.
+              We're here for every step-concept, styling, and keepsake.
             </p>
             <div className="cta-group">
               <a className="btn btn--primary" href="/workshops">

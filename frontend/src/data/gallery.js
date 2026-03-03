@@ -68,7 +68,7 @@ export const galleryItems = [
     id: "gallery-trays",
     src: galleryTrays,
     alt: "Wooden trays filled with colourful dried flowers",
-    caption: "Bloom buffet—students hand pick their petals",
+    caption: "Bloom buffet-students hand pick their petals",
   },
   {
     id: "gallery-tools",

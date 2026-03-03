@@ -98,8 +98,8 @@ function combineDateAndTime(dateInput, timeInput) {
 }
 
 const DEFAULT_TIME_RANGES = {
-  "09:00": "09:00 – 12:00",
-  "13:00": "13:00 – 16:00",
+  "09:00": "09:00 - 12:00",
+  "13:00": "13:00 - 16:00",
 };
 
 const slotTimeFormatter = new Intl.DateTimeFormat("en-ZA", {
@@ -403,7 +403,7 @@ function WorkshopDetailPage() {
     return (
       <section className="section section--tight">
         <div className="section__inner">
-          <p className="empty-state">Loading workshop information…</p>
+          <p className="empty-state">Loading workshop information...</p>
         </div>
       </section>
     );
@@ -413,7 +413,7 @@ function WorkshopDetailPage() {
     return (
       <section className="section section--tight">
         <div className="section__inner">
-          <p className="empty-state">We couldn’t load this workshop right now. {error}</p>
+          <p className="empty-state">We couldn't load this workshop right now. {error}</p>
           <Link className="btn btn--secondary" to="/workshops">
             Back to Workshops
           </Link>
@@ -426,7 +426,7 @@ function WorkshopDetailPage() {
     return (
       <section className="section section--tight">
         <div className="section__inner">
-          <p className="empty-state">We couldn’t find that workshop. It may have been updated or removed.</p>
+          <p className="empty-state">We couldn't find that workshop. It may have been updated or removed.</p>
           <Link className="btn btn--secondary" to="/workshops">
             Back to Workshops
           </Link>
@@ -504,7 +504,7 @@ function WorkshopDetailPage() {
             <Reveal as="div" className="session-picker" delay={360}>
               <h3 className="session-picker__title">Choose Your Day</h3>
               <p className="session-picker__note">
-                Pick the workshop day that suits you best, then select the time slot you’d like to attend.
+                Pick the workshop day that suits you best, then select the time slot you'd like to attend.
               </p>
               <div className="session-picker__grid session-picker__grid--dates">
                 {sessionDays.map((day) => {
@@ -544,7 +544,7 @@ function WorkshopDetailPage() {
             <Reveal as="div" className="session-slot-picker" delay={420}>
               <h3 className="session-slot-picker__title">Pick a Time</h3>
               <p className="session-slot-picker__note">
-                Morning sessions run 09:00 – 12:00 and afternoons 13:00 – 16:00. Capacity defaults to 10 guests but may differ per venue.
+                Morning sessions run 09:00 - 12:00 and afternoons 13:00 - 16:00. Capacity defaults to 10 guests but may differ per venue.
               </p>
               <div className="session-slot-picker__grid">
                 {selectedDaySlots.map((slot) => {
@@ -582,7 +582,7 @@ function WorkshopDetailPage() {
 
           {sessionDays.length === 0 && (
             <Reveal as="p" className="modal__meta session-picker__empty" delay={360}>
-              We’re finalising new workshop dates. Follow us on social or send us a note to reserve your spot.
+              We're finalising new workshop dates. Follow us on social or send us a note to reserve your spot.
             </Reveal>
           )}
           {sessionDays.length > 0 && selectedDaySlots.length === 0 && (

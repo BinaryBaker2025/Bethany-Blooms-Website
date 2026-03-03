@@ -6,9 +6,9 @@ import { useModal } from "../context/ModalContext.jsx";
 import { getFirebaseDb, getFirebaseFunctions } from "../lib/firebase.js";
 
 const DEFAULT_FRAME_OPTIONS = [
-  { value: "A5", label: "A5 – R350", price: 350 },
-  { value: "A4", label: "A4 – R550", price: 550 },
-  { value: "A3", label: "A3 – R650", price: 650 },
+  { value: "A5", label: "A5 - R350", price: 350 },
+  { value: "A4", label: "A4 - R550", price: 550 },
+  { value: "A3", label: "A3 - R650", price: 650 },
 ];
 
 const formatOptionLabel = (label, price) => {
@@ -689,7 +689,7 @@ function BookingModal() {
         closeBooking();
       } catch (error) {
         setFormStatus("error");
-        setSubmitError(error?.message || "We couldn’t save your booking. Please try again.");
+        setSubmitError(error?.message || "We couldn't save your booking. Please try again.");
       }
       return;
     }
@@ -793,7 +793,7 @@ function BookingModal() {
     !selectedSession ||
     (selectedSession.isPast && hasActiveSession);
   const submitLabel = (() => {
-    if (isSubmitting) return bookingType === "cut-flower" ? "Reserving…" : "Adding to cart…";
+    if (isSubmitting) return bookingType === "cut-flower" ? "Reserving..." : "Adding to cart...";
     if (!workshop) return bookingCopy.addLabel;
     if (sessionDays.length === 0) return bookingCopy.noSessionsCta;
     if (!selectedDay) return "Select a Day";
@@ -928,7 +928,7 @@ function BookingModal() {
           )}
           {sessionDays.length === 0 && (
             <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
-              Booking isn’t available until new dates are scheduled.
+              Booking isn't available until new dates are scheduled.
             </p>
           )}
           {sessionDays.length > 0 && selectedDaySlots.length === 0 && (

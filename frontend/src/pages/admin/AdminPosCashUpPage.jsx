@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { addDoc, collection, doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import PosVoidDialog from "../../components/admin/PosVoidDialog.jsx";
 import { useAdminData } from "../../context/AdminDataContext.jsx";
 import { useFirestoreCollection } from "../../hooks/useFirestoreCollection.js";
 import { usePageMetadata } from "../../hooks/usePageMetadata.js";
+import { getFirebaseFunctions } from "../../lib/firebase.js";
+import {
+  formatPosSaleStatusLabel,
+  getPosSaleDateKey,
+  getPosSaleNetDiscountAmount,
+  getPosSaleNetTotal,
+  getPosSaleStatusBadgeClass,
+  normalizePosSaleStatus,
+  parsePosDateValue,
+} from "../../lib/posSales.js";
 import logo from "../../assets/BethanyBloomsLogo.png";
 
 const moneyFormatter = new Intl.NumberFormat("en-ZA", {
@@ -58,13 +69,53 @@ const formatDateTime = (date) => {
   return date.toLocaleString("en-ZA", { dateStyle: "medium", timeStyle: "short" });
 };
 
-const escapeHtml = (value) => {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+const formatSaleTime = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString("en-ZA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+};
+
+const normalizeSalePaymentMethod = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "cash") return "cash";
+  if (normalized === "card") return "card";
+  if (normalized === "gift-card") return "gift-card";
+  return normalized || "unknown";
+};
+
+const getCashupStatus = (cashup = null) => {
+  const status = (cashup?.status || "").toString().trim().toLowerCase();
+  if (cashup?.reviewRequired || status === "review-needed") return "review-needed";
+  if (status === "completed") return "completed";
+  return "draft";
+};
+
+const buildCashupLiveTotals = (sales = []) => {
+  const normalizedSales = (Array.isArray(sales) ? sales : []).map((sale) => ({
+    status: normalizePosSaleStatus(sale?.status),
+    paymentMethod: normalizeSalePaymentMethod(sale?.paymentMethod),
+    netTotal: parseNumber(getPosSaleNetTotal(sale), 0),
+    netDiscountAmount: parseNumber(getPosSaleNetDiscountAmount(sale), 0),
+    voidedTotal: parseNumber(sale?.voidSummary?.voidedTotal, 0),
+  }));
+  const activeSales = normalizedSales.filter((sale) => sale.status !== "voided");
+  return {
+    cashTotal: activeSales
+      .filter((sale) => sale.paymentMethod === "cash")
+      .reduce((sum, sale) => sum + sale.netTotal, 0),
+    cardTotal: activeSales
+      .filter((sale) => sale.paymentMethod === "card")
+      .reduce((sum, sale) => sum + sale.netTotal, 0),
+    discountTotal: normalizedSales.reduce((sum, sale) => sum + sale.netDiscountAmount, 0),
+    total: activeSales.reduce((sum, sale) => sum + sale.netTotal, 0),
+    count: activeSales.length,
+    voidedCount: normalizedSales.filter((sale) => sale.voidedTotal > 0).length,
+    voidedTotal: normalizedSales.reduce((sum, sale) => sum + sale.voidedTotal, 0),
+  };
 };
 
 const getCashupExpected = (cashup) => {
@@ -83,8 +134,96 @@ const getCashupVariance = (cashup) => {
   return countedValue - expectedCash;
 };
 
-const buildCashupReportHtml = ({ cashup, sales, logoUrl }) => {
-  const totals = cashup?.totals || {};
+const formatSaleItemLine = (item) => {
+  if (!item || typeof item !== "object") return "";
+  const quantity = Math.max(1, parseNumber(item.quantity, 1));
+  const name = (item.name || "").toString().trim() || "Item";
+  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : null;
+  const variantLabel = (metadata?.variantLabel || "").toString().trim();
+  const optionLabel = (metadata?.optionLabel || "").toString().trim();
+  const sessionLabel = (metadata?.sessionLabel || "").toString().trim();
+  const detailParts = [];
+  if (variantLabel) detailParts.push(`Variant: ${variantLabel}`);
+  if (optionLabel) detailParts.push(`Option: ${optionLabel}`);
+  if (sessionLabel) detailParts.push(`Session: ${sessionLabel}`);
+  const detailSuffix = detailParts.length ? ` (${detailParts.join(", ")})` : "";
+  return `${quantity} x ${name}${detailSuffix}`;
+};
+
+const getSaleItemLines = (sale) => {
+  const items = Array.isArray(sale?.items) ? sale.items : [];
+  const lines = items.map((item) => formatSaleItemLine(item)).filter(Boolean);
+  return lines.length > 0 ? lines : ["-"];
+};
+
+const getSaleItemsDisplayText = (sale) => {
+  return getSaleItemLines(sale).join("\n");
+};
+
+const loadImageAsDataUrl = async (imageUrl) => {
+  if (!imageUrl || typeof window === "undefined") return "";
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) return "";
+    const blob = await response.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        resolve(typeof reader.result === "string" ? reader.result : "");
+      };
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return "";
+  }
+};
+
+const drawSummaryCard = ({ doc, x, y, width, title, rows }) => {
+  const rowHeight = 16;
+  const cardHeight = 34 + rows.length * rowHeight + 10;
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(209, 191, 167);
+  doc.roundedRect(x, y, width, cardHeight, 10, 10, "FD");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(47, 54, 36);
+  doc.text(title, x + 12, y + 20);
+  let rowY = y + 38;
+  rows.forEach((row) => {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(95, 102, 89);
+    doc.text(row.label, x + 12, rowY);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(47, 54, 36);
+    doc.text(row.value, x + width - 12, rowY, { align: "right" });
+    rowY += rowHeight;
+  });
+  return y + cardHeight;
+};
+
+const downloadCashupPdf = async ({ cashup, sales, logoUrl }) => {
+  const [{ jsPDF }, autoTableModule] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  const autoTable = autoTableModule.default;
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "pt",
+    format: "a4",
+  });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const marginX = 34;
+  const topMargin = 32;
+  const contentWidth = pageWidth - marginX * 2;
+
+  const totals =
+    cashup?.reviewRequired && cashup?.reviewCurrentTotals
+      ? cashup.reviewCurrentTotals
+      : cashup?.totals || {};
   const cashSales = parseNumber(totals.cash, 0);
   const cardSales = parseNumber(totals.card, 0);
   const discounts = parseNumber(totals.discounts, 0);
@@ -98,248 +237,160 @@ const buildCashupReportHtml = ({ cashup, sales, logoUrl }) => {
   const variance = getCashupVariance(cashup);
   const cashupDate = formatDateLabel(cashup?.dateKey || cashup?.date);
   const savedAtLabel = formatDateTime(cashup?.updatedAt || cashup?.createdAt);
-  const completedBy = cashup?.updatedBy?.email || cashup?.createdBy?.email || "";
-  const notes = cashup?.notes ? escapeHtml(cashup.notes) : "";
+  const completedBy = (cashup?.updatedBy?.email || cashup?.createdBy?.email || "").toString().trim();
+  const notes = (cashup?.notes || "").toString().trim();
+  const logoDataUrl = await loadImageAsDataUrl(logoUrl);
 
-  const salesRows = sales.length
-    ? sales
-        .map((sale) => {
-          const timeLabel = sale.createdAt
-            ? sale.createdAt.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })
-            : "-";
-          const itemsLabel = sale.items?.length
-            ? sale.items
-                .map((item) => `${item.quantity} x ${item.name}`)
-                .join(", ")
-            : "-";
-          return `
-            <tr>
-              <td>${escapeHtml(sale.receiptNumber || sale.id || "-")}</td>
-              <td>${escapeHtml(timeLabel)}</td>
-              <td>${escapeHtml(sale.paymentMethod || "-")}</td>
-              <td>${escapeHtml(itemsLabel)}</td>
-              <td>${escapeHtml(moneyFormatter.format(parseNumber(sale.total, 0)))}</td>
-            </tr>
-          `;
-        })
-        .join("")
-    : `
-        <tr>
-          <td class="empty" colspan="5">No POS sales recorded for this date.</td>
-        </tr>
-      `;
+  let cursorY = topMargin;
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(209, 191, 167);
+  doc.roundedRect(marginX, cursorY, contentWidth, 94, 12, 12, "FD");
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, "PNG", marginX + 14, cursorY + 16, 118, 36, undefined, "FAST");
+    } catch {
+      // Ignore image rendering issues and continue with text header only.
+    }
+  }
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.setTextColor(47, 54, 36);
+  doc.text("POS Cash Up", pageWidth - marginX - 12, cursorY + 24, { align: "right" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(73, 78, 65);
+  doc.text(getCashupStatus(cashup) === "review-needed" ? "Review needed" : "Completed", pageWidth - marginX - 12, cursorY + 42, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(cashupDate, pageWidth - marginX - 12, cursorY + 58, { align: "right" });
+  doc.text(`Saved ${savedAtLabel}`, pageWidth - marginX - 12, cursorY + 72, { align: "right" });
+  if (completedBy) {
+    doc.text(`By ${completedBy}`, pageWidth - marginX - 12, cursorY + 86, { align: "right" });
+  }
+  cursorY += 112;
 
-  return `
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>POS Cash Up</title>
-        <style>
-          :root {
-            color-scheme: only light;
-          }
-          * {
-            box-sizing: border-box;
-          }
-          body {
-            margin: 0;
-            font-family: "Source Sans 3", "Source Sans Pro", "Helvetica Neue", Arial, sans-serif;
-            background: #f5ead7;
-            color: #2f3624;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          h1, h2, h3 {
-            font-family: "Droid Serif", Georgia, serif;
-            margin: 0 0 0.5rem;
-          }
-          .page {
-            max-width: 980px;
-            margin: 0 auto;
-            padding: 32px 28px 40px;
-          }
-          .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1.5rem;
-            padding: 20px 24px;
-            border-radius: 20px;
-            background: rgba(255, 255, 255, 0.92);
-            border: 1px solid rgba(85, 107, 47, 0.15);
-            margin-bottom: 20px;
-          }
-          .header img {
-            width: 150px;
-            height: auto;
-            border-radius: 14px;
-            box-shadow: 0 12px 30px -20px rgba(58, 58, 58, 0.45);
-          }
-          .header .meta {
-            text-align: right;
-          }
-          .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 999px;
-            background: rgba(167, 199, 161, 0.35);
-            color: #2f3624;
-            font-size: 0.85rem;
-            font-weight: 600;
-          }
-          .grid {
-            display: grid;
-            gap: 16px;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-          }
-          .card {
-            background: rgba(255, 255, 255, 0.95);
-            border: 1px solid rgba(85, 107, 47, 0.15);
-            border-radius: 18px;
-            padding: 16px 18px;
-          }
-          .row {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            gap: 1rem;
-            margin: 0.4rem 0;
-          }
-          .row span {
-            color: rgba(47, 54, 36, 0.75);
-            font-size: 0.95rem;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.95rem;
-            margin-top: 0.75rem;
-          }
-          th, td {
-            padding: 10px 12px;
-            text-align: left;
-            border-bottom: 1px solid rgba(85, 107, 47, 0.12);
-          }
-          th {
-            background: rgba(167, 199, 161, 0.2);
-            font-weight: 600;
-          }
-          .empty {
-            text-align: center;
-            color: rgba(47, 54, 36, 0.65);
-            padding: 16px;
-          }
-          .notes {
-            margin-top: 0.5rem;
-            color: rgba(47, 54, 36, 0.75);
-            white-space: pre-wrap;
-          }
-          .footer {
-            margin-top: 24px;
-            font-size: 0.85rem;
-            color: rgba(47, 54, 36, 0.6);
-            text-align: right;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="page">
-          <header class="header">
-            <div>
-              ${logoUrl ? `<img src="${logoUrl}" alt="Bethany Blooms" loading="lazy" decoding="async"/>` : ""}
-            </div>
-            <div class="meta">
-              <h1>POS Cash Up</h1>
-              <div class="badge">Completed</div>
-              <div>${escapeHtml(cashupDate)}</div>
-              <div>Saved ${escapeHtml(savedAtLabel)}</div>
-              ${completedBy ? `<div>By ${escapeHtml(completedBy)}</div>` : ""}
-            </div>
-          </header>
+  const summaryGap = 14;
+  const summaryCardWidth = (contentWidth - summaryGap) / 2;
+  const cashSummaryBottom = drawSummaryCard({
+    doc,
+    x: marginX,
+    y: cursorY,
+    width: summaryCardWidth,
+    title: "Cash Summary",
+    rows: [
+      { label: "Opening float", value: moneyFormatter.format(openingFloat) },
+      { label: "Cash sales", value: moneyFormatter.format(cashSales) },
+      { label: "Expected cash", value: moneyFormatter.format(expectedCash) },
+      { label: "Cash counted", value: moneyFormatter.format(cashCounted) },
+      { label: "Variance", value: moneyFormatter.format(variance) },
+    ],
+  });
+  const salesSummaryBottom = drawSummaryCard({
+    doc,
+    x: marginX + summaryCardWidth + summaryGap,
+    y: cursorY,
+    width: summaryCardWidth,
+    title: "Sales Summary",
+    rows: [
+      { label: "Total sales", value: moneyFormatter.format(totalSales) },
+      { label: "Card sales", value: moneyFormatter.format(cardSales) },
+      { label: "Discounts", value: `-${moneyFormatter.format(discounts)}` },
+      { label: "Transactions", value: `${transactionCount}` },
+    ],
+  });
+  cursorY = Math.max(cashSummaryBottom, salesSummaryBottom) + 14;
 
-          <section class="grid">
-            <div class="card">
-              <h2>Cash Summary</h2>
-              <div class="row"><span>Opening float</span><strong>${escapeHtml(
-                moneyFormatter.format(openingFloat),
-              )}</strong></div>
-              <div class="row"><span>Cash sales</span><strong>${escapeHtml(
-                moneyFormatter.format(cashSales),
-              )}</strong></div>
-              <div class="row"><span>Expected cash</span><strong>${escapeHtml(
-                moneyFormatter.format(expectedCash),
-              )}</strong></div>
-              <div class="row"><span>Cash counted</span><strong>${escapeHtml(
-                moneyFormatter.format(cashCounted),
-              )}</strong></div>
-              <div class="row"><span>Variance</span><strong>${escapeHtml(
-                moneyFormatter.format(variance),
-              )}</strong></div>
-            </div>
-            <div class="card">
-              <h2>Sales Summary</h2>
-              <div class="row"><span>Total sales</span><strong>${escapeHtml(
-                moneyFormatter.format(totalSales),
-              )}</strong></div>
-              <div class="row"><span>Card sales</span><strong>${escapeHtml(
-                moneyFormatter.format(cardSales),
-              )}</strong></div>
-              <div class="row"><span>Discounts</span><strong>-${escapeHtml(
-                moneyFormatter.format(discounts),
-              )}</strong></div>
-              <div class="row"><span>Transactions</span><strong>${escapeHtml(
-                transactionCount,
-              )}</strong></div>
-            </div>
-          </section>
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.setTextColor(47, 54, 36);
+  doc.text("POS Sales", marginX, cursorY);
+  const salesTableBody = sales.length
+    ? sales.map((sale) => [
+        (sale.receiptNumber || sale.id || "-").toString(),
+        formatSaleTime(sale.createdAt),
+        formatPosSaleStatusLabel(sale.status),
+        (sale.paymentMethod || "-").toString(),
+        getSaleItemsDisplayText(sale),
+        moneyFormatter.format(getPosSaleNetTotal(sale)),
+      ])
+    : [[
+        {
+          content: "No POS sales recorded for this date.",
+          colSpan: 6,
+          styles: {
+            halign: "center",
+            textColor: [98, 103, 90],
+            fontStyle: "italic",
+          },
+        },
+      ]];
 
-          <section class="card">
-            <h2>POS Sales</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Receipt</th>
-                  <th>Time</th>
-                  <th>Payment</th>
-                  <th>Items</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${salesRows}
-              </tbody>
-            </table>
-          </section>
+  autoTable(doc, {
+    startY: cursorY + 8,
+    margin: { left: marginX, right: marginX },
+    head: [["Receipt", "Time", "Status", "Payment", "Items", "Total"]],
+    body: salesTableBody,
+    styles: {
+      font: "helvetica",
+      fontSize: 9,
+      cellPadding: 6,
+      valign: "top",
+      lineColor: [229, 220, 204],
+      lineWidth: 0.6,
+      overflow: "linebreak",
+      textColor: [47, 54, 36],
+    },
+    headStyles: {
+      fillColor: [225, 232, 221],
+      textColor: [47, 54, 36],
+      fontStyle: "bold",
+      lineColor: [209, 191, 167],
+      lineWidth: 0.8,
+    },
+    columnStyles: {
+      0: { cellWidth: 90 },
+      1: { cellWidth: 62 },
+      2: { cellWidth: 76 },
+      3: { cellWidth: 62 },
+      4: { cellWidth: 175 },
+      5: { cellWidth: 80, halign: "right" },
+    },
+  });
+  cursorY = (doc.lastAutoTable?.finalY || cursorY) + 14;
 
-          ${notes ? `<section class="card"><h2>Notes</h2><div class="notes">${notes}</div></section>` : ""}
+  if (notes) {
+    const noteLines = doc.splitTextToSize(notes, contentWidth - 24);
+    const noteHeight = Math.max(72, 40 + noteLines.length * 11);
+    if (cursorY + noteHeight > pageHeight - 52) {
+      doc.addPage();
+      cursorY = topMargin;
+    }
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(209, 191, 167);
+    doc.roundedRect(marginX, cursorY, contentWidth, noteHeight, 10, 10, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor(47, 54, 36);
+    doc.text("Notes", marginX + 12, cursorY + 22);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(73, 78, 65);
+    doc.text(noteLines, marginX + 12, cursorY + 40);
+  }
 
-          <div class="footer">Generated by Bethany Blooms POS</div>
-        </div>
-      </body>
-    </html>
-  `;
-};
+  const generatedAtLabel = new Date().toLocaleString("en-ZA", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(114, 120, 105);
+  doc.text(`Generated ${generatedAtLabel} by Bethany Blooms POS`, pageWidth - marginX, pageHeight - 20, {
+    align: "right",
+  });
 
-const openPrintFrame = (html) => {
-  if (typeof document === "undefined") return false;
-  const frame = document.createElement("iframe");
-  frame.setAttribute("aria-hidden", "true");
-  frame.style.position = "fixed";
-  frame.style.right = "0";
-  frame.style.bottom = "0";
-  frame.style.width = "0";
-  frame.style.height = "0";
-  frame.style.border = "0";
-  frame.onload = () => {
-    frame.contentWindow?.focus();
-    frame.contentWindow?.print();
-    window.setTimeout(() => frame.remove(), 1000);
-  };
-  frame.srcdoc = html;
-  document.body.appendChild(frame);
-  return true;
+  const filenameDate = (cashup?.dateKey || cashup?.date || toLocalDateKey(new Date())).toString();
+  doc.save(`cash-up-${filenameDate}.pdf`);
 };
 
 function AdminPosCashUpPage() {
@@ -367,14 +418,25 @@ function AdminPosCashUpPage() {
   const [errorMessage, setErrorMessage] = useState(null);
   const [editingCashupId, setEditingCashupId] = useState(null);
   const [useLatestCashup, setUseLatestCashup] = useState(true);
+  const [downloadingCashupId, setDownloadingCashupId] = useState(null);
+  const [voidSaleTarget, setVoidSaleTarget] = useState(null);
+
+  const functionsInstance = useMemo(() => {
+    try {
+      return getFirebaseFunctions();
+    } catch {
+      return null;
+    }
+  }, []);
 
   const normalizedSales = useMemo(() => {
     return (posSales || []).map((sale) => {
-      const createdAt = parseDateValue(sale.createdAt || sale.updatedAt);
+      const createdAt = parsePosDateValue(sale.createdAt || sale.updatedAt);
       return {
         ...sale,
         createdAt,
-        dateKey: createdAt ? toLocalDateKey(createdAt) : "",
+        dateKey: getPosSaleDateKey(sale) || (createdAt ? toLocalDateKey(createdAt) : ""),
+        status: normalizePosSaleStatus(sale.status),
       };
     });
   }, [posSales]);
@@ -398,22 +460,7 @@ function AdminPosCashUpPage() {
   }, [normalizedSales, selectedDate]);
 
   const cashTotals = useMemo(() => {
-    const cashSales = salesForDay.filter((sale) => sale.paymentMethod === "cash");
-    const cardSales = salesForDay.filter((sale) => sale.paymentMethod === "card");
-    const cashTotal = cashSales.reduce((sum, sale) => sum + parseNumber(sale.total, 0), 0);
-    const cardTotal = cardSales.reduce((sum, sale) => sum + parseNumber(sale.total, 0), 0);
-    const discountTotal = salesForDay.reduce((sum, sale) => {
-      const discountAmount = parseNumber(sale.discount?.amount ?? 0, 0);
-      return sum + discountAmount;
-    }, 0);
-    const total = cashTotal + cardTotal;
-    return {
-      cashTotal,
-      cardTotal,
-      discountTotal,
-      total,
-      count: salesForDay.length,
-    };
+    return buildCashupLiveTotals(salesForDay);
   }, [salesForDay]);
 
   const cashSummary = useMemo(() => {
@@ -443,6 +490,12 @@ function AdminPosCashUpPage() {
     if (!cashupsForDay.length) return null;
     return cashupsForDay.find((cashup) => cashup.id === editingCashupId) || cashupsForDay[0];
   }, [cashupsForDay, editingCashupId]);
+
+  const activeCashupStatus = getCashupStatus(activeCashup);
+  const activeCashupReviewTotals =
+    activeCashup?.reviewCurrentTotals && typeof activeCashup.reviewCurrentTotals === "object"
+      ? activeCashup.reviewCurrentTotals
+      : null;
 
   useEffect(() => {
     if (!useLatestCashup) return;
@@ -506,21 +559,36 @@ function AdminPosCashUpPage() {
     setErrorMessage(null);
   };
 
-  const handleDownloadPdf = (cashup) => {
-    if (!cashup) return;
-    const logoUrl = logo ? new URL(logo, window.location.href).toString() : "";
-    const salesForCashup = normalizedSales.filter(
-      (sale) => sale.dateKey === (cashup.dateKey || cashup.date),
-    );
-    const reportHtml = buildCashupReportHtml({
-      cashup,
-      sales: salesForCashup,
-      logoUrl,
-    });
-    const frameOpened = openPrintFrame(reportHtml);
-    if (!frameOpened) {
-      setErrorMessage("Unable to open the PDF preview. Please try again.");
+  const handleDownloadPdf = async (cashup) => {
+    if (!cashup || downloadingCashupId) return;
+    const cashupId = cashup.id || `${cashup.dateKey || cashup.date || "cashup"}`;
+    setErrorMessage(null);
+    setDownloadingCashupId(cashupId);
+    try {
+      const logoUrl = logo ? new URL(logo, window.location.href).toString() : "";
+      const salesForCashup = normalizedSales.filter(
+        (sale) => sale.dateKey === (cashup.dateKey || cashup.date),
+      );
+      await downloadCashupPdf({
+        cashup,
+        sales: salesForCashup,
+        logoUrl,
+      });
+    } catch (error) {
+      setErrorMessage(error?.message || "Unable to generate the cash-up PDF. Please try again.");
+    } finally {
+      setDownloadingCashupId(null);
     }
+  };
+
+  const handleVoidCompleted = (result) => {
+    setVoidSaleTarget(null);
+    setErrorMessage(null);
+    setStatusMessage(
+      result?.reviewTriggered
+        ? "Sale voided. The related cash-up now needs review."
+        : "Sale voided successfully.",
+    );
   };
 
   const handleSaveCashup = async (event) => {
@@ -547,6 +615,7 @@ function AdminPosCashUpPage() {
     try {
       const payload = {
         date: selectedDate,
+        dateKey: selectedDate,
         openingFloat: parseNumber(openingFloat, 0),
         cashCounted: countedValue,
         expectedCash: cashSummary.expectedCash,
@@ -557,9 +626,18 @@ function AdminPosCashUpPage() {
           discounts: cashTotals.discountTotal,
           total: cashTotals.total,
           count: cashTotals.count,
+          voidedCount: cashTotals.voidedCount,
+          voidedTotal: cashTotals.voidedTotal,
         },
         notes: notes.trim(),
         status: "completed",
+        reviewRequired: false,
+        reviewReason: null,
+        reviewTriggeredAt: null,
+        reviewTriggeredByVoidId: null,
+        reviewTriggeredByUid: null,
+        reviewTriggeredByEmail: null,
+        reviewCurrentTotals: null,
         updatedAt: serverTimestamp(),
         updatedBy: {
           uid: user?.uid || null,
@@ -598,8 +676,20 @@ function AdminPosCashUpPage() {
           <p className="modal__meta">Review the day's POS totals and confirm the cash balance.</p>
         </div>
         <div className="cashup-header__status">
-          <span className={`badge ${cashupsForDay.length ? "badge--success" : "badge--muted"}`}>
-            {cashupsForDay.length ? "Completed" : "Not completed"}
+          <span
+            className={`badge ${
+              activeCashupStatus === "review-needed"
+                ? "badge--stock-pending"
+                : cashupsForDay.length
+                  ? "badge--success"
+                  : "badge--muted"
+            }`}
+          >
+            {activeCashupStatus === "review-needed"
+              ? "Review needed"
+              : cashupsForDay.length
+                ? "Completed"
+                : "Not completed"}
           </span>
           <span className="modal__meta">
             {cashupsForDay.length ? `Last saved ${formatDateTime(activeCashup?.updatedAt || activeCashup?.createdAt)}` : "Save a cash-up to complete the day."}
@@ -608,6 +698,23 @@ function AdminPosCashUpPage() {
       </header>
 
       {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+      {activeCashupStatus === "review-needed" && (
+        <div className="cashup-review-banner">
+          <div>
+            <strong>This cash-up needs review.</strong>
+            <p className="modal__meta">
+              A receipt was voided after this cash-up was saved. Review the live totals below and save again to clear the flag.
+            </p>
+          </div>
+          {activeCashupReviewTotals && (
+            <div className="cashup-review-banner__stats">
+              <span>Saved total {moneyFormatter.format(parseNumber(activeCashup?.totals?.total, 0))}</span>
+              <span>Current total {moneyFormatter.format(parseNumber(activeCashupReviewTotals.total, 0))}</span>
+              <span>Voided {moneyFormatter.format(parseNumber(activeCashupReviewTotals.voidedTotal, 0))}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="admin-panel__content cashup-grid">
         <div className="cashup-card">
@@ -644,6 +751,14 @@ function AdminPosCashUpPage() {
               <div>
                 <span>Transactions</span>
                 <strong>{cashTotals.count}</strong>
+              </div>
+              <div>
+                <span>Voided receipts</span>
+                <strong>{cashTotals.voidedCount}</strong>
+              </div>
+              <div>
+                <span>Voided amount</span>
+                <strong>{moneyFormatter.format(cashTotals.voidedTotal)}</strong>
               </div>
             </div>
           )}
@@ -728,24 +843,57 @@ function AdminPosCashUpPage() {
             <p className="modal__meta">No POS sales recorded for this date.</p>
           ) : (
             <div className="admin-table__wrapper">
-              <table className="admin-table admin-table--compact">
+              <table className="admin-table admin-table--compact cashup-pos-sales-table">
                 <thead>
                   <tr>
                     <th scope="col">Receipt</th>
                     <th scope="col">Time</th>
+                    <th scope="col">Status</th>
                     <th scope="col">Payment</th>
+                    <th scope="col">Items</th>
                     <th scope="col">Total</th>
+                    <th scope="col">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {salesForDay.map((sale) => (
-                    <tr key={sale.id || sale.receiptNumber}>
-                      <td>{sale.receiptNumber || sale.id}</td>
-                      <td>{sale.createdAt ? sale.createdAt.toLocaleTimeString("en-ZA") : "-"}</td>
-                      <td>{sale.paymentMethod || "-"}</td>
-                      <td>{moneyFormatter.format(parseNumber(sale.total, 0))}</td>
-                    </tr>
-                  ))}
+                  {salesForDay.map((sale) => {
+                    const itemLines = getSaleItemLines(sale);
+                    return (
+                      <tr key={sale.id || sale.receiptNumber}>
+                        <td data-label="Receipt">{sale.receiptNumber || sale.id}</td>
+                        <td data-label="Time">{formatSaleTime(sale.createdAt)}</td>
+                        <td data-label="Status">
+                          <span className={`badge ${getPosSaleStatusBadgeClass(sale.status)}`}>
+                            {formatPosSaleStatusLabel(sale.status)}
+                          </span>
+                        </td>
+                        <td data-label="Payment">{sale.paymentMethod || "-"}</td>
+                        <td data-label="Items">
+                          <div className="cashup-sales-items">
+                            {itemLines.map((line, index) => (
+                              <span
+                                key={`${sale.id || sale.receiptNumber || "sale"}-line-${index}`}
+                                className="cashup-sales-items__line"
+                              >
+                                {line}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td data-label="Total">{moneyFormatter.format(getPosSaleNetTotal(sale))}</td>
+                        <td className="admin-table__actions cashup-actions" data-label="Actions">
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            onClick={() => setVoidSaleTarget(sale)}
+                            disabled={!functionsInstance}
+                          >
+                            Void / Correct
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -763,7 +911,14 @@ function AdminPosCashUpPage() {
                   const savedAt = cashup.updatedAt || cashup.createdAt;
                   const expectedCash = getCashupExpected(cashup);
                   const variance = getCashupVariance(cashup);
+                  const cardSales = parseNumber(cashup.totals?.card, 0);
                   const totalSales = parseNumber(cashup.totals?.total, 0);
+                  const currentTotals =
+                    cashup.reviewCurrentTotals && typeof cashup.reviewCurrentTotals === "object"
+                      ? cashup.reviewCurrentTotals
+                      : null;
+                  const cashupStatus = getCashupStatus(cashup);
+                  const isDownloadingPdf = downloadingCashupId === cashup.id;
                   return (
                     <article
                       key={cashup.id}
@@ -776,7 +931,9 @@ function AdminPosCashUpPage() {
                             Saved {savedAt ? savedAt.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "-"}
                           </p>
                         </div>
-                        <span className="badge badge--success">Completed</span>
+                        <span className={`badge ${cashupStatus === "review-needed" ? "badge--stock-pending" : "badge--success"}`}>
+                          {cashupStatus === "review-needed" ? "Review needed" : "Completed"}
+                        </span>
                       </div>
                       <div className="cashup-card-item__grid">
                         <div>
@@ -792,16 +949,53 @@ function AdminPosCashUpPage() {
                           <strong>{moneyFormatter.format(variance)}</strong>
                         </div>
                         <div>
+                          <span>Card sales</span>
+                          <strong>{moneyFormatter.format(cardSales)}</strong>
+                        </div>
+                        <div>
                           <span>Total sales</span>
                           <strong>{moneyFormatter.format(totalSales)}</strong>
                         </div>
                       </div>
+                      {currentTotals && cashupStatus === "review-needed" && (
+                        <div className="cashup-review-grid">
+                          <div>
+                            <span>Current cash</span>
+                            <strong>{moneyFormatter.format(parseNumber(currentTotals.cash, 0))}</strong>
+                          </div>
+                          <div>
+                            <span>Current card</span>
+                            <strong>{moneyFormatter.format(parseNumber(currentTotals.card, 0))}</strong>
+                          </div>
+                          <div>
+                            <span>Current total</span>
+                            <strong>{moneyFormatter.format(parseNumber(currentTotals.total, 0))}</strong>
+                          </div>
+                          <div>
+                            <span>Current count</span>
+                            <strong>{parseNumber(currentTotals.count, 0)}</strong>
+                          </div>
+                          <div>
+                            <span>Voided receipts</span>
+                            <strong>{parseNumber(currentTotals.voidedCount, 0)}</strong>
+                          </div>
+                          <div>
+                            <span>Voided amount</span>
+                            <strong>{moneyFormatter.format(parseNumber(currentTotals.voidedTotal, 0))}</strong>
+                          </div>
+                        </div>
+                      )}
                       <div className="cashup-card-item__actions">
                         <button className="btn btn--secondary" type="button" onClick={() => handleEditCashup(cashup)}>
                           Edit
                         </button>
-                        <button className="btn btn--primary" type="button" onClick={() => handleDownloadPdf(cashup)}>
-                          Download PDF
+                        <button
+                          className="btn btn--primary"
+                          type="button"
+                          onClick={() => handleDownloadPdf(cashup)}
+                          disabled={Boolean(downloadingCashupId)}
+                        >
+                          {isDownloadingPdf ? "Generating..." : "Download PDF"}
                         </button>
                       </div>
                     </article>
@@ -817,8 +1011,10 @@ function AdminPosCashUpPage() {
                       <th scope="col">Expected</th>
                       <th scope="col">Counted</th>
                       <th scope="col">Variance</th>
+                      <th scope="col">Card sales</th>
                       <th scope="col">Total sales</th>
                       <th scope="col">Status</th>
+                      <th scope="col">Current total</th>
                       <th scope="col">Actions</th>
                     </tr>
                   </thead>
@@ -827,24 +1023,46 @@ function AdminPosCashUpPage() {
                       const savedAt = cashup.updatedAt || cashup.createdAt;
                       const expectedCash = getCashupExpected(cashup);
                       const variance = getCashupVariance(cashup);
+                      const cardSales = parseNumber(cashup.totals?.card, 0);
                       const totalSales = parseNumber(cashup.totals?.total, 0);
+                      const currentTotals =
+                        cashup.reviewCurrentTotals && typeof cashup.reviewCurrentTotals === "object"
+                          ? cashup.reviewCurrentTotals
+                          : null;
+                      const cashupStatus = getCashupStatus(cashup);
+                      const isDownloadingPdf = downloadingCashupId === cashup.id;
                       return (
                         <tr key={cashup.id} className={cashup.id === editingCashupId ? "is-active" : ""}>
-                          <td>{formatDateLabel(cashup.dateKey || cashup.date)}</td>
-                          <td>{savedAt ? savedAt.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "-"}</td>
-                          <td>{moneyFormatter.format(expectedCash)}</td>
-                          <td>{moneyFormatter.format(parseNumber(cashup.cashCounted, 0))}</td>
-                          <td>{moneyFormatter.format(variance)}</td>
-                          <td>{moneyFormatter.format(totalSales)}</td>
-                          <td>
-                            <span className="badge badge--success">Completed</span>
+                          <td data-label="Date">{formatDateLabel(cashup.dateKey || cashup.date)}</td>
+                          <td data-label="Saved">
+                            {savedAt ? savedAt.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "-"}
                           </td>
-                          <td className="admin-table__actions cashup-actions">
+                          <td data-label="Expected">{moneyFormatter.format(expectedCash)}</td>
+                          <td data-label="Counted">{moneyFormatter.format(parseNumber(cashup.cashCounted, 0))}</td>
+                          <td data-label="Variance">{moneyFormatter.format(variance)}</td>
+                          <td data-label="Card sales">{moneyFormatter.format(cardSales)}</td>
+                          <td data-label="Total sales">{moneyFormatter.format(totalSales)}</td>
+                          <td data-label="Status">
+                            <span className={`badge ${cashupStatus === "review-needed" ? "badge--stock-pending" : "badge--success"}`}>
+                              {cashupStatus === "review-needed" ? "Review needed" : "Completed"}
+                            </span>
+                          </td>
+                          <td data-label="Current total">
+                            {currentTotals
+                              ? moneyFormatter.format(parseNumber(currentTotals.total, 0))
+                              : "-"}
+                          </td>
+                          <td className="admin-table__actions cashup-actions" data-label="Actions">
                             <button className="btn btn--secondary" type="button" onClick={() => handleEditCashup(cashup)}>
                               Edit
                             </button>
-                            <button className="btn btn--primary" type="button" onClick={() => handleDownloadPdf(cashup)}>
-                              Download PDF
+                            <button
+                              className="btn btn--primary"
+                              type="button"
+                              onClick={() => handleDownloadPdf(cashup)}
+                              disabled={Boolean(downloadingCashupId)}
+                            >
+                              {isDownloadingPdf ? "Generating..." : "Download PDF"}
                             </button>
                           </td>
                         </tr>
@@ -857,6 +1075,14 @@ function AdminPosCashUpPage() {
           )}
         </div>
       </div>
+
+      <PosVoidDialog
+        open={Boolean(voidSaleTarget)}
+        sale={voidSaleTarget}
+        functionsInstance={functionsInstance}
+        onClose={() => setVoidSaleTarget(null)}
+        onVoided={handleVoidCompleted}
+      />
     </div>
   );
 }
