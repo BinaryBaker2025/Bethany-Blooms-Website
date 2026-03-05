@@ -214,6 +214,10 @@ const GIFT_CARD_CONTACT_LINE = "079 267 0819";
 const GIFT_CARD_ASSET_DIRECTORY = path.join(__dirname, "assets", "giftcard");
 const GIFT_CARD_LOGO_FILE = path.join(GIFT_CARD_ASSET_DIRECTORY, "logo.png");
 const GIFT_CARD_SIGNATURE_FILE = path.join(GIFT_CARD_ASSET_DIRECTORY, "signiture.png");
+const GIFT_CARD_REMOTE_BACKGROUND_IMAGE_URL =
+  "https://raw.githubusercontent.com/BinaryBaker2025/Bethany-Blooms-Website/40b5f0c38fa88d1e7ca8e7a256df1b41bffbc90e/frontend/src/assets/Gemini_Generated_Image_466wr8466wr8466w.png";
+const GIFT_CARD_REMOTE_LOGO_IMAGE_URL =
+  "https://raw.githubusercontent.com/BinaryBaker2025/Bethany-Blooms-Website/0a0a1066a40c475f17ca1cf33d8334d0b6ecf37b/frontend/src/assets/BethanyBloomsLogo.png";
 const GIFT_CARDS_COLLECTION = "giftCards";
 const GIFT_CARD_REGISTRY_COLLECTION = "giftCardRegistry";
 const GIFT_CARD_DRAFTS_COLLECTION = "giftCardDrafts";
@@ -265,7 +269,13 @@ const GIFT_CARD_CODE_MAX_GENERATION_ATTEMPTS = 25;
 const GIFT_CARD_CODE_FALLBACK_SUFFIX_BYTES = 2;
 const WHOLE_CREW_MIN_QTY = 4;
 const WHOLE_CREW_OPTION_KEY = "wholecrew";
+const GIFT_CARD_MODE_CUSTOM_GIVEAWAY = "custom-giveaway";
+const GIFT_CARD_MODE_CATALOG_ITEM = "catalog-item";
 const GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY = "admin-giveaway";
+const GIFT_CARD_ISSUE_SOURCE_ADMIN_ISSUED = "admin-issued";
+const GIFT_CARD_CATALOG_KIND_PRODUCT = "product";
+const GIFT_CARD_CATALOG_KIND_WORKSHOP = "workshop";
+const GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS = "cut-flower-class";
 const FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON = "fresh-flower-blooming-stems";
 const FRESH_FLOWER_DELIVERY_NOTE =
   "A Bethany Blooms team member will contact you after checkout to confirm delivery details for fresh flowers and blooming stems.";
@@ -297,6 +307,7 @@ const ROBOTS_CACHE_CONTROL = "public, max-age=3600";
 const SITEMAP_CONTENT_TYPE = "application/xml; charset=utf-8";
 const ROBOTS_CONTENT_TYPE = "text/plain; charset=utf-8";
 let giftCardDesignAssetsCache = null;
+let giftCardRemoteDesignAssetsCache = null;
 
 const FIELD_VALUE = admin.firestore.FieldValue;
 
@@ -3748,6 +3759,25 @@ function normalizeGiftCardSelectedOptions(options = []) {
         }
       }
       if (!label || !Number.isFinite(amount)) return;
+      const sourceCollection = (option?.sourceCollection || option?.collection || "").toString().trim();
+      const sourceKind = (option?.sourceKind || option?.kind || "").toString().trim();
+      const sourceId = (
+        option?.sourceId ||
+        option?.productId ||
+        option?.workshopId ||
+        option?.classId ||
+        ""
+      )
+        .toString()
+        .trim();
+      const variantId = (option?.variantId || "").toString().trim();
+      const variantLabel = (option?.variantLabel || "").toString().trim();
+      const optionId = (option?.optionId || "").toString().trim();
+      const optionLabel = (option?.optionLabel || "").toString().trim();
+      const unitPriceSnapshot = normalizeGiftCardAmount(
+        option?.unitPriceSnapshot ?? option?.unitPrice ?? option?.snapshotAmount,
+        null,
+      );
       const id =
         (
           option?.id ||
@@ -3760,7 +3790,16 @@ function normalizeGiftCardSelectedOptions(options = []) {
           .toString()
           .trim() ||
         `option-${index + 1}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-      const key = `${id}::${label.toLowerCase()}::${amount}`;
+      const key = [
+        id,
+        label.toLowerCase(),
+        amount,
+        sourceCollection,
+        sourceKind,
+        sourceId,
+        variantId,
+        optionId,
+      ].join("::");
       const existing = mergedOptions.get(key);
       if (existing) {
         existing.quantity += quantity;
@@ -3771,6 +3810,14 @@ function normalizeGiftCardSelectedOptions(options = []) {
         label,
         amount,
         quantity,
+        ...(sourceCollection ? { sourceCollection } : {}),
+        ...(sourceKind ? { sourceKind } : {}),
+        ...(sourceId ? { sourceId } : {}),
+        ...(variantId ? { variantId } : {}),
+        ...(variantLabel ? { variantLabel } : {}),
+        ...(optionId ? { optionId } : {}),
+        ...(optionLabel ? { optionLabel } : {}),
+        ...(Number.isFinite(unitPriceSnapshot) ? { unitPriceSnapshot } : {}),
       });
     });
 
@@ -3923,6 +3970,516 @@ async function resolveAdminGiveawayGiftCardInput(payload = {}) {
   };
 }
 
+function normalizeAdminGiftCardMode(
+  value = "",
+  fallback = GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+) {
+  const normalized = value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  if (
+    normalized === GIFT_CARD_MODE_CATALOG_ITEM ||
+    normalized === "catalog" ||
+    normalized === "catalogitem"
+  ) {
+    return GIFT_CARD_MODE_CATALOG_ITEM;
+  }
+  if (
+    normalized === GIFT_CARD_MODE_CUSTOM_GIVEAWAY ||
+    normalized === "giveaway" ||
+    normalized === GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY
+  ) {
+    return GIFT_CARD_MODE_CUSTOM_GIVEAWAY;
+  }
+  return fallback;
+}
+
+function normalizeCatalogGiftCardItemType(value = "") {
+  const normalized = value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  if (normalized === "products" || normalized === GIFT_CARD_CATALOG_KIND_PRODUCT) {
+    return GIFT_CARD_CATALOG_KIND_PRODUCT;
+  }
+  if (normalized === "workshops" || normalized === GIFT_CARD_CATALOG_KIND_WORKSHOP) {
+    return GIFT_CARD_CATALOG_KIND_WORKSHOP;
+  }
+  if (
+    normalized === "classes" ||
+    normalized === "cut-flower-classes" ||
+    normalized === GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS
+  ) {
+    return GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS;
+  }
+  return "";
+}
+
+function getGiftCardCatalogCollectionForKind(kind = "") {
+  if (kind === GIFT_CARD_CATALOG_KIND_PRODUCT) return "products";
+  if (kind === GIFT_CARD_CATALOG_KIND_WORKSHOP) return "workshops";
+  if (kind === GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS) return "cutFlowerClasses";
+  return "";
+}
+
+function sanitizeGiftCardCatalogQuantity(value, fallback = 1) {
+  const parsed = parsePositiveInteger(value, fallback);
+  return Math.max(1, Math.min(200, parsed));
+}
+
+function buildCatalogGiftCardDefaultTerms({
+  kind = "",
+  title = "selected item",
+} = {}) {
+  const safeTitle = truncateText(title || "selected item", 160);
+  if (kind === GIFT_CARD_CATALOG_KIND_PRODUCT) {
+    return `This gift card is redeemable for ${safeTitle} before its expiry date and is not exchangeable for cash.`;
+  }
+  return `This gift card is redeemable for ${safeTitle} before its expiry date. Booking is arranged separately and remains subject to availability. This gift card is not exchangeable for cash.`;
+}
+
+function normalizeGiftCardCatalogItemRef(value = {}) {
+  if (!value || typeof value !== "object") return null;
+  const collection = (value.collection || "").toString().trim();
+  const kind = normalizeCatalogGiftCardItemType(value.kind || "");
+  const sourceId = (value.sourceId || "").toString().trim();
+  if (!collection || !kind || !sourceId) return null;
+  const titleSnapshot = truncateText(
+    value.titleSnapshot || value.title || value.productTitle || "Bethany Blooms Gift Card",
+    160,
+  );
+  const variantId = (value.variantId || "").toString().trim() || null;
+  const variantLabel = truncateText(value.variantLabel || "", 160) || null;
+  const optionId = (value.optionId || "").toString().trim() || null;
+  const optionLabel = truncateText(value.optionLabel || "", 160) || null;
+  const unitPriceSnapshot = normalizeGiftCardAmount(
+    value.unitPriceSnapshot ?? value.unitPrice ?? value.amount,
+    null,
+  );
+  const quantity = sanitizeGiftCardCatalogQuantity(value.quantity, 1);
+  const fulfillmentMode =
+    (value.fulfillmentMode || "").toString().trim() ||
+    (kind === GIFT_CARD_CATALOG_KIND_PRODUCT ? "inventory" : "booking-later");
+  return {
+    collection,
+    kind,
+    sourceId,
+    titleSnapshot,
+    variantId,
+    variantLabel,
+    optionId,
+    optionLabel,
+    unitPriceSnapshot: Number.isFinite(unitPriceSnapshot) ? unitPriceSnapshot : null,
+    quantity,
+    fulfillmentMode,
+  };
+}
+
+function isCatalogGiftCardPayload(giftCard = {}) {
+  return (
+    normalizeAdminGiftCardMode(giftCard?.giftCardMode || "", "") === GIFT_CARD_MODE_CATALOG_ITEM ||
+    normalizeAdminGiftCardMode(giftCard?.mode || "", "") === GIFT_CARD_MODE_CATALOG_ITEM ||
+    (giftCard?.issueSource || "").toString().trim().toLowerCase() === GIFT_CARD_ISSUE_SOURCE_ADMIN_ISSUED ||
+    Boolean(normalizeGiftCardCatalogItemRef(giftCard?.catalogItemRef))
+  );
+}
+
+function buildCatalogGiftCardSelectedOption({
+  kind = "",
+  collection = "",
+  sourceId = "",
+  title = "",
+  variantId = "",
+  variantLabel = "",
+  optionId = "",
+  optionLabel = "",
+  amount = null,
+  quantity = 1,
+} = {}) {
+  const safeAmount = normalizeGiftCardAmount(amount, null);
+  if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
+    throw new Error("Selected catalog item does not have a valid gift-card price.");
+  }
+  const safeQuantity = sanitizeGiftCardCatalogQuantity(quantity, 1);
+  const safeTitle = truncateText(title || "Bethany Blooms Gift", 160);
+  const safeVariantId = (variantId || "").toString().trim();
+  const safeVariantLabel = truncateText(variantLabel || "", 160);
+  const safeOptionId = (optionId || "").toString().trim();
+  const safeOptionLabel = truncateText(optionLabel || "", 160);
+  const labelParts = [safeTitle];
+  if (kind === GIFT_CARD_CATALOG_KIND_PRODUCT && safeVariantLabel) labelParts.push(safeVariantLabel);
+  if (kind === GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS && safeOptionLabel) labelParts.push(safeOptionLabel);
+  const label =
+    labelParts
+      .filter(Boolean)
+      .join(" - ")
+      .trim() || safeTitle;
+  return {
+    id: [kind || "catalog", sourceId || "item", safeVariantId || safeOptionId || "base"].join(":"),
+    label,
+    amount: safeAmount,
+    quantity: safeQuantity,
+    lineTotal: Number((safeAmount * safeQuantity).toFixed(2)),
+    unitPriceSnapshot: safeAmount,
+    ...(collection ? { sourceCollection: collection } : {}),
+    ...(kind ? { sourceKind: kind } : {}),
+    ...(sourceId ? { sourceId } : {}),
+    ...(safeVariantId ? { variantId: safeVariantId } : {}),
+    ...(safeVariantLabel ? { variantLabel: safeVariantLabel } : {}),
+    ...(safeOptionId ? { optionId: safeOptionId } : {}),
+    ...(safeOptionLabel ? { optionLabel: safeOptionLabel } : {}),
+  };
+}
+
+async function resolveAdminCatalogGiftCardInput(payload = {}) {
+  const itemType = normalizeCatalogGiftCardItemType(payload?.itemType || payload?.kind || "");
+  if (!itemType) {
+    throw new Error("Catalog item type is required.");
+  }
+  const collectionName = getGiftCardCatalogCollectionForKind(itemType);
+  const sourceId = (payload?.sourceId || payload?.itemId || "").toString().trim();
+  if (!sourceId) {
+    throw new Error("Catalog item is required.");
+  }
+
+  const sourceSnap = await db.collection(collectionName).doc(sourceId).get();
+  if (!sourceSnap.exists) {
+    throw new Error("Catalog item could not be found.");
+  }
+  const source = sourceSnap.data() || {};
+  const status = (source?.status || "live").toString().trim().toLowerCase();
+  if (status !== "live") {
+    throw new Error("Only live catalog items can be issued as gift cards.");
+  }
+
+  const quantity = sanitizeGiftCardCatalogQuantity(payload?.quantity, 1);
+  const message = truncateText(payload?.message || "", GIFT_CARD_MAX_MESSAGE_LENGTH);
+  const recipientName = truncateText(payload?.recipientName || "", GIFT_CARD_MAX_NAME_LENGTH);
+  const purchaserName = truncateText(payload?.purchaserName || "", GIFT_CARD_MAX_NAME_LENGTH);
+
+  if (itemType === GIFT_CARD_CATALOG_KIND_PRODUCT) {
+    if (source?.isGiftCard || source?.is_gift_card) {
+      throw new Error("Gift card products cannot be issued as catalog gift cards.");
+    }
+    const title = truncateText(source?.title || source?.name || "Bethany Blooms Product", 160);
+    const variants = Array.isArray(source?.variants) ? source.variants : [];
+    const selectedVariantId = (payload?.variantId || "").toString().trim();
+    let selectedVariant = null;
+    if (variants.length > 0) {
+      if (!selectedVariantId) {
+        throw new Error("Select a product variant.");
+      }
+      selectedVariant =
+        variants.find((variant) => (variant?.id || "").toString().trim() === selectedVariantId) || null;
+      if (!selectedVariant) {
+        throw new Error("Selected product variant could not be found.");
+      }
+    }
+    const unitPrice = normalizeGiftCardAmount(
+      selectedVariant ? selectedVariant?.price : source?.sale_price ?? source?.salePrice ?? source?.price,
+      null,
+    );
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      throw new Error("Selected product does not have a valid price.");
+    }
+    const selectedOptions = normalizeGiftCardSelectedOptions([
+      buildCatalogGiftCardSelectedOption({
+        kind: itemType,
+        collection: collectionName,
+        sourceId,
+        title,
+        variantId: selectedVariant?.id || "",
+        variantLabel: selectedVariant?.label || selectedVariant?.name || "",
+        amount: unitPrice,
+        quantity,
+      }),
+    ]);
+    const giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+    const expiryDays = normalizeGiftCardExpiryDays(payload?.expiryDays, GIFT_CARD_DEFAULT_EXPIRY_DAYS);
+    const terms = truncateText(
+      source?.giftCardTerms ||
+        source?.gift_card_terms ||
+        buildCatalogGiftCardDefaultTerms({ kind: itemType, title }),
+      GIFT_CARD_MAX_TERMS_LENGTH,
+    );
+    return {
+      mode: GIFT_CARD_MODE_CATALOG_ITEM,
+      itemType,
+      sourceId,
+      productId: sourceId,
+      productTitle: title,
+      recipientName,
+      purchaserName,
+      message,
+      terms,
+      expiryDays,
+      selectedOptions,
+      selectedOptionCount: quantity,
+      giftCardValue,
+      catalogItemRef: normalizeGiftCardCatalogItemRef({
+        collection: collectionName,
+        kind: itemType,
+        sourceId,
+        titleSnapshot: title,
+        variantId: selectedVariant?.id || "",
+        variantLabel: selectedVariant?.label || selectedVariant?.name || "",
+        unitPriceSnapshot: unitPrice,
+        quantity,
+        fulfillmentMode: "inventory",
+      }),
+    };
+  }
+
+  if (itemType === GIFT_CARD_CATALOG_KIND_WORKSHOP) {
+    const title = truncateText(source?.title || source?.name || "Bethany Blooms Workshop", 160);
+    const unitPrice = normalizeGiftCardAmount(source?.price, null);
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      throw new Error("Selected workshop does not have a valid price.");
+    }
+    const selectedOptions = normalizeGiftCardSelectedOptions([
+      buildCatalogGiftCardSelectedOption({
+        kind: itemType,
+        collection: collectionName,
+        sourceId,
+        title,
+        amount: unitPrice,
+        quantity,
+      }),
+    ]);
+    const giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+    const expiryDays = normalizeGiftCardExpiryDays(payload?.expiryDays, GIFT_CARD_DEFAULT_EXPIRY_DAYS);
+    const terms = truncateText(
+      buildCatalogGiftCardDefaultTerms({ kind: itemType, title }),
+      GIFT_CARD_MAX_TERMS_LENGTH,
+    );
+    return {
+      mode: GIFT_CARD_MODE_CATALOG_ITEM,
+      itemType,
+      sourceId,
+      productId: null,
+      productTitle: title,
+      recipientName,
+      purchaserName,
+      message,
+      terms,
+      expiryDays,
+      selectedOptions,
+      selectedOptionCount: quantity,
+      giftCardValue,
+      catalogItemRef: normalizeGiftCardCatalogItemRef({
+        collection: collectionName,
+        kind: itemType,
+        sourceId,
+        titleSnapshot: title,
+        unitPriceSnapshot: unitPrice,
+        quantity,
+        fulfillmentMode: "booking-later",
+      }),
+    };
+  }
+
+  if (itemType === GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS) {
+    const title = truncateText(source?.title || source?.name || "Bethany Blooms Class", 160);
+    const options = Array.isArray(source?.options) ? source.options : [];
+    const selectedOptionId = (payload?.optionId || "").toString().trim();
+    let selectedOption = null;
+    if (options.length > 0) {
+      if (!selectedOptionId) {
+        throw new Error("Select a class option.");
+      }
+      selectedOption =
+        options.find((option) => (option?.id || option?.value || "").toString().trim() === selectedOptionId) || null;
+      if (!selectedOption) {
+        throw new Error("Selected class option could not be found.");
+      }
+    }
+    const unitPrice = normalizeGiftCardAmount(
+      selectedOption?.price ?? selectedOption?.amount ?? source?.price,
+      null,
+    );
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      throw new Error("Selected class does not have a valid price.");
+    }
+    const selectedOptions = normalizeGiftCardSelectedOptions([
+      buildCatalogGiftCardSelectedOption({
+        kind: itemType,
+        collection: collectionName,
+        sourceId,
+        title,
+        optionId: selectedOption?.id || selectedOption?.value || "",
+        optionLabel: selectedOption?.label || selectedOption?.name || "",
+        amount: unitPrice,
+        quantity,
+      }),
+    ]);
+    const giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+    const expiryDays = normalizeGiftCardExpiryDays(payload?.expiryDays, GIFT_CARD_DEFAULT_EXPIRY_DAYS);
+    const terms = truncateText(
+      buildCatalogGiftCardDefaultTerms({ kind: itemType, title }),
+      GIFT_CARD_MAX_TERMS_LENGTH,
+    );
+    return {
+      mode: GIFT_CARD_MODE_CATALOG_ITEM,
+      itemType,
+      sourceId,
+      productId: null,
+      productTitle: title,
+      recipientName,
+      purchaserName,
+      message,
+      terms,
+      expiryDays,
+      selectedOptions,
+      selectedOptionCount: quantity,
+      giftCardValue,
+      catalogItemRef: normalizeGiftCardCatalogItemRef({
+        collection: collectionName,
+        kind: itemType,
+        sourceId,
+        titleSnapshot: title,
+        optionId: selectedOption?.id || selectedOption?.value || "",
+        optionLabel: selectedOption?.label || selectedOption?.name || "",
+        unitPriceSnapshot: unitPrice,
+        quantity,
+        fulfillmentMode: "booking-later",
+      }),
+    };
+  }
+
+  throw new Error("Unsupported catalog item type.");
+}
+
+function inferCatalogGiftCardDraftItemRef(draft = {}) {
+  const normalizedDraftRef = normalizeGiftCardCatalogItemRef(draft?.catalogItemRef);
+  if (normalizedDraftRef) return normalizedDraftRef;
+
+  const firstSelectedOption = normalizeGiftCardSelectedOptions(draft?.selectedOptions)[0] || null;
+  const kind = normalizeCatalogGiftCardItemType(firstSelectedOption?.sourceKind || "");
+  const collection =
+    (firstSelectedOption?.sourceCollection || getGiftCardCatalogCollectionForKind(kind))
+      .toString()
+      .trim();
+  const sourceId = (
+    firstSelectedOption?.sourceId ||
+    (kind === GIFT_CARD_CATALOG_KIND_PRODUCT ? draft?.productId : "") ||
+    ""
+  )
+    .toString()
+    .trim();
+  if (!kind || !collection || !sourceId) return null;
+
+  return normalizeGiftCardCatalogItemRef({
+    collection,
+    kind,
+    sourceId,
+    titleSnapshot:
+      draft?.productTitle ||
+      firstSelectedOption?.label ||
+      "Bethany Blooms Gift Card",
+    variantId: firstSelectedOption?.variantId || "",
+    variantLabel: firstSelectedOption?.variantLabel || "",
+    optionId: firstSelectedOption?.optionId || "",
+    optionLabel: firstSelectedOption?.optionLabel || "",
+    unitPriceSnapshot:
+      firstSelectedOption?.unitPriceSnapshot ??
+      firstSelectedOption?.amount ??
+      null,
+    quantity:
+      firstSelectedOption?.quantity ||
+      draft?.selectedOptionCount ||
+      1,
+    fulfillmentMode:
+      kind === GIFT_CARD_CATALOG_KIND_PRODUCT ? "inventory" : "booking-later",
+  });
+}
+
+function resolveAdminCatalogGiftCardDraftInput(draft = {}) {
+  const catalogItemRef = inferCatalogGiftCardDraftItemRef(draft);
+  if (!catalogItemRef) {
+    throw new Error("Catalog item details are missing from this saved draft.");
+  }
+
+  let selectedOptions = normalizeGiftCardSelectedOptions(draft?.selectedOptions);
+  if (!selectedOptions.length) {
+    selectedOptions = normalizeGiftCardSelectedOptions([
+      buildCatalogGiftCardSelectedOption({
+        kind: catalogItemRef.kind,
+        collection: catalogItemRef.collection,
+        sourceId: catalogItemRef.sourceId,
+        title: catalogItemRef.titleSnapshot,
+        variantId: catalogItemRef.variantId || "",
+        variantLabel: catalogItemRef.variantLabel || "",
+        optionId: catalogItemRef.optionId || "",
+        optionLabel: catalogItemRef.optionLabel || "",
+        amount: catalogItemRef.unitPriceSnapshot,
+        quantity: catalogItemRef.quantity || 1,
+      }),
+    ]);
+  }
+  if (!selectedOptions.length) {
+    throw new Error("Catalog item selections are missing from this saved draft.");
+  }
+
+  const giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+  if (!Number.isFinite(giftCardValue) || giftCardValue <= 0) {
+    throw new Error("Catalog item pricing is invalid in this saved draft.");
+  }
+
+  const selectedOptionCountValue = Number(draft?.selectedOptionCount);
+  const selectedOptionCount =
+    Number.isFinite(selectedOptionCountValue) && selectedOptionCountValue > 0
+      ? Math.floor(selectedOptionCountValue)
+      : selectedOptions.reduce(
+          (sum, option) => sum + normalizeGiftCardOptionQuantity(option?.quantity, 1),
+          0,
+        );
+  const titleSnapshot = truncateText(
+    draft?.productTitle || catalogItemRef.titleSnapshot || "Bethany Blooms Gift Card",
+    160,
+  );
+  const itemType = normalizeCatalogGiftCardItemType(catalogItemRef.kind || "");
+  return {
+    mode: GIFT_CARD_MODE_CATALOG_ITEM,
+    itemType,
+    sourceId: catalogItemRef.sourceId,
+    productId: itemType === GIFT_CARD_CATALOG_KIND_PRODUCT ? catalogItemRef.sourceId : null,
+    productTitle: titleSnapshot,
+    recipientName: truncateText(draft?.recipientName || "", GIFT_CARD_MAX_NAME_LENGTH),
+    purchaserName: truncateText(draft?.purchaserName || "", GIFT_CARD_MAX_NAME_LENGTH),
+    message: truncateText(draft?.message || "", GIFT_CARD_MAX_MESSAGE_LENGTH),
+    terms: truncateText(
+      draft?.terms || buildCatalogGiftCardDefaultTerms({ kind: itemType, title: titleSnapshot }),
+      GIFT_CARD_MAX_TERMS_LENGTH,
+    ),
+    expiryDays: normalizeGiftCardExpiryDays(draft?.expiryDays, GIFT_CARD_DEFAULT_EXPIRY_DAYS),
+    selectedOptions,
+    selectedOptionCount,
+    giftCardValue,
+    catalogItemRef,
+  };
+}
+
+async function resolveAdminGiftCardInput(payload = {}) {
+  const mode = normalizeAdminGiftCardMode(
+    payload?.mode || (payload?.itemType || payload?.sourceId ? GIFT_CARD_MODE_CATALOG_ITEM : ""),
+    GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+  );
+  if (mode === GIFT_CARD_MODE_CATALOG_ITEM) {
+    return resolveAdminCatalogGiftCardInput(payload);
+  }
+  const resolved = await resolveAdminGiveawayGiftCardInput(payload);
+  return {
+    ...resolved,
+    mode: GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+    recipientName: "",
+    purchaserName: "",
+    catalogItemRef: null,
+  };
+}
+
 function normalizeGiftCardStatus(value = "", fallback = GIFT_CARD_STATUS_ACTIVE) {
   const normalized = (value || fallback).toString().trim().toLowerCase();
   return normalized || fallback;
@@ -3942,6 +4499,9 @@ function buildGiftCardSourceType(giftCard = {}) {
   const issueSource = (giftCard?.issueSource || "").toString().trim().toLowerCase();
   if (issueSource === GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY || giftCard?.isGiveaway) {
     return "admin-giveaway";
+  }
+  if (issueSource === GIFT_CARD_ISSUE_SOURCE_ADMIN_ISSUED || isCatalogGiftCardPayload(giftCard)) {
+    return "admin-issued";
   }
   if (giftCard?.isTest || issueSource === "admin-test") {
     return "admin-test";
@@ -3993,6 +4553,7 @@ function buildGiftCardRegistryPayload(giftCard = {}, giftCardId = "") {
   const selectedOptions = normalizeGiftCardSelectedOptions(giftCard?.selectedOptions);
   const sourceType = buildGiftCardSourceType(giftCard);
   const selectedOptionCount = Number(publicPayload.selectedOptionCount || 0);
+  const catalogItemRef = normalizeGiftCardCatalogItemRef(giftCard?.catalogItemRef);
   return {
     giftCardId: normalizedGiftCardId,
     code: publicPayload.code,
@@ -4016,6 +4577,8 @@ function buildGiftCardRegistryPayload(giftCard = {}, giftCardId = "") {
     siteAccessUrl: publicPayload.siteAccessUrl || "",
     orderId: (giftCard?.orderId || "").toString().trim() || null,
     orderNumber: giftCard?.orderNumber ?? null,
+    giftCardMode: publicPayload.giftCardMode || null,
+    catalogItemRef,
     productId: (giftCard?.productId || "").toString().trim() || null,
     productTitle: (giftCard?.productTitle || "").toString().trim() || "Bethany Blooms Gift Card",
     issuedAt: giftCard?.issuedAt || null,
@@ -4104,6 +4667,8 @@ async function createGiveawayGiftCardRecord({
     message: resolved.message || null,
     productId: resolved.productId,
     productTitle: resolved.productTitle,
+    giftCardMode: GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+    catalogItemRef: null,
     terms: resolved.terms,
     selectedOptions: resolved.selectedOptions,
     selectedOptionCount: resolved.selectedOptionCount,
@@ -4113,6 +4678,95 @@ async function createGiveawayGiftCardRecord({
     pdfStoragePath,
     isGiveaway: true,
     issueSource: GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
+    issueMeta: {
+      createdByUid: request?.auth?.uid || null,
+      createdByEmail: (request?.auth?.token?.email || "").toString().trim() || null,
+      draftId: (draftId || "").toString().trim() || null,
+    },
+    updatedAt: FIELD_VALUE.serverTimestamp(),
+    createdAt: FIELD_VALUE.serverTimestamp(),
+  };
+
+  const pdfBytes = await createGiftCardPdfBytes({
+    ...giftCardRecord,
+    issuedAt: issuedAtDate,
+    expiresAt: expiresAtDate,
+  });
+  const bucket = admin.storage().bucket();
+  await bucket.file(pdfStoragePath).save(pdfBytes, {
+    contentType: "application/pdf",
+    resumable: false,
+    metadata: {
+      cacheControl: "private, max-age=0, no-store",
+    },
+  });
+
+  await db.collection(GIFT_CARDS_COLLECTION).doc(giftCardId).set(giftCardRecord, {
+    merge: true,
+  });
+
+  const giftCardPayload = buildGiftCardPublicPayload(giftCardRecord, giftCardId, token);
+  return {
+    giftCardId,
+    giftCardRecord,
+    giftCardPayload,
+  };
+}
+
+async function createAdminCatalogGiftCardRecord({
+  resolved = null,
+  request = null,
+  draftId = "",
+} = {}) {
+  if (!resolved || typeof resolved !== "object") {
+    throw new Error("Catalog gift card input is invalid.");
+  }
+  const catalogItemRef = normalizeGiftCardCatalogItemRef(resolved.catalogItemRef);
+  if (!catalogItemRef) {
+    throw new Error("Catalog gift card item could not be resolved.");
+  }
+  const giftCardId = `gc-admin-${crypto.randomBytes(10).toString("hex")}`;
+  const token = createGiftCardAccessToken(giftCardId);
+  const issuedAtDate = new Date();
+  const expiresAtDate = new Date(
+    issuedAtDate.getTime() + resolved.expiryDays * 24 * 60 * 60 * 1000,
+  );
+  const code = await generateUniqueGiftCardCode({
+    orderNumber: "ADMIN",
+    giftCardId,
+    lineIndex: 0,
+    unitIndex: 0,
+  });
+  const pdfStoragePath = resolveGiftCardPdfStoragePath({
+    giftCardId,
+    issueSource: GIFT_CARD_ISSUE_SOURCE_ADMIN_ISSUED,
+  });
+  const giftCardRecord = {
+    id: giftCardId,
+    orderId: null,
+    orderNumber: null,
+    orderItemIndex: null,
+    orderItemUnit: null,
+    code,
+    status: "active",
+    value: resolved.giftCardValue,
+    currency: GIFT_CARD_VALUE_CURRENCY,
+    purchaserName: resolved.purchaserName || "",
+    recipientName: resolved.recipientName || "",
+    message: resolved.message || null,
+    productId: resolved.productId || null,
+    productTitle: resolved.productTitle,
+    giftCardMode: GIFT_CARD_MODE_CATALOG_ITEM,
+    catalogItemRef,
+    terms: resolved.terms,
+    selectedOptions: resolved.selectedOptions,
+    selectedOptionCount: resolved.selectedOptionCount,
+    expiryDays: resolved.expiryDays,
+    issuedAt: admin.firestore.Timestamp.fromDate(issuedAtDate),
+    expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
+    pdfStoragePath,
+    isGiveaway: false,
+    issueSource: GIFT_CARD_ISSUE_SOURCE_ADMIN_ISSUED,
     issueMeta: {
       createdByUid: request?.auth?.uid || null,
       createdByEmail: (request?.auth?.token?.email || "").toString().trim() || null,
@@ -4158,13 +4812,28 @@ function toGiveawayGiftCardHttpsError(error, fallbackMessage) {
     normalized.includes("gift card option") ||
     normalized.includes("whole crew") ||
     normalized.includes("select at least") ||
-    normalized.includes("not a gift card");
+    normalized.includes("not a gift card") ||
+    normalized.includes("variant") ||
+    normalized.includes("catalog item") ||
+    normalized.includes("workshop") ||
+    normalized.includes("class");
   return new HttpsError(looksLikeValidationError ? "invalid-argument" : "internal", message);
 }
 
-function buildGiftCardInvitationLine({ recipientDisplay = "Gift recipient", isGiveaway = false } = {}) {
+function buildGiftCardInvitationLine({
+  recipientDisplay = "Gift recipient",
+  isGiveaway = false,
+  catalogItemRef = null,
+} = {}) {
   if (isGiveaway) return "";
   const recipient = (recipientDisplay || "Gift recipient").toString().trim() || "Gift recipient";
+  const normalizedCatalogItemRef = normalizeGiftCardCatalogItemRef(catalogItemRef);
+  if (normalizedCatalogItemRef?.kind === GIFT_CARD_CATALOG_KIND_PRODUCT) {
+    return `For ${recipient} to enjoy a Bethany Blooms gift made just for them.`;
+  }
+  if (normalizedCatalogItemRef) {
+    return `For ${recipient} to book a Bethany Blooms experience when the time is right.`;
+  }
   return `For ${recipient} to come and join us at our farm.`;
 }
 
@@ -4327,6 +4996,32 @@ function getGiftCardDesignAssets() {
   return giftCardDesignAssetsCache;
 }
 
+async function fetchOptionalRemoteBuffer(url = "") {
+  const normalizedUrl = (url || "").toString().trim();
+  if (!normalizedUrl) return null;
+  try {
+    const response = await fetch(normalizedUrl);
+    if (!response.ok) return null;
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch {
+    return null;
+  }
+}
+
+async function getGiftCardRemoteDesignAssets() {
+  if (giftCardRemoteDesignAssetsCache) return giftCardRemoteDesignAssetsCache;
+  const [logoBuffer, backgroundBuffer] = await Promise.all([
+    fetchOptionalRemoteBuffer(GIFT_CARD_REMOTE_LOGO_IMAGE_URL),
+    fetchOptionalRemoteBuffer(GIFT_CARD_REMOTE_BACKGROUND_IMAGE_URL),
+  ]);
+  giftCardRemoteDesignAssetsCache = {
+    logoBuffer,
+    backgroundBuffer,
+  };
+  return giftCardRemoteDesignAssetsCache;
+}
+
 function formatGiftCardDate(value) {
   const date = coerceTimestampToDate(value);
   if (!date) return "";
@@ -4376,8 +5071,53 @@ function buildGiftCardDownloadUrl(giftCardId = "", token = "", { inline = false 
   return `${functionsBase}/downloadGiftCardPdfHttp?giftCardId=${idPart}&token=${tokenPart}${inlinePart}`;
 }
 
+function buildGiftCardDisplayTermsText(giftCard = {}) {
+  return (
+    (giftCard.terms || "").toString().trim() ||
+    "Redeemable for Bethany Blooms products and services only before expiry. Non-refundable and not exchangeable for cash."
+  );
+}
+
+function buildGiftCardDisplayOptionItems(selectedOptions = []) {
+  const normalized = normalizeGiftCardSelectedOptions(selectedOptions);
+  if (!normalized.length) {
+    return [
+      {
+        label: "No selections recorded.",
+        detail: "",
+        valueLabel: "",
+      },
+    ];
+  }
+  return normalized.map((option) => {
+    const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
+    const amount = Number(option?.amount || 0);
+    const lineTotal = Number(option?.lineTotal ?? amount * quantity);
+    const detail =
+      quantity > 1
+        ? `${quantity} x ${formatCurrency(amount)} · ${formatCurrency(lineTotal)}`
+        : formatCurrency(amount);
+    return {
+      label: (option?.label || "Gift card selection").toString().trim(),
+      detail,
+      valueLabel: formatCurrency(quantity > 1 ? lineTotal : amount),
+    };
+  });
+}
+
+function clampGiftCardDisplayItems(items = [], maxItems = 6) {
+  if (!Array.isArray(items) || items.length <= maxItems) return items;
+  const visible = items.slice(0, Math.max(1, maxItems - 1));
+  const remaining = items.length - visible.length;
+  visible.push({
+    label: `Plus ${remaining} more selection${remaining === 1 ? "" : "s"}`,
+    detail: "Included on file",
+  });
+  return visible;
+}
+
 function buildGiftCardViewerHtml(giftCard = {}) {
-  const { logoDataUri, signatureDataUri } = getGiftCardDesignAssets();
+  const { signatureDataUri } = getGiftCardDesignAssets();
   const selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
   const isGiveaway = isGiveawayGiftCardPayload(giftCard);
   const purchaserDisplay = (giftCard.purchaserName || "Bethany Blooms Customer").toString().trim();
@@ -4386,54 +5126,50 @@ function buildGiftCardViewerHtml(giftCard = {}) {
     recipientDisplay,
     selectedOptions,
     isGiveaway,
+    catalogItemRef: giftCard.catalogItemRef,
   });
-  const invitationLineHtml = invitationLine
-    ? `<p class="recipient-line">${escapeHtml(invitationLine)}</p>`
-    : "";
-  const giveawayMetaHtml = "";
+  const invitationLineHtml = invitationLine ? `<p class="recipient-line">${escapeHtml(invitationLine)}</p>` : "";
   const paidDateLabel =
     formatGiftCardCompactDate(giftCard.issuedAt) ||
     formatGiftCardCompactDate(new Date().toISOString()) ||
     "N/A";
   const expiryLabel = formatGiftCardDate(giftCard.expiresAt) || "No expiry date set";
-  const optionRows = selectedOptions.length
-    ? selectedOptions
-        .map((option, index) => {
-          const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
-          const amount = Number(option?.amount || 0);
-          const lineTotal = Number(option?.lineTotal ?? amount * quantity);
-          const detail = quantity > 1
-            ? `${quantity} x ${formatCurrency(amount)} (${formatCurrency(lineTotal)} total)`
-            : formatCurrency(amount);
-          return `
-            <li class="option-row">
-              <span class="option-index">${index + 1}.</span>
-              <span class="option-label">${escapeHtml(option.label)}</span>
-              <span class="option-detail">${escapeHtml(detail)}</span>
-            </li>`;
-        })
-        .join("")
-    : '<li class="option-row option-row--empty"><span class="option-label">No options recorded.</span></li>';
+  const optionRows = clampGiftCardDisplayItems(buildGiftCardDisplayOptionItems(selectedOptions), 6)
+    .map(
+      (option, index) => `
+        <li class="option-row">
+          <span class="option-copy">
+            <strong class="option-label">${escapeHtml(option.label)}</strong>
+            ${option.detail ? `<span class="option-detail">${escapeHtml(option.detail)}</span>` : ""}
+          </span>
+          ${option.valueLabel ? `<strong class="option-price">${escapeHtml(option.valueLabel)}</strong>` : ""}
+        </li>`,
+    )
+    .join("");
   const messageHtml = giftCard.message
-    ? `<p class="message">"${escapeHtml(giftCard.message)}"</p>`
+    ? `
+      <section class="message-card">
+        <p class="section-label">Message</p>
+        <div class="message-quote">
+          <span class="message-mark" aria-hidden="true">"</span>
+          <p class="message">${escapeHtml(giftCard.message)}</p>
+        </div>
+      </section>`
     : "";
-  const termsText =
-    (giftCard.terms || "").toString().trim() ||
-    "Redeemable for Bethany Blooms products and services only, before expiry. Non-refundable and not exchangeable for cash.";
+  const termsText = buildGiftCardDisplayTermsText(giftCard);
   const siteAccessUrl = (giftCard.siteAccessUrl || "").toString().trim();
   const actionLinks = [
     giftCard.downloadUrl
       ? `<a class="btn" href="${escapeHtml(giftCard.downloadUrl)}">Download PDF</a>`
       : "",
-    '<a class="btn btn--alt" href="#" onclick="window.print();return false;">Print voucher</a>',
     siteAccessUrl
       ? `<a class="btn btn--ghost" href="${escapeHtml(siteAccessUrl)}">Open website page</a>`
       : "",
   ]
     .filter(Boolean)
     .join("");
-  const logoHtml = logoDataUri
-    ? `<img class="logo-art" src="${logoDataUri}" alt="Bethany Blooms Flower Farm logo"/>`
+  const logoHtml = GIFT_CARD_REMOTE_LOGO_IMAGE_URL
+    ? `<img class="logo-art" src="${escapeHtml(GIFT_CARD_REMOTE_LOGO_IMAGE_URL)}" alt="Bethany Blooms Flower Farm logo"/>`
     : `<p class="logo-fallback">BETHANY BLOOMS FLOWER FARM</p>`;
   const signatureHtml = signatureDataUri
     ? `<img class="signature-art" src="${signatureDataUri}" alt="Bethany Blooms signature"/>`
@@ -4451,126 +5187,189 @@ function buildGiftCardViewerHtml(giftCard = {}) {
       body {
         margin: 0;
         font-family: Georgia, "Times New Roman", Times, serif;
-        background: radial-gradient(1200px 500px at 50% -120px, #f5efdf 0%, #ece3cf 62%, #e8deca 100%);
-        color: #2f5e44;
+        background:
+          radial-gradient(1100px 460px at 15% 0%, rgba(255, 255, 255, 0.6), transparent 60%),
+          linear-gradient(180deg, #efe6d6 0%, #e7dcc8 100%);
+        color: #274936;
       }
       .shell {
-        max-width: 1020px;
+        max-width: 1180px;
         margin: 24px auto 30px;
         padding: 0 16px;
       }
       .gift-card {
         position: relative;
         overflow: hidden;
-        border-radius: 22px;
+        border-radius: 32px;
         background:
-          radial-gradient(160% 120% at 0% 0%, rgba(255, 255, 255, 0.78), transparent 58%),
-          linear-gradient(180deg, rgba(248, 241, 226, 0.98) 0%, rgba(237, 229, 210, 0.98) 100%);
-        border: 1px solid rgba(47, 94, 68, 0.24);
-        box-shadow: 0 30px 52px -32px rgba(31, 47, 37, 0.65);
-        padding: 38px 44px 42px;
-      }
-      .gift-card--giveaway {
-        border-color: rgba(47, 94, 68, 0.34);
-        box-shadow: 0 34px 58px -34px rgba(31, 47, 37, 0.7);
+          linear-gradient(145deg, rgba(249, 244, 235, 0.9), rgba(238, 228, 209, 0.88)),
+          radial-gradient(110% 90% at 10% 0%, rgba(255, 255, 255, 0.72), transparent 58%),
+          url("${escapeHtml(GIFT_CARD_REMOTE_BACKGROUND_IMAGE_URL)}") center/cover no-repeat;
+        border: 1px solid rgba(108, 117, 91, 0.26);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.76),
+          0 34px 68px -42px rgba(44, 53, 39, 0.5);
+        padding: 34px 34px 30px;
       }
       .gift-card::before {
         content: "";
         position: absolute;
-        top: -170px;
-        right: -130px;
-        width: 390px;
-        height: 390px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(225, 197, 167, 0.35) 0%, rgba(225, 197, 167, 0) 72%);
+        inset: 16px;
+        border-radius: 24px;
+        border: 1px solid rgba(171, 155, 125, 0.28);
         pointer-events: none;
       }
       .gift-card::after {
         content: "";
         position: absolute;
-        bottom: -190px;
-        left: -120px;
-        width: 410px;
-        height: 410px;
+        bottom: -160px;
+        left: -100px;
+        width: 320px;
+        height: 320px;
         border-radius: 50%;
-        background: radial-gradient(circle, rgba(167, 198, 175, 0.24) 0%, rgba(167, 198, 175, 0) 72%);
+        background:
+          radial-gradient(circle, rgba(121, 152, 119, 0.16) 0%, rgba(121, 152, 119, 0) 72%),
+          radial-gradient(circle at 84% 16%, rgba(199, 176, 144, 0.22) 0%, rgba(199, 176, 144, 0) 56%);
         pointer-events: none;
       }
-      .logo-wrap {
-        text-align: center;
-        margin-bottom: 20px;
+      .brand-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 18px;
       }
       .logo-art {
-        width: min(760px, 100%);
-        max-height: 185px;
+        width: min(290px, 100%);
+        max-height: 92px;
         object-fit: contain;
       }
       .logo-fallback {
         margin: 0;
-        font-size: 48px;
-        letter-spacing: 0.1em;
+        font-size: 28px;
+        letter-spacing: 0.08em;
         line-height: 1.05;
       }
-      .headline,
-      .gift-title,
-      .recipient-line,
-      .location,
-      .phone {
-        text-align: center;
-        margin: 0;
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 84px;
+        padding: 9px 14px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #698e60, #55794d);
+        color: #fffaf1;
+        font: 700 11px/1.1 Arial, sans-serif;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
-        color: #2f6a47;
+        box-shadow: 0 12px 18px -16px rgba(36, 68, 51, 0.8);
       }
-      .headline {
-        font-size: clamp(28px, 4.2vw, 56px);
-        letter-spacing: 0.14em;
+      .eyebrow {
+        margin: 0;
+        color: #7a7a55;
+        font: 700 11px/1.1 Arial, sans-serif;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
       }
       .gift-title {
-        margin-top: 18px;
-        font-size: clamp(31px, 4.7vw, 64px);
-        letter-spacing: 0.11em;
-        text-decoration: underline;
-        text-decoration-thickness: 2px;
-        text-underline-offset: 10px;
+        margin: 10px 0 0;
+        font-size: clamp(38px, 4.8vw, 62px);
+        line-height: 0.95;
+        letter-spacing: 0.04em;
+        color: #244433;
       }
       .recipient-line {
-        margin-top: 22px;
-        font-size: clamp(27px, 3.8vw, 52px);
-        line-height: 1.28;
-        text-transform: none;
-        letter-spacing: 0.08em;
-      }
-      .meta-line {
-        text-align: center;
         margin: 14px 0 0;
-        font-size: 18px;
-        letter-spacing: 0.05em;
+        max-width: 780px;
+        font-size: clamp(20px, 3vw, 31px);
+        line-height: 1.45;
+        text-transform: none;
+        letter-spacing: 0.01em;
+        color: rgba(39, 73, 54, 0.9);
       }
-      .meta-line--giveaway {
-        display: inline-flex;
-        justify-content: center;
-        margin: 14px auto 0;
-        padding: 6px 14px;
-        border-radius: 999px;
-        border: 1px solid rgba(47, 94, 68, 0.25);
-        background: rgba(255, 255, 255, 0.62);
-        font-size: 14px;
+      .hero-grid {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1.55fr) minmax(255px, 0.92fr);
+        gap: 22px;
+        margin-top: 24px;
+      }
+      .hero-main,
+      .content-stack {
+        display: grid;
+        gap: 18px;
+      }
+      .value-panel,
+      .message-card,
+      .detail-panel,
+      .options-card,
+      .terms-card {
+        border-radius: 24px;
+        border: 1px solid rgba(131, 136, 109, 0.22);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.62),
+          0 16px 32px -28px rgba(58, 54, 39, 0.5);
+      }
+      .value-panel {
+        padding: 22px 24px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(248, 242, 228, 0.85)),
+          rgba(255, 255, 255, 0.72);
+      }
+      .value-label,
+      .section-label {
+        margin: 0 0 8px;
+        color: #766c49;
+        font: 700 10px/1.1 Arial, sans-serif;
+        letter-spacing: 0.2em;
         text-transform: uppercase;
       }
-      .message {
-        margin: 10px auto 0;
-        max-width: 760px;
-        text-align: center;
-        font-size: 24px;
-        line-height: 1.35;
-        color: rgba(47, 94, 68, 0.9);
+      .value-amount {
+        margin: 0;
+        font-size: clamp(46px, 6vw, 72px);
+        line-height: 0.9;
+        color: #173726;
       }
-      .options {
-        margin: 26px auto 0;
-        max-width: 810px;
+      .value-note {
+        margin: 10px 0 0;
+        font-size: 16px;
+        line-height: 1.65;
+        color: rgba(39, 73, 54, 0.74);
+      }
+      .message-card,
+      .options-card,
+      .terms-card,
+      .detail-panel {
+        padding: 18px 20px;
+      }
+      .message-card {
+        background:
+          radial-gradient(140% 120% at 0% 0%, rgba(255, 255, 255, 0.68), transparent 62%),
+          linear-gradient(180deg, rgba(251, 241, 232, 0.92), rgba(248, 239, 228, 0.78));
+      }
+      .message-quote {
+        position: relative;
+        margin-top: 10px;
+        padding: 6px 0 0 28px;
+      }
+      .message-mark {
+        position: absolute;
+        top: -14px;
+        left: -2px;
+        color: rgba(171, 129, 110, 0.36);
+        font-size: 66px;
+        line-height: 1;
+      }
+      .message {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.8;
+        font-style: italic;
+        color: rgba(43, 63, 48, 0.95);
       }
       .option-list {
-        margin: 0;
+        margin: 10px 0 0;
         padding: 0;
         list-style: none;
         display: grid;
@@ -4578,82 +5377,86 @@ function buildGiftCardViewerHtml(giftCard = {}) {
       }
       .option-row {
         display: grid;
-        grid-template-columns: 34px 1fr auto;
-        gap: 8px;
-        align-items: baseline;
-        border-bottom: 1px dashed rgba(47, 94, 68, 0.22);
-        padding-bottom: 8px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: flex-start;
+        padding-bottom: 9px;
+        border-bottom: 1px dashed rgba(109, 122, 96, 0.22);
       }
-      .option-row--empty {
-        grid-template-columns: 1fr;
-        text-align: center;
-      }
-      .option-index,
-      .option-label,
-      .option-detail {
-        font-size: 18px;
+      .option-row:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
       }
       .option-detail {
+        display: block;
+        margin-top: 3px;
+        color: rgba(39, 73, 54, 0.7);
+        font: 400 13px/1.5 Arial, sans-serif;
+      }
+      .option-label {
+        display: block;
+        font-size: 17px;
+        line-height: 1.4;
+        color: #244433;
+      }
+      .option-price {
+        padding-top: 1px;
+        color: #214232;
+        font-size: 15px;
+        line-height: 1.45;
         white-space: nowrap;
       }
-      .option-index {
-        font-weight: 700;
+      .detail-panel {
+        display: grid;
+        gap: 14px;
+        align-content: start;
+        background:
+          radial-gradient(130% 120% at 100% 0%, rgba(255, 255, 255, 0.78), transparent 60%),
+          rgba(255, 255, 255, 0.8);
       }
-      .bottom-block {
-        margin-top: 30px;
-        position: relative;
-        min-height: 130px;
+      .detail-item {
+        display: grid;
+        gap: 5px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid rgba(109, 122, 96, 0.2);
       }
-      .location,
-      .phone {
-        letter-spacing: 0.12em;
+      .detail-item:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
       }
-      .location {
-        font-size: clamp(26px, 3.2vw, 46px);
-        line-height: 1.15;
+      .detail-item--person {
+        gap: 7px;
       }
-      .phone {
-        margin-top: 10px;
-        font-size: clamp(36px, 4.2vw, 60px);
-        line-height: 1.1;
-      }
-      .signature-box {
-        position: absolute;
-        right: 6px;
-        bottom: -6px;
-        text-align: right;
-      }
-      .signature-art {
-        width: 155px;
-        max-width: 36vw;
-        height: auto;
-        display: block;
-        margin-left: auto;
-      }
-      .signature-fallback {
-        font-size: 18px;
-        font-style: italic;
-      }
-      .paid-line {
-        margin-top: 4px;
-        font: 700 15px/1.1 "Courier New", Courier, monospace;
-        color: #2f5e44;
-        letter-spacing: 0.12em;
-      }
-      .code-line,
-      .expiry-line,
-      .status-line {
-        margin: 8px 0 0;
-        text-align: center;
-        font-size: 17px;
-        letter-spacing: 0.04em;
-      }
-      .status-line {
-        margin-top: 4px;
+      .detail-item span {
+        color: #766c49;
+        font: 700 10px/1.1 Arial, sans-serif;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
       }
+      .detail-item strong {
+        font-size: 16px;
+        line-height: 1.4;
+        color: #244433;
+      }
+      .detail-item--person strong {
+        font-size: 24px;
+        line-height: 1.18;
+        color: #173726;
+      }
+      .terms-copy {
+        margin: 6px 0 0;
+        font: 400 14px/1.7 Arial, sans-serif;
+        color: rgba(39, 73, 54, 0.78);
+      }
+      .footer-row {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 18px;
+        margin-top: 22px;
+      }
       .actions {
-        margin-top: 14px;
+        margin-top: 16px;
         display: flex;
         flex-wrap: wrap;
         gap: 10px;
@@ -4680,51 +5483,62 @@ function buildGiftCardViewerHtml(giftCard = {}) {
         background: transparent;
         color: #2f6a47;
       }
-      .terms-card {
-        margin-top: 16px;
-        background: rgba(255, 255, 255, 0.72);
-        border-radius: 12px;
-        border: 1px solid rgba(47, 94, 68, 0.18);
-        padding: 18px 20px;
+      .footer-copy {
+        display: grid;
+        gap: 6px;
       }
-      .terms-card h3 {
-        margin: 0 0 8px;
-        text-transform: uppercase;
-        letter-spacing: 0.11em;
-        font-size: 16px;
-      }
-      .terms-card p {
+      .footer-copy p,
+      .paid-line {
         margin: 0;
-        font-size: 14px;
-        line-height: 1.55;
+      }
+      .footer-copy p {
+        font-size: 15px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .signature-box {
+        text-align: right;
+        display: grid;
+        justify-items: end;
+        gap: 4px;
+      }
+      .signature-art {
+        width: 120px;
+        max-width: 32vw;
+        height: auto;
+        display: block;
+        margin-left: auto;
+      }
+      .signature-fallback {
+        font-size: 18px;
+        font-style: italic;
+      }
+      .paid-line {
+        margin-top: 4px;
+        font: 700 12px/1.1 Arial, sans-serif;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
       }
       .note {
         margin-top: 8px;
         font-size: 12px;
         color: rgba(47, 94, 68, 0.8);
       }
-      @media (max-width: 740px) {
+      @media (max-width: 860px) {
         .gift-card {
-          padding: 22px 18px 28px;
+          padding: 22px 18px 24px;
         }
-        .option-row {
-          grid-template-columns: 28px 1fr;
-        }
-        .option-detail {
-          grid-column: 2;
-          white-space: normal;
-          font-size: 16px;
+        .brand-row,
+        .hero-grid,
+        .footer-row {
+          grid-template-columns: 1fr;
+          display: grid;
         }
         .signature-box {
-          position: static;
-          margin-top: 18px;
-          text-align: center;
+          text-align: left;
         }
         .signature-art {
-          margin: 0 auto;
-        }
-        .paid-line {
-          text-align: center;
+          margin-left: 0;
         }
       }
       @media print {
@@ -4738,19 +5552,16 @@ function buildGiftCardViewerHtml(giftCard = {}) {
         .shell {
           margin: 0 auto;
           padding: 0;
-          max-width: 1020px;
+          max-width: 1180px;
         }
         .gift-card {
-          border: 1px solid rgba(47, 94, 68, 0.2);
-          border-radius: 14px;
+          min-height: calc(100vh - 8px);
+          border: none;
+          border-radius: 0;
           box-shadow: none;
           margin: 0;
-          page-break-after: avoid;
         }
         .actions {
-          display: none !important;
-        }
-        .terms-card {
           display: none !important;
         }
       }
@@ -4759,46 +5570,72 @@ function buildGiftCardViewerHtml(giftCard = {}) {
   <body>
     <div class="shell">
       <article class="gift-card${isGiveaway ? " gift-card--giveaway" : ""}">
-        <div class="logo-wrap">${logoHtml}</div>
-        <p class="headline">COME AND PICK YOUR OWN BLOOMS</p>
-        <p class="gift-title">FLOWER FARM GIFT CARD</p>
-        ${invitationLineHtml}
-        ${giveawayMetaHtml}
-        ${messageHtml}
-        <div class="options">
-          <ol class="option-list">${optionRows}</ol>
+        <div class="brand-row">
+          <div>${logoHtml}</div>
+          <span class="status-pill">${escapeHtml(giftCard.status || "active")}</span>
         </div>
-        <div class="bottom-block">
-          <p class="location">${escapeHtml(GIFT_CARD_LOCATION_LINE)}</p>
-          <p class="phone">${escapeHtml(GIFT_CARD_CONTACT_LINE)}</p>
+        <p class="eyebrow">Bethany Blooms Flower Farm</p>
+        <h1 class="gift-title">Flower Farm Gift Card</h1>
+        ${invitationLineHtml}
+        <div class="hero-grid">
+          <div class="hero-main">
+            <section class="value-panel">
+              <p class="value-label">Gifted amount</p>
+              <p class="value-amount">${escapeHtml(formatCurrency(giftCard.value || 0))}</p>
+              <p class="value-note">Valid for Bethany Blooms products and experiences before the expiry date shown on this card.</p>
+            </section>
+            ${messageHtml}
+          </div>
+          <aside class="detail-panel">
+            <div class="detail-item detail-item--person">
+              <span>Recipient</span>
+              <strong>${escapeHtml(recipientDisplay)}</strong>
+            </div>
+            ${!isGiveaway ? `<div class="detail-item detail-item--person"><span>Purchased by</span><strong>${escapeHtml(purchaserDisplay || "Bethany Blooms Customer")}</strong></div>` : ""}
+            <div class="detail-item">
+              <span>Card code</span>
+              <strong>${escapeHtml(giftCard.code || "Gift Card")}</strong>
+            </div>
+            <div class="detail-item">
+              <span>Value</span>
+              <strong>${escapeHtml(formatCurrency(giftCard.value || 0))} ${escapeHtml(GIFT_CARD_VALUE_CURRENCY)}</strong>
+            </div>
+            <div class="detail-item">
+              <span>Expiry</span>
+              <strong>${escapeHtml(expiryLabel)}</strong>
+            </div>
+            <div class="detail-item">
+              <span>Issued</span>
+              <strong>${escapeHtml(paidDateLabel)}</strong>
+            </div>
+          </aside>
+        </div>
+        <div class="content-stack">
+          <section class="options-card">
+            <p class="section-label">Included selections</p>
+            <ol class="option-list">${optionRows}</ol>
+          </section>
+          <section class="terms-card">
+            <p class="section-label">Terms</p>
+            <p class="terms-copy">${escapeHtml(termsText).replace(/\n/g, "<br/>")}</p>
+          </section>
+        </div>
+        <div class="footer-row">
+          <div class="footer-copy">
+            <p>${escapeHtml(GIFT_CARD_LOCATION_LINE)}</p>
+            <p>${escapeHtml(GIFT_CARD_CONTACT_LINE)}</p>
+          </div>
           <div class="signature-box">
             ${signatureHtml}
             <p class="paid-line">PAID: ${escapeHtml(paidDateLabel)}</p>
           </div>
         </div>
-        <p class="code-line">Card code: ${escapeHtml(giftCard.code || "Gift Card")}</p>
-        <p class="expiry-line">Valid until: ${escapeHtml(expiryLabel)}</p>
-        <p class="status-line">Status: ${escapeHtml(giftCard.status || "active")}</p>
       </article>
       <div class="actions">
         ${actionLinks}
       </div>
-      <section class="terms-card">
-        <h3>Gift Card Terms</h3>
-        <p>${escapeHtml(termsText).replace(/\n/g, "<br/>")}</p>
-        <p class="note">If this page opened correctly, your gift card link is working.</p>
-      </section>
+      <p class="note">If this page opened correctly, your gift card link is working.</p>
     </div>
-    <script>
-      (function () {
-        var params = new URLSearchParams(window.location.search || "");
-        if (params.get("print") === "1") {
-          window.addEventListener("load", function () {
-            window.print();
-          });
-        }
-      })();
-    </script>
   </body>
 </html>`;
 }
@@ -4893,6 +5730,45 @@ function drawCenteredPdfText({
   return cursorY;
 }
 
+function buildRoundedPdfRectPath(x, y, width, height, radius = 16) {
+  const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+  if (!safeRadius) {
+    return `M ${x} ${y} L ${x + width} ${y} L ${x + width} ${y + height} L ${x} ${y + height} Z`;
+  }
+  return [
+    `M ${x + safeRadius} ${y}`,
+    `L ${x + width - safeRadius} ${y}`,
+    `C ${x + width - safeRadius / 2} ${y} ${x + width} ${y + safeRadius / 2} ${x + width} ${y + safeRadius}`,
+    `L ${x + width} ${y + height - safeRadius}`,
+    `C ${x + width} ${y + height - safeRadius / 2} ${x + width - safeRadius / 2} ${y + height} ${x + width - safeRadius} ${y + height}`,
+    `L ${x + safeRadius} ${y + height}`,
+    `C ${x + safeRadius / 2} ${y + height} ${x} ${y + height - safeRadius / 2} ${x} ${y + height - safeRadius}`,
+    `L ${x} ${y + safeRadius}`,
+    `C ${x} ${y + safeRadius / 2} ${x + safeRadius / 2} ${y} ${x + safeRadius} ${y}`,
+    "Z",
+  ].join(" ");
+}
+
+function drawRoundedPdfRect({
+  page,
+  x = 0,
+  y = 0,
+  width = 0,
+  height = 0,
+  radius = 16,
+  color,
+  borderColor,
+  borderWidth = 1,
+  opacity = 1,
+}) {
+  page.drawSvgPath(buildRoundedPdfRectPath(x, y, width, height, radius), {
+    ...(color ? { color } : {}),
+    ...(borderColor ? { borderColor } : {}),
+    borderWidth,
+    opacity,
+  });
+}
+
 function buildGiftCardPlanFromOrder(order = {}, orderId = "") {
   const orderItems = Array.isArray(order.items) ? order.items : [];
   const plans = [];
@@ -4977,13 +5853,25 @@ async function createGiftCardPdfBytes(giftCard = {}) {
   const fontSerif = await pdf.embedFont(StandardFonts.TimesRoman);
   const fontSerifBold = await pdf.embedFont(StandardFonts.TimesRomanBold);
   const { logoBuffer, signatureBuffer } = getGiftCardDesignAssets();
+  const remoteDesignAssets = await getGiftCardRemoteDesignAssets();
+  const preferredLogoBuffer = remoteDesignAssets?.logoBuffer || logoBuffer;
+  const backgroundBuffer = remoteDesignAssets?.backgroundBuffer || null;
 
   let logoImage = null;
-  if (logoBuffer) {
+  if (preferredLogoBuffer) {
     try {
-      logoImage = await pdf.embedPng(logoBuffer);
+      logoImage = await pdf.embedPng(preferredLogoBuffer);
     } catch {
       logoImage = null;
+    }
+  }
+
+  let backgroundImage = null;
+  if (backgroundBuffer) {
+    try {
+      backgroundImage = await pdf.embedPng(backgroundBuffer);
+    } catch {
+      backgroundImage = null;
     }
   }
 
@@ -4997,56 +5885,60 @@ async function createGiftCardPdfBytes(giftCard = {}) {
   }
 
   const palette = {
-    bg: rgb(0.95, 0.92, 0.85),
-    card: rgb(0.97, 0.94, 0.88),
-    cardBorder: rgb(0.68, 0.72, 0.62),
-    text: rgb(0.18, 0.39, 0.29),
-    darkText: rgb(0.15, 0.27, 0.2),
-    accent: rgb(0.88, 0.79, 0.68),
-    accentSoft: rgb(0.79, 0.87, 0.81),
+    bg: rgb(0.944, 0.914, 0.862),
+    card: rgb(0.98, 0.972, 0.952),
+    panel: rgb(0.973, 0.963, 0.942),
+    message: rgb(0.973, 0.944, 0.914),
+    border: rgb(0.747, 0.739, 0.64),
+    frame: rgb(0.83, 0.78, 0.67),
+    text: rgb(0.09, 0.215, 0.16),
+    muted: rgb(0.45, 0.42, 0.29),
+    accent: rgb(0.34, 0.49, 0.31),
+    accentSoft: rgb(0.86, 0.87, 0.78),
+    blush: rgb(0.87, 0.79, 0.73),
   };
 
-  const drawGiftCardPageFrame = (page, { decorative = true } = {}) => {
-    const width = page.getWidth();
-    const height = page.getHeight();
-    page.drawRectangle({
-      x: 0,
-      y: 0,
+  const drawSectionBox = ({
+    page,
+    x,
+    y,
+    width,
+    height,
+    title = "",
+    radius = 18,
+    fill = palette.panel,
+  }) => {
+    drawRoundedPdfRect({
+      page,
+      x,
+      y,
       width,
       height,
-      color: palette.bg,
+      radius,
+      color: fill,
+      borderColor: palette.border,
+      borderWidth: 0.8,
+      opacity: 0.9,
     });
-    if (decorative) {
-      page.drawRectangle({
-        x: -40,
-        y: height - 225,
-        width: width + 80,
-        height: 230,
-        color: palette.accentSoft,
-        opacity: 0.18,
-      });
-      page.drawRectangle({
-        x: -25,
-        y: -15,
-        width: width + 50,
-        height: 220,
-        color: palette.accent,
-        opacity: 0.14,
+    if (title) {
+      page.drawText(title.toUpperCase(), {
+        x: x + 14,
+        y: y + height - 18,
+        size: 8.5,
+        font: fontSansBold,
+        color: palette.muted,
       });
     }
-    page.drawRectangle({
-      x: 24,
-      y: 28,
-      width: width - 48,
-      height: height - 56,
-      color: palette.card,
-      borderColor: palette.cardBorder,
-      borderWidth: 1.2,
-      opacity: 0.96,
-    });
   };
 
+  const page = pdf.addPage(pageSize);
+  const width = page.getWidth();
+  const height = page.getHeight();
   const selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
+  const displayOptions = clampGiftCardDisplayItems(
+    buildGiftCardDisplayOptionItems(selectedOptions),
+    6,
+  );
   const isGiveaway = isGiveawayGiftCardPayload(giftCard);
   const purchaserDisplay = (giftCard.purchaserName || "Bethany Blooms Customer").toString().trim();
   const recipientDisplay = (giftCard.recipientName || purchaserDisplay || "Gift recipient").toString().trim();
@@ -5054,356 +5946,395 @@ async function createGiftCardPdfBytes(giftCard = {}) {
     recipientDisplay,
     selectedOptions,
     isGiveaway,
+    catalogItemRef: giftCard.catalogItemRef,
   });
+  const termsText = buildGiftCardDisplayTermsText(giftCard);
   const paidDateLabel =
     formatGiftCardCompactDate(giftCard.issuedAt) ||
     formatGiftCardCompactDate(new Date().toISOString()) ||
     "N/A";
   const expiryLabel = formatGiftCardDate(giftCard.expiresAt) || "No expiry date set";
+  const messageText =
+    (giftCard.message || "").toString().trim() ||
+    "A thoughtful Bethany Blooms gift, ready to redeem when the moment feels right.";
 
-  const optionLines = selectedOptions.length
-    ? selectedOptions.map((option) => {
-        const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
-        const amount = Number(option?.amount || 0);
-        const lineTotal = Number(option?.lineTotal ?? amount * quantity);
-        if (quantity <= 1) return `${option.label} (${formatCurrency(amount)})`;
-        return `${option.label} x${quantity} (${formatCurrency(amount)} each, ${formatCurrency(lineTotal)} total)`;
-      })
-    : ["No options recorded."];
+  page.drawRectangle({
+    x: 0,
+    y: 0,
+    width,
+    height,
+    color: palette.bg,
+  });
+  page.drawRectangle({
+    x: -40,
+    y: height - 220,
+    width: 250,
+    height: 250,
+    color: palette.accentSoft,
+    opacity: 0.28,
+  });
+  page.drawRectangle({
+    x: width - 220,
+    y: -40,
+    width: 290,
+    height: 220,
+    color: palette.blush,
+    opacity: 0.24,
+  });
 
-  const frontPage = pdf.addPage(pageSize);
-  drawGiftCardPageFrame(frontPage);
-  const width = frontPage.getWidth();
-  const height = frontPage.getHeight();
+  drawRoundedPdfRect({
+    page,
+    x: 24,
+    y: 26,
+    width: width - 48,
+    height: height - 52,
+    radius: 24,
+    color: palette.card,
+    borderColor: palette.border,
+    borderWidth: 1.1,
+  });
+  if (backgroundImage) {
+    const coverScale = Math.max((width - 48) / backgroundImage.width, (height - 52) / backgroundImage.height);
+    const renderedWidth = backgroundImage.width * coverScale;
+    const renderedHeight = backgroundImage.height * coverScale;
+    page.drawImage(backgroundImage, {
+      x: 24 + (width - 48 - renderedWidth) / 2,
+      y: 26 + (height - 52 - renderedHeight) / 2,
+      width: renderedWidth,
+      height: renderedHeight,
+      opacity: 0.18,
+    });
+  }
+  drawRoundedPdfRect({
+    page,
+    x: 38,
+    y: 40,
+    width: width - 76,
+    height: height - 80,
+    radius: 18,
+    color: undefined,
+    borderColor: palette.frame,
+    borderWidth: 0.9,
+    opacity: 1,
+  });
 
   if (logoImage) {
-    const logoDims = logoImage.scaleToFit(width - 100, 205);
-    frontPage.drawImage(logoImage, {
-      x: (width - logoDims.width) / 2,
-      y: height - 240,
+    const logoDims = logoImage.scaleToFit(250, 88);
+    page.drawImage(logoImage, {
+      x: 42,
+      y: height - 116,
       width: logoDims.width,
       height: logoDims.height,
       opacity: 0.98,
     });
   } else {
-    drawCenteredPdfText({
-      page: frontPage,
-      text: "BETHANY BLOOMS FLOWER FARM",
-      y: height - 126,
-      maxWidth: width - 100,
+    page.drawText("BETHANY BLOOMS FLOWER FARM", {
+      x: 42,
+      y: height - 76,
+      size: 20,
       font: fontSerifBold,
-      fontSize: 30,
-      lineHeight: 36,
       color: palette.text,
     });
   }
 
-  drawCenteredPdfText({
-    page: frontPage,
-    text: "COME AND PICK YOUR OWN BLOOMS",
-    y: 546,
-    maxWidth: width - 90,
-    font: fontSerif,
-    fontSize: 22,
-    lineHeight: 28,
-    color: palette.text,
+  drawRoundedPdfRect({
+    page,
+    x: width - 120,
+    y: height - 88,
+    width: 74,
+    height: 24,
+    radius: 12,
+    color: palette.accent,
+    borderColor: palette.accent,
+    borderWidth: 0.4,
+    opacity: 0.96,
+  });
+  page.drawText((giftCard.status || "active").toString().toUpperCase(), {
+    x: width - 109,
+    y: height - 79,
+    size: 8.4,
+    font: fontSansBold,
+    color: rgb(0.98, 0.97, 0.94),
   });
 
-  const giftTitle = "FLOWER FARM GIFT CARD";
-  const giftTitleSize = 29;
-  const giftTitleWidth = fontSerifBold.widthOfTextAtSize(giftTitle, giftTitleSize);
-  const giftTitleX = Math.max(0, (width - giftTitleWidth) / 2);
-  const giftTitleY = 500;
-  frontPage.drawText(giftTitle, {
-    x: giftTitleX,
-    y: giftTitleY,
-    size: giftTitleSize,
+  page.drawText("BETHANY BLOOMS FLOWER FARM", {
+    x: 42,
+    y: height - 140,
+    size: 9.5,
+    font: fontSansBold,
+    color: palette.muted,
+  });
+  page.drawText("FLOWER FARM GIFT CARD", {
+    x: 42,
+    y: height - 176,
+    size: 28,
     font: fontSerifBold,
     color: palette.text,
   });
-  frontPage.drawLine({
-    start: { x: giftTitleX, y: giftTitleY - 4 },
-    end: { x: giftTitleX + giftTitleWidth, y: giftTitleY - 4 },
-    thickness: 1.3,
+  drawWrappedPdfText({
+    page,
+    text: invitationLine || "A Bethany Blooms gift to use at the perfect time.",
+    x: 42,
+    y: height - 204,
+    maxWidth: width - 84,
+    font: fontSerif,
+    fontSize: 14.3,
+    lineHeight: 17,
     color: palette.text,
   });
 
-  if (invitationLine) {
-    drawCenteredPdfText({
-      page: frontPage,
-      text: invitationLine,
-      y: 444,
-      maxWidth: width - 116,
-      font: fontSerif,
-      fontSize: 17,
-      lineHeight: 23,
-      color: palette.darkText,
-    });
-  }
-  if (giftCard.message) {
-    const messageLines = splitTextToPdfLines(`"${giftCard.message}"`, fontSerif, 11.5, width - 140).slice(0, 3);
-    let messageY = isGiveaway ? 392 : 364;
-    messageLines.forEach((line) => {
-      const lineWidth = fontSerif.widthOfTextAtSize(line, 11.5);
-      const x = Math.max(0, (width - lineWidth) / 2);
-      frontPage.drawText(line, {
-        x,
-        y: messageY,
-        size: 11.5,
-        font: fontSerif,
-        color: rgb(0.24, 0.36, 0.28),
-      });
-      messageY -= 15;
-    });
-  }
+  const leftX = 42;
+  const leftWidth = 334;
+  const rightX = 390;
+  const rightWidth = 162;
+  const heroTop = 560;
+  const amountHeight = 100;
+  const messageLines = splitTextToPdfLines(messageText, fontSerif, 11.8, leftWidth - 48).slice(0, 4);
+  const messageHeight = Math.max(88, 46 + messageLines.length * 16);
+  const amountY = heroTop - amountHeight;
+  const messageY = amountY - 12 - messageHeight;
 
-  const selectedOptionsLabelY = isGiveaway ? 360 : 333;
-  frontPage.drawText("Selected options", {
-    x: 57,
-    y: selectedOptionsLabelY,
+  const detailEntries = [
+    { label: "Recipient", value: recipientDisplay, kind: "person" },
+    ...(!isGiveaway
+      ? [{ label: "Purchased by", value: purchaserDisplay || "Bethany Blooms Customer", kind: "person" }]
+      : []),
+    { label: "Card code", value: giftCard.code || "Gift Card", kind: "meta" },
+    { label: "Value", value: `${formatCurrency(giftCard.value || 0)} ${GIFT_CARD_VALUE_CURRENCY}`, kind: "meta" },
+    { label: "Expiry", value: expiryLabel, kind: "meta" },
+    { label: "Issued", value: paidDateLabel, kind: "meta" },
+  ].map((entry) => {
+    const font = entry.kind === "person" ? fontSerifBold : fontSansBold;
+    const fontSize = entry.kind === "person" ? 13.6 : 10.1;
+    const lineHeight = entry.kind === "person" ? 15.2 : 11.6;
+    const lines = splitTextToPdfLines(entry.value, font, fontSize, rightWidth - 30).slice(0, 2);
+    const blockHeight =
+      entry.kind === "person"
+        ? 26 + lines.length * lineHeight
+        : 22 + lines.length * lineHeight;
+    return {
+      ...entry,
+      font,
+      fontSize,
+      lineHeight,
+      lines,
+      blockHeight,
+    };
+  });
+  const detailsHeight = 24 + detailEntries.reduce((sum, entry) => sum + entry.blockHeight + 7, 0);
+  const detailsY = heroTop - detailsHeight;
+
+  const optionRows = displayOptions.map((option) => {
+    const labelLines = splitTextToPdfLines(option.label, fontSansBold, 10.2, leftWidth - 118).slice(0, 2);
+    const detailLines = option.detail
+      ? splitTextToPdfLines(option.detail, fontSans, 8.7, leftWidth - 118).slice(0, 1)
+      : [];
+    const rowHeight = 10 + labelLines.length * 11.8 + detailLines.length * 9.4 + 7;
+    return {
+      ...option,
+      labelLines,
+      detailLines,
+      rowHeight,
+    };
+  });
+  const optionsHeight = Math.max(
+    78,
+    28 + optionRows.reduce((sum, row) => sum + row.rowHeight, 0) + Math.max(0, optionRows.length - 1) * 3,
+  );
+  const heroBottom = Math.min(messageY, detailsY);
+  const optionsY = heroBottom - 16 - optionsHeight;
+  const termLines = splitTextToPdfLines(termsText, fontSans, 9.1, width - 116).slice(0, 3);
+  const termsHeight = Math.max(54, 24 + termLines.length * 11.5);
+  const termsY = optionsY - 14 - termsHeight;
+
+  drawSectionBox({
+    page,
+    x: leftX,
+    y: amountY,
+    width: leftWidth,
+    height: amountHeight,
+    title: "Gifted amount",
+  });
+  page.drawText(formatCurrency(giftCard.value || 0), {
+    x: leftX + 16,
+    y: amountY + 48,
+    size: 36,
+    font: fontSerifBold,
+    color: palette.text,
+  });
+  drawWrappedPdfText({
+    page,
+    text: "Redeemable for Bethany Blooms products and experiences before the expiry date shown below.",
+    x: leftX + 16,
+    y: amountY + 32,
+    maxWidth: leftWidth - 32,
+    font: fontSans,
+    fontSize: 9.8,
+    lineHeight: 12,
+    color: palette.muted,
+  });
+
+  drawSectionBox({
+    page,
+    x: leftX,
+    y: messageY,
+    width: leftWidth,
+    height: messageHeight,
+    title: "Message",
+    fill: palette.message,
+  });
+  page.drawText('"', {
+    x: leftX + 12,
+    y: messageY + messageHeight - 42,
+    size: 40,
+    font: fontSerif,
+    color: rgb(0.66, 0.53, 0.47),
+    opacity: 0.38,
+  });
+  let messageCursorY = messageY + messageHeight - 34;
+  messageLines.forEach((line) => {
+    page.drawText(line, {
+      x: leftX + 34,
+      y: messageCursorY,
+      size: 11.8,
+      font: fontSerif,
+      color: palette.text,
+    });
+    messageCursorY -= 15.5;
+  });
+
+  drawSectionBox({
+    page,
+    x: leftX,
+    y: optionsY,
+    width: leftWidth,
+    height: optionsHeight,
+    title: "Included selections",
+  });
+  let optionCursorY = optionsY + optionsHeight - 28;
+  optionRows.forEach((option) => {
+    option.labelLines.forEach((line, index) => {
+      page.drawText(line, {
+        x: leftX + 14,
+        y: optionCursorY,
+        size: 10.2,
+        font: fontSansBold,
+        color: palette.text,
+      });
+      if (index === 0 && option.valueLabel) {
+        const amountWidth = fontSansBold.widthOfTextAtSize(option.valueLabel, 10.2);
+        page.drawText(option.valueLabel, {
+          x: leftX + leftWidth - 16 - amountWidth,
+          y: optionCursorY,
+          size: 10.2,
+          font: fontSansBold,
+          color: palette.text,
+        });
+      }
+      optionCursorY -= 11.6;
+    });
+    option.detailLines.forEach((line) => {
+      page.drawText(line, {
+        x: leftX + 14,
+        y: optionCursorY,
+        size: 8.7,
+        font: fontSans,
+        color: palette.muted,
+      });
+      optionCursorY -= 9.4;
+    });
+    optionCursorY -= 10;
+  });
+
+  drawSectionBox({
+    page,
+    x: rightX,
+    y: detailsY,
+    width: rightWidth,
+    height: detailsHeight,
+    title: "Card details",
+  });
+  let detailY = detailsY + detailsHeight - 24;
+  detailEntries.forEach((entry, entryIndex) => {
+    page.drawText(entry.label.toUpperCase(), {
+      x: rightX + 14,
+      y: detailY,
+      size: 7.8,
+      font: fontSansBold,
+      color: palette.muted,
+    });
+    let valueY = detailY - (entry.kind === "person" ? 16 : 14);
+    entry.lines.forEach((line) => {
+      page.drawText(line, {
+        x: rightX + 14,
+        y: valueY,
+        size: entry.fontSize,
+        font: entry.font,
+        color: palette.text,
+      });
+      valueY -= entry.lineHeight;
+    });
+    if (entryIndex < detailEntries.length - 1) {
+      page.drawLine({
+        start: { x: rightX + 14, y: valueY - 2 },
+        end: { x: rightX + rightWidth - 14, y: valueY - 2 },
+        thickness: 0.5,
+        color: rgb(0.82, 0.82, 0.76),
+      });
+    }
+    detailY = valueY - 11;
+  });
+
+  drawSectionBox({
+    page,
+    x: leftX,
+    y: termsY,
+    width: width - 84,
+    height: termsHeight,
+    title: "Terms",
+  });
+  let termsCursorY = termsY + termsHeight - 26;
+  termLines.forEach((line) => {
+    page.drawText(line, {
+      x: leftX + 14,
+      y: termsCursorY,
+      size: 9.1,
+      font: fontSans,
+      color: palette.text,
+    });
+    termsCursorY -= 11.5;
+  });
+
+  page.drawText(GIFT_CARD_LOCATION_LINE, {
+    x: 42,
+    y: 56,
+    size: 10,
+    font: fontSansBold,
+    color: palette.text,
+  });
+  page.drawText(GIFT_CARD_CONTACT_LINE, {
+    x: 42,
+    y: 40,
     size: 12,
     font: fontSansBold,
     color: palette.text,
   });
-  const optionBoxX = 52;
-  const optionBoxY = selectedOptionsLabelY - 98;
-  const optionBoxWidth = width - 104;
-  const optionBoxHeight = 92;
-  frontPage.drawRectangle({
-    x: optionBoxX,
-    y: optionBoxY,
-    width: optionBoxWidth,
-    height: optionBoxHeight,
-    borderColor: rgb(0.55, 0.65, 0.56),
-    borderWidth: 1,
-    color: rgb(1, 1, 1),
-    opacity: 0.58,
-  });
-
-  let optionsCursorY = selectedOptionsLabelY - 25;
-  const optionsOverflow = [];
-  for (let index = 0; index < optionLines.length; index += 1) {
-    const numberedLine = `${index + 1}. ${optionLines[index]}`;
-    const wrapped = splitTextToPdfLines(numberedLine, fontSans, 11, optionBoxWidth - 26);
-    const requiredHeight = wrapped.length * 13 + 3;
-    if (optionsCursorY - requiredHeight < optionBoxY + 13) {
-      for (let overflowIndex = index; overflowIndex < optionLines.length; overflowIndex += 1) {
-        optionsOverflow.push(`${overflowIndex + 1}. ${optionLines[overflowIndex]}`);
-      }
-      break;
-    }
-    wrapped.forEach((line) => {
-      frontPage.drawText(line, {
-        x: optionBoxX + 12,
-        y: optionsCursorY,
-        size: 11,
-        font: fontSans,
-        color: palette.darkText,
-      });
-      optionsCursorY -= 13;
-    });
-    optionsCursorY -= 3;
-  }
-
-  drawCenteredPdfText({
-    page: frontPage,
-    text: GIFT_CARD_LOCATION_LINE,
-    y: 160,
-    maxWidth: width - 120,
-    font: fontSerifBold,
-    fontSize: 17,
-    lineHeight: 21,
-    color: palette.text,
-  });
-  drawCenteredPdfText({
-    page: frontPage,
-    text: GIFT_CARD_CONTACT_LINE,
-    y: 124,
-    maxWidth: width - 120,
-    font: fontSerifBold,
-    fontSize: 21,
-    lineHeight: 25,
-    color: palette.text,
-  });
-
   if (signatureImage) {
-    const signatureDims = signatureImage.scaleToFit(135, 95);
-    frontPage.drawImage(signatureImage, {
-      x: width - 60 - signatureDims.width,
-      y: 95,
+    const signatureDims = signatureImage.scaleToFit(118, 52);
+    page.drawImage(signatureImage, {
+      x: width - 48 - signatureDims.width,
+      y: 38,
       width: signatureDims.width,
       height: signatureDims.height,
       opacity: 0.95,
     });
   }
-  frontPage.drawText(`PAID: ${paidDateLabel}`, {
-    x: width - 182,
-    y: 90,
-    size: 10,
+  page.drawText(`PAID ${paidDateLabel}`, {
+    x: width - 150,
+    y: 28,
+    size: 8.5,
     font: fontSansBold,
-    color: palette.darkText,
-  });
-
-  frontPage.drawText(`Code: ${giftCard.code || "Gift Card"}`, {
-    x: 52,
-    y: 97,
-    size: 10.5,
-    font: fontSansBold,
-    color: palette.darkText,
-  });
-  frontPage.drawText(`Expiry: ${expiryLabel}`, {
-    x: 52,
-    y: 82,
-    size: 10.5,
-    font: fontSans,
-    color: palette.darkText,
-  });
-  frontPage.drawText(`Status: ${(giftCard.status || "active").toString().toUpperCase()}`, {
-    x: 52,
-    y: 67,
-    size: 10.5,
-    font: fontSans,
-    color: palette.darkText,
-  });
-  frontPage.drawText(`Value: ${formatCurrency(giftCard.value || 0)} ${GIFT_CARD_VALUE_CURRENCY}`, {
-    x: 52,
-    y: 52,
-    size: 10.5,
-    font: fontSans,
-    color: palette.darkText,
-  });
-
-  let remainingOptionLines = optionsOverflow;
-  while (remainingOptionLines.length) {
-    const overflowPage = pdf.addPage(pageSize);
-    drawGiftCardPageFrame(overflowPage, { decorative: false });
-    const overflowWidth = overflowPage.getWidth();
-    drawCenteredPdfText({
-      page: overflowPage,
-      text: "Selected options (continued)",
-      y: overflowPage.getHeight() - 94,
-      maxWidth: overflowWidth - 100,
-      font: fontSerifBold,
-      fontSize: 25,
-      lineHeight: 31,
-      color: palette.text,
-    });
-    const listX = 56;
-    const listWidth = overflowWidth - 112;
-    let listY = overflowPage.getHeight() - 142;
-    const nextRemaining = [];
-
-    for (let index = 0; index < remainingOptionLines.length; index += 1) {
-      const line = remainingOptionLines[index];
-      const wrapped = splitTextToPdfLines(line, fontSans, 12, listWidth);
-      const requiredHeight = wrapped.length * 16 + 2;
-      if (listY - requiredHeight < 92) {
-        for (let keep = index; keep < remainingOptionLines.length; keep += 1) {
-          nextRemaining.push(remainingOptionLines[keep]);
-        }
-        break;
-      }
-      wrapped.forEach((wrappedLine) => {
-        overflowPage.drawText(wrappedLine, {
-          x: listX,
-          y: listY,
-          size: 12,
-          font: fontSans,
-          color: palette.darkText,
-        });
-        listY -= 16;
-      });
-      listY -= 2;
-    }
-
-    overflowPage.drawText(`Gift card code: ${giftCard.code || "Gift Card"}`, {
-      x: listX,
-      y: 56,
-      size: 10,
-      font: fontSansBold,
-      color: palette.darkText,
-    });
-    remainingOptionLines = nextRemaining;
-  }
-
-  const termsPage = pdf.addPage(pageSize);
-  drawGiftCardPageFrame(termsPage, { decorative: false });
-  const termsMarginX = 56;
-  const termsWidth = termsPage.getWidth() - termsMarginX * 2;
-  let termsY = termsPage.getHeight() - 94;
-  termsPage.drawText("Gift Card Terms", {
-    x: termsMarginX,
-    y: termsY,
-    size: 30,
-    font: fontSerifBold,
-    color: palette.text,
-  });
-  termsY -= 40;
-
-  const defaultTerms = [
-    "Gift card is redeemable for Bethany Blooms products and services only.",
-    "Gift cards are non-refundable and cannot be exchanged for cash.",
-    "Present your gift card code when booking or redeeming in person.",
-    `Gift card must be used before ${expiryLabel}.`,
-  ];
-
-  const normalizedTermsText = (giftCard.terms || "").toString().trim();
-  const termRows = normalizedTermsText
-    ? normalizedTermsText
-        .split(/\n+/)
-        .flatMap((line) => line.split(/(?<=\.)\s+/))
-        .map((line) => line.toString().trim())
-        .filter(Boolean)
-    : defaultTerms;
-
-  const limitedTerms = termRows.slice(0, 10);
-  limitedTerms.forEach((entry) => {
-    if (termsY < 130) return;
-    termsY = drawWrappedPdfText({
-      page: termsPage,
-      text: `- ${entry}`,
-      x: termsMarginX,
-      y: termsY,
-      maxWidth: termsWidth,
-      font: fontSans,
-      fontSize: 12.5,
-      lineHeight: 18,
-      color: palette.darkText,
-    });
-    termsY -= 6;
-  });
-
-  if (logoImage) {
-    const logoDims = logoImage.scaleToFit(300, 100);
-    termsPage.drawImage(logoImage, {
-      x: (termsPage.getWidth() - logoDims.width) / 2,
-      y: 112,
-      width: logoDims.width,
-      height: logoDims.height,
-      opacity: 0.28,
-    });
-  }
-
-  termsPage.drawText(`Gift card code: ${giftCard.code || "Gift Card"}`, {
-    x: termsMarginX,
-    y: 82,
-    size: 10.5,
-    font: fontSansBold,
-    color: palette.darkText,
-  });
-  termsPage.drawText(`Recipient: ${recipientDisplay}`, {
-    x: termsMarginX,
-    y: 66,
-    size: 10.5,
-    font: fontSans,
-    color: palette.darkText,
-  });
-  termsPage.drawText(`Issued: ${paidDateLabel}`, {
-    x: termsMarginX,
-    y: 50,
-    size: 10.5,
-    font: fontSans,
-    color: palette.darkText,
+    color: palette.muted,
   });
 
   return Buffer.from(await pdf.save());
@@ -5412,6 +6343,10 @@ async function createGiftCardPdfBytes(giftCard = {}) {
 function buildGiftCardPublicPayload(giftCardDoc = {}, giftCardId = "", token = "") {
   const selectedOptions = normalizeGiftCardSelectedOptions(giftCardDoc.selectedOptions);
   const isGiveaway = isGiveawayGiftCardPayload(giftCardDoc);
+  const catalogItemRef = normalizeGiftCardCatalogItemRef(giftCardDoc.catalogItemRef);
+  const giftCardMode = isCatalogGiftCardPayload(giftCardDoc)
+    ? GIFT_CARD_MODE_CATALOG_ITEM
+    : normalizeAdminGiftCardMode(giftCardDoc.giftCardMode || "", "");
   const selectedOptionCountValue = Number(giftCardDoc.selectedOptionCount);
   const selectedOptionCount =
     Number.isFinite(selectedOptionCountValue) && selectedOptionCountValue >= 0
@@ -5427,12 +6362,14 @@ function buildGiftCardPublicPayload(giftCardDoc = {}, giftCardId = "", token = "
     value: Number(giftCardDoc.value || 0),
     currency: giftCardDoc.currency || GIFT_CARD_VALUE_CURRENCY,
     isGiveaway,
+    giftCardMode: giftCardMode || null,
     issueSource: (giftCardDoc.issueSource || "").toString().trim() || null,
     purchaserName: giftCardDoc.purchaserName || "",
     recipientName: giftCardDoc.recipientName || "",
     message: giftCardDoc.message || "",
     productTitle: giftCardDoc.productTitle || "Bethany Blooms Gift Card",
     productId: giftCardDoc.productId || null,
+    catalogItemRef,
     terms: giftCardDoc.terms || "",
     selectedOptions,
     selectedOptionCount,
@@ -16048,30 +16985,35 @@ exports.previewAdminGiveawayGiftCard = onCall({ cors: true }, async (request) =>
 
   const payload = request.data || {};
   try {
-    const resolved = await resolveAdminGiveawayGiftCardInput(payload);
+    const resolved = await resolveAdminGiftCardInput(payload);
     const generatedAt = new Date();
     const expiresAtDate = new Date(
       generatedAt.getTime() + resolved.expiryDays * 24 * 60 * 60 * 1000,
     );
+    const isCatalogItem = resolved.mode === GIFT_CARD_MODE_CATALOG_ITEM;
     const previewGiftCard = {
-      id: "gc-preview-giveaway",
+      id: isCatalogItem ? "gc-preview-admin" : "gc-preview-giveaway",
       code: "PREVIEW",
       status: "preview",
       value: resolved.giftCardValue,
       currency: GIFT_CARD_VALUE_CURRENCY,
-      purchaserName: "",
-      recipientName: "",
+      purchaserName: resolved.purchaserName || "",
+      recipientName: resolved.recipientName || "",
       message: resolved.message || null,
       productId: resolved.productId,
       productTitle: resolved.productTitle,
+      giftCardMode: resolved.mode,
+      catalogItemRef: resolved.catalogItemRef || null,
       terms: resolved.terms,
       selectedOptions: resolved.selectedOptions,
       selectedOptionCount: resolved.selectedOptionCount,
       expiryDays: resolved.expiryDays,
       issuedAt: generatedAt.toISOString(),
       expiresAt: expiresAtDate.toISOString(),
-      isGiveaway: true,
-      issueSource: GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
+      isGiveaway: !isCatalogItem,
+      issueSource: isCatalogItem
+        ? GIFT_CARD_ISSUE_SOURCE_ADMIN_ISSUED
+        : GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
       downloadUrl: "",
       printUrl: "",
       siteAccessUrl: "",
@@ -16096,15 +17038,22 @@ exports.saveAdminGiveawayGiftCardDraft = onCall({ cors: true }, async (request) 
   await assertAdminRequest(request);
   const payload = request.data || {};
   try {
-    const resolved = await resolveAdminGiveawayGiftCardInput(payload);
+    const resolved = await resolveAdminGiftCardInput(payload);
     const draftId = `gcd-${crypto.randomBytes(10).toString("hex")}`;
     const createdByEmail = (request.auth?.token?.email || "").toString().trim() || null;
+    const isCatalogItem = resolved.mode === GIFT_CARD_MODE_CATALOG_ITEM;
     const draftRecord = {
       id: draftId,
       status: "draft",
-      source: GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
+      source: isCatalogItem
+        ? GIFT_CARD_ISSUE_SOURCE_ADMIN_ISSUED
+        : GIFT_CARD_ISSUE_SOURCE_ADMIN_GIVEAWAY,
+      giftCardMode: resolved.mode,
       productId: resolved.productId,
       productTitle: resolved.productTitle,
+      catalogItemRef: resolved.catalogItemRef || null,
+      recipientName: resolved.recipientName || "",
+      purchaserName: resolved.purchaserName || "",
       message: resolved.message || null,
       terms: resolved.terms,
       expiryDays: resolved.expiryDays,
@@ -16124,6 +17073,7 @@ exports.saveAdminGiveawayGiftCardDraft = onCall({ cors: true }, async (request) 
       draft: {
         id: draftId,
         status: "draft",
+        giftCardMode: resolved.mode,
         productId: resolved.productId,
         productTitle: resolved.productTitle,
         selectedOptionCount: resolved.selectedOptionCount,
@@ -16162,21 +17112,35 @@ exports.createAdminGiveawayGiftCardFromDraft = onCall({ cors: true }, async (req
       );
     }
 
-    const resolved = await resolveAdminGiveawayGiftCardInput({
-      productId: draft.productId,
-      selectedOptions: normalizeGiftCardSelectedOptions(draft.selectedOptions).map((option) => ({
-        id: option.id,
-        quantity: option.quantity,
-      })),
-      message: draft.message || "",
-      expiryDays: draft.expiryDays,
-    });
-
-    const createResult = await createGiveawayGiftCardRecord({
-      resolved,
-      request,
-      draftId,
-    });
+    const mode = normalizeAdminGiftCardMode(
+      draft.giftCardMode || draft.mode || draft.source || "",
+      GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+    );
+    let resolved = null;
+    let createResult = null;
+    if (mode === GIFT_CARD_MODE_CATALOG_ITEM) {
+      resolved = resolveAdminCatalogGiftCardDraftInput(draft);
+      createResult = await createAdminCatalogGiftCardRecord({
+        resolved,
+        request,
+        draftId,
+      });
+    } else {
+      resolved = await resolveAdminGiveawayGiftCardInput({
+        productId: draft.productId,
+        selectedOptions: normalizeGiftCardSelectedOptions(draft.selectedOptions).map((option) => ({
+          id: option.id,
+          quantity: option.quantity,
+        })),
+        message: draft.message || "",
+        expiryDays: draft.expiryDays,
+      });
+      createResult = await createGiveawayGiftCardRecord({
+        resolved,
+        request,
+        draftId,
+      });
+    }
 
     await draftRef.set(
       {
@@ -16231,38 +17195,11 @@ exports.adminUpdateGiftCard = onCall({ cors: true }, async (request) => {
     }
     const giftCard = giftCardSnap.data() || {};
     const isGiveaway = isGiveawayGiftCardPayload(giftCard);
-
+    const isCatalogItem = isCatalogGiftCardPayload(giftCard);
+    let catalogItemRef = normalizeGiftCardCatalogItemRef(giftCard.catalogItemRef);
     let selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
-    if (payloadHas("selectedOptions")) {
-      const liveOptions = await getCutFlowerGiftCardOptions();
-      if (!liveOptions.length) {
-        throw new Error("No live gift card options are available.");
-      }
-      const optionLookup = new Map(liveOptions.map((option) => [option.id, option]));
-      selectedOptions = normalizeAdminGiveawaySelectedOptions(
-        payload.selectedOptions,
-        optionLookup,
-      );
-    }
-    if (!selectedOptions.length) {
-      throw new Error("Select at least one gift card option.");
-    }
-    selectedOptions.forEach((option) => {
-      if (!isWholeCrewOption(option)) return;
-      const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
-      if (quantity < WHOLE_CREW_MIN_QTY) {
-        throw new Error(`Whole Crew requires at least ${WHOLE_CREW_MIN_QTY} people.`);
-      }
-    });
-
-    const selectedOptionCount = selectedOptions.reduce(
-      (sum, option) => sum + normalizeGiftCardOptionQuantity(option?.quantity, 1),
-      0,
-    );
-    const giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
-    if (!Number.isFinite(giftCardValue) || giftCardValue <= 0) {
-      throw new Error("Unable to build a valid gift card value.");
-    }
+    let selectedOptionCount = 0;
+    let giftCardValue = 0;
 
     const issuedAtDate = coerceTimestampToDate(giftCard.issuedAt) || new Date();
     const fallbackExpiresAtDate =
@@ -16290,26 +17227,117 @@ exports.adminUpdateGiftCard = onCall({ cors: true }, async (request) => {
       giftCard.expiryDays || GIFT_CARD_DEFAULT_EXPIRY_DAYS,
     );
 
+    if (isCatalogItem) {
+      if (!catalogItemRef) {
+        throw new Error("Catalog gift card data is missing.");
+      }
+      const baseOption = selectedOptions[0] || null;
+      const quantity = sanitizeGiftCardCatalogQuantity(
+        payloadHas("quantity")
+          ? payload.quantity
+          : catalogItemRef.quantity || baseOption?.quantity || giftCard.selectedOptionCount || 1,
+        1,
+      );
+      const unitPrice = normalizeGiftCardAmount(
+        catalogItemRef.unitPriceSnapshot ?? baseOption?.amount,
+        null,
+      );
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        throw new Error("Catalog gift card price is invalid.");
+      }
+      const optionTitle = truncateText(
+        giftCard.productTitle || catalogItemRef.titleSnapshot || "Bethany Blooms Gift Card",
+        160,
+      );
+      selectedOptions = normalizeGiftCardSelectedOptions([
+        {
+          ...(baseOption || {}),
+          ...buildCatalogGiftCardSelectedOption({
+            kind: catalogItemRef.kind,
+            collection: catalogItemRef.collection,
+            sourceId: catalogItemRef.sourceId,
+            title: optionTitle,
+            variantId: catalogItemRef.variantId || "",
+            variantLabel: catalogItemRef.variantLabel || "",
+            optionId: catalogItemRef.optionId || "",
+            optionLabel: catalogItemRef.optionLabel || "",
+            amount: unitPrice,
+            quantity,
+          }),
+        },
+      ]);
+      selectedOptionCount = quantity;
+      giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+      catalogItemRef = {
+        ...catalogItemRef,
+        quantity,
+        unitPriceSnapshot: unitPrice,
+      };
+    } else {
+      if (payloadHas("selectedOptions")) {
+        const liveOptions = await getCutFlowerGiftCardOptions();
+        if (!liveOptions.length) {
+          throw new Error("No live gift card options are available.");
+        }
+        const optionLookup = new Map(liveOptions.map((option) => [option.id, option]));
+        selectedOptions = normalizeAdminGiveawaySelectedOptions(
+          payload.selectedOptions,
+          optionLookup,
+        );
+      }
+      if (!selectedOptions.length) {
+        throw new Error("Select at least one gift card option.");
+      }
+      selectedOptions.forEach((option) => {
+        if (!isWholeCrewOption(option)) return;
+        const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 1);
+        if (quantity < WHOLE_CREW_MIN_QTY) {
+          throw new Error(`Whole Crew requires at least ${WHOLE_CREW_MIN_QTY} people.`);
+        }
+      });
+      selectedOptionCount = selectedOptions.reduce(
+        (sum, option) => sum + normalizeGiftCardOptionQuantity(option?.quantity, 1),
+        0,
+      );
+      giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+    }
+    if (!Number.isFinite(giftCardValue) || giftCardValue <= 0) {
+      throw new Error("Unable to build a valid gift card value.");
+    }
+
     const recipientName = truncateText(
       payloadHas("recipientName") ? payload.recipientName : giftCard.recipientName || "",
       GIFT_CARD_MAX_NAME_LENGTH,
     );
-    const purchaserName = isGiveaway
-      ? ""
-      : truncateText(
-          payloadHas("purchaserName") ? payload.purchaserName : giftCard.purchaserName || "",
-          GIFT_CARD_MAX_NAME_LENGTH,
-        );
+    const purchaserName =
+      isGiveaway && !isCatalogItem
+        ? ""
+        : truncateText(
+            payloadHas("purchaserName") ? payload.purchaserName : giftCard.purchaserName || "",
+            GIFT_CARD_MAX_NAME_LENGTH,
+          );
     const message = truncateText(
       payloadHas("message") ? payload.message : giftCard.message || "",
       GIFT_CARD_MAX_MESSAGE_LENGTH,
     );
     const terms = truncateText(
-      payloadHas("terms") ? payload.terms : giftCard.terms || "",
+      isCatalogItem
+        ? giftCard.terms ||
+            buildCatalogGiftCardDefaultTerms({
+              kind: catalogItemRef?.kind || "",
+              title: giftCard.productTitle || catalogItemRef?.titleSnapshot || "",
+            })
+        : payloadHas("terms")
+          ? payload.terms
+          : giftCard.terms || "",
       GIFT_CARD_MAX_TERMS_LENGTH,
     );
     const productTitle = truncateText(
-      payloadHas("productTitle") ? payload.productTitle : giftCard.productTitle || "Bethany Blooms Gift Card",
+      isCatalogItem
+        ? giftCard.productTitle || catalogItemRef?.titleSnapshot || "Bethany Blooms Gift Card"
+        : payloadHas("productTitle")
+          ? payload.productTitle
+          : giftCard.productTitle || "Bethany Blooms Gift Card",
       160,
     );
     const status = normalizeGiftCardStatus(
@@ -16337,6 +17365,8 @@ exports.adminUpdateGiftCard = onCall({ cors: true }, async (request) => {
       expiryDays,
       expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
       productTitle,
+      giftCardMode: isCatalogItem ? GIFT_CARD_MODE_CATALOG_ITEM : GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+      catalogItemRef: catalogItemRef || null,
       pdfStoragePath,
     };
 
@@ -16407,7 +17437,10 @@ exports.adminUpdateGiftCard = onCall({ cors: true }, async (request) => {
       normalized.includes("not found") ||
       normalized.includes("whole crew") ||
       normalized.includes("select at least") ||
-      normalized.includes("live gift card options");
+      normalized.includes("live gift card options") ||
+      normalized.includes("catalog gift card") ||
+      normalized.includes("variant") ||
+      normalized.includes("class option");
     throw new HttpsError(isValidationError ? "invalid-argument" : "internal", message);
   }
 });
@@ -16916,6 +17949,10 @@ exports.lookupGiftCardByCode = onCall(async (request) => {
   }
   let selectedOptions = normalizeGiftCardSelectedOptions(giftCard.selectedOptions);
   let selectedOptionsSummary = (giftCard.selectedOptionsSummary || "").toString().trim();
+  let catalogItemRef = normalizeGiftCardCatalogItemRef(giftCard.catalogItemRef);
+  const giftCardMode = isCatalogGiftCardPayload(giftCard)
+    ? GIFT_CARD_MODE_CATALOG_ITEM
+    : normalizeAdminGiftCardMode(giftCard.giftCardMode || "", "");
   const giftCardId = (giftCardSnap.id || "").toString().trim();
   const orderId = (giftCard.orderId || "").toString().trim();
 
@@ -16977,6 +18014,11 @@ exports.lookupGiftCardByCode = onCall(async (request) => {
             registryDoc.selectedOptions || registryDoc.giftCard?.selectedOptions || [],
           );
         }
+        if (!catalogItemRef) {
+          catalogItemRef = normalizeGiftCardCatalogItemRef(
+            registryDoc.catalogItemRef || registryDoc.giftCard?.catalogItemRef,
+          );
+        }
         if (!selectedOptionsSummary) {
           selectedOptionsSummary = (registryDoc.selectedOptionsSummary || "").toString().trim();
         }
@@ -17007,6 +18049,8 @@ exports.lookupGiftCardByCode = onCall(async (request) => {
       status,
       isExpired,
       isActive: status === "active" && !isExpired,
+      giftCardMode: giftCardMode || null,
+      catalogItemRef,
       recipientName: (giftCard.recipientName || "").toString(),
       purchaserName: (giftCard.purchaserName || "").toString(),
       value: Number(giftCard.value || 0),

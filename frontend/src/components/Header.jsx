@@ -8,6 +8,7 @@ import logo from "../assets/BethanyBloomsLogo.png";
 
 const PRODUCT_CATEGORY_CACHE_KEY = "bethany-blooms-product-categories-cache-v1";
 const PRODUCT_CATEGORY_CACHE_LIMIT = 50;
+const MOBILE_NAV_BREAKPOINT = 1024;
 const DEFAULT_PRODUCT_CATEGORIES = Object.freeze([
   { id: "cut-flowers", name: "Cut flowers", slug: "cut-flowers" },
   { id: "pressed-flower-diy", name: "Pressed flower DIY", slug: "pressed-flower-diy" },
@@ -227,7 +228,7 @@ function Header() {
 
     let frameId = null;
     let resizeObserver = null;
-    const mobileQuery = window.matchMedia("(max-width: 768px)");
+    const mobileQuery = window.matchMedia(`(max-width: ${MOBILE_NAV_BREAKPOINT}px)`);
 
     const syncActionLayout = () => {
       const navNode = navRef.current;
@@ -400,14 +401,46 @@ function Header() {
                 onClick={openCartFromMenu}
                 aria-label="Open cart"
               >
-                Cart ({totalCount})
+                <span className="nav__mobile-shortcut-main">
+                  <span className="nav__mobile-shortcut-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="presentation">
+                      <path
+                        d="M3.5 4.5h1.9l1.9 10.5h10.2l1.8-7.5H7"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <circle cx="10" cy="19" r="1.4" fill="currentColor" />
+                      <circle cx="17" cy="19" r="1.4" fill="currentColor" />
+                    </svg>
+                  </span>
+                  <span className="nav__mobile-shortcut-label">Cart</span>
+                </span>
+                <span className="nav__mobile-shortcut-badge" aria-live="polite">
+                  {totalCount}
+                </span>
               </button>
               <NavLink
                 to="/account"
                 className={({ isActive }) => `nav__mobile-shortcut ${isActive ? "active" : ""}`}
                 onClick={closeAllMenus}
               >
-                {user ? "Account" : "Sign in"}
+                <span className="nav__mobile-shortcut-main">
+                  <span className="nav__mobile-shortcut-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="presentation">
+                      <path
+                        d="M12 12a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5Zm0 2.25c-4.18 0-7.5 2.45-7.5 5.5 0 .41.34.75.75.75h13.5c.41 0 .75-.34.75-.75 0-3.05-3.32-5.5-7.5-5.5Z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </span>
+                  <span className="nav__mobile-shortcut-label">{user ? "Account" : "Sign in"}</span>
+                </span>
+                <span className="nav__mobile-shortcut-arrow" aria-hidden="true">
+                  &#8250;
+                </span>
               </NavLink>
             </div>
           )}

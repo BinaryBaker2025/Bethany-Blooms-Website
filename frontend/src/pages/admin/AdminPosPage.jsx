@@ -24,7 +24,7 @@ import {
   normalizePosSaleStatus,
   parsePosDateValue,
 } from "../../lib/posSales.js";
-import { getStockStatus } from "../../lib/stockStatus.js";
+import { getStockStatus, getVariantStockStatus } from "../../lib/stockStatus.js";
 
 const POS_TABS = [
   { id: "products", label: "Products" },
@@ -65,6 +65,9 @@ const clampQuantity = (value) => {
   if (!Number.isFinite(parsed)) return null;
   return Math.max(0, Math.floor(parsed));
 };
+
+const getTrackedQuantity = (value = {}) =>
+  clampQuantity(value?.stock_quantity ?? value?.stockQuantity ?? value?.quantity);
 
 const formatCurrency = (value) => {
   const amount = parseNumber(value, 0);
@@ -166,6 +169,13 @@ const coerceGiftCardOptionsList = (options) => {
   if (Array.isArray(options.selectedOptions)) return options.selectedOptions;
   if (Array.isArray(options.options)) return options.options;
   return Object.values(options).filter((entry) => entry && typeof entry === "object");
+};
+
+const buildCatalogItemSummary = (catalogItemRef = null) => {
+  if (!catalogItemRef || typeof catalogItemRef !== "object") return "";
+  return [catalogItemRef.titleSnapshot, catalogItemRef.variantLabel || catalogItemRef.optionLabel]
+    .filter(Boolean)
+    .join(" | ");
 };
 
 function AdminPosPage() {
@@ -273,20 +283,21 @@ function AdminPosPage() {
   const normalizedProducts = useMemo(() => {
     return (products || []).map((product) => {
       const priceNumber = parseNumber(product.price, null);
-      const variants = Array.isArray(product.variants)
-        ? product.variants
-            .map((variant) => {
-              const label = (variant.label || variant.name || "").toString().trim();
-              if (!label) return null;
-              const variantPrice = parseNumber(variant.price, null);
-              return {
-                id: (variant.id || label).toString(),
-                label,
-                price: variantPrice,
-              };
-            })
-            .filter(Boolean)
-        : [];
+      const rawVariants = Array.isArray(product.variants) ? product.variants : [];
+      const variants = rawVariants
+        .map((variant) => {
+          const label = (variant.label || variant.name || "").toString().trim();
+          if (!label) return null;
+          const variantPrice = parseNumber(variant.price, null);
+          return {
+            id: (variant.id || label).toString(),
+            label,
+            price: variantPrice,
+            quantity: variant.stock_quantity ?? variant.stockQuantity ?? variant.quantity,
+            stockStatus: getVariantStockStatus(variant, product),
+          };
+        })
+        .filter(Boolean);
       const stockStatus = getStockStatus({
         quantity: product.stock_quantity ?? product.quantity,
         forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
@@ -299,6 +310,7 @@ function AdminPosPage() {
         numericPrice: priceNumber,
         displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
         variants,
+        rawVariants,
         stockStatus,
       };
     });
@@ -808,6 +820,11 @@ function AdminPosPage() {
       const selectedOptionsSummaryRaw = (giftCard.selectedOptionsSummary || "").toString().trim();
       const selectedOptionsSummary =
         selectedOptionsSummaryRaw.toLowerCase() === "none" ? "" : selectedOptionsSummaryRaw;
+      const giftCardMode = (giftCard.giftCardMode || "").toString().trim().toLowerCase();
+      const catalogItemRef =
+        giftCard?.catalogItemRef && typeof giftCard.catalogItemRef === "object"
+          ? giftCard.catalogItemRef
+          : null;
       const normalizedSelectedOptions = coerceGiftCardOptionsList(giftCard.selectedOptions)
         .map((option, index) => {
           const label = (
@@ -836,6 +853,7 @@ function AdminPosPage() {
             option?.amount ??
               option?.price ??
               option?.unitPrice ??
+              option?.unitPriceSnapshot ??
               option?.estimatedPrice ??
               option?.value,
             null,
@@ -872,6 +890,14 @@ function AdminPosPage() {
             amount,
             quantity,
             lineTotal: Number((amount * quantity).toFixed(2)),
+            sourceCollection: (option?.sourceCollection || "").toString().trim(),
+            sourceKind: (option?.sourceKind || "").toString().trim(),
+            sourceId: (option?.sourceId || "").toString().trim(),
+            variantId: (option?.variantId || "").toString().trim(),
+            variantLabel: (option?.variantLabel || "").toString().trim(),
+            optionId: (option?.optionId || rawOptionId || "").toString().trim(),
+            optionLabel: (option?.optionLabel || label).toString().trim(),
+            unitPriceSnapshot: parseNumber(option?.unitPriceSnapshot ?? amount, amount),
           };
         })
         .filter(Boolean);
@@ -891,6 +917,8 @@ function AdminPosPage() {
           expiresAt: giftCard.expiresAt || null,
           selectedOptions: normalizedSelectedOptions,
           selectedOptionsSummary,
+          giftCardMode,
+          catalogItemRef,
           matchedAtIso: new Date().toISOString(),
         },
       ]);
@@ -902,7 +930,63 @@ function AdminPosPage() {
           giftCardLinked: true,
           giftCardId: (giftCard.id || "").toString().trim(),
           giftCardCode: resolvedGiftCardCode,
+          giftCardMode,
+          catalogItemRef,
         };
+        const primaryOption = normalizedSelectedOptions[0] || null;
+        const catalogKind = (catalogItemRef?.kind || primaryOption?.sourceKind || "")
+          .toString()
+          .trim()
+          .toLowerCase();
+
+        if (giftCardMode === "catalog-item" && catalogKind === "product") {
+          const productId =
+            (catalogItemRef?.sourceId || primaryOption?.sourceId || "").toString().trim();
+          const variantId =
+            (catalogItemRef?.variantId || primaryOption?.variantId || "").toString().trim();
+          const product = normalizedProducts.find((entry) => entry.id === productId) || null;
+          const variant = variantId
+            ? product?.variants?.find((entry) => entry.id === variantId) || null
+            : null;
+          if (product && (!variantId || variant)) {
+            const quantity = Math.max(
+              1,
+              Number.parseInt(catalogItemRef?.quantity ?? primaryOption?.quantity, 10) || 1,
+            );
+            const unitPrice = parseNumber(
+              catalogItemRef?.unitPriceSnapshot ?? primaryOption?.amount ?? variant?.price ?? product?.numericPrice,
+              0,
+            );
+            const lineKey = [
+              "gift-card-product",
+              giftCard.id,
+              product.id,
+              variant?.id || "base",
+            ].join(":");
+            const productLine = {
+              key: lineKey,
+              sourceId: product.id,
+              type: "product",
+              name: product.name,
+              price: unitPrice,
+              quantity,
+              metadata: {
+                ...linkedMetadataBase,
+                type: "product",
+                productId: product.id,
+                variantId: variant?.id || null,
+                variantLabel: variant?.label || catalogItemRef?.variantLabel || null,
+              },
+            };
+            const existingIndex = next.findIndex((entry) => entry.key === lineKey);
+            if (existingIndex === -1) {
+              next.push(productLine);
+            } else {
+              next[existingIndex] = productLine;
+            }
+            return next;
+          }
+        }
 
         if (normalizedSelectedOptions.length > 0) {
           normalizedSelectedOptions.forEach((option) => {
@@ -923,6 +1007,10 @@ function AdminPosPage() {
                 ...linkedMetadataBase,
                 giftCardOptionId: option.id,
                 optionLabel: option.label,
+                productId: option.sourceKind === "product" ? option.sourceId || null : null,
+                variantId: option.variantId || null,
+                variantLabel: option.variantLabel || null,
+                optionId: option.optionId || null,
               },
             };
             if (existingIndex === -1) {
@@ -943,13 +1031,14 @@ function AdminPosPage() {
           key: fallbackKey,
           sourceId: giftCard.id,
           type: "gift-card-redemption",
-          name: `${selectedOptionsSummary || "Gift card redemption"} (${resolvedGiftCardCode})`,
+          name: `${selectedOptionsSummary || buildCatalogItemSummary(catalogItemRef) || "Gift card redemption"} (${resolvedGiftCardCode})`,
           price: parseNumber(giftCard.value, 0),
           quantity: 1,
           metadata: {
             ...linkedMetadataBase,
             giftCardOptionId: "base",
-            optionLabel: selectedOptionsSummary || "Gift card redemption",
+            optionLabel:
+              selectedOptionsSummary || buildCatalogItemSummary(catalogItemRef) || "Gift card redemption",
           },
         };
         const fallbackIndex = next.findIndex((entry) => entry.key === fallbackKey);
@@ -1422,6 +1511,11 @@ function AdminPosPage() {
           currency: (entry.currency || "ZAR").toString().trim() || "ZAR",
           expiresAt: entry.expiresAt || null,
           selectedOptions: Array.isArray(entry.selectedOptions) ? entry.selectedOptions : [],
+          giftCardMode: (entry.giftCardMode || "").toString().trim().toLowerCase() || null,
+          catalogItemRef:
+            entry?.catalogItemRef && typeof entry.catalogItemRef === "object"
+              ? entry.catalogItemRef
+              : null,
           matchedAtIso: (entry.matchedAtIso || new Date().toISOString()).toString(),
         };
       })
@@ -1451,12 +1545,18 @@ function AdminPosPage() {
     const outOfStockItems = cartItems.filter((item) => {
       if (item.type === "product") {
         const product = normalizedProducts.find((entry) => entry.id === item.sourceId);
-        const currentQty = clampQuantity(product?.quantity);
+        const variantId = (item?.metadata?.variantId || "").toString().trim();
+        if (variantId) {
+          const variant = product?.variants?.find((entry) => entry.id === variantId);
+          const currentQty = getTrackedQuantity(variant);
+          return currentQty !== null && currentQty < item.quantity;
+        }
+        const currentQty = getTrackedQuantity(product);
         return currentQty !== null && currentQty < item.quantity;
       }
       if (item.type === "pos-product") {
         const product = normalizedPosProducts.find((entry) => entry.id === item.sourceId);
-        const currentQty = clampQuantity(product?.quantity);
+        const currentQty = getTrackedQuantity(product);
         return currentQty !== null && currentQty < item.quantity;
       }
       return false;
@@ -1615,23 +1715,63 @@ function AdminPosPage() {
 
       const stockUpdates = cartItems.reduce((map, item) => {
         if (item.type !== "product" && item.type !== "pos-product") return map;
-        const key = `${item.type}:${item.sourceId}`;
+        const variantId =
+          item.type === "product" ? (item?.metadata?.variantId || "").toString().trim() : "";
+        const key = `${item.type}:${item.sourceId}:${variantId}`;
         map.set(key, (map.get(key) || 0) + item.quantity);
         return map;
       }, new Map());
 
       const stockPromises = Array.from(stockUpdates.entries()).map(([key, quantity]) => {
-        const [type, sourceId] = key.split(":");
+        const [type, sourceId, variantId = ""] = key.split(":");
         const sourceCollection = type === "product" ? "products" : "posProducts";
         const sourceList = type === "product" ? normalizedProducts : normalizedPosProducts;
         const sourceItem = sourceList.find((entry) => entry.id === sourceId);
-        const currentQty = clampQuantity(sourceItem?.quantity);
+        if (type === "product" && variantId) {
+          const rawVariants = Array.isArray(sourceItem?.rawVariants) ? sourceItem.rawVariants : [];
+          if (!rawVariants.length) return null;
+          let didChange = false;
+          const nextVariants = rawVariants.map((variant) => {
+            const resolvedVariantId = (variant?.id || variant?.label || variant?.name || "")
+              .toString()
+              .trim();
+            if (resolvedVariantId !== variantId) return variant;
+            const currentQty = getTrackedQuantity(variant);
+            if (currentQty === null) return variant;
+            const nextQty = Math.max(0, currentQty - quantity);
+            didChange = true;
+            const nextVariant = {
+              ...variant,
+              stock_quantity: nextQty,
+            };
+            if (Object.prototype.hasOwnProperty.call(variant, "stockQuantity")) {
+              nextVariant.stockQuantity = nextQty;
+            }
+            if (Object.prototype.hasOwnProperty.call(variant, "quantity")) {
+              nextVariant.quantity = nextQty;
+            }
+            return nextVariant;
+          });
+          if (!didChange) return null;
+          return updateDoc(doc(db, sourceCollection, sourceId), {
+            variants: nextVariants,
+            updatedAt: serverTimestamp(),
+          });
+        }
+        const currentQty = getTrackedQuantity(sourceItem);
         if (currentQty === null) return null;
         const nextQty = Math.max(0, currentQty - quantity);
-        return updateDoc(doc(db, sourceCollection, sourceId), {
-          quantity: nextQty,
+        const updatePayload = {
+          stock_quantity: nextQty,
           updatedAt: serverTimestamp(),
-        });
+        };
+        if (Object.prototype.hasOwnProperty.call(sourceItem || {}, "stockQuantity")) {
+          updatePayload.stockQuantity = nextQty;
+        }
+        if (Object.prototype.hasOwnProperty.call(sourceItem || {}, "quantity")) {
+          updatePayload.quantity = nextQty;
+        }
+        return updateDoc(doc(db, sourceCollection, sourceId), updatePayload);
       });
 
       const bookingPromises = cartItems
@@ -1959,7 +2099,10 @@ function AdminPosPage() {
                 const variant = product.variants.find((entry) => entry.id === selection) || null;
                 const variantPrice = Number.isFinite(variant?.price) ? variant.price : product.numericPrice;
                 const priceLabel = Number.isFinite(variantPrice) ? formatCurrency(variantPrice) : "Price on request";
-                const canAdd = product.stockStatus?.state !== "out";
+                const canAdd =
+                  product.variants.length > 0
+                    ? Boolean(variant) && variant.stockStatus?.state !== "out"
+                    : product.stockStatus?.state !== "out";
                 return (
                   <article className="pos-item-card" key={product.id}>
                     <div>

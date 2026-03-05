@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import logo from "../assets/BethanyBloomsLogo.png";
+import giftCardBackground from "../assets/Gemini_Generated_Image_466wr8466wr8466w.png";
+import signature from "../assets/giftcard/signiture.png";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 
 const GIFT_CARD_PUBLIC_FUNCTION_URL =
@@ -10,6 +13,19 @@ const normalizeGiftCardOptionQuantity = (value) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return 1;
   return Math.min(200, parsed);
+};
+
+const buildGiftCardInvitationLine = (giftCard = {}) => {
+  const recipient = (giftCard?.recipientName || "Gift recipient").toString().trim() || "Gift recipient";
+  const kind = (giftCard?.catalogItemRef?.kind || "").toString().trim().toLowerCase();
+  if (giftCard?.isGiveaway) return "A Bethany Blooms gift from the flower farm.";
+  if (kind === "product") {
+    return `For ${recipient} to enjoy a Bethany Blooms gift chosen just for them.`;
+  }
+  if (kind) {
+    return `For ${recipient} to book a Bethany Blooms experience when the time feels right.`;
+  }
+  return `For ${recipient} to enjoy the flower farm in their own time.`;
 };
 
 function GiftCardPage() {
@@ -23,7 +39,7 @@ function GiftCardPage() {
   const pageTitle = giftCard?.code ? `Gift Card ${giftCard.code} | Bethany Blooms` : "Gift Card | Bethany Blooms";
   usePageMetadata({
     title: pageTitle,
-    description: "View, download, and print your Bethany Blooms gift card.",
+    description: "View and download your Bethany Blooms gift card.",
     noIndex: true,
   });
 
@@ -86,6 +102,19 @@ function GiftCardPage() {
     }
     return optionRows.reduce((sum, option) => sum + normalizeGiftCardOptionQuantity(option?.quantity), 0);
   }, [giftCard?.selectedOptionCount, optionRows]);
+  const invitationLine = useMemo(() => buildGiftCardInvitationLine(giftCard), [giftCard]);
+  const termsText =
+    (giftCard?.terms || "").toString().trim() ||
+    "Valid for Bethany Blooms products and experiences before expiry. Non-refundable and not exchangeable for cash.";
+  const statusLabel = (giftCard?.status || "active").toString().trim();
+  const recipientLabel = (giftCard?.recipientName || "Gift recipient").toString().trim() || "Gift recipient";
+  const purchaserLabel = (giftCard?.purchaserName || "Customer").toString().trim() || "Customer";
+  const issuedLabel = giftCard?.issuedAt
+    ? new Date(giftCard.issuedAt).toLocaleDateString("en-ZA")
+    : "N/A";
+  const expiryLabel = giftCard?.expiresAt
+    ? new Date(giftCard.expiresAt).toLocaleDateString("en-ZA")
+    : "N/A";
 
   return (
     <section className="section section--tight gift-card-page">
@@ -97,57 +126,141 @@ function GiftCardPage() {
 
         {!loading && !error && giftCard && (
           <div className="gift-card-page__grid">
-            <article className="gift-card-sheet">
-              <div className="gift-card-sheet__header">
-                <h2>{giftCard.code || "Gift Card"}</h2>
-                <span className="badge badge--stock-in">{giftCard.status || "active"}</span>
+            <article
+              className="gift-card-sheet"
+              style={{
+                "--gift-card-sheet-background": `url(${giftCardBackground})`,
+              }}
+            >
+              <div className="gift-card-sheet__brand-row">
+                <img
+                  className="gift-card-sheet__logo"
+                  src={logo}
+                  alt="Bethany Blooms logo"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <span className="gift-card-sheet__status">{statusLabel}</span>
               </div>
-              <p className="gift-card-sheet__value">{currency(giftCard.value)}</p>
-              <div className="gift-card-sheet__meta">
-                {!isGiveawayCard && (
-                  <p>
-                    <strong>Recipient:</strong> {giftCard.recipientName || "Gift recipient"}
-                  </p>
-                )}
-                {!isGiveawayCard && (
-                  <p>
-                    <strong>Purchased by:</strong> {giftCard.purchaserName || "Customer"}
-                  </p>
-                )}
-                <p>
-                  <strong>Expiry:</strong> {giftCard.expiresAt ? new Date(giftCard.expiresAt).toLocaleDateString("en-ZA") : "N/A"}
-                </p>
-              </div>
-              {giftCard.message && (
-                <div className="gift-card-sheet__message">
-                  <strong>Message</strong>
-                  <p>{giftCard.message}</p>
-                </div>
-              )}
-              <div className="gift-card-sheet__options">
-                <strong>Selected options ({optionCount})</strong>
-                {optionRows.length > 0 ? (
-                  <ul>
-                    {optionRows.map((option) => (
-                      <li key={option.id || option.label}>
-                        <span>
-                          {option.label}
-                          {normalizeGiftCardOptionQuantity(option?.quantity) > 1
-                            ? ` x${normalizeGiftCardOptionQuantity(option?.quantity)}`
-                            : ""}
+              <p className="gift-card-sheet__eyebrow">Bethany Blooms Flower Farm</p>
+              <h2 className="gift-card-sheet__title">Flower Farm Gift Card</h2>
+              <p className="gift-card-sheet__recipient-line">{invitationLine}</p>
+
+              <div className="gift-card-sheet__hero">
+                <div className="gift-card-sheet__hero-main">
+                  <section className="gift-card-sheet__value-panel">
+                    <span className="gift-card-sheet__section-label">Gifted amount</span>
+                    <p className="gift-card-sheet__value">{currency(giftCard.value)}</p>
+                    <p className="gift-card-sheet__value-note">
+                      Redeemable for Bethany Blooms products and experiences before the expiry date shown on this card.
+                    </p>
+                  </section>
+
+                  {giftCard.message && (
+                    <div className="gift-card-sheet__message">
+                      <span className="gift-card-sheet__section-label">Message</span>
+                      <div className="gift-card-sheet__message-quote">
+                        <span className="gift-card-sheet__message-mark" aria-hidden="true">
+                          "
                         </span>
-                        <span>{currency(option.amount)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>No options listed.</p>
-                )}
+                        <p>{giftCard.message}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <aside className="gift-card-sheet__details">
+                  <div className="gift-card-sheet__detail-block gift-card-sheet__detail-block--person">
+                    <span>Recipient</span>
+                    <strong className="gift-card-sheet__detail-name">{recipientLabel}</strong>
+                  </div>
+                  {!isGiveawayCard && (
+                    <div className="gift-card-sheet__detail-block gift-card-sheet__detail-block--person">
+                      <span>Purchased by</span>
+                      <strong className="gift-card-sheet__detail-name">{purchaserLabel}</strong>
+                    </div>
+                  )}
+                  <div className="gift-card-sheet__detail-block">
+                    <span>Card code</span>
+                    <strong>{giftCard.code || "Gift Card"}</strong>
+                  </div>
+                  <div className="gift-card-sheet__detail-block">
+                    <span>Value</span>
+                    <strong>{currency(giftCard.value)} ZAR</strong>
+                  </div>
+                  <div className="gift-card-sheet__detail-block">
+                    <span>Expiry</span>
+                    <strong>{expiryLabel}</strong>
+                  </div>
+                  <div className="gift-card-sheet__detail-block">
+                    <span>Issued</span>
+                    <strong>{issuedLabel}</strong>
+                  </div>
+                </aside>
+              </div>
+
+              <div className="gift-card-sheet__stack">
+                <div className="gift-card-sheet__options">
+                  <span className="gift-card-sheet__section-label">
+                    Included selections ({optionCount})
+                  </span>
+                  {optionRows.length > 0 ? (
+                    <ul>
+                      {optionRows.map((option) => {
+                        const quantity = normalizeGiftCardOptionQuantity(option?.quantity);
+                        const amount = Number(option?.amount || 0);
+                        const lineTotal = Number(option?.lineTotal ?? amount * quantity);
+                        return (
+                          <li key={option.id || option.label} className="gift-card-sheet__option-row">
+                            <div className="gift-card-sheet__option-copy">
+                              <strong>{option.label}</strong>
+                              {quantity > 1 && (
+                                <span>
+                                  {quantity} x {currency(amount)}
+                                </span>
+                              )}
+                            </div>
+                            <strong className="gift-card-sheet__option-price">
+                              {quantity > 1 ? currency(lineTotal) : currency(amount)}
+                            </strong>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p>No options listed.</p>
+                  )}
+                </div>
+
+                <div className="gift-card-sheet__terms">
+                  <span className="gift-card-sheet__section-label">Terms</span>
+                  <p>{termsText}</p>
+                </div>
+              </div>
+
+              <div className="gift-card-sheet__footer">
+                <div>
+                  <p>2 Paul Roos Street, Unitas Park</p>
+                  <p>079 267 0819</p>
+                </div>
+                <div className="gift-card-sheet__footer-signature">
+                  <img
+                    className="gift-card-sheet__signature"
+                    src={signature}
+                    alt="Bethany Blooms signature"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <p className="gift-card-sheet__footer-note">Paid {issuedLabel}</p>
+                </div>
               </div>
             </article>
 
             <aside className="gift-card-panel">
-              <h3>Actions</h3>
+              <h3>Gift Card</h3>
+              <p className="modal__meta">
+                Download the single-page PDF version of this gift card.
+              </p>
               <div className="gift-card-panel__actions">
                 {giftCard.downloadUrl ? (
                   <a className="btn btn--primary" href={giftCard.downloadUrl}>
@@ -158,18 +271,6 @@ function GiftCardPage() {
                     Download PDF
                   </button>
                 )}
-                <button className="btn btn--secondary" type="button" onClick={() => window.print()}>
-                  Print Gift Card
-                </button>
-              </div>
-              <div className="gift-card-panel__terms">
-                <h4>Terms</h4>
-                <p>
-                  {(giftCard.terms || "")
-                    .toString()
-                    .trim() ||
-                    "Valid for Bethany Blooms products/services until expiry. Non-refundable and not exchangeable for cash."}
-                </p>
               </div>
               <div className="gift-card-panel__links">
                 <Link className="btn btn--secondary" to="/products">

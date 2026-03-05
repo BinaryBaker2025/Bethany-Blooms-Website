@@ -16,6 +16,10 @@ import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage
 import { httpsCallable } from "firebase/functions";
 import Reveal from "../components/Reveal.jsx";
 import { read, utils, writeFile } from "xlsx";
+import {
+  AdminGiftCardGenerateManageExperience,
+  AdminGiftCardPreviewExperience,
+} from "./admin/AdminGiftCardViews.jsx";
 import { useAdminData } from "../context/AdminDataContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
@@ -11366,7 +11370,357 @@ const copyTextWithFallback = async (value = "") => {
   }
 };
 
-export function AdminGiftCardPreviewView() {
+const ADMIN_GIFT_CARD_MODE_CATALOG_ITEM = "catalog-item";
+const ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY = "custom-giveaway";
+const ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT = "product";
+const ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP = "workshop";
+const ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS = "cut-flower-class";
+const ADMIN_GIFT_CARD_DEFAULT_EXPIRY_DAYS = "365";
+const ADMIN_GIFT_CARD_MODE_OPTIONS = Object.freeze([
+  { value: ADMIN_GIFT_CARD_MODE_CATALOG_ITEM, label: "Catalog item" },
+  { value: ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY, label: "Custom giveaway" },
+]);
+const ADMIN_GIFT_CARD_ITEM_TYPE_OPTIONS = Object.freeze([
+  { value: ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT, label: "Products" },
+  { value: ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP, label: "Workshops" },
+  { value: ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS, label: "Classes" },
+]);
+
+function AdminGiftCardModeSwitch({ value, onChange }) {
+  return (
+    <div className="admin-form__actions" role="tablist" aria-label="Gift card mode">
+      {ADMIN_GIFT_CARD_MODE_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          className={value === option.value ? "btn btn--primary" : "btn btn--secondary"}
+          type="button"
+          role="tab"
+          aria-selected={value === option.value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AdminLegacyGiftCardControls({
+  giftCardProducts,
+  selectedProductId,
+  onSelectedProductIdChange,
+  expiryDays,
+  onExpiryDaysChange,
+  message,
+  onMessageChange,
+  liveGiftCardOptions,
+  optionQuantities,
+  onOptionQuantityChange,
+  wholeCrewValidation,
+  selectedCount,
+  total,
+  idPrefix = "giftcard-legacy",
+}) {
+  return (
+    <>
+      <label className="admin-form__field" htmlFor={`${idPrefix}-product`}>
+        <span>Gift card product</span>
+        <select
+          className="input"
+          id={`${idPrefix}-product`}
+          value={selectedProductId}
+          onChange={(event) => onSelectedProductIdChange(event.target.value)}
+          disabled={!giftCardProducts.length}
+        >
+          {!giftCardProducts.length && <option value="">No gift card products found</option>}
+          {giftCardProducts.map((product) => (
+            <option key={product.id} value={product.id}>
+              {product.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="admin-form__field" htmlFor={`${idPrefix}-expiry`}>
+        <span>Expiry days</span>
+        <input
+          className="input"
+          id={`${idPrefix}-expiry`}
+          type="number"
+          min="1"
+          max="1825"
+          step="1"
+          value={expiryDays}
+          onChange={(event) => onExpiryDaysChange(event.target.value)}
+        />
+      </label>
+      <label className="admin-form__field" htmlFor={`${idPrefix}-message`}>
+        <span>Optional message</span>
+        <textarea
+          className="input textarea"
+          id={`${idPrefix}-message`}
+          rows="3"
+          value={message}
+          onChange={(event) => onMessageChange(event.target.value)}
+          placeholder="Optional giveaway note"
+        />
+      </label>
+      <div className="admin-giftcard-studio__options">
+        <div className="admin-giftcard-studio__options-head">
+          <h3>Live option selection</h3>
+          <p className="modal__meta">Option quantities set the giveaway value.</p>
+        </div>
+        {liveGiftCardOptions.length === 0 ? (
+          <p className="admin-panel__note">
+            No live cut-flower options were found. Add options in Cut Flower Classes.
+          </p>
+        ) : (
+          <div className="admin-giftcard-studio__options-grid">
+            {liveGiftCardOptions.map((option) => {
+              const quantity = normalizeGiftCardOptionQuantity(optionQuantities?.[option.id], 0);
+              const optionIsSelected = quantity > 0;
+              const isWholeCrew = isWholeCrewOption(option);
+              const optionHasWholeCrewViolation =
+                isWholeCrew &&
+                getWholeCrewSelectionValidation([{ ...option, quantity }]).hasViolation;
+              return (
+                <article
+                  key={option.id}
+                  className={`admin-giftcard-studio__option-card${optionIsSelected ? " is-selected" : ""}${optionHasWholeCrewViolation ? " is-invalid" : ""}`}
+                >
+                  <div className="admin-giftcard-studio__option-main">
+                    <h4>{option.label}</h4>
+                    <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                  </div>
+                  <label className="admin-giftcard-studio__option-qty" htmlFor={`${idPrefix}-option-${option.id}`}>
+                    <span>Quantity</span>
+                    <input
+                      className="input"
+                      id={`${idPrefix}-option-${option.id}`}
+                      type="number"
+                      min="0"
+                      max="200"
+                      step="1"
+                      value={quantity}
+                      onChange={(event) => onOptionQuantityChange(option.id, event.target.value)}
+                    />
+                  </label>
+                  {isWholeCrew && (
+                    <p className="modal__meta admin-giftcard-studio__whole-crew-note">
+                      {wholeCrewValidation.minimumMessage}
+                    </p>
+                  )}
+                  {isWholeCrew && optionHasWholeCrewViolation && (
+                    <p className="admin-panel__error admin-giftcard-studio__whole-crew-error">
+                      Select at least 4 for Whole Crew.
+                    </p>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <div className="admin-giftcard-studio__summary">
+        <p className="modal__meta">
+          Selected options: <strong>{selectedCount}</strong>
+        </p>
+        <p className="modal__meta">
+          Giveaway value: <strong>{formatPriceLabel(total)}</strong>
+        </p>
+        {wholeCrewValidation.hasViolation && (
+          <p className="admin-panel__error">{wholeCrewValidation.minimumMessage}</p>
+        )}
+      </div>
+    </>
+  );
+}
+
+function AdminCatalogGiftCardControls({
+  formState,
+  onFieldChange,
+  selection,
+  idPrefix = "giftcard-catalog",
+}) {
+  const hasItemsForType = selection.items.length > 0;
+  const selectedItem = selection.selectedItem;
+
+  return (
+    <>
+      <div className="admin-form__grid">
+        <label className="admin-form__field" htmlFor={`${idPrefix}-type`}>
+          <span>Item type</span>
+          <select
+            className="input"
+            id={`${idPrefix}-type`}
+            value={formState.itemType}
+            onChange={(event) =>
+              onFieldChange({
+                itemType: event.target.value,
+                sourceId: "",
+                variantId: "",
+                optionId: "",
+              })
+            }
+          >
+            {ADMIN_GIFT_CARD_ITEM_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="admin-form__field" htmlFor={`${idPrefix}-item`}>
+          <span>Item</span>
+          <select
+            className="input"
+            id={`${idPrefix}-item`}
+            value={formState.sourceId}
+            onChange={(event) =>
+              onFieldChange({
+                sourceId: event.target.value,
+                variantId: "",
+                optionId: "",
+              })
+            }
+            disabled={!hasItemsForType}
+          >
+            {!hasItemsForType && <option value="">No eligible items found</option>}
+            {selection.items.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.title}
+                {item.metaLabel ? ` | ${item.metaLabel}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT && selectedItem?.variants?.length > 0 && (
+          <label className="admin-form__field" htmlFor={`${idPrefix}-variant`}>
+            <span>Variant</span>
+            <select
+              className="input"
+              id={`${idPrefix}-variant`}
+              value={formState.variantId}
+              onChange={(event) => onFieldChange({ variantId: event.target.value })}
+            >
+              <option value="">Select variant</option>
+              {selectedItem.variants.map((variant) => (
+                <option key={variant.id} value={variant.id}>
+                  {variant.label} - {formatPriceLabel(variant.price)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS && selectedItem?.options?.length > 0 && (
+          <label className="admin-form__field" htmlFor={`${idPrefix}-option`}>
+            <span>Class option</span>
+            <select
+              className="input"
+              id={`${idPrefix}-option`}
+              value={formState.optionId}
+              onChange={(event) => onFieldChange({ optionId: event.target.value })}
+            >
+              <option value="">Select option</option>
+              {selectedItem.options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label} - {formatPriceLabel(option.price)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="admin-form__field" htmlFor={`${idPrefix}-quantity`}>
+          <span>{selection.quantityLabel}</span>
+          <input
+            className="input"
+            id={`${idPrefix}-quantity`}
+            type="number"
+            min="1"
+            max="200"
+            step="1"
+            value={formState.quantity}
+            onChange={(event) => onFieldChange({ quantity: event.target.value })}
+          />
+        </label>
+        <label className="admin-form__field" htmlFor={`${idPrefix}-recipient`}>
+          <span>Recipient name</span>
+          <input
+            className="input"
+            id={`${idPrefix}-recipient`}
+            type="text"
+            value={formState.recipientName}
+            onChange={(event) => onFieldChange({ recipientName: event.target.value })}
+            placeholder="Optional"
+          />
+        </label>
+        <label className="admin-form__field" htmlFor={`${idPrefix}-purchaser`}>
+          <span>Purchased by</span>
+          <input
+            className="input"
+            id={`${idPrefix}-purchaser`}
+            type="text"
+            value={formState.purchaserName}
+            onChange={(event) => onFieldChange({ purchaserName: event.target.value })}
+            placeholder="Optional"
+          />
+        </label>
+        <label className="admin-form__field" htmlFor={`${idPrefix}-expiry`}>
+          <span>Expiry days</span>
+          <input
+            className="input"
+            id={`${idPrefix}-expiry`}
+            type="number"
+            min="1"
+            max="1825"
+            step="1"
+            value={formState.expiryDays}
+            onChange={(event) => onFieldChange({ expiryDays: event.target.value })}
+          />
+        </label>
+        <label className="admin-form__field" htmlFor={`${idPrefix}-message`}>
+          <span>Optional message</span>
+          <textarea
+            className="input textarea"
+            id={`${idPrefix}-message`}
+            rows="3"
+            value={formState.message}
+            onChange={(event) => onFieldChange({ message: event.target.value })}
+            placeholder="Optional admin-issued note"
+          />
+        </label>
+      </div>
+      <div className="admin-giftcard-studio__summary">
+        <p className="modal__meta">
+          Item: <strong>{selectedItem?.title || "Select an item"}</strong>
+        </p>
+        {selection.selectedVariant && (
+          <p className="modal__meta">
+            Variant: <strong>{selection.selectedVariant.label}</strong>
+          </p>
+        )}
+        {selection.selectedOption && (
+          <p className="modal__meta">
+            Option: <strong>{selection.selectedOption.label}</strong>
+          </p>
+        )}
+        <p className="modal__meta">
+          Unit price: <strong>{Number.isFinite(selection.unitPrice) ? formatPriceLabel(selection.unitPrice) : "-"}</strong>
+        </p>
+        <p className="modal__meta">
+          {selection.quantityLabel}: <strong>{selection.quantityValue || 0}</strong>
+        </p>
+        <p className="modal__meta">
+          Voucher value: <strong>{formatPriceLabel(selection.total)}</strong>
+        </p>
+        {selection.errorMessage && <p className="admin-panel__error">{selection.errorMessage}</p>}
+      </div>
+    </>
+  );
+}
+
+export const AdminGiftCardPreviewView = AdminGiftCardPreviewExperience;
+
+function LegacyAdminGiftCardPreviewView() {
   usePageMetadata({
     title: "Admin - Gift Card Preview",
     description: "Preview giveaway gift cards and save drafts for generation.",
@@ -11796,7 +12150,9 @@ export function AdminGiftCardPreviewView() {
   );
 }
 
-export function AdminGiftCardGenerateManageView() {
+export const AdminGiftCardGenerateManageView = AdminGiftCardGenerateManageExperience;
+
+function LegacyAdminGiftCardGenerateManageView() {
   usePageMetadata({
     title: "Admin - Gift Card Generate & Manage",
     description: "Generate gift cards instantly or from drafts, and manage issued cards.",
