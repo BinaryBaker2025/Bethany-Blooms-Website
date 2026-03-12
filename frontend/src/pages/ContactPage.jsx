@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
-import heroBackground from "../assets/hero-flowers.svg";
+import contactPhoto from "../assets/photos/workshop-table-details-1.png";
 import { getFirebaseFunctions } from "../lib/firebase.js";
 import {
   COMPANY_PHONE_LOCAL_DISPLAY,
@@ -74,22 +73,29 @@ function ContactPage() {
 
   return (
     <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Hero variant="contact" background={heroBackground}>
+      {/* Page hero */}
+      <section className="section--no-pad">
+        <div className="page-hero">
+          <img className="page-hero__bg" src={contactPhoto} alt="" aria-hidden="true" loading="eager" decoding="async" />
+          <div className="page-hero__overlay" aria-hidden="true" />
+          <div className="page-hero__content">
+            <span className="editorial-eyebrow">Get in Touch</span>
             <h1>We'd Love to Hear From You</h1>
             <p>
               Reach out about workshops, bespoke commissions, or simply to say hello. We respond within two business
               days with warmth and detail.
             </p>
-          </Hero>
+            <div className="cta-group">
+              <a href="#contact-form" className="btn btn--primary">Send a Message</a>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section className="section section--tight">
+      <section className="section band--white" id="contact-form">
         <div className="section__inner">
-          <Reveal as="div" className="contact-intro">
-            <span className="badge">Get in Touch</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Get in Touch</span>
             <h2>Tell us what you're dreaming up</h2>
             <p>
               Whether you need help booking a workshop, designing bespoke pressed florals, or sourcing seasonal blooms,
@@ -244,41 +250,38 @@ function ContactPage() {
         </div>
       </section>
 
-      <section className="section">
+      {/* Studio Hours — editorial-process */}
+      <section className="section band--cream">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Visit Us</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Visit Us</span>
             <h2>Studio Hours</h2>
             <p>
               By appointment only in Vereeniging, South Africa. We prepare the studio with refreshments, so please book
               ahead.
             </p>
           </Reveal>
-          <div className="cards-grid">
-            <Reveal as="article" className="card">
-              <h3 className="card__title">Email</h3>
-              <p>
-                <a href="mailto:admin@bethanyblooms.co.za">admin@bethanyblooms.co.za</a>
-              </p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={120}>
-              <h3 className="card__title">Phone</h3>
-              <p>
-                <a href={COMPANY_PHONE_TEL_HREF}>{COMPANY_PHONE_LOCAL_DISPLAY}</a>
-              </p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={240}>
-              <h3 className="card__title">Hours</h3>
-              <ul style={{listStyle: "none", padding: 0, margin: 0}}>
-                <li>Monday - Friday by appoinment</li>
-                <li>Saturday, 08:00-11:00 and  16:00-19:00</li>
-              </ul>
-            </Reveal>
-            <Reveal as="article" className="card" delay={360}>
-              <h3 className="card__title">Cut Flower Desk</h3>
+          <Reveal as="div" className="editorial-process">
+            <div className="editorial-process__step">
+              <h3>Email</h3>
+              <p><a href="mailto:admin@bethanyblooms.co.za">admin@bethanyblooms.co.za</a></p>
+              <p>We respond within two business days.</p>
+            </div>
+            <div className="editorial-process__step">
+              <h3>Phone</h3>
+              <p><a href={COMPANY_PHONE_TEL_HREF}>{COMPANY_PHONE_LOCAL_DISPLAY}</a></p>
+              <p>Tuesday–Saturday, 09:00–16:00 (SAST)</p>
+            </div>
+            <div className="editorial-process__step">
+              <h3>Hours</h3>
+              <p>Monday–Friday by appointment</p>
+              <p>Saturday, 08:00–11:00 and 16:00–19:00</p>
+            </div>
+            <div className="editorial-process__step">
+              <h3>Cut Flower Desk</h3>
               <p>Please contact us today if you would like any flowers for an event or special occasion.</p>
-            </Reveal>
-          </div>
+            </div>
+          </Reveal>
         </div>
       </section>
     </>

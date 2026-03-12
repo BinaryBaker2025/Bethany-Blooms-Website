@@ -22,10 +22,21 @@ const moneyFormatter = new Intl.NumberFormat("en-ZA", {
 
 const ADMIN_GIFT_CARD_MODE_CATALOG_ITEM = "catalog-item";
 const ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY = "custom-giveaway";
+const ADMIN_GIFT_CARD_MODE_MULTI_ITEM = "multi-item";
 const ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT = "product";
 const ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP = "workshop";
 const ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS = "cut-flower-class";
 const ADMIN_GIFT_CARD_DEFAULT_EXPIRY_DAYS = "365";
+const ADMIN_GIFT_CARD_REDEMPTION_SCOPE_OPTIONS = Object.freeze([
+  { value: "both", label: "In-store & Online" },
+  { value: "instore", label: "In-store only" },
+  { value: "online", label: "Online only" },
+]);
+const ADMIN_GIFT_CARD_REDEMPTION_SCOPE_DESCRIPTIONS = Object.freeze({
+  both: "Redeem at checkout online or in person at the farm.",
+  instore: "Use this card only for in-person purchases and bookings.",
+  online: "Use this card only through the website checkout flow.",
+});
 const ADMIN_GIFT_CARD_MODE_OPTIONS = Object.freeze([
   { value: ADMIN_GIFT_CARD_MODE_CATALOG_ITEM, label: "Catalog item" },
   { value: ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY, label: "Custom giveaway" },
@@ -429,6 +440,18 @@ const getCatalogItemKindLabel = (kind = "") => {
   }
 };
 
+const getRedemptionScopeLabel = (value = "") => {
+  switch ((value || "").toString().trim().toLowerCase()) {
+    case "instore":
+      return "In-store only";
+    case "online":
+      return "Online only";
+    case "both":
+    default:
+      return "In-store & online";
+  }
+};
+
 const buildCatalogItemSummary = (catalogItemRef = null) => {
   if (!catalogItemRef || typeof catalogItemRef !== "object") return "";
   const parts = [
@@ -440,7 +463,7 @@ const buildCatalogItemSummary = (catalogItemRef = null) => {
 
 function AdminGiftCardModeSwitch({ value, onChange }) {
   return (
-    <div className="admin-form__actions" role="tablist" aria-label="Gift card mode">
+    <div className="admin-giftcard-manage__mode-switch" role="tablist" aria-label="Gift card mode">
       {ADMIN_GIFT_CARD_MODE_OPTIONS.map((option) => (
         <button
           key={option.value}
@@ -779,217 +802,138 @@ function AdminCatalogGiftCardControls({
 
 export function AdminGiftCardPreviewExperience() {
   usePageMetadata({
-    title: "Admin - Gift Card Preview",
-    description: "Preview admin-issued gift cards and save drafts for generation.",
+    title: "Admin - Gift Card Builder",
+    description: "Build multi-item gift cards with products, workshops, and classes.",
   });
 
-  const {
-    products,
-    workshops,
-    cutFlowerClasses,
-    inventoryEnabled,
-    inventoryLoading,
-    inventoryError,
-  } = useAdminData();
-  const functionsInstance = useMemo(() => {
-    try {
-      return getFirebaseFunctions();
-    } catch {
-      return null;
-    }
-  }, []);
+  const { products, workshops, cutFlowerClasses, inventoryEnabled, inventoryLoading, inventoryError } = useAdminData();
+  const functionsInstance = useMemo(() => { try { return getFirebaseFunctions(); } catch { return null; } }, []);
+  const catalogItemsByType = useAdminCatalogGiftCardInventory({ products, workshops, cutFlowerClasses });
 
-  const [mode, setMode] = useState(ADMIN_GIFT_CARD_MODE_CATALOG_ITEM);
-  const [selectedProductId, setSelectedProductId] = useState("");
-  const [optionQuantities, setOptionQuantities] = useState({});
+  // Multi-item line items state
+  const [lineItems, setLineItems] = useState([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addItemForm, setAddItemForm] = useState(createInitialCatalogGiftCardForm);
+
+  // Card details
+  const [redemptionScope, setRedemptionScope] = useState("both");
+  const [recipientName, setRecipientName] = useState("");
+  const [purchaserName, setPurchaserName] = useState("");
   const [message, setMessage] = useState("");
   const [expiryDays, setExpiryDays] = useState(ADMIN_GIFT_CARD_DEFAULT_EXPIRY_DAYS);
-  const [catalogForm, setCatalogForm] = useState(createInitialCatalogGiftCardForm);
-  const [previewState, setPreviewState] = useState({
-    html: "",
-    generatedAt: "",
-  });
-  const [savedDraft, setSavedDraft] = useState(null);
+
+  // Preview / draft state
+  const [previewState, setPreviewState] = useState({ html: "", generatedAt: "" });
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [savedDraft, setSavedDraft] = useState(null);
   const [statusMessage, setStatusMessage] = useState(null);
   const [error, setError] = useState(null);
 
-  const giftCardProducts = useMemo(() => buildLegacyAdminGiftCardProducts(products), [products]);
-  const catalogItemsByType = useAdminCatalogGiftCardInventory({
-    products,
-    workshops,
-    cutFlowerClasses,
-  });
-  const liveGiftCardOptions = useMemo(
-    () => collectLiveCutFlowerGiftCardOptions(cutFlowerClasses),
-    [cutFlowerClasses],
-  );
-  const selectedOptions = useMemo(
-    () => buildSelectedGiftCardOptions(liveGiftCardOptions, optionQuantities),
-    [liveGiftCardOptions, optionQuantities],
-  );
-  const selectionSummary = useMemo(
-    () => summarizeGiftCardSelectedOptions(selectedOptions),
-    [selectedOptions],
-  );
-  const wholeCrewValidation = useMemo(
-    () => getWholeCrewSelectionValidation(selectedOptions),
-    [selectedOptions],
-  );
-  const selectedOptionsPayload = useMemo(
-    () =>
-      selectedOptions.map((option) => ({
-        id: option.id,
-        quantity: normalizeGiftCardOptionQuantity(option.quantity, 1),
-      })),
-    [selectedOptions],
-  );
-  const selectedProduct = useMemo(
-    () => giftCardProducts.find((product) => product.id === selectedProductId) || null,
-    [giftCardProducts, selectedProductId],
-  );
-  const normalizedExpiryDays = normalizeGiftCardExpiryDays(
-    expiryDays,
-    selectedProduct?.expiryDays || 365,
-  );
-  const catalogSelection = useMemo(
-    () =>
-      resolveAdminCatalogGiftCardSelection({
-        catalogItemsByType,
-        itemType: catalogForm.itemType,
-        sourceId: catalogForm.sourceId,
-        variantId: catalogForm.variantId,
-        optionId: catalogForm.optionId,
-        quantity: catalogForm.quantity,
-      }),
-    [catalogItemsByType, catalogForm],
+  const addItemSelection = useMemo(
+    () => resolveAdminCatalogGiftCardSelection({
+      catalogItemsByType,
+      itemType: addItemForm.itemType,
+      sourceId: addItemForm.sourceId,
+      variantId: addItemForm.variantId,
+      optionId: addItemForm.optionId,
+      quantity: addItemForm.quantity,
+    }),
+    [catalogItemsByType, addItemForm],
   );
 
+  // Sync sourceId when item type changes
   useEffect(() => {
-    if (!giftCardProducts.length) {
-      if (selectedProductId) setSelectedProductId("");
-      return;
+    const items = catalogItemsByType?.[addItemForm.itemType] || [];
+    const hasSelected = items.some((item) => item.id === addItemForm.sourceId);
+    const nextSourceId = hasSelected ? addItemForm.sourceId : (items[0]?.id || "");
+    if (nextSourceId !== addItemForm.sourceId) {
+      setAddItemForm((prev) => ({ ...prev, sourceId: nextSourceId, variantId: "", optionId: "" }));
     }
-    if (!giftCardProducts.some((product) => product.id === selectedProductId)) {
-      setSelectedProductId(giftCardProducts[0].id);
-    }
-  }, [giftCardProducts, selectedProductId]);
-
-  useEffect(() => {
-    if (!selectedProduct) return;
-    setExpiryDays(String(selectedProduct.expiryDays || 365));
-  }, [selectedProduct]);
-
-  useEffect(() => {
-    const items = catalogItemsByType?.[catalogForm.itemType] || [];
-    const selectedItem = items.find((item) => item.id === catalogForm.sourceId) || null;
-    const nextSourceId = selectedItem ? catalogForm.sourceId : items[0]?.id || "";
-    const nextVariantId =
-      catalogForm.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT &&
-      selectedItem?.variants?.some((variant) => variant.id === catalogForm.variantId)
-        ? catalogForm.variantId
-        : "";
-    const nextOptionId =
-      catalogForm.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS &&
-      selectedItem?.options?.some((option) => option.id === catalogForm.optionId)
-        ? catalogForm.optionId
-        : "";
-    if (
-      nextSourceId !== catalogForm.sourceId ||
-      nextVariantId !== catalogForm.variantId ||
-      nextOptionId !== catalogForm.optionId
-    ) {
-      setCatalogForm((previous) => ({
-        ...previous,
-        sourceId: nextSourceId,
-        variantId: nextVariantId,
-        optionId: nextOptionId,
-      }));
-    }
-  }, [
-    catalogItemsByType,
-    catalogForm.itemType,
-    catalogForm.optionId,
-    catalogForm.sourceId,
-    catalogForm.variantId,
-  ]);
+  }, [catalogItemsByType, addItemForm.itemType, addItemForm.sourceId]);
 
   useEffect(() => {
     if (!statusMessage) return undefined;
-    const timeout = setTimeout(() => setStatusMessage(null), 3200);
-    return () => clearTimeout(timeout);
+    const t = setTimeout(() => setStatusMessage(null), 3200);
+    return () => clearTimeout(t);
   }, [statusMessage]);
 
-  const canGenerateGiftCard =
-    mode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM
-      ? catalogSelection.canSubmit
-      : Boolean(selectedProductId) &&
-        selectedOptionsPayload.length > 0 &&
-        selectionSummary.total > 0 &&
-        !wholeCrewValidation.hasViolation;
+  // Resolve each line item for display (title, price, etc.)
+  const resolvedLineItems = useMemo(() =>
+    lineItems.map((item) => {
+      const items = catalogItemsByType?.[item.type] || [];
+      const found = items.find((i) => i.id === item.sourceId) || null;
+      const variant = item.type === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT && found?.variants?.length
+        ? found.variants.find((v) => v.id === item.variantId) || null : null;
+      const option = item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS && found?.options?.length
+        ? found.options.find((o) => o.id === item.optionId) || null : null;
+      const unitPrice =
+        item.type === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT
+          ? (found?.variants?.length ? variant?.price : found?.unitPrice) ?? 0
+          : item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS
+            ? (found?.options?.length ? option?.price : found?.unitPrice) ?? 0
+            : found?.unitPrice ?? 0;
+      const subtitle = [variant?.label, option?.label].filter(Boolean).join(" | ");
+      return {
+        ...item,
+        title: found?.title || item.sourceId,
+        subtitle,
+        typeLabel: getCatalogItemKindLabel(item.type),
+        unitPrice,
+        lineTotal: Number((unitPrice * item.quantity).toFixed(2)),
+      };
+    }),
+    [lineItems, catalogItemsByType],
+  );
 
-  const canCallFunctions =
-    inventoryEnabled &&
-    Boolean(functionsInstance) &&
-    canGenerateGiftCard;
+  const grandTotal = useMemo(
+    () => resolvedLineItems.reduce((sum, item) => sum + item.lineTotal, 0),
+    [resolvedLineItems],
+  );
 
-  const handleOptionQuantityChange = (optionId, value) => {
-    if (!optionId) return;
-    const quantity = normalizeGiftCardOptionQuantity(value, 0);
-    setOptionQuantities((previous) => {
-      const next = { ...(previous || {}) };
-      if (quantity <= 0) {
-        delete next[optionId];
-      } else {
-        next[optionId] = quantity;
-      }
-      return next;
-    });
+  const canBuild = lineItems.length > 0;
+  const canCallFunctions = inventoryEnabled && Boolean(functionsInstance) && canBuild;
+
+  const buildPayload = () => ({
+    lineItems: lineItems.map((item) => ({
+      type: item.type,
+      sourceId: item.sourceId,
+      quantity: item.quantity,
+      ...(item.variantId ? { variantId: item.variantId } : {}),
+      ...(item.optionId ? { optionId: item.optionId } : {}),
+    })),
+    recipientName: recipientName.trim(),
+    purchaserName: purchaserName.trim(),
+    message: message.trim(),
+    expiryDays: normalizeGiftCardExpiryDays(expiryDays, 365),
+    redemptionScope,
+  });
+
+  const handleAddItem = () => {
+    if (!addItemSelection.canSubmit) return;
+    setLineItems((prev) => [
+      ...prev,
+      {
+        localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type: addItemForm.itemType,
+        sourceId: addItemForm.sourceId,
+        variantId: addItemForm.variantId,
+        optionId: addItemForm.optionId,
+        quantity: addItemSelection.quantityValue,
+      },
+    ]);
+    setAddItemForm(createInitialCatalogGiftCardForm());
+    setShowAddForm(false);
   };
 
-  const buildRequestPayload = () =>
-    mode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM
-      ? buildAdminCatalogGiftCardPayload({
-          itemType: catalogForm.itemType,
-          sourceId: catalogForm.sourceId,
-          variantId: catalogForm.variantId,
-          optionId: catalogForm.optionId,
-          quantityValue: catalogSelection.quantityValue,
-          recipientName: catalogForm.recipientName,
-          purchaserName: catalogForm.purchaserName,
-          message: catalogForm.message,
-          expiryDays: catalogForm.expiryDays,
-        })
-      : {
-          mode: ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
-          productId: selectedProductId,
-          selectedOptions: selectedOptionsPayload,
-          message: message.toString().trim(),
-          expiryDays: normalizedExpiryDays,
-        };
-
-  const getValidationMessage = () => {
-    if (mode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM) {
-      return catalogSelection.errorMessage || "Select a valid catalog item.";
-    }
-    return wholeCrewValidation.hasViolation
-      ? wholeCrewValidation.minimumMessage
-      : "Select valid gift card options.";
+  const handleRemoveItem = (localId) => {
+    setLineItems((prev) => prev.filter((item) => item.localId !== localId));
   };
 
-  const handleRefreshPreview = async (event) => {
-    if (event) event.preventDefault();
-    if (!functionsInstance) {
-      setError("Gift card functions are not available.");
-      return;
-    }
-    if (!inventoryEnabled) {
-      setError("Admin access is required to preview gift cards.");
-      return;
-    }
-    if (!canGenerateGiftCard) {
-      setError(getValidationMessage());
+  const handleRefreshPreview = async (e) => {
+    if (e) e.preventDefault();
+    if (!canCallFunctions) {
+      setError(!inventoryEnabled ? "Admin access required." : !canBuild ? "Add at least one item." : "Preview unavailable.");
       return;
     }
     setLoadingPreview(true);
@@ -997,61 +941,33 @@ export function AdminGiftCardPreviewExperience() {
     setStatusMessage(null);
     try {
       const callable = httpsCallable(functionsInstance, "previewAdminGiveawayGiftCard");
-      const response = await callable(buildRequestPayload());
-      const data = response?.data || {};
-      const preview = data.preview || {};
-      setPreviewState({
-        html: (preview.html || "").toString(),
-        generatedAt: (preview.generatedAt || "").toString(),
-      });
-      const generatedLabel = preview?.generatedAt
-        ? new Date(preview.generatedAt).toLocaleString("en-ZA")
-        : "";
-      setStatusMessage(
-        generatedLabel ? `Preview generated at ${generatedLabel}.` : "Preview generated.",
-      );
-    } catch (previewError) {
-      setError(
-        resolveGiftCardStudioCallableError(
-          previewError,
-          "Unable to generate gift card preview.",
-        ),
-      );
+      const response = await callable(buildPayload());
+      const preview = response?.data?.preview || {};
+      setPreviewState({ html: (preview.html || "").toString(), generatedAt: (preview.generatedAt || "").toString() });
+      setStatusMessage(preview.generatedAt ? `Preview generated at ${new Date(preview.generatedAt).toLocaleString("en-ZA")}.` : "Preview generated.");
+    } catch (err) {
+      setError(resolveGiftCardStudioCallableError(err, "Unable to generate preview."));
     } finally {
       setLoadingPreview(false);
     }
   };
 
   const handleSaveDraft = async () => {
-    if (!functionsInstance) {
-      setError("Gift card functions are not available.");
+    if (!canCallFunctions) {
+      setError(!inventoryEnabled ? "Admin access required." : "Add at least one item.");
       return;
     }
-    if (!inventoryEnabled) {
-      setError("Admin access is required to save gift card drafts.");
-      return;
-    }
-    if (!canGenerateGiftCard) {
-      setError(getValidationMessage());
-      return;
-    }
-
     setSavingDraft(true);
     setError(null);
     setStatusMessage(null);
     try {
       const callable = httpsCallable(functionsInstance, "saveAdminGiveawayGiftCardDraft");
-      const response = await callable(buildRequestPayload());
+      const response = await callable(buildPayload());
       const draft = response?.data?.draft || null;
       setSavedDraft(draft);
       setStatusMessage(`Draft saved${draft?.id ? ` (${draft.id})` : ""}.`);
-    } catch (draftError) {
-      setError(
-        resolveGiftCardStudioCallableError(
-          draftError,
-          "Unable to save gift card draft.",
-        ),
-      );
+    } catch (err) {
+      setError(resolveGiftCardStudioCallableError(err, "Unable to save draft."));
     } finally {
       setSavingDraft(false);
     }
@@ -1061,92 +977,118 @@ export function AdminGiftCardPreviewExperience() {
     <div className="admin-panel admin-panel--full admin-giftcard-studio">
       <Reveal as="div" className="admin-panel__header">
         <div>
-          <h2>Gift Cards - Preview</h2>
+          <h2>Gift Card Builder</h2>
           <p className="admin-panel__note">
-            Preview catalog-linked vouchers or legacy custom giveaway cards, then save a draft for generation.
+            Build a gift card with multiple items — products, workshops, or classes. Set the redemption scope, then save a draft to issue the card.
           </p>
         </div>
       </Reveal>
 
       <div className="admin-giftcard-studio__layout">
         <form className="admin-giftcard-studio__controls" onSubmit={handleRefreshPreview}>
-          <AdminGiftCardModeSwitch
-            value={mode}
-            onChange={(nextMode) => {
-              setMode(nextMode);
-              setSavedDraft(null);
-              setError(null);
-            }}
-          />
 
-          {mode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM ? (
-            <>
-              <p className="modal__meta">
-                Create an admin-issued gift card for a listed product, workshop, or class already in the site catalog.
-              </p>
-              <AdminCatalogGiftCardControls
-                formState={catalogForm}
-                onFieldChange={(nextFields) => {
-                  setCatalogForm((previous) => ({ ...previous, ...nextFields }));
-                  setSavedDraft(null);
-                  setError(null);
-                }}
-                selection={catalogSelection}
-                idPrefix="giftcard-preview-catalog"
-              />
-            </>
-          ) : (
-            <>
-              <p className="modal__meta">
-                Legacy giveaway mode uses live cut-flower options to build a custom bundle.
-              </p>
-              <AdminLegacyGiftCardControls
-                giftCardProducts={giftCardProducts}
-                selectedProductId={selectedProductId}
-                onSelectedProductIdChange={(value) => {
-                  setSelectedProductId(value);
-                  setSavedDraft(null);
-                  setError(null);
-                }}
-                expiryDays={expiryDays}
-                onExpiryDaysChange={setExpiryDays}
-                message={message}
-                onMessageChange={setMessage}
-                liveGiftCardOptions={liveGiftCardOptions}
-                optionQuantities={optionQuantities}
-                onOptionQuantityChange={handleOptionQuantityChange}
-                wholeCrewValidation={wholeCrewValidation}
-                selectedCount={selectionSummary.selectedCount}
-                total={selectionSummary.total}
-                idPrefix="giftcard-preview-legacy"
-              />
-            </>
-          )}
+          {/* ── Items list ── */}
+          <div className="admin-giftcard-multiitem">
+            <div className="admin-giftcard-multiitem__header">
+              <h3>Items on this card</h3>
+              {resolvedLineItems.length > 0 && (
+                <span className="modal__meta">
+                  {resolvedLineItems.length} item(s) · Total: <strong>{formatPriceLabel(grandTotal)}</strong>
+                </span>
+              )}
+            </div>
+
+            {resolvedLineItems.length === 0 ? (
+              <p className="modal__meta admin-giftcard-multiitem__empty">No items added yet. Use "+ Add Item" below to start building.</p>
+            ) : (
+              <ul className="admin-giftcard-multiitem__list">
+                {resolvedLineItems.map((item) => (
+                  <li key={item.localId} className="admin-giftcard-multiitem__item">
+                    <div className="admin-giftcard-multiitem__item-info">
+                      <span className="admin-giftcard-multiitem__type-badge">{item.typeLabel}</span>
+                      <strong>{item.title}</strong>
+                      {item.subtitle && <span className="modal__meta"> · {item.subtitle}</span>}
+                    </div>
+                    <div className="admin-giftcard-multiitem__item-meta">
+                      <span>Qty: {item.quantity}</span>
+                      <span>{formatPriceLabel(item.unitPrice)} ea</span>
+                      <strong>{formatPriceLabel(item.lineTotal)}</strong>
+                    </div>
+                    <button type="button" className="btn btn--danger btn--small" onClick={() => handleRemoveItem(item.localId)}>
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {!showAddForm ? (
+              <button type="button" className="btn btn--secondary admin-giftcard-multiitem__add-btn" onClick={() => { setShowAddForm(true); setError(null); }} disabled={!inventoryEnabled}>
+                + Add Item
+              </button>
+            ) : (
+              <div className="admin-giftcard-multiitem__add-form">
+                <h4>Add an item</h4>
+                <AdminCatalogGiftCardControls
+                  formState={addItemForm}
+                  onFieldChange={(nextFields) => setAddItemForm((prev) => ({ ...prev, ...nextFields }))}
+                  selection={addItemSelection}
+                  idPrefix="gc-builder-add"
+                />
+                <div className="admin-form__actions">
+                  <button type="button" className="btn btn--secondary" onClick={() => setShowAddForm(false)}>Cancel</button>
+                  <button type="button" className="btn btn--primary" onClick={handleAddItem} disabled={!addItemSelection.canSubmit}>
+                    Add to Card
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Redemption scope ── */}
+          <div className="admin-form__field">
+            <span className="admin-form__label">Redeemable</span>
+            <div className="admin-giftcard-scope-radios">
+              {ADMIN_GIFT_CARD_REDEMPTION_SCOPE_OPTIONS.map((opt) => (
+                <label key={opt.value} className="admin-giftcard-scope-radio">
+                  <input type="radio" name="gc-builder-scope" value={opt.value} checked={redemptionScope === opt.value} onChange={() => setRedemptionScope(opt.value)} />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Card details ── */}
+          <div className="admin-form__grid">
+            <label className="admin-form__field" htmlFor="gc-builder-recipient">
+              <span>Recipient name</span>
+              <input className="input" id="gc-builder-recipient" type="text" value={recipientName} onChange={(e) => setRecipientName(e.target.value)} placeholder="Optional" />
+            </label>
+            <label className="admin-form__field" htmlFor="gc-builder-purchaser">
+              <span>Purchased by</span>
+              <input className="input" id="gc-builder-purchaser" type="text" value={purchaserName} onChange={(e) => setPurchaserName(e.target.value)} placeholder="Optional" />
+            </label>
+            <label className="admin-form__field" htmlFor="gc-builder-expiry">
+              <span>Expiry (days)</span>
+              <input className="input" id="gc-builder-expiry" type="number" min="1" max="1825" step="1" value={expiryDays} onChange={(e) => setExpiryDays(e.target.value)} />
+            </label>
+            <label className="admin-form__field" htmlFor="gc-builder-message">
+              <span>Optional message</span>
+              <textarea className="input textarea" id="gc-builder-message" rows="3" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Personal note on the card" />
+            </label>
+          </div>
 
           <div className="admin-form__actions">
-            <button
-              className="btn btn--secondary"
-              type="submit"
-              disabled={loadingPreview || !canCallFunctions}
-            >
-              {loadingPreview ? "Generating preview..." : "Refresh Preview"}
+            <button className="btn btn--secondary" type="submit" disabled={loadingPreview || !canCallFunctions}>
+              {loadingPreview ? "Generating..." : "Refresh Preview"}
             </button>
-            <button
-              className="btn btn--primary"
-              type="button"
-              onClick={handleSaveDraft}
-              disabled={savingDraft || !canCallFunctions}
-            >
-              {savingDraft ? "Saving draft..." : "Save Draft For Generation"}
+            <button className="btn btn--primary" type="button" onClick={handleSaveDraft} disabled={savingDraft || !canCallFunctions}>
+              {savingDraft ? "Saving draft..." : "Save Draft"}
             </button>
           </div>
 
-          {savedDraft?.id && (
-            <p className="modal__meta">
-              Saved draft: <strong>{savedDraft.id}</strong>
-            </p>
-          )}
-          {inventoryLoading && <p className="modal__meta">Loading admin inventory...</p>}
+          {savedDraft?.id && <p className="modal__meta">Saved draft: <strong>{savedDraft.id}</strong></p>}
+          {inventoryLoading && <p className="modal__meta">Loading catalog...</p>}
           {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
           {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
           {error && <p className="admin-panel__error">{error}</p>}
@@ -1154,26 +1096,14 @@ export function AdminGiftCardPreviewExperience() {
 
         <div className="admin-email-preview__panel admin-giftcard-studio__preview-panel">
           <div className="admin-email-preview__meta">
-            <p className="modal__meta">
-              <strong>Preview</strong>
-            </p>
-            {previewState.generatedAt && (
-              <p className="modal__meta">
-                Generated: {new Date(previewState.generatedAt).toLocaleString("en-ZA")}
-              </p>
-            )}
+            <p className="modal__meta"><strong>Preview</strong></p>
+            {previewState.generatedAt && <p className="modal__meta">Generated: {new Date(previewState.generatedAt).toLocaleString("en-ZA")}</p>}
           </div>
           <div className="admin-email-preview__frame-wrap">
             {previewState.html ? (
-              <iframe
-                className="admin-email-preview__frame admin-giftcard-studio__frame"
-                title="Admin gift card preview"
-                srcDoc={previewState.html}
-              />
+              <iframe className="admin-email-preview__frame admin-giftcard-studio__frame" title="Gift card preview" srcDoc={previewState.html} />
             ) : (
-              <p className="modal__meta" style={{ padding: "1rem" }}>
-                Generate a preview to inspect the final card layout.
-              </p>
+              <p className="modal__meta" style={{ padding: "1rem" }}>Add items and click "Refresh Preview" to see the card layout.</p>
             )}
           </div>
         </div>
@@ -1214,14 +1144,17 @@ export function AdminGiftCardGenerateManageExperience() {
   });
 
   const [quickCreateDialogOpen, setQuickCreateDialogOpen] = useState(false);
-  const [quickMode, setQuickMode] = useState(ADMIN_GIFT_CARD_MODE_CATALOG_ITEM);
-  const [quickSelectedProductId, setQuickSelectedProductId] = useState("");
-  const [quickOptionQuantities, setQuickOptionQuantities] = useState({});
+  const [quickLineItems, setQuickLineItems] = useState([]);
+  const [quickShowAddForm, setQuickShowAddForm] = useState(false);
   const [quickMessage, setQuickMessage] = useState("");
+  const [quickRecipientName, setQuickRecipientName] = useState("");
+  const [quickPurchaserName, setQuickPurchaserName] = useState("");
+  const [quickRedemptionScope, setQuickRedemptionScope] = useState("both");
   const [quickExpiryDays, setQuickExpiryDays] = useState(ADMIN_GIFT_CARD_DEFAULT_EXPIRY_DAYS);
   const [quickCatalogForm, setQuickCatalogForm] = useState(createInitialCatalogGiftCardForm);
   const [quickCreatingGiftCard, setQuickCreatingGiftCard] = useState(false);
   const [copiedKey, setCopiedKey] = useState("");
+  const [openActionMenuId, setOpenActionMenuId] = useState("");
   const [statusMessage, setStatusMessage] = useState(null);
   const [error, setError] = useState(null);
   const [searchValue, setSearchValue] = useState("");
@@ -1241,9 +1174,12 @@ export function AdminGiftCardGenerateManageExperience() {
     productTitle: "",
     expiresAt: "",
     optionQuantities: {},
+    selectedOptions: [],
+    selectedOptionsSummary: "",
     quantity: "1",
     isGiveaway: false,
     giftCardMode: ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+    redemptionScope: "both",
     catalogItemRef: null,
   });
   const [savingEdit, setSavingEdit] = useState(false);
@@ -1259,42 +1195,13 @@ export function AdminGiftCardGenerateManageExperience() {
     () => new Set(liveGiftCardOptions.map((option) => option.id)),
     [liveGiftCardOptions],
   );
-  const giftCardProducts = useMemo(() => buildLegacyAdminGiftCardProducts(products), [products]);
   const catalogItemsByType = useAdminCatalogGiftCardInventory({
     products,
     workshops,
     cutFlowerClasses,
   });
 
-  const quickSelectedProduct = useMemo(
-    () => giftCardProducts.find((product) => product.id === quickSelectedProductId) || null,
-    [giftCardProducts, quickSelectedProductId],
-  );
-  const quickSelectedOptions = useMemo(
-    () => buildSelectedGiftCardOptions(liveGiftCardOptions, quickOptionQuantities),
-    [liveGiftCardOptions, quickOptionQuantities],
-  );
-  const quickSummary = useMemo(
-    () => summarizeGiftCardSelectedOptions(quickSelectedOptions),
-    [quickSelectedOptions],
-  );
-  const quickWholeCrewValidation = useMemo(
-    () => getWholeCrewSelectionValidation(quickSelectedOptions),
-    [quickSelectedOptions],
-  );
-  const quickSelectedOptionsPayload = useMemo(
-    () =>
-      quickSelectedOptions.map((option) => ({
-        id: option.id,
-        quantity: normalizeGiftCardOptionQuantity(option.quantity, 1),
-      })),
-    [quickSelectedOptions],
-  );
-  const normalizedQuickExpiryDays = normalizeGiftCardExpiryDays(
-    quickExpiryDays,
-    quickSelectedProduct?.expiryDays || 365,
-  );
-  const quickCatalogSelection = useMemo(
+  const quickAddSelection = useMemo(
     () =>
       resolveAdminCatalogGiftCardSelection({
         catalogItemsByType,
@@ -1306,21 +1213,40 @@ export function AdminGiftCardGenerateManageExperience() {
       }),
     [catalogItemsByType, quickCatalogForm],
   );
-
-  useEffect(() => {
-    if (!giftCardProducts.length) {
-      if (quickSelectedProductId) setQuickSelectedProductId("");
-      return;
-    }
-    if (!giftCardProducts.some((product) => product.id === quickSelectedProductId)) {
-      setQuickSelectedProductId(giftCardProducts[0].id);
-    }
-  }, [giftCardProducts, quickSelectedProductId]);
-
-  useEffect(() => {
-    if (!quickSelectedProduct) return;
-    setQuickExpiryDays(String(quickSelectedProduct.expiryDays || 365));
-  }, [quickSelectedProduct]);
+  const quickCatalogSelection = useMemo(
+    () =>
+      quickLineItems.map((item) => {
+        const items = catalogItemsByType?.[item.type] || [];
+        const selectedItem = items.find((entry) => entry.id === item.sourceId) || null;
+        const selectedVariant =
+          item.type === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT && selectedItem?.variants?.length
+            ? selectedItem.variants.find((variant) => variant.id === item.variantId) || null
+            : null;
+        const selectedOption =
+          item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS && selectedItem?.options?.length
+            ? selectedItem.options.find((option) => option.id === item.optionId) || null
+            : null;
+        const unitPrice =
+          item.type === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT
+            ? (selectedItem?.variants?.length ? selectedVariant?.price : selectedItem?.unitPrice) ?? 0
+            : item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS
+              ? (selectedItem?.options?.length ? selectedOption?.price : selectedItem?.unitPrice) ?? 0
+              : selectedItem?.unitPrice ?? 0;
+        return {
+          ...item,
+          title: selectedItem?.title || item.sourceId,
+          typeLabel: getCatalogItemKindLabel(item.type),
+          subtitle: [selectedVariant?.label, selectedOption?.label].filter(Boolean).join(" | "),
+          unitPrice,
+          lineTotal: Number((unitPrice * item.quantity).toFixed(2)),
+        };
+      }),
+    [catalogItemsByType, quickLineItems],
+  );
+  const quickCatalogTotal = useMemo(
+    () => quickCatalogSelection.reduce((sum, item) => sum + item.lineTotal, 0),
+    [quickCatalogSelection],
+  );
 
   useEffect(() => {
     const items = catalogItemsByType?.[quickCatalogForm.itemType] || [];
@@ -1368,13 +1294,28 @@ export function AdminGiftCardGenerateManageExperience() {
     return () => clearTimeout(timeout);
   }, [copiedKey]);
 
-  const canQuickCreateGiftCard =
-    quickMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM
-      ? quickCatalogSelection.canSubmit
-      : Boolean(quickSelectedProductId) &&
-        quickSelectedOptionsPayload.length > 0 &&
-        quickSummary.total > 0 &&
-        !quickWholeCrewValidation.hasViolation;
+  useEffect(() => {
+    if (!openActionMenuId) return undefined;
+    const handlePointerDown = (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-giftcard-actions-root]")) {
+        return;
+      }
+      setOpenActionMenuId("");
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setOpenActionMenuId("");
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openActionMenuId]);
+
+  const canQuickCreateGiftCard = quickCatalogSelection.length > 0;
 
   const registryRows = useMemo(() => {
     return (Array.isArray(giftCardRegistry) ? giftCardRegistry : [])
@@ -1397,17 +1338,20 @@ export function AdminGiftCardGenerateManageExperience() {
           sourceType,
           value: Number(row.value || 0),
           selectedOptions: Array.isArray(row.selectedOptions) ? row.selectedOptions : [],
+          selectedOptionsSummary: (row.selectedOptionsSummary || "").toString().trim(),
+          redemptionScope: (row.redemptionScope || "both").toString().trim() || "both",
           isGiveaway: Boolean(row.isGiveaway || sourceType === "admin-giveaway"),
           isDeleted: Boolean(row.isDeleted),
           giftCardMode,
           catalogItemRef,
           itemSummary:
-            giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM
+            (row.selectedOptionsSummary || "").toString().trim() ||
+            (giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM
               ? buildCatalogItemSummary(catalogItemRef)
-              : (row.productTitle || "").toString().trim(),
+              : (row.productTitle || "").toString().trim()),
         };
       })
-      .filter((row) => !row.isDeleted && row.status !== "deleted" && row.status !== "archived");
+      .filter((row) => !row.isDeleted && row.status !== "deleted");
   }, [giftCardRegistry]);
 
   const availableStatuses = useMemo(
@@ -1430,6 +1374,7 @@ export function AdminGiftCardGenerateManageExperience() {
     const expiresTime = (row) => resolveComparableTime(row.expiresAt);
 
     const filteredRows = registryRows.filter((row) => {
+      if (statusFilter === "all" && row.status === "archived") return false;
       if (statusFilter !== "all" && row.status !== statusFilter) return false;
       if (sourceFilter !== "all" && row.sourceType !== sourceFilter) return false;
       if (dateFilter === "last7" && createdOrIssuedTime(row) < now - 7 * dayMs) return false;
@@ -1521,27 +1466,54 @@ export function AdminGiftCardGenerateManageExperience() {
   const getRegistryCreatedOrIssuedLabel = (row) =>
     formatRegistryDateLabel(row?.createdAt || row?.issuedAt || row?.updatedAt);
 
-  const handleQuickOptionQuantityChange = (optionId, value) => {
-    if (!optionId) return;
-    const quantity = normalizeGiftCardOptionQuantity(value, 0);
-    setQuickOptionQuantities((previous) => {
-      const next = { ...(previous || {}) };
-      if (quantity <= 0) {
-        delete next[optionId];
-      } else {
-        next[optionId] = quantity;
-      }
-      return next;
-    });
+  const resetQuickCreateState = () => {
+    setQuickLineItems([]);
+    setQuickShowAddForm(false);
+    setQuickCatalogForm(createInitialCatalogGiftCardForm());
+    setQuickMessage("");
+    setQuickRecipientName("");
+    setQuickPurchaserName("");
+    setQuickRedemptionScope("both");
+    setQuickExpiryDays(ADMIN_GIFT_CARD_DEFAULT_EXPIRY_DAYS);
   };
 
   const getQuickCreateValidationMessage = () => {
-    if (quickMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM) {
-      return quickCatalogSelection.errorMessage || "Select a valid catalog item before generating.";
+    return quickAddSelection.errorMessage || "Add at least one catalog item before generating.";
+  };
+
+  const handleQuickAddItem = () => {
+    if (!quickAddSelection.canSubmit) {
+      setError(getQuickCreateValidationMessage());
+      return;
     }
-    return quickWholeCrewValidation.hasViolation
-      ? quickWholeCrewValidation.minimumMessage
-      : "Select valid gift card options before generating.";
+    setQuickLineItems((previous) => [
+      ...previous,
+      {
+        localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type: quickCatalogForm.itemType,
+        sourceId: quickCatalogForm.sourceId,
+        variantId: quickCatalogForm.variantId,
+        optionId: quickCatalogForm.optionId,
+        quantity: quickAddSelection.quantityValue,
+      },
+    ]);
+    setQuickCatalogForm((previous) => ({
+      ...createInitialCatalogGiftCardForm(),
+      itemType: previous.itemType,
+    }));
+    setQuickShowAddForm(false);
+    setError(null);
+  };
+
+  const handleQuickRemoveItem = (localId) => {
+    setQuickLineItems((previous) => previous.filter((item) => item.localId !== localId));
+  };
+
+  const handleQuickLineItemQuantityChange = (localId, value) => {
+    const quantity = normalizeGiftCardOptionQuantity(value, 1);
+    setQuickLineItems((previous) =>
+      previous.map((item) => (item.localId === localId ? { ...item, quantity } : item)),
+    );
   };
 
   const handleQuickCreateGiftCard = async () => {
@@ -1562,26 +1534,20 @@ export function AdminGiftCardGenerateManageExperience() {
     setStatusMessage(null);
     setError(null);
     try {
-      const payload =
-        quickMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM
-          ? buildAdminCatalogGiftCardPayload({
-              itemType: quickCatalogForm.itemType,
-              sourceId: quickCatalogForm.sourceId,
-              variantId: quickCatalogForm.variantId,
-              optionId: quickCatalogForm.optionId,
-              quantityValue: quickCatalogSelection.quantityValue,
-              recipientName: quickCatalogForm.recipientName,
-              purchaserName: quickCatalogForm.purchaserName,
-              message: quickCatalogForm.message,
-              expiryDays: quickCatalogForm.expiryDays,
-            })
-          : {
-              mode: ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
-              productId: quickSelectedProductId,
-              selectedOptions: quickSelectedOptionsPayload,
-              message: quickMessage.toString().trim(),
-              expiryDays: normalizedQuickExpiryDays,
-            };
+      const payload = {
+        lineItems: quickLineItems.map((item) => ({
+          type: item.type,
+          sourceId: item.sourceId,
+          quantity: normalizeGiftCardOptionQuantity(item.quantity, 1),
+          ...(item.variantId ? { variantId: item.variantId } : {}),
+          ...(item.optionId ? { optionId: item.optionId } : {}),
+        })),
+        recipientName: quickRecipientName.toString().trim(),
+        purchaserName: quickPurchaserName.toString().trim(),
+        message: quickMessage.toString().trim(),
+        expiryDays: normalizeGiftCardExpiryDays(quickExpiryDays, 365),
+        redemptionScope: quickRedemptionScope,
+      };
       const saveDraftCallable = httpsCallable(functionsInstance, "saveAdminGiveawayGiftCardDraft");
       const draftResponse = await saveDraftCallable(payload);
       const draftId = (draftResponse?.data?.draft?.id || "").toString().trim();
@@ -1597,10 +1563,7 @@ export function AdminGiftCardGenerateManageExperience() {
       }
       setStatusMessage(`Gift card created: ${giftCard.code || "Code unavailable"}.`);
       setQuickCreateDialogOpen(false);
-      setQuickMode(ADMIN_GIFT_CARD_MODE_CATALOG_ITEM);
-      setQuickCatalogForm(createInitialCatalogGiftCardForm());
-      setQuickMessage("");
-      setQuickOptionQuantities({});
+      resetQuickCreateState();
     } catch (quickCreateError) {
       setError(
         resolveGiftCardStudioCallableError(
@@ -1651,9 +1614,12 @@ export function AdminGiftCardGenerateManageExperience() {
       productTitle: (row.productTitle || "").toString(),
       expiresAt: expiresDate ? expiresDate.toISOString().slice(0, 10) : "",
       optionQuantities,
+      selectedOptions: Array.isArray(row.selectedOptions) ? row.selectedOptions : [],
+      selectedOptionsSummary: (row.selectedOptionsSummary || "").toString(),
       quantity: String(catalogQuantity || 1),
       isGiveaway: Boolean(row.isGiveaway),
       giftCardMode: row.giftCardMode || ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+      redemptionScope: (row.redemptionScope || "both").toString().trim() || "both",
       catalogItemRef,
     });
     setError(null);
@@ -1672,9 +1638,12 @@ export function AdminGiftCardGenerateManageExperience() {
       productTitle: "",
       expiresAt: "",
       optionQuantities: {},
+      selectedOptions: [],
+      selectedOptionsSummary: "",
       quantity: "1",
       isGiveaway: false,
       giftCardMode: ADMIN_GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+      redemptionScope: "both",
       catalogItemRef: null,
     });
 
@@ -1763,6 +1732,92 @@ export function AdminGiftCardGenerateManageExperience() {
     }
   };
 
+  const renderGiftCardActionMenu = (row, scope = "table") => {
+    const rowId = (row?.giftCardId || row?.id || "").toString().trim();
+    if (!rowId) return null;
+    const menuId = `${scope}-${rowId}`;
+    const isOpen = openActionMenuId === menuId;
+    const isArchiving = archivingGiftCardId === rowId;
+
+    return (
+      <div className="admin-giftcard-actions" data-giftcard-actions-root>
+        <button
+          className={`admin-giftcard-actions__trigger${isOpen ? " is-open" : ""}`}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+          aria-label={`More actions for gift card ${row.code || rowId}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpenActionMenuId((previous) => (previous === menuId ? "" : menuId));
+          }}
+        >
+          <span className="admin-giftcard-actions__dots" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
+        {isOpen && (
+          <div className="admin-giftcard-actions__menu" role="menu" aria-label="Gift card actions">
+            <button
+              className="admin-giftcard-actions__item"
+              type="button"
+              role="menuitem"
+              onClick={async (event) => {
+                event.stopPropagation();
+                setOpenActionMenuId("");
+                await copyValue(row.code || "", `${scope}-code-${rowId}`);
+              }}
+            >
+              {copiedKey === `${scope}-code-${rowId}` ? "Copied" : "Copy code"}
+            </button>
+            {row.siteAccessUrl && (
+              <a
+                className="admin-giftcard-actions__item"
+                href={row.siteAccessUrl}
+                target="_blank"
+                rel="noreferrer"
+                role="menuitem"
+                onClick={() => setOpenActionMenuId("")}
+              >
+                View
+              </a>
+            )}
+            <button
+              className="admin-giftcard-actions__item"
+              type="button"
+              role="menuitem"
+              disabled={isArchiving}
+              onClick={(event) => {
+                event.stopPropagation();
+                setOpenActionMenuId("");
+                openEditModal(row);
+              }}
+            >
+              Edit
+            </button>
+            {row.status !== "archived" && (
+              <button
+                className="admin-giftcard-actions__item is-danger"
+                type="button"
+                role="menuitem"
+                disabled={isArchiving}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpenActionMenuId("");
+                  handleArchiveGiftCard(row);
+                }}
+              >
+                {isArchiving ? "Archiving..." : "Archive"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const editSelectedOptions = useMemo(
     () => buildSelectedGiftCardOptions(liveGiftCardOptions, editState.optionQuantities),
     [liveGiftCardOptions, editState.optionQuantities],
@@ -1781,10 +1836,51 @@ export function AdminGiftCardGenerateManageExperience() {
       .map(([optionId]) => optionId)
       .filter((optionId) => !liveOptionIdSet.has(optionId));
   }, [editState.optionQuantities, liveOptionIdSet]);
+  const editIsBundledCatalogCard =
+    editState.giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM &&
+    Array.isArray(editState.selectedOptions) &&
+    editState.selectedOptions.length > 1;
   const catalogEditQuantity = normalizeGiftCardOptionQuantity(editState.quantity, 0);
+  const editCatalogItems = useMemo(() => {
+    if (editState.giftCardMode !== ADMIN_GIFT_CARD_MODE_CATALOG_ITEM) return [];
+    return (Array.isArray(editState.selectedOptions) ? editState.selectedOptions : []).map((option, index) => {
+      const quantity = normalizeGiftCardOptionQuantity(
+        !editIsBundledCatalogCard && index === 0 ? editState.quantity : option?.quantity,
+        1,
+      );
+      const unitPrice = parseNumber(option?.amount ?? option?.unitPriceSnapshot, 0) || 0;
+      const lineTotal =
+        parseNumber(option?.lineTotal, null) ??
+        Number((unitPrice * quantity).toFixed(2));
+      return {
+        id: (option?.id || option?.label || `option-${index + 1}`).toString(),
+        label: (option?.label || editState.productTitle || "Gift item").toString(),
+        typeLabel: getCatalogItemKindLabel(option?.sourceKind || editState.catalogItemRef?.kind || ""),
+        quantity,
+        lineTotal,
+      };
+    });
+  }, [
+    editIsBundledCatalogCard,
+    editState.catalogItemRef?.kind,
+    editState.giftCardMode,
+    editState.productTitle,
+    editState.quantity,
+    editState.selectedOptions,
+  ]);
+  const editCatalogTotal = useMemo(
+    () => editCatalogItems.reduce((sum, item) => sum + (parseNumber(item.lineTotal, 0) || 0), 0),
+    [editCatalogItems],
+  );
+  const editDialogItemCount =
+    editState.giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM
+      ? editCatalogItems.length
+      : editSelectedOptions.length;
+  const editDialogTotal =
+    editState.giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM ? editCatalogTotal : editSummary.total;
   const canSaveEdit =
     editState.giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM
-      ? editState.open && catalogEditQuantity > 0 && !savingEdit
+      ? editState.open && (editIsBundledCatalogCard || catalogEditQuantity > 0) && !savingEdit
       : editState.open &&
         editSelectedOptions.length > 0 &&
         !editWholeCrewValidation.hasViolation &&
@@ -1840,7 +1936,7 @@ export function AdminGiftCardGenerateManageExperience() {
               expiresAt: editState.expiresAt
                 ? new Date(`${editState.expiresAt}T23:59:59+02:00`).toISOString()
                 : null,
-              quantity: catalogEditQuantity,
+              ...(editIsBundledCatalogCard ? {} : { quantity: catalogEditQuantity }),
             }
           : {
               giftCardId: editState.giftCardId,
@@ -1874,7 +1970,7 @@ export function AdminGiftCardGenerateManageExperience() {
         <div className="admin-giftcard-manage__hero">
           <h2>Gift Cards - Generate & Manage</h2>
           <p className="admin-panel__note">
-            Create catalog-linked gift cards or legacy custom giveaways, then manage the full registry from one place.
+            Build gift cards with products, workshops, and cut flower classes, then manage the full registry from one place.
           </p>
         </div>
       </Reveal>
@@ -1882,19 +1978,20 @@ export function AdminGiftCardGenerateManageExperience() {
       <section className="admin-panel__card admin-giftcard-manage__create-card">
         <h3>Create gift card</h3>
         <p className="modal__meta">
-          Open the creator dialog to issue a new catalog voucher or legacy custom giveaway card.
+          Add one or more catalog items, choose where the card can be redeemed, and issue it immediately.
         </p>
         <div className="admin-form__actions">
           <button
             className="btn btn--primary admin-giftcard-manage__create-btn"
             type="button"
             onClick={() => {
+              resetQuickCreateState();
               setQuickCreateDialogOpen(true);
               setError(null);
             }}
             disabled={!inventoryEnabled || !functionsInstance}
           >
-            Create Gift Card Now
+            Build Gift Card
           </button>
         </div>
       </section>
@@ -1951,7 +2048,7 @@ export function AdminGiftCardGenerateManageExperience() {
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
             >
-              <option value="all">All statuses</option>
+              <option value="all">All except archived</option>
               {availableStatuses.map((value) => (
                 <option key={value} value={value}>
                   {value}
@@ -2022,45 +2119,19 @@ export function AdminGiftCardGenerateManageExperience() {
                   <span className="admin-giftcard-registry-card__status">{row.status || "active"}</span>
                 </div>
                 <div className="admin-giftcard-registry-card__meta">
-                  <span>Mode: {getGiftCardModeLabel(row.giftCardMode)}</span>
+                  <span>
+                    Mode: {row.selectedOptions.length > 1 ? "Gift package" : getGiftCardModeLabel(row.giftCardMode)}
+                  </span>
                   <span>Source: {row.sourceType || "unknown"}</span>
                   <span>Value: {formatPriceLabel(row.value)}</span>
                   <span>Item: {row.itemSummary || "-"}</span>
+                  <span>Redeemable: {getRedemptionScopeLabel(row.redemptionScope)}</span>
                   <span>Recipient: {row.recipientName || "-"}</span>
                   <span>Purchaser: {row.purchaserName || "-"}</span>
                   <span>Created: {getRegistryCreatedOrIssuedLabel(row)}</span>
                 </div>
                 <div className="admin-giftcard-registry-card__actions">
-                  <button
-                    className="btn btn--secondary btn--small"
-                    type="button"
-                    onClick={() => copyValue(row.code || "", `mobile-code-${row.giftCardId}`)}
-                  >
-                    {copiedKey === `mobile-code-${row.giftCardId}` ? "Copied" : "Copy code"}
-                  </button>
-                  {row.siteAccessUrl && (
-                    <a className="btn btn--secondary btn--small" href={row.siteAccessUrl} target="_blank" rel="noreferrer">
-                      View
-                    </a>
-                  )}
-                  <button
-                    className="btn btn--secondary btn--small"
-                    type="button"
-                    onClick={() => openEditModal(row)}
-                    disabled={archivingGiftCardId === (row.giftCardId || row.id)}
-                  >
-                    Edit
-                  </button>
-                  {row.status !== "archived" && (
-                    <button
-                      className="btn btn--danger btn--small"
-                      type="button"
-                      onClick={() => handleArchiveGiftCard(row)}
-                      disabled={archivingGiftCardId === (row.giftCardId || row.id)}
-                    >
-                      {archivingGiftCardId === (row.giftCardId || row.id) ? "Archiving..." : "Archive"}
-                    </button>
-                  )}
+                  {renderGiftCardActionMenu(row, "mobile")}
                 </div>
               </article>
             ))}
@@ -2091,46 +2162,18 @@ export function AdminGiftCardGenerateManageExperience() {
                 filteredRegistryRows.map((row) => (
                   <tr key={row.giftCardId || row.id}>
                     <td>{row.code || "-"}</td>
-                    <td>{getGiftCardModeLabel(row.giftCardMode)}</td>
+                    <td>{row.selectedOptions.length > 1 ? "Gift package" : getGiftCardModeLabel(row.giftCardMode)}</td>
                     <td>{row.sourceType || "unknown"}</td>
                     <td>{row.status || "active"}</td>
                     <td>{formatPriceLabel(row.value)}</td>
-                    <td>{row.itemSummary || "-"}</td>
-                    <td>{getRegistryCreatedOrIssuedLabel(row)}</td>
                     <td>
-                      <div className="admin-table__actions">
-                        <button
-                          className="btn btn--secondary btn--small"
-                          type="button"
-                          onClick={() => copyValue(row.code || "", `code-${row.giftCardId}`)}
-                        >
-                          {copiedKey === `code-${row.giftCardId}` ? "Copied" : "Copy code"}
-                        </button>
-                        {row.siteAccessUrl && (
-                          <a className="btn btn--secondary btn--small" href={row.siteAccessUrl} target="_blank" rel="noreferrer">
-                            View
-                          </a>
-                        )}
-                        <button
-                          className="btn btn--secondary btn--small"
-                          type="button"
-                          onClick={() => openEditModal(row)}
-                          disabled={archivingGiftCardId === (row.giftCardId || row.id)}
-                        >
-                          Edit
-                        </button>
-                        {row.status !== "archived" && (
-                          <button
-                            className="btn btn--danger btn--small"
-                            type="button"
-                            onClick={() => handleArchiveGiftCard(row)}
-                            disabled={archivingGiftCardId === (row.giftCardId || row.id)}
-                          >
-                            {archivingGiftCardId === (row.giftCardId || row.id) ? "Archiving..." : "Archive"}
-                          </button>
-                        )}
+                      <div className="admin-giftcard-registry__item-cell">
+                        <strong>{row.itemSummary || "-"}</strong>
+                        <span>{getRedemptionScopeLabel(row.redemptionScope)}</span>
                       </div>
                     </td>
+                    <td>{getRegistryCreatedOrIssuedLabel(row)}</td>
+                    <td>{renderGiftCardActionMenu(row, "table")}</td>
                   </tr>
                 ))
               )}
@@ -2149,7 +2192,7 @@ export function AdminGiftCardGenerateManageExperience() {
 
       {quickCreateDialogOpen && (
         <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="giftcard-create-title">
-          <div className="modal__content">
+          <div className="modal__content admin-giftcard-manage__dialog">
             <button
               className="modal__close"
               type="button"
@@ -2158,68 +2201,254 @@ export function AdminGiftCardGenerateManageExperience() {
             >
               x
             </button>
-            <h3 className="modal__title" id="giftcard-create-title">
-              Create Gift Card
-            </h3>
-            <AdminGiftCardModeSwitch value={quickMode} onChange={setQuickMode} />
-            {quickMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM ? (
-              <>
-                <p className="modal__meta">
-                  Issue a gift card linked to one live catalog item already listed on the website.
+            <div className="admin-giftcard-manage__dialog-head">
+              <div className="admin-giftcard-manage__dialog-head-copy">
+                <p className="admin-giftcard-manage__eyebrow">Gift Card Builder</p>
+                <h3 className="modal__title admin-giftcard-manage__dialog-title" id="giftcard-create-title">
+                  Build Gift Card
+                </h3>
+                <p className="admin-giftcard-manage__subtitle">
+                  Create a bundled card that can include products, workshops, and cut flower classes in a single issue flow.
                 </p>
-                <AdminCatalogGiftCardControls
-                  formState={quickCatalogForm}
-                  onFieldChange={(nextFields) => {
-                    setQuickCatalogForm((previous) => ({ ...previous, ...nextFields }));
-                    setError(null);
+              </div>
+              <div className="admin-giftcard-manage__hero-stats" aria-label="Gift card summary">
+                <div className="admin-giftcard-manage__hero-stat">
+                  <span>Items</span>
+                  <strong>{quickCatalogSelection.length}</strong>
+                </div>
+                <div className="admin-giftcard-manage__hero-stat">
+                  <span>Value</span>
+                  <strong>{formatPriceLabel(quickCatalogTotal)}</strong>
+                </div>
+              </div>
+            </div>
+            <div className="admin-modal__content admin-giftcard-manage__dialog-body">
+              <section className="admin-giftcard-manage__section admin-giftcard-manage__section--items">
+                <div className="admin-giftcard-manage__section-head">
+                  <div>
+                    <p className="admin-giftcard-manage__section-kicker">Included Items</p>
+                    <h4>Build the package</h4>
+                  </div>
+                  {quickCatalogSelection.length > 0 && (
+                    <div className="admin-giftcard-manage__section-summary">
+                      <span>{quickCatalogSelection.length} selected</span>
+                      <strong>{formatPriceLabel(quickCatalogTotal)}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div className="admin-giftcard-multiitem">
+                  {quickCatalogSelection.length === 0 ? (
+                    <p className="modal__meta admin-giftcard-multiitem__empty">
+                      No items added yet. Start by adding a product, workshop, or class.
+                    </p>
+                  ) : (
+                    <ul className="admin-giftcard-multiitem__list">
+                      {quickCatalogSelection.map((item) => (
+                        <li key={item.localId} className="admin-giftcard-multiitem__item">
+                          <div className="admin-giftcard-multiitem__item-info">
+                            <span className="admin-giftcard-multiitem__type-badge">{item.typeLabel}</span>
+                            <div className="admin-giftcard-multiitem__item-copy">
+                              <strong>{item.title}</strong>
+                              {item.subtitle && <span className="modal__meta">{item.subtitle}</span>}
+                            </div>
+                          </div>
+                          <div className="admin-giftcard-multiitem__item-meta">
+                            <label className="admin-giftcard-multiitem__qty" htmlFor={`quick-item-${item.localId}`}>
+                              <span>Qty</span>
+                              <input
+                                className="input"
+                                id={`quick-item-${item.localId}`}
+                                type="number"
+                                min="1"
+                                max="200"
+                                step="1"
+                                value={item.quantity}
+                                onChange={(event) =>
+                                  handleQuickLineItemQuantityChange(item.localId, event.target.value)
+                                }
+                              />
+                            </label>
+                            <div className="admin-giftcard-multiitem__line-total">
+                              <span>Line total</span>
+                              <strong>{formatPriceLabel(item.lineTotal)}</strong>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn--danger btn--small"
+                            onClick={() => handleQuickRemoveItem(item.localId)}
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {!quickShowAddForm ? (
+                    <button
+                      type="button"
+                      className="btn btn--secondary admin-giftcard-multiitem__add-btn"
+                      onClick={() => {
+                        setQuickShowAddForm(true);
+                        setError(null);
+                      }}
+                    >
+                      + Add Item
+                    </button>
+                  ) : (
+                    <div className="admin-giftcard-multiitem__add-form">
+                      <div className="admin-giftcard-manage__section-head admin-giftcard-manage__section-head--compact">
+                        <div>
+                          <p className="admin-giftcard-manage__section-kicker">Catalog Picker</p>
+                          <h4>Add another item</h4>
+                        </div>
+                      </div>
+                      <AdminCatalogGiftCardControls
+                        formState={quickCatalogForm}
+                        onFieldChange={(nextFields) => {
+                          setQuickCatalogForm((previous) => ({ ...previous, ...nextFields }));
+                          setError(null);
+                        }}
+                        selection={quickAddSelection}
+                        idPrefix="giftcard-generate-catalog"
+                      />
+                      <div className="admin-form__actions">
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={() => setQuickShowAddForm(false)}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="btn btn--primary"
+                          type="button"
+                          onClick={handleQuickAddItem}
+                          disabled={!quickAddSelection.canSubmit}
+                        >
+                          Add to Card
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="admin-giftcard-manage__section">
+                <div className="admin-giftcard-manage__section-head">
+                  <div>
+                    <p className="admin-giftcard-manage__section-kicker">Redemption</p>
+                    <h4>Where can this card be used?</h4>
+                  </div>
+                </div>
+                <div className="admin-giftcard-scope-radios">
+                  {ADMIN_GIFT_CARD_REDEMPTION_SCOPE_OPTIONS.map((option) => (
+                    <label key={option.value} className="admin-giftcard-scope-radio">
+                      <input
+                        type="radio"
+                        name="giftcard-generate-scope"
+                        value={option.value}
+                        checked={quickRedemptionScope === option.value}
+                        onChange={() => setQuickRedemptionScope(option.value)}
+                      />
+                      <span className="admin-giftcard-scope-radio__card">
+                        <strong>{option.label}</strong>
+                        <small>{ADMIN_GIFT_CARD_REDEMPTION_SCOPE_DESCRIPTIONS[option.value]}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+
+              <section className="admin-giftcard-manage__section">
+                <div className="admin-giftcard-manage__section-head">
+                  <div>
+                    <p className="admin-giftcard-manage__section-kicker">Card Details</p>
+                    <h4>Personalize the issue</h4>
+                  </div>
+                </div>
+                <div className="admin-form__grid admin-giftcard-manage__details-grid">
+                  <label className="admin-form__field" htmlFor="giftcard-generate-recipient">
+                    <span>Recipient name</span>
+                    <input
+                      className="input"
+                      id="giftcard-generate-recipient"
+                      type="text"
+                      value={quickRecipientName}
+                      onChange={(event) => setQuickRecipientName(event.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label className="admin-form__field" htmlFor="giftcard-generate-purchaser">
+                    <span>Purchased by</span>
+                    <input
+                      className="input"
+                      id="giftcard-generate-purchaser"
+                      type="text"
+                      value={quickPurchaserName}
+                      onChange={(event) => setQuickPurchaserName(event.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label className="admin-form__field admin-giftcard-manage__field--compact" htmlFor="giftcard-generate-expiry">
+                    <span>Expiry days</span>
+                    <input
+                      className="input"
+                      id="giftcard-generate-expiry"
+                      type="number"
+                      min="1"
+                      max="1825"
+                      step="1"
+                      value={quickExpiryDays}
+                      onChange={(event) => setQuickExpiryDays(event.target.value)}
+                    />
+                  </label>
+                  <label className="admin-form__field admin-giftcard-manage__field--message" htmlFor="giftcard-generate-message">
+                    <span>Optional message</span>
+                    <textarea
+                      className="input textarea"
+                      id="giftcard-generate-message"
+                      rows="4"
+                      value={quickMessage}
+                      onChange={(event) => setQuickMessage(event.target.value)}
+                      placeholder="Optional note on the card"
+                    />
+                  </label>
+                </div>
+              </section>
+            </div>
+            <div className="admin-modal__actions admin-form__actions admin-giftcard-manage__footer">
+              <div className="admin-giftcard-manage__footer-meta">
+                <span>{quickCatalogSelection.length > 0 ? "Ready to issue" : "Build your card"}</span>
+                <strong>
+                  {quickCatalogSelection.length > 0
+                    ? `${quickCatalogSelection.length} item(s) | ${formatPriceLabel(quickCatalogTotal)}`
+                    : "Add at least one item to continue"}
+                </strong>
+              </div>
+              <div className="admin-giftcard-manage__footer-actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={() => {
+                    setQuickCreateDialogOpen(false);
+                    resetQuickCreateState();
                   }}
-                  selection={quickCatalogSelection}
-                  idPrefix="giftcard-generate-catalog"
-                />
-              </>
-            ) : (
-              <>
-                <p className="modal__meta">
-                  Legacy giveaway mode builds value from live cut-flower options.
-                </p>
-                <AdminLegacyGiftCardControls
-                  giftCardProducts={giftCardProducts}
-                  selectedProductId={quickSelectedProductId}
-                  onSelectedProductIdChange={(value) => {
-                    setQuickSelectedProductId(value);
-                    setError(null);
-                  }}
-                  expiryDays={quickExpiryDays}
-                  onExpiryDaysChange={setQuickExpiryDays}
-                  message={quickMessage}
-                  onMessageChange={setQuickMessage}
-                  liveGiftCardOptions={liveGiftCardOptions}
-                  optionQuantities={quickOptionQuantities}
-                  onOptionQuantityChange={handleQuickOptionQuantityChange}
-                  wholeCrewValidation={quickWholeCrewValidation}
-                  selectedCount={quickSummary.selectedCount}
-                  total={quickSummary.total}
-                  idPrefix="giftcard-generate-legacy"
-                />
-              </>
-            )}
-            <div className="admin-form__actions">
-              <button
-                className="btn btn--secondary"
-                type="button"
-                onClick={() => setQuickCreateDialogOpen(false)}
-                disabled={quickCreatingGiftCard}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn--primary"
-                type="button"
-                onClick={handleQuickCreateGiftCard}
-                disabled={quickCreatingGiftCard || !canQuickCreateGiftCard || !inventoryEnabled || !functionsInstance}
-              >
-                {quickCreatingGiftCard ? "Creating..." : "Create Gift Card Now"}
-              </button>
+                  disabled={quickCreatingGiftCard}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={handleQuickCreateGiftCard}
+                  disabled={quickCreatingGiftCard || !canQuickCreateGiftCard || !inventoryEnabled || !functionsInstance}
+                >
+                  {quickCreatingGiftCard ? "Creating..." : "Issue Gift Card"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2227,231 +2456,346 @@ export function AdminGiftCardGenerateManageExperience() {
 
       {editState.open && (
         <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="giftcard-edit-title">
-          <div className="modal__content">
+          <div className="modal__content admin-giftcard-manage__dialog">
             <button className="modal__close" type="button" onClick={closeEditModal} aria-label="Close">
               x
             </button>
-            <h3 className="modal__title" id="giftcard-edit-title">
-              Edit Gift Card {editState.code ? `- ${editState.code}` : ""}
-            </h3>
-            <div className="admin-form__grid">
-              <label className="admin-form__field" htmlFor="giftcard-edit-status">
-                <span>Status</span>
-                <input
-                  className="input"
-                  id="giftcard-edit-status"
-                  value={editState.status}
-                  onChange={(event) =>
-                    setEditState((previous) => ({ ...previous, status: event.target.value }))
-                  }
-                />
-              </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-expiry">
-                <span>Expiry date</span>
-                <input
-                  className="input"
-                  id="giftcard-edit-expiry"
-                  type="date"
-                  value={editState.expiresAt}
-                  onChange={(event) =>
-                    setEditState((previous) => ({ ...previous, expiresAt: event.target.value }))
-                  }
-                />
-              </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-recipient">
-                <span>Recipient name</span>
-                <input
-                  className="input"
-                  id="giftcard-edit-recipient"
-                  value={editState.recipientName}
-                  onChange={(event) =>
-                    setEditState((previous) => ({
-                      ...previous,
-                      recipientName: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-purchaser">
-                <span>Purchaser name</span>
-                <input
-                  className="input"
-                  id="giftcard-edit-purchaser"
-                  value={editState.isGiveaway ? "" : editState.purchaserName}
-                  onChange={(event) =>
-                    setEditState((previous) => ({
-                      ...previous,
-                      purchaserName: event.target.value,
-                    }))
-                  }
-                  disabled={editState.isGiveaway}
-                />
-              </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-message-field">
-                <span>Message</span>
-                <textarea
-                  className="input textarea"
-                  id="giftcard-edit-message-field"
-                  rows="2"
-                  value={editState.message}
-                  onChange={(event) =>
-                    setEditState((previous) => ({ ...previous, message: event.target.value }))
-                  }
-                />
-              </label>
-              {editState.giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM ? (
-                <label className="admin-form__field" htmlFor="giftcard-edit-quantity">
-                  <span>
-                    {editState.catalogItemRef?.kind === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT
-                      ? "Quantity"
-                      : "Attendees"}
-                  </span>
-                  <input
-                    className="input"
-                    id="giftcard-edit-quantity"
-                    type="number"
-                    min="1"
-                    max="200"
-                    step="1"
-                    value={editState.quantity}
-                    onChange={(event) =>
-                      setEditState((previous) => ({ ...previous, quantity: event.target.value }))
-                    }
-                  />
-                </label>
-              ) : (
-                <>
-                  <label className="admin-form__field" htmlFor="giftcard-edit-title-field">
-                    <span>Product title</span>
-                    <input
-                      className="input"
-                      id="giftcard-edit-title-field"
-                      value={editState.productTitle}
-                      onChange={(event) =>
-                        setEditState((previous) => ({ ...previous, productTitle: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field" htmlFor="giftcard-edit-terms-field">
-                    <span>Terms</span>
-                    <textarea
-                      className="input textarea"
-                      id="giftcard-edit-terms-field"
-                      rows="3"
-                      value={editState.terms}
-                      onChange={(event) =>
-                        setEditState((previous) => ({ ...previous, terms: event.target.value }))
-                      }
-                    />
-                  </label>
-                </>
-              )}
-            </div>
-
-            {editState.giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM ? (
-              <div className="admin-giftcard-studio__summary">
-                <p className="modal__meta">
-                  Mode: <strong>{getGiftCardModeLabel(editState.giftCardMode)}</strong>
-                </p>
-                <p className="modal__meta">
-                  Kind: <strong>{getCatalogItemKindLabel(editState.catalogItemRef?.kind)}</strong>
-                </p>
-                <p className="modal__meta">
-                  Item: <strong>{buildCatalogItemSummary(editState.catalogItemRef) || editState.productTitle || "-"}</strong>
-                </p>
-                <p className="modal__meta">
-                  Unit price: <strong>{formatPriceLabel(editState.catalogItemRef?.unitPriceSnapshot)}</strong>
-                </p>
-                <p className="modal__meta">
-                  Voucher value:{" "}
-                  <strong>
-                    {formatPriceLabel(
-                      (parseNumber(editState.catalogItemRef?.unitPriceSnapshot, 0) || 0) *
-                        Math.max(1, catalogEditQuantity || 0),
-                    )}
-                  </strong>
-                </p>
-                <p className="modal__meta">
-                  Catalog binding is locked after issue. You can update names, message, expiry, status, and quantity only.
+            <div className="admin-giftcard-manage__dialog-head">
+              <div className="admin-giftcard-manage__dialog-head-copy">
+                <p className="admin-giftcard-manage__eyebrow">Gift Card Builder</p>
+                <h3 className="modal__title admin-giftcard-manage__dialog-title" id="giftcard-edit-title">
+                  Edit Gift Card
+                </h3>
+                <p className="admin-giftcard-manage__subtitle">
+                  {editState.code ? `${editState.code}. ` : ""}
+                  Update the issued card using the same layout as creation while keeping post-issue rules intact.
                 </p>
               </div>
-            ) : (
-              <>
-                <div className="admin-giftcard-studio__options">
-                  <div className="admin-giftcard-studio__options-head">
-                    <h3>Live option selection</h3>
-                    <p className="modal__meta">Option quantities determine card value.</p>
+              <div className="admin-giftcard-manage__hero-stats" aria-label="Gift card summary">
+                <div className="admin-giftcard-manage__hero-stat">
+                  <span>Items</span>
+                  <strong>{editDialogItemCount}</strong>
+                </div>
+                <div className="admin-giftcard-manage__hero-stat">
+                  <span>Value</span>
+                  <strong>{formatPriceLabel(editDialogTotal)}</strong>
+                </div>
+              </div>
+            </div>
+            <div className="admin-modal__content admin-giftcard-manage__dialog-body">
+              {editState.giftCardMode === ADMIN_GIFT_CARD_MODE_CATALOG_ITEM ? (
+                <section className="admin-giftcard-manage__section admin-giftcard-manage__section--items">
+                  <div className="admin-giftcard-manage__section-head">
+                    <div>
+                      <p className="admin-giftcard-manage__section-kicker">Included Items</p>
+                      <h4>Review the issued package</h4>
+                    </div>
+                    <div className="admin-giftcard-manage__section-summary">
+                      <span>{editCatalogItems.length} selected</span>
+                      <strong>{formatPriceLabel(editCatalogTotal)}</strong>
+                    </div>
                   </div>
-                  <div className="admin-giftcard-studio__options-grid">
-                    {liveGiftCardOptions.map((option) => {
-                      const quantity = normalizeGiftCardOptionQuantity(
-                        editState.optionQuantities?.[option.id],
-                        0,
-                      );
-                      const wholeCrewOptionSelectedInvalid =
-                        isWholeCrewOption(option) &&
-                        getWholeCrewSelectionValidation([{ ...option, quantity }]).hasViolation;
-                      return (
-                        <article
-                          key={option.id}
-                          className={`admin-giftcard-studio__option-card${quantity > 0 ? " is-selected" : ""}${wholeCrewOptionSelectedInvalid ? " is-invalid" : ""}`}
-                        >
-                          <div className="admin-giftcard-studio__option-main">
-                            <h4>{option.label}</h4>
-                            <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
-                          </div>
-                          <label className="admin-giftcard-studio__option-qty" htmlFor={`giftcard-edit-option-${option.id}`}>
-                            <span>Quantity</span>
-                            <input
-                              className="input"
-                              id={`giftcard-edit-option-${option.id}`}
-                              type="number"
-                              min="0"
-                              max="200"
-                              step="1"
-                              value={quantity}
-                              onChange={(event) => handleEditOptionQuantityChange(option.id, event.target.value)}
-                            />
-                          </label>
-                          {isWholeCrewOption(option) && (
-                            <p className="modal__meta admin-giftcard-studio__whole-crew-note">
-                              {editWholeCrewValidation.minimumMessage}
-                            </p>
-                          )}
-                          {isWholeCrewOption(option) && wholeCrewOptionSelectedInvalid && (
-                            <p className="admin-panel__error admin-giftcard-studio__whole-crew-error">
-                              Select at least 4 for Whole Crew.
-                            </p>
-                          )}
-                        </article>
-                      );
-                    })}
+
+                  <div className="admin-giftcard-multiitem">
+                    {editCatalogItems.length === 0 ? (
+                      <p className="modal__meta admin-giftcard-multiitem__empty">
+                        No catalog selections were stored on this card.
+                      </p>
+                    ) : (
+                      <ul className="admin-giftcard-multiitem__list">
+                        {editCatalogItems.map((item, index) => (
+                          <li key={item.id} className="admin-giftcard-multiitem__item">
+                            <div className="admin-giftcard-multiitem__item-info">
+                              <span className="admin-giftcard-multiitem__type-badge">{item.typeLabel || "Item"}</span>
+                              <div className="admin-giftcard-multiitem__item-copy">
+                                <strong>{item.label}</strong>
+                                {index === 0 && !editIsBundledCatalogCard && (
+                                  <span className="modal__meta">
+                                    {buildCatalogItemSummary(editState.catalogItemRef) || "Catalog-linked item"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="admin-giftcard-multiitem__item-meta">
+                              <label className="admin-giftcard-multiitem__qty" htmlFor={`giftcard-edit-item-${item.id}`}>
+                                <span>Qty</span>
+                                <input
+                                  className="input"
+                                  id={`giftcard-edit-item-${item.id}`}
+                                  type="number"
+                                  min="1"
+                                  max="200"
+                                  step="1"
+                                  value={
+                                    !editIsBundledCatalogCard && index === 0
+                                      ? editState.quantity
+                                      : item.quantity
+                                  }
+                                  onChange={(event) =>
+                                    !editIsBundledCatalogCard && index === 0
+                                      ? setEditState((previous) => ({
+                                          ...previous,
+                                          quantity: event.target.value,
+                                        }))
+                                      : undefined
+                                  }
+                                  disabled={editIsBundledCatalogCard || index > 0}
+                                />
+                              </label>
+                              <div className="admin-giftcard-multiitem__line-total">
+                                <span>Line total</span>
+                                <strong>{formatPriceLabel(item.lineTotal)}</strong>
+                              </div>
+                            </div>
+                            <div className="admin-giftcard-manage__readonly-value">
+                              {editIsBundledCatalogCard ? "Locked" : "Editable"}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <p className="modal__meta">
+                      {editIsBundledCatalogCard
+                        ? "Included selections are locked after issue. You can still update names, message, expiry, and status."
+                        : "Catalog binding is locked after issue. You can update names, message, expiry, status, and quantity only."}
+                    </p>
+                  </div>
+                </section>
+              ) : (
+                <section className="admin-giftcard-manage__section admin-giftcard-manage__section--items">
+                  <div className="admin-giftcard-manage__section-head">
+                    <div>
+                      <p className="admin-giftcard-manage__section-kicker">Included Items</p>
+                      <h4>Review the issued package</h4>
+                    </div>
+                    <div className="admin-giftcard-manage__section-summary">
+                      <span>{editSelectedOptions.length} selected</span>
+                      <strong>{formatPriceLabel(editSummary.total)}</strong>
+                    </div>
+                  </div>
+                  <div className="admin-giftcard-studio__options">
+                    <div className="admin-giftcard-studio__options-head">
+                      <h3>Live option selection</h3>
+                      <p className="modal__meta">Option quantities determine card value.</p>
+                    </div>
+                    <div className="admin-giftcard-studio__options-grid">
+                      {liveGiftCardOptions.map((option) => {
+                        const quantity = normalizeGiftCardOptionQuantity(
+                          editState.optionQuantities?.[option.id],
+                          0,
+                        );
+                        const wholeCrewOptionSelectedInvalid =
+                          isWholeCrewOption(option) &&
+                          getWholeCrewSelectionValidation([{ ...option, quantity }]).hasViolation;
+                        return (
+                          <article
+                            key={option.id}
+                            className={`admin-giftcard-studio__option-card${quantity > 0 ? " is-selected" : ""}${wholeCrewOptionSelectedInvalid ? " is-invalid" : ""}`}
+                          >
+                            <div className="admin-giftcard-studio__option-main">
+                              <h4>{option.label}</h4>
+                              <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                            </div>
+                            <label className="admin-giftcard-studio__option-qty" htmlFor={`giftcard-edit-option-${option.id}`}>
+                              <span>Quantity</span>
+                              <input
+                                className="input"
+                                id={`giftcard-edit-option-${option.id}`}
+                                type="number"
+                                min="0"
+                                max="200"
+                                step="1"
+                                value={quantity}
+                                onChange={(event) => handleEditOptionQuantityChange(option.id, event.target.value)}
+                              />
+                            </label>
+                            {isWholeCrewOption(option) && (
+                              <p className="modal__meta admin-giftcard-studio__whole-crew-note">
+                                {editWholeCrewValidation.minimumMessage}
+                              </p>
+                            )}
+                            {isWholeCrewOption(option) && wholeCrewOptionSelectedInvalid && (
+                              <p className="admin-panel__error admin-giftcard-studio__whole-crew-error">
+                                Select at least 4 for Whole Crew.
+                              </p>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {editWholeCrewValidation.hasViolation && (
+                    <p className="admin-panel__error">{editWholeCrewValidation.minimumMessage}</p>
+                  )}
+                  {editMissingOptionIds.length > 0 && (
+                    <p className="admin-panel__error">
+                      Options no longer live: {editMissingOptionIds.join(", ")}.
+                    </p>
+                  )}
+                </section>
+              )}
+
+              <section className="admin-giftcard-manage__section">
+                <div className="admin-giftcard-manage__section-head">
+                  <div>
+                    <p className="admin-giftcard-manage__section-kicker">Redemption</p>
+                    <h4>Where can this card be used?</h4>
                   </div>
                 </div>
+                <div className="admin-giftcard-scope-radios">
+                  {ADMIN_GIFT_CARD_REDEMPTION_SCOPE_OPTIONS.map((option) => (
+                    <label key={option.value} className="admin-giftcard-scope-radio">
+                      <input
+                        type="radio"
+                        name="giftcard-edit-scope"
+                        value={option.value}
+                        checked={editState.redemptionScope === option.value}
+                        onChange={() => null}
+                        disabled
+                      />
+                      <span className="admin-giftcard-scope-radio__card">
+                        <strong>{option.label}</strong>
+                        <small>{ADMIN_GIFT_CARD_REDEMPTION_SCOPE_DESCRIPTIONS[option.value]}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
                 <p className="modal__meta">
-                  Recalculated value: <strong>{formatPriceLabel(editSummary.total)}</strong>
+                  Redemption scope is locked after issue and shown here for reference only.
                 </p>
-                <p className="modal__meta">
-                  Selected options: <strong>{editSummary.selectedCount}</strong>
-                </p>
-                {editWholeCrewValidation.hasViolation && (
-                  <p className="admin-panel__error">{editWholeCrewValidation.minimumMessage}</p>
-                )}
-                {editMissingOptionIds.length > 0 && (
-                  <p className="admin-panel__error">
-                    Options no longer live: {editMissingOptionIds.join(", ")}.
-                  </p>
-                )}
-              </>
-            )}
+              </section>
 
-            <div className="admin-form__actions" style={{ marginTop: "1rem" }}>
-              <button className="btn btn--secondary" type="button" onClick={closeEditModal}>
-                Cancel
-              </button>
-              <button className="btn btn--primary" type="button" disabled={!canSaveEdit} onClick={handleSaveEdit}>
-                {savingEdit ? "Saving..." : "Save changes"}
-              </button>
+              <section className="admin-giftcard-manage__section">
+                <div className="admin-giftcard-manage__section-head">
+                  <div>
+                    <p className="admin-giftcard-manage__section-kicker">Card Details</p>
+                    <h4>Update the issued card</h4>
+                  </div>
+                </div>
+                <div className="admin-form__grid admin-giftcard-manage__details-grid">
+                  <label className="admin-form__field" htmlFor="giftcard-edit-recipient">
+                    <span>Recipient name</span>
+                    <input
+                      className="input"
+                      id="giftcard-edit-recipient"
+                      type="text"
+                      value={editState.recipientName}
+                      onChange={(event) =>
+                        setEditState((previous) => ({
+                          ...previous,
+                          recipientName: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label className="admin-form__field" htmlFor="giftcard-edit-purchaser">
+                    <span>Purchased by</span>
+                    <input
+                      className="input"
+                      id="giftcard-edit-purchaser"
+                      type="text"
+                      value={editState.isGiveaway ? "" : editState.purchaserName}
+                      onChange={(event) =>
+                        setEditState((previous) => ({
+                          ...previous,
+                          purchaserName: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional"
+                      disabled={editState.isGiveaway}
+                    />
+                  </label>
+                  <label className="admin-form__field admin-giftcard-manage__field--compact" htmlFor="giftcard-edit-expiry">
+                    <span>Expiry date</span>
+                    <input
+                      className="input"
+                      id="giftcard-edit-expiry"
+                      type="date"
+                      value={editState.expiresAt}
+                      onChange={(event) =>
+                        setEditState((previous) => ({ ...previous, expiresAt: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field admin-giftcard-manage__field--compact" htmlFor="giftcard-edit-status">
+                    <span>Status</span>
+                    <input
+                      className="input"
+                      id="giftcard-edit-status"
+                      type="text"
+                      value={editState.status}
+                      onChange={(event) =>
+                        setEditState((previous) => ({ ...previous, status: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field admin-giftcard-manage__field--message" htmlFor="giftcard-edit-message-field">
+                    <span>Optional message</span>
+                    <textarea
+                      className="input textarea"
+                      id="giftcard-edit-message-field"
+                      rows="4"
+                      value={editState.message}
+                      onChange={(event) =>
+                        setEditState((previous) => ({ ...previous, message: event.target.value }))
+                      }
+                      placeholder="Optional note on the card"
+                    />
+                  </label>
+                  {editState.giftCardMode !== ADMIN_GIFT_CARD_MODE_CATALOG_ITEM && (
+                    <>
+                      <label className="admin-form__field" htmlFor="giftcard-edit-title-field">
+                        <span>Product title</span>
+                        <input
+                          className="input"
+                          id="giftcard-edit-title-field"
+                          type="text"
+                          value={editState.productTitle}
+                          onChange={(event) =>
+                            setEditState((previous) => ({
+                              ...previous,
+                              productTitle: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="admin-form__field admin-giftcard-manage__field--message" htmlFor="giftcard-edit-terms-field">
+                        <span>Terms</span>
+                        <textarea
+                          className="input textarea"
+                          id="giftcard-edit-terms-field"
+                          rows="3"
+                          value={editState.terms}
+                          onChange={(event) =>
+                            setEditState((previous) => ({ ...previous, terms: event.target.value }))
+                          }
+                        />
+                      </label>
+                    </>
+                  )}
+                </div>
+              </section>
+            </div>
+
+            <div className="admin-modal__actions admin-form__actions admin-giftcard-manage__footer">
+              <div className="admin-giftcard-manage__footer-meta">
+                <span>{canSaveEdit ? "Ready to save" : "Resolve edit issues"}</span>
+                <strong>
+                  {editDialogItemCount > 0
+                    ? `${editDialogItemCount} item(s) | ${formatPriceLabel(editDialogTotal)}`
+                    : "No editable selections available"}
+                </strong>
+              </div>
+              <div className="admin-giftcard-manage__footer-actions">
+                <button className="btn btn--secondary" type="button" onClick={closeEditModal}>
+                  Cancel
+                </button>
+                <button className="btn btn--primary" type="button" disabled={!canSaveEdit} onClick={handleSaveEdit}>
+                  {savingEdit ? "Saving..." : "Save changes"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

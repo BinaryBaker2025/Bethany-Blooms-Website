@@ -28,6 +28,18 @@ const buildGiftCardInvitationLine = (giftCard = {}) => {
   return `For ${recipient} to enjoy the flower farm in their own time.`;
 };
 
+const getGiftCardRedemptionScopeLabel = (value = "") => {
+  switch ((value || "").toString().trim().toLowerCase()) {
+    case "instore":
+      return "In-store only";
+    case "online":
+      return "Online only";
+    case "both":
+    default:
+      return "In-store and online";
+  }
+};
+
 function GiftCardPage() {
   const { giftCardId } = useParams();
   const [searchParams] = useSearchParams();
@@ -187,6 +199,10 @@ function GiftCardPage() {
                   <div className="gift-card-sheet__detail-block">
                     <span>Value</span>
                     <strong>{currency(giftCard.value)} ZAR</strong>
+                  </div>
+                  <div className="gift-card-sheet__detail-block">
+                    <span>Redeemable</span>
+                    <strong>{getGiftCardRedemptionScopeLabel(giftCard.redemptionScope)}</strong>
                   </div>
                   <div className="gift-card-sheet__detail-block">
                     <span>Expiry</span>

@@ -274,6 +274,8 @@ const ORDER_STATUSES = [
   "order-placed",
   "packing-order",
   "order-ready-for-shipping",
+  "out-for-delivery",
+  "delivered",
   "shipped",
   "completed",
   "cancelled",
@@ -5317,7 +5319,11 @@ export function AdminSubscriptionsView() {
                   const status = (plan?.status || "draft").toString().trim().toLowerCase();
                   const statusLabel = status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : "Draft";
                   return (
-                    <tr key={plan.id}>
+                    <tr
+                      key={plan.id}
+                      className="admin-table__row--clickable"
+                      onClick={() => handleEditPlan(plan)}
+                    >
                       <td>
                         <div className="admin-table__product">
                           {(plan?.image || "").toString().trim() ? (
@@ -5353,7 +5359,7 @@ export function AdminSubscriptionsView() {
                         <button
                           className="icon-btn"
                           type="button"
-                          onClick={() => handleEditPlan(plan)}
+                          onClick={(e) => { e.stopPropagation(); handleEditPlan(plan); }}
                           disabled={!inventoryEnabled}
                           title="Edit plan"
                         >
@@ -5362,7 +5368,7 @@ export function AdminSubscriptionsView() {
                         <button
                           className="icon-btn icon-btn--danger"
                           type="button"
-                          onClick={() => setPendingDeletePlan(plan)}
+                          onClick={(e) => { e.stopPropagation(); setPendingDeletePlan(plan); }}
                           disabled={!inventoryEnabled}
                           title="Delete plan"
                         >
@@ -7919,6 +7925,9 @@ export function AdminSubscriptionOpsView() {
                             }
                           />
                         </label>
+                        {errorMessage && (
+                          <p className="admin-panel__error" role="alert">{errorMessage}</p>
+                        )}
                         <div className="admin-subscription-ops-manage__action-grid">
                           <button
                             className="btn btn--secondary"
@@ -8085,7 +8094,9 @@ export function AdminSubscriptionOpsView() {
                             }
                           />
                         </label>
-
+                        {errorMessage && (
+                          <p className="admin-panel__error" role="alert">{errorMessage}</p>
+                        )}
                         <div className="admin-subscription-ops-manage__action-grid">
                           <button
                             className="btn btn--secondary"
@@ -10737,7 +10748,7 @@ export function AdminEventsView() {
                             Edit
                           </button>
                           <button
-                            className="btn btn--primary"
+                            className="btn btn--danger"
                             type="button"
                             onClick={() => handleDeleteEvent(eventDoc.id)}
                           >
@@ -13839,7 +13850,7 @@ export function AdminCutFlowerClassesView() {
                               Edit
                             </button>
                             <button
-                              className="btn btn--primary"
+                              className="btn btn--danger"
                               type="button"
                               onClick={() => handleDeleteClass(classDoc.id)}
                             >
@@ -16182,6 +16193,56 @@ export function AdminOrdersView() {
     }
   };
 
+  const [batchDeliveryBusy, setBatchDeliveryBusy] = useState(false);
+
+  const handleMarkAllOutForDelivery = async () => {
+    if (!db) return;
+    const eligible = orders.filter(
+      (o) => normalizeOrderStatus(o.status) === "order-ready-for-shipping"
+    );
+    if (eligible.length === 0) {
+      setStatusMessage("No orders are ready for shipping.");
+      return;
+    }
+    setBatchDeliveryBusy(true);
+    setStatusMessage(null);
+    let sent = 0;
+    let failed = 0;
+    try {
+      await Promise.all(
+        eligible.map(async (order) => {
+          try {
+            await updateDoc(doc(db, "orders", order.id), {
+              status: "out-for-delivery",
+              updatedAt: serverTimestamp(),
+            });
+            if (functionsInstance && order.customer?.email) {
+              const sendOrderStatusEmail = httpsCallable(functionsInstance, "sendOrderStatusEmail");
+              await sendOrderStatusEmail({
+                status: "Out For Delivery",
+                orderNumber: order.orderNumber ?? null,
+                trackingLink: order.trackingLink || "",
+                customer: order.customer,
+                customerEmail: order.customer.email,
+                items: order.items || [],
+              });
+            }
+            sent++;
+          } catch {
+            failed++;
+          }
+        })
+      );
+      setStatusMessage(
+        failed === 0
+          ? `${sent} order${sent !== 1 ? "s" : ""} marked Out for Delivery — customers notified.`
+          : `${sent} updated, ${failed} failed.`
+      );
+    } finally {
+      setBatchDeliveryBusy(false);
+    }
+  };
+
   const handleUpdateOrderStatus = async (
     orderId,
     nextStatus,
@@ -16575,16 +16636,27 @@ export function AdminOrdersView() {
             Track everything added to cart, including workshop metadata.
           </p>
         </div>
-        <button
-          className="btn btn--primary"
-          type="button"
-          onClick={() => {
-            setCreateOrderOpen(true);
-            setCreateOrderError(null);
-          }}
-        >
-          Create Order
-        </button>
+        <div className="admin-panel__header-actions">
+          <button
+            className="btn btn--secondary"
+            type="button"
+            disabled={batchDeliveryBusy}
+            onClick={handleMarkAllOutForDelivery}
+            title="Mark all 'Ready for Shipping' orders as Out for Delivery and email each customer"
+          >
+            {batchDeliveryBusy ? "Sending…" : "Mark All Out for Delivery"}
+          </button>
+          <button
+            className="btn btn--primary"
+            type="button"
+            onClick={() => {
+              setCreateOrderOpen(true);
+              setCreateOrderError(null);
+            }}
+          >
+            Create Order
+          </button>
+        </div>
       </Reveal>
 
       <Reveal as="div" className="admin-kpi-grid" delay={20}>
@@ -16773,18 +16845,6 @@ export function AdminOrdersView() {
                     </td>
                     <td className="admin-orders-table__delivery" data-label="Delivery">
                       <span className="modal__meta admin-orders-table__delivery-value">{deliveryLabel}</span>
-                    </td>
-                    <td className="admin-orders-table__actions-cell" data-label="Actions">
-                      <button
-                        className="btn btn--secondary"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setSelectedOrderId(order.id);
-                        }}
-                      >
-                        View
-                      </button>
                     </td>
                   </tr>
                 );
@@ -18303,153 +18363,171 @@ export function AdminShippingView() {
               }}
               disabled={!inventoryEnabled || savingId === "new"}
             >
-              Create new shipping method
+              + Add Shipping Method
             </button>
           </div>
         </div>
 
-        <div className="admin-session-panel">
-          <h3>Courier options</h3>
-          {status === "loading" && <p className="modal__meta">Loading courier options...</p>}
-          {error && <p className="admin-panel__error">{error.message}</p>}
-          {courierOptions.length === 0 ? (
-            <p className="admin-panel__notice">No courier options configured yet.</p>
-          ) : (
-            <div className="admin-shipping-grid">
-              {courierOptions.map((option) => {
-                const draft = drafts[option.id];
-                if (!draft) return null;
-                const isExpanded = expandedCourierIds[option.id] ?? true;
-                const activeProvinceCount = SA_PROVINCES.filter(
-                  (province) => draft.provinces?.[province.value]?.isAvailable
-                ).length;
-                return (
-                  <div key={option.id} className="admin-detail-card">
-                    <div className="admin-form__section-header admin-shipping-card__header">
-                      <div>
-                        <h4>{option.name || "Courier option"}</h4>
-                        {!isExpanded && (
-                          <p className="modal__meta admin-shipping-card__summary">
-                            {activeProvinceCount} province{activeProvinceCount === 1 ? "" : "s"} available
-                          </p>
-                        )}
+        {status === "loading" && <p className="modal__meta">Loading courier options...</p>}
+        {error && <p className="admin-panel__error">{error.message}</p>}
+        {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+
+        {courierOptions.length === 0 ? (
+          <div className="admin-shipping-empty">
+            <p className="admin-shipping-empty__icon">🚚</p>
+            <p className="admin-shipping-empty__title">No shipping methods yet</p>
+            <p className="admin-shipping-empty__note">Add your first shipping method to enable delivery at checkout.</p>
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={() => { setNewCourier({ name: "", isActive: true }); setCreateCourierDialogOpen(true); }}
+              disabled={!inventoryEnabled}
+            >
+              + Add Shipping Method
+            </button>
+          </div>
+        ) : (
+          <div className="admin-shipping-list">
+            {courierOptions.map((option) => {
+              const draft = drafts[option.id];
+              if (!draft) return null;
+              const isExpanded = expandedCourierIds[option.id] ?? true;
+              const activeProvinces = SA_PROVINCES.filter(
+                (p) => draft.provinces?.[p.value]?.isAvailable
+              );
+              const isSaving = savingId === option.id;
+
+              return (
+                <div
+                  key={option.id}
+                  className={`admin-shipping-card${draft.isActive ? "" : " admin-shipping-card--inactive"}`}
+                >
+                  {/* ── Card header ── */}
+                  <div className="admin-shipping-card__header">
+                    <button
+                      className="admin-shipping-card__toggle"
+                      type="button"
+                      aria-expanded={isExpanded}
+                      onClick={() => handleToggleCourierExpanded(option.id)}
+                    >
+                      <span className="admin-shipping-card__chevron" aria-hidden="true">
+                        {isExpanded ? "▾" : "▸"}
+                      </span>
+                      <div className="admin-shipping-card__title-group">
+                        <span className="admin-shipping-card__name">{draft.name || "Unnamed method"}</span>
+                        <span className="admin-shipping-card__meta">
+                          {draft.isActive ? (
+                            <span className="admin-shipping-badge admin-shipping-badge--active">Active</span>
+                          ) : (
+                            <span className="admin-shipping-badge admin-shipping-badge--inactive">Inactive</span>
+                          )}
+                          <span className="admin-shipping-card__province-count">
+                            {activeProvinces.length} of {SA_PROVINCES.length} provinces enabled
+                          </span>
+                        </span>
                       </div>
-                      <div className="admin-shipping-card__header-actions">
-                        <button
-                          className="btn btn--secondary btn--small"
-                          type="button"
-                          onClick={() => handleToggleCourierExpanded(option.id)}
-                        >
-                          {isExpanded ? "Collapse" : "Expand"}
-                        </button>
-                        <label className="admin-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(draft.isActive)}
-                            onChange={(event) =>
-                              handleDraftChange(option.id, "isActive", event.target.checked)
-                            }
-                          />
-                          Active
-                        </label>
-                      </div>
+                    </button>
+                    <div className="admin-shipping-card__header-right">
+                      <label className="admin-shipping-toggle" title={draft.isActive ? "Disable this method" : "Enable this method"}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(draft.isActive)}
+                          onChange={(e) => handleDraftChange(option.id, "isActive", e.target.checked)}
+                        />
+                        <span className="admin-shipping-toggle__track" aria-hidden="true" />
+                      </label>
                     </div>
-                    {isExpanded && (
-                      <>
-                        <label className="admin-form__field">
-                          Display name
-                          <input
-                            className="input"
-                            type="text"
-                            value={draft.name}
-                            onChange={(event) =>
-                              handleDraftChange(option.id, "name", event.target.value)
-                            }
-                          />
+                  </div>
+
+                  {/* ── Expanded body ── */}
+                  {isExpanded && (
+                    <div className="admin-shipping-card__body">
+                      <div className="admin-shipping-card__name-row">
+                        <label className="admin-shipping-label">
+                          Display name shown at checkout
                         </label>
-                        <div className="admin-shipping-provinces">
-                          {SA_PROVINCES.map((province) => {
-                            const provinceDraft = draft.provinces?.[province.value] || {};
-                            return (
-                              <div key={`${option.id}-${province.value}`} className="admin-shipping-row">
-                                <span>{province.label}</span>
-                                <label className="admin-checkbox">
-                                  <input
-                                    type="checkbox"
-                                    checked={Boolean(provinceDraft.isAvailable)}
-                                    onChange={(event) =>
-                                      handleProvinceChange(
-                                        option.id,
-                                        province.value,
-                                        "isAvailable",
-                                        event.target.checked,
-                                      )
-                                    }
-                                  />
-                                  Available
-                                </label>
-                                <label className="admin-form__field admin-form__field--price">
-                                  Price (ZAR)
-                                  <input
-                                    className="input"
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={provinceDraft.price}
-                                    onChange={(event) =>
-                                      handleProvinceChange(
-                                        option.id,
-                                        province.value,
-                                        "price",
-                                        event.target.value,
-                                      )
-                                    }
-                                    placeholder="0.00"
-                                  />
-                                </label>
+                        <input
+                          className="input admin-shipping-name-input"
+                          type="text"
+                          value={draft.name}
+                          placeholder="e.g. Standard Delivery"
+                          onChange={(e) => handleDraftChange(option.id, "name", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="admin-shipping-provinces-header">
+                        <span>Province</span>
+                        <span>Available</span>
+                        <span>Price (ZAR)</span>
+                      </div>
+
+                      <div className="admin-shipping-provinces">
+                        {SA_PROVINCES.map((province) => {
+                          const pd = draft.provinces?.[province.value] || {};
+                          const isOn = Boolean(pd.isAvailable);
+                          return (
+                            <div
+                              key={`${option.id}-${province.value}`}
+                              className={`admin-shipping-row${isOn ? " admin-shipping-row--on" : ""}`}
+                            >
+                              <span className="admin-shipping-row__province">{province.label}</span>
+
+                              <label className="admin-shipping-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={isOn}
+                                  onChange={(e) =>
+                                    handleProvinceChange(option.id, province.value, "isAvailable", e.target.checked)
+                                  }
+                                />
+                                <span className="admin-shipping-toggle__track" aria-hidden="true" />
+                              </label>
+
+                              <div className="admin-shipping-row__price">
+                                <span className="admin-shipping-row__currency">R</span>
+                                <input
+                                  className="input admin-shipping-price-input"
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={pd.price}
+                                  disabled={!isOn}
+                                  placeholder="0.00"
+                                  onChange={(e) =>
+                                    handleProvinceChange(option.id, province.value, "price", e.target.value)
+                                  }
+                                />
                               </div>
-                            );
-                          })}
-                        </div>
-                        <div className="admin-form__actions">
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            onClick={() => setDeleteTarget(option.id)}
-                            disabled={savingId === option.id}
-                          >
-                            Remove
-                          </button>
-                          <button
-                            className="btn btn--primary"
-                            type="button"
-                            onClick={() => handleSaveCourier(option.id)}
-                            disabled={savingId === option.id}
-                          >
-                            {savingId === option.id ? "Saving..." : "Save changes"}
-                          </button>
-                        </div>
-                      </>
-                    )}
-                    {!isExpanded && (
-                      <div className="admin-form__actions">
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="admin-shipping-card__footer">
                         <button
-                          className="btn btn--secondary"
+                          className="admin-shipping-delete-btn"
                           type="button"
                           onClick={() => setDeleteTarget(option.id)}
-                          disabled={savingId === option.id}
+                          disabled={isSaving}
                         >
-                          Remove
+                          Delete method
+                        </button>
+                        <button
+                          className="btn btn--primary"
+                          type="button"
+                          onClick={() => handleSaveCourier(option.id)}
+                          disabled={isSaving || !inventoryEnabled}
+                        >
+                          {isSaving ? "Saving…" : "Save changes"}
                         </button>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Reveal>
 
       <ConfirmDialog

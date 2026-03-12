@@ -1,12 +1,10 @@
 import { Link } from "react-router-dom";
-import { useMemo } from "react";
 import Reveal from "../components/Reveal.jsx";
 import TestimonialCarousel from "../components/TestimonialCarousel.jsx";
-import HeroCarousel from "../components/HeroCarousel.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { getProductCardStockStatus, getStockBadgeLabel } from "../lib/stockStatus.js";
-import heroBackground from "../assets/photos/workshop-banner.jpg";
+import heroBackground from "../assets/photos/workshop-outdoor-venue.jpg";
 import homePhotoOne from "../assets/photos/workshop-frame-hand-pink.jpeg";
 import homePhotoTwo from "../assets/photos/workshop-frame-hand-neutral.jpeg";
 import homePhotoThree from "../assets/photos/workshop-flowers-trays.jpg";
@@ -156,149 +154,148 @@ function HomePage() {
   const displayProducts =
     featuredProducts.length > 0 ? featuredProducts : normalizedProducts.slice(0, 4);
 
-  const heroSlides = useMemo(
-    () => [
-      {
-        id: "hero-cut-flowers",
-        variant: "cut",
-        badge: "Cut Flowers",
-        title: "Pick-Your-Own Fresh Cut Flowers",
-        description:
-          "Visit our flower farm and hand-pick your own fresh, seasonal blooms straight from the field for gifting, events, or personal enjoyment.",
-        background: CUT_FLOWER_PAGE_IMAGES.homeHeroBackground,
-        mediaImage: CUT_FLOWER_PAGE_IMAGES.homeHeroMedia,
-        mediaAlt: "Bethany Blooms long floral styling table outdoors",
-        primaryCta: { label: "Plan Your Florals", href: "/contact", variant: "primary" },
-        secondaryCta: { label: "View Gallery", href: "/gallery", variant: "secondary" },
-      },
-      {
-        id: "hero-pressed-flowers",
-        variant: "pressed",
-        badge: "Pressed Flowers",
-        title: "Pressed Flower Art & Workshops, Made Simple 🌸",
-        description:
-          "Discover the joy of preserving blooms with crafted workshops, ready-to-style floral products, bespoke art pieces, and thoughtful gifting collections from the Bethany Blooms studio.",
-        background: heroBackground,
-        mediaImage: homePhotoFour,
-        mediaAlt: "Bethany Blooms workshop experience",
-        primaryCta: { label: "Book a Workshop", href: "/workshops", variant: "primary" },
-        secondaryCta: { label: "Explore Products", href: "/products", variant: "secondary" },
-      },
-      {
-        id: "hero-studio-products",
-        variant: "products",
-        badge: "Studio Products",
-        title: "Ready-to-ship Floral Finds",
-        description:
-          "Shop limited studio drops, DIY kits, and gift-ready frames curated with local botanicals for keepsakes that last.",
-        background: workshopGuestsSmiling,
-        mediaImage: workshopTableDetailsOne,
-        mediaAlt: "Colourful trays of dried flowers ready for a workshop",
-        primaryCta: { label: "Browse Products", href: "/products", variant: "primary" },
-        secondaryCta: { label: "Get in Touch", href: "/contact", variant: "secondary" },
-      },
-    ],
-    []
-  );
 
   return (
     <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <HeroCarousel slides={heroSlides} />
-        </div>
-      </section>
-
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">What We Create</span>
-            <h2>Cut Flowers & Pressed Flowers</h2>
-            <p>
-              From fresh floral styling for special moments to preserved keepsakes you can treasure for years, Bethany
-              Blooms offers both worlds beautifully.
-            </p>
-          </Reveal>
-          <div className="home-offerings-grid">
-            <Reveal as="article" className="home-offering-card" delay={60}>
-              <figure className="home-offering-card__media">
-                <img
-                  src={CUT_FLOWER_PAGE_IMAGES.homeOfferCard}
-                  alt="Fresh cut flowers from the Bethany Blooms farm"
-                  loading="lazy"
-                  decoding="async"
-                />
-              </figure>
-              <div className="home-offering-card__body">
-                <span className="home-offering-card__eyebrow">Cut Flowers</span>
-                <h3>Pick-Your-Own Flower Farm Experience</h3>
-                <p>
-                  Visit the flower farm, walk through the rows, and cut your own blooms straight from the bush to take
-                  home in your own handpicked mix.
-                </p>
-                <Link className="btn btn--secondary" to="/cut-flowers">
-                  Ask About The Flower Farm
-                </Link>
-              </div>
-            </Reveal>
-
-            <Reveal as="article" className="home-offering-card" delay={140}>
-              <figure className="home-offering-card__media">
-                <img
-                  src={homePhotoOne}
-                  alt="Pressed flower artwork in a frame held outdoors"
-                  loading="lazy"
-                  decoding="async"
-                />
-              </figure>
-              <div className="home-offering-card__body">
-                <span className="home-offering-card__eyebrow">Pressed Flowers</span>
-                <h3>Hands-On Pressed Flower Workshop</h3>
-                <p>
-                  Join a guided workshop where you receive a frame and create your own floral artwork by placing dried
-                  flowers into a design you love.
-                </p>
-                <Link className="btn btn--secondary" to="/workshops">
-                  Book A Pressed Flower Session
-                </Link>
-              </div>
-            </Reveal>
+      {/* 1 — Home hero: full-bleed image with gradient overlay + service cards */}
+      <section className="home-hero">
+        <img
+          className="home-hero__bg-img"
+          src={heroBackground}
+          alt=""
+          aria-hidden="true"
+          loading="eager"
+          decoding="async"
+          fetchpriority="high"
+        />
+        <div className="home-hero__overlay" aria-hidden="true" />
+        <div className="home-hero__text">
+          <span className="home-hero__eyebrow">Bethany Blooms</span>
+          <h1>Fresh Blooms,<br />Given With Love</h1>
+          <p>
+            Cut flowers, pressed keepsakes, thoughtful gifts, floral arrangements, and hands-on workshops
+          </p>
+          <div className="cta-group">
+            <Link className="btn btn--primary" to="/workshops">Book a Workshop</Link>
+            <Link className="btn btn--ghost" to="/cut-flowers">Visit the Farm</Link>
           </div>
         </div>
+        <div className="home-hero__services">
+          <Link className="home-hero__service" to="/cut-flowers">
+            <img src={CUT_FLOWER_PAGE_IMAGES.homeOfferCard} alt="Buckets of bright cut flowers" loading="eager" decoding="async" />
+            <div className="home-hero__service-label">
+              <span>Farm Experience</span>
+              <strong>Cut Flowers</strong>
+            </div>
+          </Link>
+          <Link className="home-hero__service" to="/workshops">
+            <img src={homePhotoOne} alt="Pressed flower frame held by hand" loading="eager" decoding="async" />
+            <div className="home-hero__service-label">
+              <span>Guided Sessions</span>
+              <strong>Pressed Flower Workshops</strong>
+            </div>
+          </Link>
+          <Link className="home-hero__service" to="/products">
+            <img src={workshopTableDetailsOne} alt="Pressed floral art and studio products" loading="eager" decoding="async" />
+            <div className="home-hero__service-label">
+              <span>Take-Home Keepsakes</span>
+              <strong>Floral Art & Kits</strong>
+            </div>
+          </Link>
+          <Link className="home-hero__service" to="/events">
+            <img src={workshopGuestsSmiling} alt="Workshop guests at a Bethany Blooms event" loading="eager" decoding="async" />
+            <div className="home-hero__service-label">
+              <span>Pop-ups & Styling</span>
+              <strong>Events & Arrangements</strong>
+            </div>
+          </Link>
+        </div>
       </section>
 
-      <section className="section">
+      {/* 2a — Editorial split: Cut Flowers (image left, cream bg) */}
+      <section className="section section--no-pad band--cream">
+        <Reveal as="div" className="editorial-split">
+          <div className="editorial-split__media">
+            <img
+              src={CUT_FLOWER_PAGE_IMAGES.homeOfferCard}
+              alt="Fresh cut flowers from the Bethany Blooms farm"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <div className="editorial-split__body">
+            <span className="editorial-eyebrow">Cut Flowers</span>
+            <h2>Pick-Your-Own Flower Farm Experience</h2>
+            <p>
+              Visit the flower farm, walk through the rows, and cut your own blooms straight from the bush — fresh,
+              seasonal, and entirely your own handpicked mix.
+            </p>
+            <div className="cta-group">
+              <Link className="btn btn--secondary" to="/cut-flowers">Ask About The Flower Farm</Link>
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
+      {/* 2b — Editorial split reversed: Pressed Flowers (image right, white bg) */}
+      <section className="section section--no-pad band--white">
+        <Reveal as="div" className="editorial-split editorial-split--reverse">
+          <div className="editorial-split__media">
+            <img
+              src={homePhotoOne}
+              alt="Pressed flower artwork in a frame held outdoors"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <div className="editorial-split__body">
+            <span className="editorial-eyebrow">Pressed Flowers</span>
+            <h2>Hands-On Pressed Flower Workshop</h2>
+            <p>
+              Join a guided workshop where you receive a frame and create your own floral artwork by placing dried
+              flowers into a design you love — a keepsake made entirely by hand.
+            </p>
+            <div className="cta-group">
+              <Link className="btn btn--secondary" to="/workshops">Book A Pressed Flower Session</Link>
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
+      {/* 3 — Editorial mosaic: Inside the Studio */}
+      <section className="section band--cream">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Inside the Studio</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Inside the Studio</span>
             <h2>Where Memories Take Shape</h2>
             <p>From pressed keepsakes to fresh farm cuts, here is a peek at recent Bethany Blooms creations.</p>
           </Reveal>
-          <div className="home-photo-grid">
-            {[
-              { src: homePhotoOne, alt: "Pressed floral frame with pink blooms held outside" },
-              { src: homePhotoTwo, alt: "Pressed floral art in soft neutral tones" },
-              {
-                src: CUT_FLOWER_PAGE_IMAGES.homeFallbackMarketBucket,
-                alt: "Fresh cut flower stems arranged in bright seasonal colours",
-              },
-              {
-                src: CUT_FLOWER_PAGE_IMAGES.homeFallbackBouquet,
-                alt: "Hand-tied cut flower bouquet prepared from farm blooms",
-              },
-            ].map((item, index) => (
-              <Reveal as="figure" className="home-photo-grid__item" key={item.src} delay={index * 90}>
-                <img src={item.src} alt={item.alt} loading="lazy" decoding="async"/>
-              </Reveal>
-            ))}
-          </div>
+        </div>
+        <div className="editorial-mosaic">
+          {[
+            { src: homePhotoTwo, alt: "Pressed floral art in soft neutral tones" },
+            { src: homePhotoOne, alt: "Pressed floral frame with pink blooms held outside" },
+            {
+              src: CUT_FLOWER_PAGE_IMAGES.homeFallbackMarketBucket,
+              alt: "Fresh cut flower stems arranged in bright seasonal colours",
+            },
+            {
+              src: CUT_FLOWER_PAGE_IMAGES.homeFallbackBouquet,
+              alt: "Hand-tied cut flower bouquet prepared from farm blooms",
+            },
+          ].map((item, index) => (
+            <Reveal as="div" className="editorial-mosaic__item" key={item.src} delay={index * 80}>
+              <img src={item.src} alt={item.alt} loading="lazy" decoding="async" />
+            </Reveal>
+          ))}
         </div>
       </section>
 
-      <section className="section section--tight">
+      {/* 4 — Featured Products */}
+      <section className="section band--white" id="product-collection">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Featured Collection</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Featured Collection</span>
             <h2>Products from the Studio</h2>
             <p>
               Curated pieces crafted for gifting, styling, and preserving your favourite floral moments. Browse a blend
@@ -325,7 +322,9 @@ function HomePage() {
                       className="product-card__image"
                       src={product.image}
                       alt=""
-                      loading="lazy" decoding="async"/>
+                      loading="lazy"
+                      decoding="async"
+                    />
                     {product.stockBadgeLabel && (
                       <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
                         {product.stockBadgeLabel}
@@ -362,10 +361,14 @@ function HomePage() {
         </div>
       </section>
 
-      <section className="section section--tight">
+      {/* 5 — Testimonials with pull-quote */}
+      <section className="section band--cream">
         <div className="section__inner" data-testimonials="">
-          <Reveal as="div">
-            <span className="badge">Kind Words</span>
+          <Reveal as="blockquote" className="pull-quote">
+            Flowers preserved by hand, stories kept for life.
+          </Reveal>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Kind Words</span>
             <h2>Testimonials</h2>
           </Reveal>
           <TestimonialCarousel testimonials={testimonials} />

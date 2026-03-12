@@ -859,7 +859,14 @@ function AdminPosCashUpPage() {
                   {salesForDay.map((sale) => {
                     const itemLines = getSaleItemLines(sale);
                     return (
-                      <tr key={sale.id || sale.receiptNumber}>
+                      <tr
+                        key={sale.id || sale.receiptNumber}
+                        className="admin-table__row--clickable"
+                        onClick={() => setVoidSaleTarget(sale)}
+                        tabIndex={0}
+                        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setVoidSaleTarget(sale)}
+                        aria-label={`View sale ${sale.receiptNumber || sale.id}`}
+                      >
                         <td data-label="Receipt">{sale.receiptNumber || sale.id}</td>
                         <td data-label="Time">{formatSaleTime(sale.createdAt)}</td>
                         <td data-label="Status">
@@ -881,7 +888,7 @@ function AdminPosCashUpPage() {
                           </div>
                         </td>
                         <td data-label="Total">{moneyFormatter.format(getPosSaleNetTotal(sale))}</td>
-                        <td className="admin-table__actions cashup-actions" data-label="Actions">
+                        <td className="admin-table__actions cashup-actions" data-label="Actions" onClick={(e) => e.stopPropagation()}>
                           <button
                             className="btn btn--secondary"
                             type="button"
@@ -1032,7 +1039,14 @@ function AdminPosCashUpPage() {
                       const cashupStatus = getCashupStatus(cashup);
                       const isDownloadingPdf = downloadingCashupId === cashup.id;
                       return (
-                        <tr key={cashup.id} className={cashup.id === editingCashupId ? "is-active" : ""}>
+                        <tr
+                          key={cashup.id}
+                          className={`admin-table__row--clickable${cashup.id === editingCashupId ? " is-active" : ""}`}
+                          onClick={() => handleEditCashup(cashup)}
+                          tabIndex={0}
+                          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && handleEditCashup(cashup)}
+                          aria-label={`Edit cash-up for ${formatDateLabel(cashup.dateKey || cashup.date)}`}
+                        >
                           <td data-label="Date">{formatDateLabel(cashup.dateKey || cashup.date)}</td>
                           <td data-label="Saved">
                             {savedAt ? savedAt.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "-"}
@@ -1052,7 +1066,7 @@ function AdminPosCashUpPage() {
                               ? moneyFormatter.format(parseNumber(currentTotals.total, 0))
                               : "-"}
                           </td>
-                          <td className="admin-table__actions cashup-actions" data-label="Actions">
+                          <td className="admin-table__actions cashup-actions" data-label="Actions" onClick={(e) => e.stopPropagation()}>
                             <button className="btn btn--secondary" type="button" onClick={() => handleEditCashup(cashup)}>
                               Edit
                             </button>

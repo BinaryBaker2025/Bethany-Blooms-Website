@@ -117,8 +117,8 @@ function Footer() {
         </div>
       </div>
       <p className="credits">
-        © <span>{new Date().getFullYear()}</span> Bethany Blooms. Crafted with
-        care in South Africa.
+        Â© <span>{new Date().getFullYear()}</span> Bethany Blooms. Crafted with
+        care in South Africa. Website developed by Binary Baker.
       </p>
     </footer>
   );

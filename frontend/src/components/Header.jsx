@@ -225,6 +225,18 @@ function Header() {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
+    const el = headerRef.current;
+    if (!el) return undefined;
+    const onScroll = () => {
+      el.classList.toggle("site-header--scrolled", window.scrollY > 20);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
 
     let frameId = null;
     let resizeObserver = null;

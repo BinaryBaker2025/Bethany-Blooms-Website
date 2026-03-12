@@ -1846,11 +1846,14 @@ async function isSubscriptionProductRecord(product = {}) {
 
   const categoryDocIds = collectSubscriptionCategoryDocIds(product);
   if (!categoryDocIds.length) return false;
-  const categorySnapshots = await Promise.all(
+  const categoryResults = await Promise.allSettled(
     categoryDocIds.map((categoryId) =>
       db.collection("productCategories").doc(categoryId).get(),
     ),
   );
+  const categorySnapshots = categoryResults
+    .filter((r) => r.status === "fulfilled")
+    .map((r) => r.value);
   return categorySnapshots.some((snapshot) => {
     if (!snapshot.exists) return false;
     const data = snapshot.data() || {};
@@ -4219,6 +4222,7 @@ async function resolveAdminCatalogGiftCardInput(payload = {}) {
       selectedOptions,
       selectedOptionCount: quantity,
       giftCardValue,
+      redemptionScope: (payload?.redemptionScope || "both").toString().trim() || "both",
       catalogItemRef: normalizeGiftCardCatalogItemRef({
         collection: collectionName,
         kind: itemType,
@@ -4269,6 +4273,7 @@ async function resolveAdminCatalogGiftCardInput(payload = {}) {
       selectedOptions,
       selectedOptionCount: quantity,
       giftCardValue,
+      redemptionScope: (payload?.redemptionScope || "both").toString().trim() || "both",
       catalogItemRef: normalizeGiftCardCatalogItemRef({
         collection: collectionName,
         kind: itemType,
@@ -4335,6 +4340,7 @@ async function resolveAdminCatalogGiftCardInput(payload = {}) {
       selectedOptions,
       selectedOptionCount: quantity,
       giftCardValue,
+      redemptionScope: (payload?.redemptionScope || "both").toString().trim() || "both",
       catalogItemRef: normalizeGiftCardCatalogItemRef({
         collection: collectionName,
         kind: itemType,
@@ -4458,11 +4464,98 @@ function resolveAdminCatalogGiftCardDraftInput(draft = {}) {
     selectedOptions,
     selectedOptionCount,
     giftCardValue,
+    redemptionScope: (draft?.redemptionScope || "both").toString().trim() || "both",
     catalogItemRef,
   };
 }
 
+async function resolveAdminMultiItemGiftCardInput(payload = {}) {
+  const lineItems = Array.isArray(payload?.lineItems) ? payload.lineItems : [];
+  if (!lineItems.length) {
+    throw new Error("At least one item is required.");
+  }
+  const selectedOptions = [];
+  let primaryItemRef = null;
+  for (let i = 0; i < lineItems.length; i++) {
+    const item = lineItems[i];
+    const itemType = normalizeCatalogGiftCardItemType(item?.type || item?.kind || "");
+    if (!itemType) throw new Error(`Item ${i + 1}: item type is required.`);
+    const sourceId = (item?.sourceId || "").toString().trim();
+    if (!sourceId) throw new Error(`Item ${i + 1}: source ID is required.`);
+    const collectionName = getGiftCardCatalogCollectionForKind(itemType);
+    const snap = await db.collection(collectionName).doc(sourceId).get();
+    if (!snap.exists) throw new Error(`Item ${i + 1}: catalog item not found.`);
+    const source = snap.data() || {};
+    const quantity = sanitizeGiftCardCatalogQuantity(item?.quantity, 1);
+    let unitPrice = null;
+    let title = "";
+    let variantId = "";
+    let variantLabel = "";
+    let optionId = "";
+    let optionLabel = "";
+    if (itemType === GIFT_CARD_CATALOG_KIND_PRODUCT) {
+      title = truncateText(source?.title || "Product", 160);
+      const variants = Array.isArray(source?.variants) ? source.variants : [];
+      const selectedVariantId = (item?.variantId || "").toString().trim();
+      if (variants.length > 0 && !selectedVariantId) throw new Error(`Item ${i + 1}: product variant is required.`);
+      const selectedVariant = variants.find((v) => (v?.id || "").toString().trim() === selectedVariantId) || null;
+      unitPrice = normalizeGiftCardAmount(selectedVariant ? selectedVariant?.price : (source?.sale_price ?? source?.salePrice ?? source?.price), null);
+      variantId = selectedVariant?.id || "";
+      variantLabel = selectedVariant?.label || selectedVariant?.name || "";
+    } else if (itemType === GIFT_CARD_CATALOG_KIND_WORKSHOP) {
+      title = truncateText(source?.title || "Workshop", 160);
+      unitPrice = normalizeGiftCardAmount(source?.price, null);
+    } else if (itemType === GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS) {
+      title = truncateText(source?.title || "Class", 160);
+      const options = Array.isArray(source?.options) ? source.options : [];
+      const selectedOptionId = (item?.optionId || "").toString().trim();
+      if (options.length > 0 && !selectedOptionId) throw new Error(`Item ${i + 1}: class option is required.`);
+      const selectedOption = options.find((o) => (o?.id || o?.value || "").toString().trim() === selectedOptionId) || null;
+      unitPrice = normalizeGiftCardAmount(selectedOption?.price ?? selectedOption?.amount ?? source?.price, null);
+      optionId = selectedOption?.id || selectedOption?.value || "";
+      optionLabel = selectedOption?.label || selectedOption?.name || "";
+    }
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) throw new Error(`Item ${i + 1}: item has no valid price.`);
+    const option = buildCatalogGiftCardSelectedOption({ kind: itemType, collection: collectionName, sourceId, title, variantId, variantLabel, optionId, optionLabel, amount: unitPrice, quantity });
+    selectedOptions.push(option);
+    if (i === 0) {
+      primaryItemRef = normalizeGiftCardCatalogItemRef({ collection: collectionName, kind: itemType, sourceId, titleSnapshot: title, variantId, variantLabel, optionId, optionLabel, unitPriceSnapshot: unitPrice, quantity, fulfillmentMode: itemType === GIFT_CARD_CATALOG_KIND_PRODUCT ? "inventory" : "booking-later" });
+    }
+  }
+  const normalizedOptions = normalizeGiftCardSelectedOptions(selectedOptions);
+  const giftCardValue = buildGiftCardOptionsTotal(normalizedOptions);
+  if (!Number.isFinite(giftCardValue) || giftCardValue <= 0) throw new Error("Gift card total value is invalid.");
+  const totalQuantity = normalizedOptions.reduce((sum, o) => sum + normalizeGiftCardOptionQuantity(o?.quantity, 1), 0);
+  const productTitle = truncateText(normalizedOptions.length === 1 ? (normalizedOptions[0].label || "Gift Package") : "Gift Package", 160);
+  const expiryDays = normalizeGiftCardExpiryDays(payload?.expiryDays, GIFT_CARD_DEFAULT_EXPIRY_DAYS);
+  const message = truncateText(payload?.message || "", GIFT_CARD_MAX_MESSAGE_LENGTH);
+  const recipientName = truncateText(payload?.recipientName || "", GIFT_CARD_MAX_NAME_LENGTH);
+  const purchaserName = truncateText(payload?.purchaserName || "", GIFT_CARD_MAX_NAME_LENGTH);
+  const terms = truncateText(buildCatalogGiftCardDefaultTerms({ kind: primaryItemRef?.kind || GIFT_CARD_CATALOG_KIND_PRODUCT, title: productTitle }), GIFT_CARD_MAX_TERMS_LENGTH);
+  return {
+    mode: GIFT_CARD_MODE_CATALOG_ITEM,
+    itemType: primaryItemRef?.kind || GIFT_CARD_CATALOG_KIND_PRODUCT,
+    sourceId: primaryItemRef?.sourceId || "",
+    productId: null,
+    productTitle,
+    recipientName,
+    purchaserName,
+    message,
+    terms,
+    expiryDays,
+    selectedOptions: normalizedOptions,
+    selectedOptionCount: totalQuantity,
+    giftCardValue,
+    catalogItemRef: primaryItemRef,
+    redemptionScope: (payload?.redemptionScope || "both").toString().trim() || "both",
+  };
+}
+
 async function resolveAdminGiftCardInput(payload = {}) {
+  // New multi-item mode: triggered when lineItems array is provided
+  if (Array.isArray(payload?.lineItems) && payload.lineItems.length > 0) {
+    return resolveAdminMultiItemGiftCardInput(payload);
+  }
   const mode = normalizeAdminGiftCardMode(
     payload?.mode || (payload?.itemType || payload?.sourceId ? GIFT_CARD_MODE_CATALOG_ITEM : ""),
     GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
@@ -4564,6 +4657,7 @@ function buildGiftCardRegistryPayload(giftCard = {}, giftCardId = "") {
     sourceType,
     value: Number(publicPayload.value || 0),
     currency: (publicPayload.currency || GIFT_CARD_VALUE_CURRENCY).toString() || GIFT_CARD_VALUE_CURRENCY,
+    redemptionScope: (publicPayload.redemptionScope || "both").toString().trim() || "both",
     selectedOptions,
     selectedOptionCount: Number.isFinite(selectedOptionCount) ? selectedOptionCount : 0,
     selectedOptionsSummary: buildGiftCardSelectedOptionsSummary(selectedOptions),
@@ -4672,6 +4766,7 @@ async function createGiveawayGiftCardRecord({
     terms: resolved.terms,
     selectedOptions: resolved.selectedOptions,
     selectedOptionCount: resolved.selectedOptionCount,
+    redemptionScope: (resolved.redemptionScope || "both").toString().trim() || "both",
     expiryDays: resolved.expiryDays,
     issuedAt: admin.firestore.Timestamp.fromDate(issuedAtDate),
     expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
@@ -4761,6 +4856,7 @@ async function createAdminCatalogGiftCardRecord({
     terms: resolved.terms,
     selectedOptions: resolved.selectedOptions,
     selectedOptionCount: resolved.selectedOptionCount,
+    redemptionScope: (resolved.redemptionScope || "both").toString().trim() || "both",
     expiryDays: resolved.expiryDays,
     issuedAt: admin.firestore.Timestamp.fromDate(issuedAtDate),
     expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
@@ -6363,6 +6459,7 @@ function buildGiftCardPublicPayload(giftCardDoc = {}, giftCardId = "", token = "
     currency: giftCardDoc.currency || GIFT_CARD_VALUE_CURRENCY,
     isGiveaway,
     giftCardMode: giftCardMode || null,
+    redemptionScope: (giftCardDoc.redemptionScope || "both").toString().trim() || "both",
     issueSource: (giftCardDoc.issueSource || "").toString().trim() || null,
     purchaserName: giftCardDoc.purchaserName || "",
     recipientName: giftCardDoc.recipientName || "",
@@ -13652,6 +13749,7 @@ exports.sendMonthlySubscriptionInvoices = onSchedule(
     timeZone: SUBSCRIPTION_TIMEZONE,
   },
   async () => {
+    try {
     const nowDate = new Date();
     const nowParts = formatTimeZoneDateParts(nowDate, SUBSCRIPTION_TIMEZONE);
     const currentMonth = nowParts.monthKey;
@@ -13872,6 +13970,10 @@ exports.sendMonthlySubscriptionInvoices = onSchedule(
       emailsFailed,
       skipped,
     });
+    } catch (outerError) {
+      functions.logger.error("sendMonthlySubscriptionInvoices top-level failure", outerError);
+      throw outerError;
+    }
   },
 );
 
@@ -15891,6 +15993,11 @@ exports.payfastItn = onRequest(async (req, res) => {
     { allowModeFallback: false },
   );
   const transactionHost = resolvedCredentials.host;
+  if (!resolvedCredentials.passphrase) {
+    functions.logger.error("PayFast passphrase not configured - rejecting ITN");
+    res.status(400).send("Configuration error");
+    return;
+  }
   const signatureValue = (params.signature || "").toString().trim().toLowerCase();
   const expectedSignature = createPayfastSignatureFromParamString(
     paramString,
@@ -15951,7 +16058,16 @@ exports.payfastItn = onRequest(async (req, res) => {
     ? FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON
     : null;
 
-  if (paymentVerified && !pending.orderId) {
+  if (pending.orderId) {
+    functions.logger.info("Duplicate ITN received for already-processed payment", {
+      paymentId: params.m_payment_id || null,
+      orderId: pending.orderId,
+    });
+    res.status(200).send("OK");
+    return;
+  }
+
+  if (paymentVerified) {
     const orderNumber = await getNextOrderNumber();
     const paymentApproval = {
       required: false,
@@ -16021,8 +16137,6 @@ exports.payfastItn = onRequest(async (req, res) => {
     );
     orderRef = newOrderRef;
     orderCreated = true;
-  } else if (pending.orderId) {
-    orderRef = db.doc(`orders/${pending.orderId}`);
   }
 
   if (orderRef && !orderCreated) {
@@ -17007,6 +17121,7 @@ exports.previewAdminGiveawayGiftCard = onCall({ cors: true }, async (request) =>
       terms: resolved.terms,
       selectedOptions: resolved.selectedOptions,
       selectedOptionCount: resolved.selectedOptionCount,
+      redemptionScope: (resolved.redemptionScope || "both").toString().trim() || "both",
       expiryDays: resolved.expiryDays,
       issuedAt: generatedAt.toISOString(),
       expiresAt: expiresAtDate.toISOString(),
@@ -17060,6 +17175,7 @@ exports.saveAdminGiveawayGiftCardDraft = onCall({ cors: true }, async (request) 
       selectedOptions: resolved.selectedOptions,
       selectedOptionCount: resolved.selectedOptionCount,
       giftCardValue: resolved.giftCardValue,
+      redemptionScope: (resolved.redemptionScope || payload?.redemptionScope || "both").toString().trim() || "both",
       createdByUid: request.auth?.uid || null,
       createdByEmail,
       createdAt: FIELD_VALUE.serverTimestamp(),
@@ -17231,48 +17347,57 @@ exports.adminUpdateGiftCard = onCall({ cors: true }, async (request) => {
       if (!catalogItemRef) {
         throw new Error("Catalog gift card data is missing.");
       }
-      const baseOption = selectedOptions[0] || null;
-      const quantity = sanitizeGiftCardCatalogQuantity(
-        payloadHas("quantity")
-          ? payload.quantity
-          : catalogItemRef.quantity || baseOption?.quantity || giftCard.selectedOptionCount || 1,
-        1,
-      );
-      const unitPrice = normalizeGiftCardAmount(
-        catalogItemRef.unitPriceSnapshot ?? baseOption?.amount,
-        null,
-      );
-      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
-        throw new Error("Catalog gift card price is invalid.");
+      const isMultiItemCatalogGiftCard = selectedOptions.length > 1;
+      if (isMultiItemCatalogGiftCard) {
+        selectedOptionCount = selectedOptions.reduce(
+          (sum, option) => sum + normalizeGiftCardOptionQuantity(option?.quantity, 1),
+          0,
+        );
+        giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+      } else {
+        const baseOption = selectedOptions[0] || null;
+        const quantity = sanitizeGiftCardCatalogQuantity(
+          payloadHas("quantity")
+            ? payload.quantity
+            : catalogItemRef.quantity || baseOption?.quantity || giftCard.selectedOptionCount || 1,
+          1,
+        );
+        const unitPrice = normalizeGiftCardAmount(
+          catalogItemRef.unitPriceSnapshot ?? baseOption?.amount,
+          null,
+        );
+        if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+          throw new Error("Catalog gift card price is invalid.");
+        }
+        const optionTitle = truncateText(
+          giftCard.productTitle || catalogItemRef.titleSnapshot || "Bethany Blooms Gift Card",
+          160,
+        );
+        selectedOptions = normalizeGiftCardSelectedOptions([
+          {
+            ...(baseOption || {}),
+            ...buildCatalogGiftCardSelectedOption({
+              kind: catalogItemRef.kind,
+              collection: catalogItemRef.collection,
+              sourceId: catalogItemRef.sourceId,
+              title: optionTitle,
+              variantId: catalogItemRef.variantId || "",
+              variantLabel: catalogItemRef.variantLabel || "",
+              optionId: catalogItemRef.optionId || "",
+              optionLabel: catalogItemRef.optionLabel || "",
+              amount: unitPrice,
+              quantity,
+            }),
+          },
+        ]);
+        selectedOptionCount = quantity;
+        giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
+        catalogItemRef = {
+          ...catalogItemRef,
+          quantity,
+          unitPriceSnapshot: unitPrice,
+        };
       }
-      const optionTitle = truncateText(
-        giftCard.productTitle || catalogItemRef.titleSnapshot || "Bethany Blooms Gift Card",
-        160,
-      );
-      selectedOptions = normalizeGiftCardSelectedOptions([
-        {
-          ...(baseOption || {}),
-          ...buildCatalogGiftCardSelectedOption({
-            kind: catalogItemRef.kind,
-            collection: catalogItemRef.collection,
-            sourceId: catalogItemRef.sourceId,
-            title: optionTitle,
-            variantId: catalogItemRef.variantId || "",
-            variantLabel: catalogItemRef.variantLabel || "",
-            optionId: catalogItemRef.optionId || "",
-            optionLabel: catalogItemRef.optionLabel || "",
-            amount: unitPrice,
-            quantity,
-          }),
-        },
-      ]);
-      selectedOptionCount = quantity;
-      giftCardValue = buildGiftCardOptionsTotal(selectedOptions);
-      catalogItemRef = {
-        ...catalogItemRef,
-        quantity,
-        unitPriceSnapshot: unitPrice,
-      };
     } else {
       if (payloadHas("selectedOptions")) {
         const liveOptions = await getCutFlowerGiftCardOptions();
@@ -17366,6 +17491,7 @@ exports.adminUpdateGiftCard = onCall({ cors: true }, async (request) => {
       expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
       productTitle,
       giftCardMode: isCatalogItem ? GIFT_CARD_MODE_CATALOG_ITEM : GIFT_CARD_MODE_CUSTOM_GIVEAWAY,
+      redemptionScope: (giftCard.redemptionScope || "both").toString().trim() || "both",
       catalogItemRef: catalogItemRef || null,
       pdfStoragePath,
     };
@@ -17529,6 +17655,57 @@ exports.adminArchiveGiftCard = onCall({ cors: true }, async (request) => {
       (error?.message || "Unable to archive gift card.").toString(),
     );
   }
+});
+
+exports.redeemGiftCardOnline = onCall({ cors: true }, async (request) => {
+  const payload = request.data || {};
+  const code = (payload?.code || "").toString().trim().toUpperCase();
+  const orderId = (payload?.orderId || "").toString().trim();
+  if (!code) throw new HttpsError("invalid-argument", "Gift card code is required.");
+
+  // Find gift card by code
+  const snap = await db.collection(GIFT_CARDS_COLLECTION).where("code", "==", code).limit(1).get();
+  if (snap.empty) throw new HttpsError("not-found", "Gift card not found.");
+
+  const docRef = snap.docs[0].ref;
+  const giftCard = snap.docs[0].data() || {};
+  const giftCardId = snap.docs[0].id;
+
+  // Validate
+  if (giftCard.status !== GIFT_CARD_STATUS_ACTIVE) throw new HttpsError("failed-precondition", "This gift card is not active.");
+  if (giftCard.isRedeemable === false) throw new HttpsError("failed-precondition", "This gift card has already been redeemed.");
+  const now = new Date();
+  const expiresAt = giftCard.expiresAt?.toDate ? giftCard.expiresAt.toDate() : null;
+  if (expiresAt && expiresAt < now) throw new HttpsError("failed-precondition", "This gift card has expired.");
+  const scope = (giftCard.redemptionScope || "both").toString().trim().toLowerCase();
+  if (scope === "instore") throw new HttpsError("failed-precondition", "This gift card can only be redeemed in store.");
+
+  // Redeem
+  const redeemedByEmail = (request.auth?.token?.email || "").toString().trim() || null;
+  await docRef.set({
+    status: "redeemed",
+    isRedeemable: false,
+    redeemedAt: FIELD_VALUE.serverTimestamp(),
+    redeemedByUid: request.auth?.uid || null,
+    redeemedByEmail,
+    redemption: {
+      via: "checkout",
+      posSaleId: null,
+      receiptNumber: null,
+      orderId: orderId || null,
+      matchedAtIso: now.toISOString(),
+    },
+    updatedAt: FIELD_VALUE.serverTimestamp(),
+  }, { merge: true });
+
+  return {
+    ok: true,
+    giftCardId,
+    code,
+    value: giftCard.value || 0,
+    currency: giftCard.currency || "ZAR",
+    productTitle: giftCard.productTitle || "",
+  };
 });
 
 exports.adminBackfillGiftCardRegistry = onCall({ cors: true }, async (request) => {

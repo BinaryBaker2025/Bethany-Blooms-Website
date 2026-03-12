@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useCart } from "../context/CartContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
@@ -9,6 +9,8 @@ import {
 
 function PaymentSuccessPage() {
   const { clearCart } = useCart();
+  const clearCartRef = useRef(clearCart);
+  clearCartRef.current = clearCart;
   const location = useLocation();
   const [containsGiftCards, setContainsGiftCards] = useState(false);
   const [paymentReference, setPaymentReference] = useState("");
@@ -30,9 +32,9 @@ function PaymentSuccessPage() {
     const searchParams = new URLSearchParams(location.search);
     const paymentStatus = (searchParams.get("payment_status") || "").toString().trim().toUpperCase();
     if (paymentStatus !== "COMPLETE") return;
-    clearCart();
+    clearCartRef.current();
     clearPayfastPendingSession();
-  }, [clearCart, location.search]);
+  }, [location.search]);
 
   return (
     <section className="section section--tight payment-status-page payment-status-page--success">

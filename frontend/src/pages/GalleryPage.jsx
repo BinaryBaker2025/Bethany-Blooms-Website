@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
@@ -27,35 +26,32 @@ function GalleryPage() {
 
   return (
     <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Hero variant="gallery" background={CUT_FLOWER_PAGE_IMAGES.galleryHero}>
+      {/* Page hero */}
+      <section className="section--no-pad">
+        <div className="page-hero">
+          <img className="page-hero__bg" src={CUT_FLOWER_PAGE_IMAGES.galleryHero} alt="" aria-hidden="true" loading="eager" decoding="async" fetchpriority="high" />
+          <div className="page-hero__overlay" aria-hidden="true" />
+          <div className="page-hero__content">
+            <span className="editorial-eyebrow">Bethany Blooms</span>
             <h1>Gallery of Blooming Stories</h1>
-            <p>
-              Explore both pressed flower keepsakes and cut flower moments from the farm. From workshops and custom
-              commissions to fresh seasonal blooms, each image carries a story.
-            </p>
-          </Hero>
+            <p>Pressed flower keepsakes and cut flower moments from the farm and studio.</p>
+          </div>
         </div>
       </section>
 
-      <section className="section" id="gallery-grid">
+      {/* Editorial gallery grid */}
+      <section className="section band--white" id="gallery-grid">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Community Creations</span>
-            <h2>Cut Flowers & Pressed Florals</h2>
-            <p>Select an image to view it larger in the lightbox.</p>
-          </Reveal>
-          <div className="gallery">
+          <div className="gallery editorial-gallery-grid">
             {galleryItems.map((item, index) => (
-              <Reveal key={item.id} as="div" className="gallery__item" delay={index * 60}>
+              <Reveal key={item.id} as="div" className="gallery__item" delay={index * 40}>
                 <button
                   type="button"
                   onClick={() => setSelected(item)}
                   className="gallery__button"
                   aria-label={`Open ${item.caption}`}
                 >
-                  <img src={item.src} alt={item.alt} loading="lazy" decoding="async"/>
+                  <img src={item.src} alt={item.alt} loading="lazy" decoding="async" />
                   <div className="gallery__overlay" aria-hidden="true" />
                 </button>
               </Reveal>

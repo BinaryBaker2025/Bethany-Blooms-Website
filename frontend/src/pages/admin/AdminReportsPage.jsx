@@ -30,16 +30,12 @@ const toLocalDateKey = (date) => {
 
 const parseDateValue = (value) => {
   if (!value) return null;
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
-  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   if (typeof value?.toDate === "function") {
     try {
       const converted = value.toDate();
       return Number.isNaN(converted.getTime()) ? null : converted;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
   if (typeof value === "object" && typeof value.seconds === "number") {
     const converted = new Date(value.seconds * 1000);
@@ -59,14 +55,13 @@ const parseNumber = (value, fallback = 0) => {
 
 const normalizeVariantLabel = (item) => {
   const label = item?.metadata?.variantLabel;
-  if (typeof label !== "string") return "";
-  return label.trim();
+  return typeof label === "string" ? label.trim() : "";
 };
 
 const buildProductReportLabel = (item, fallbackName) => {
   const baseName = (item?.name || fallbackName || "Product").toString().trim() || "Product";
   const variantLabel = normalizeVariantLabel(item);
-  return variantLabel ? `${baseName} - ${variantLabel}` : baseName;
+  return variantLabel ? `${baseName} — ${variantLabel}` : baseName;
 };
 
 const resolveProductReportIdentity = (item) => {
@@ -75,30 +70,16 @@ const resolveProductReportIdentity = (item) => {
   const idSegments = rawItemId ? rawItemId.split(":") : [];
   const fallbackProductId = idSegments[0] || rawItemId;
   const fallbackVariantId = idSegments.length > 1 ? idSegments.slice(1).join(":") : "";
-
-  const productKey = (
-    metadata.productId ||
-    metadata.productID ||
-    metadata.product ||
-    fallbackProductId ||
-    item?.name ||
-    ""
-  )
-    .toString()
-    .trim();
-
+  const productKey = (metadata.productId || metadata.productID || metadata.product || fallbackProductId || item?.name || "").toString().trim();
   const variantLabel = normalizeVariantLabel(item);
-  const variantId = (metadata.variantId || fallbackVariantId || "")
-    .toString()
-    .trim();
+  const variantId = (metadata.variantId || fallbackVariantId || "").toString().trim();
   const variantKey = (variantId || variantLabel).toString().trim().toLowerCase();
-
   return { productKey, variantKey };
 };
 
 function AdminReportsPage() {
   usePageMetadata({
-    title: "Admin - Reports",
+    title: "Admin — Reports",
     description: "Comprehensive reporting for online and POS sales.",
   });
 
@@ -126,9 +107,7 @@ function AdminReportsPage() {
   const rangeBounds = useMemo(() => {
     const start = startDate ? new Date(startDate) : null;
     const end = endDate ? new Date(endDate) : null;
-    if (end) {
-      end.setHours(23, 59, 59, 999);
-    }
+    if (end) end.setHours(23, 59, 59, 999);
     return { start, end };
   }, [startDate, endDate]);
 
@@ -137,113 +116,74 @@ function AdminReportsPage() {
     return dateValue >= rangeBounds.start && dateValue <= rangeBounds.end;
   };
 
-  const normalizedOrders = useMemo(() => {
-    return (orders || []).map((order) => ({
+  const normalizedOrders = useMemo(() =>
+    (Array.isArray(orders) ? orders : []).map((order) => ({
       ...order,
       createdAt: parseDateValue(order.createdAt || order.paidAt || order.updatedAt),
-    }));
-  }, [orders]);
+    })),
+  [orders]);
 
-  const normalizedSales = useMemo(() => {
-    return (posSales || []).map((sale) => ({
+  const normalizedSales = useMemo(() =>
+    (Array.isArray(posSales) ? posSales : []).map((sale) => ({
       ...sale,
       createdAt: parseDateValue(sale.createdAt || sale.updatedAt),
       status: normalizePosSaleStatus(sale.status),
       netTotal: getPosSaleNetTotal(sale),
       voidSummary: getPosSaleVoidSummary(sale),
-    }));
-  }, [posSales]);
+    })),
+  [posSales]);
 
-  const filteredOrders = useMemo(() => {
-    return normalizedOrders.filter((order) => inRange(order.createdAt));
-  }, [normalizedOrders, rangeBounds]);
+  const filteredOrders = useMemo(() =>
+    normalizedOrders.filter((order) => inRange(order.createdAt)),
+  [normalizedOrders, rangeBounds]);
 
-  const recognizedRevenueOrders = useMemo(() => {
-    return filteredOrders.filter((order) => {
+  const recognizedRevenueOrders = useMemo(() =>
+    filteredOrders.filter((order) => {
       const paymentMethod = normalizePaymentMethod(order?.paymentMethod);
       if (paymentMethod !== PAYMENT_METHODS.EFT) return true;
-      return (
-        normalizePaymentApprovalStatus(order) ===
-        PAYMENT_APPROVAL_STATUSES.APPROVED
-      );
-    });
-  }, [filteredOrders]);
+      return normalizePaymentApprovalStatus(order) === PAYMENT_APPROVAL_STATUSES.APPROVED;
+    }),
+  [filteredOrders]);
 
-  const filteredSales = useMemo(() => {
-    return normalizedSales.filter((sale) => inRange(sale.createdAt));
-  }, [normalizedSales, rangeBounds]);
+  const filteredSales = useMemo(() =>
+    normalizedSales.filter((sale) => inRange(sale.createdAt)),
+  [normalizedSales, rangeBounds]);
 
-  const onlineRevenue = recognizedRevenueOrders.reduce(
-    (sum, order) => sum + parseNumber(order.totalPrice, 0),
-    0,
-  );
-  const posRevenue = filteredSales.reduce((sum, sale) => sum + parseNumber(sale.netTotal, 0), 0);
+  const onlineRevenue = recognizedRevenueOrders.reduce((sum, o) => sum + parseNumber(o.totalPrice), 0);
+  const posRevenue    = filteredSales.reduce((sum, s) => sum + parseNumber(s.netTotal), 0);
   const combinedRevenue = onlineRevenue + posRevenue;
 
-  const posCashTotal = filteredSales
-    .filter((sale) => sale.paymentMethod === "cash")
-    .reduce((sum, sale) => sum + parseNumber(sale.netTotal, 0), 0);
-  const posCardTotal = filteredSales
-    .filter((sale) => sale.paymentMethod === "card")
-    .reduce((sum, sale) => sum + parseNumber(sale.netTotal, 0), 0);
-  const voidedReceiptCount = filteredSales.filter((sale) => sale.voidSummary.voidedTotal > 0).length;
-  const voidedAmount = filteredSales.reduce(
-    (sum, sale) => sum + parseNumber(sale.voidSummary.voidedTotal, 0),
-    0,
-  );
-  const activeReceiptCount = filteredSales.filter((sale) => sale.status !== "voided").length;
+  const posCashTotal = filteredSales.filter((s) => s.paymentMethod === "cash").reduce((sum, s) => sum + parseNumber(s.netTotal), 0);
+  const posCardTotal = filteredSales.filter((s) => s.paymentMethod === "card").reduce((sum, s) => sum + parseNumber(s.netTotal), 0);
+  const voidedReceiptCount = filteredSales.filter((s) => s.voidSummary.voidedTotal > 0).length;
+  const voidedAmount       = filteredSales.reduce((sum, s) => sum + parseNumber(s.voidSummary.voidedTotal), 0);
+  const activeReceiptCount = filteredSales.filter((s) => s.status !== "voided").length;
 
   const productTotalsRaw = useMemo(() => {
     const map = new Map();
-
     recognizedRevenueOrders.forEach((order) => {
       (order.items || []).forEach((item) => {
-        const isProduct = item.metadata?.type === "product";
-        if (!isProduct) return;
+        if (item.metadata?.type !== "product") return;
         const { productKey, variantKey } = resolveProductReportIdentity(item);
         if (!productKey) return;
         const key = variantKey ? `${productKey}::${variantKey}` : productKey;
-        const entry = map.get(key) || {
-          key,
-          name: buildProductReportLabel(item, productKey),
-          quantity: 0,
-          revenue: 0,
-        };
-        const quantity = parseNumber(item.quantity, 0);
+        const entry = map.get(key) || { key, name: buildProductReportLabel(item, productKey), quantity: 0, revenue: 0 };
+        const quantity = parseNumber(item.quantity);
         entry.quantity += quantity;
-        entry.revenue += parseNumber(item.price, 0) * quantity;
+        entry.revenue  += parseNumber(item.price) * quantity;
         map.set(key, entry);
       });
     });
-
     return Array.from(map.values());
   }, [recognizedRevenueOrders]);
 
-  const minQtyValue = useMemo(() => {
-    const parsed = Number.parseInt(minQty, 10);
-    if (!Number.isFinite(parsed)) return 1;
-    return Math.max(1, Math.floor(parsed));
-  }, [minQty]);
-
-  const minRevenueValue = useMemo(() => {
-    const parsed = Number(minRevenue);
-    if (!Number.isFinite(parsed)) return 0;
-    return Math.max(0, parsed);
-  }, [minRevenue]);
-
-  const productSearchTerm = useMemo(
-    () => productSearch.toLowerCase().trim(),
-    [productSearch],
-  );
-
-  const hasProductSales = useMemo(
-    () => productTotalsRaw.some((item) => item.quantity >= 1),
-    [productTotalsRaw],
-  );
+  const minQtyValue     = useMemo(() => Math.max(1, Math.floor(Number.parseInt(minQty, 10) || 1)), [minQty]);
+  const minRevenueValue = useMemo(() => Math.max(0, Number(minRevenue) || 0), [minRevenue]);
+  const productSearchTerm = useMemo(() => productSearch.toLowerCase().trim(), [productSearch]);
+  const hasProductSales   = useMemo(() => productTotalsRaw.some((i) => i.quantity >= 1), [productTotalsRaw]);
 
   const visibleProductTotals = useMemo(() => {
     const compareByName = (a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" });
-
     const filtered = productTotalsRaw.filter((item) => {
       if (item.quantity < 1) return false;
       if (item.quantity < minQtyValue) return false;
@@ -251,33 +191,22 @@ function AdminReportsPage() {
       if (productSearchTerm && !item.name.toLowerCase().includes(productSearchTerm)) return false;
       return true;
     });
-
     filtered.sort((a, b) => {
-      const nameCompare = compareByName(a, b);
-      if (productSort === "qty-asc") {
-        const qtyDiff = a.quantity - b.quantity;
-        return qtyDiff !== 0 ? qtyDiff : nameCompare;
-      }
-      if (productSort === "revenue-desc") {
-        const revenueDiff = b.revenue - a.revenue;
-        return revenueDiff !== 0 ? revenueDiff : nameCompare;
-      }
-      if (productSort === "revenue-asc") {
-        const revenueDiff = a.revenue - b.revenue;
-        return revenueDiff !== 0 ? revenueDiff : nameCompare;
-      }
-      if (productSort === "name-asc") {
-        return nameCompare;
-      }
-      if (productSort === "name-desc") {
-        return nameCompare * -1;
-      }
-      const qtyDiff = b.quantity - a.quantity;
-      return qtyDiff !== 0 ? qtyDiff : nameCompare;
+      const name = compareByName(a, b);
+      if (productSort === "qty-asc")      return (a.quantity - b.quantity) || name;
+      if (productSort === "revenue-desc") return (b.revenue - a.revenue) || name;
+      if (productSort === "revenue-asc")  return (a.revenue - b.revenue) || name;
+      if (productSort === "name-asc")     return name;
+      if (productSort === "name-desc")    return name * -1;
+      return (b.quantity - a.quantity) || name;
     });
-
     return filtered;
   }, [productTotalsRaw, minQtyValue, minRevenueValue, productSearchTerm, productSort]);
+
+  const visitsInRange = useMemo(() => {
+    const normalized = (siteVisits || []).map((v) => ({ ...v, createdAt: parseDateValue(v.createdAt || v.timestamp) }));
+    return normalized.filter((v) => inRange(v.createdAt));
+  }, [siteVisits, rangeBounds]);
 
   const handleResetProductFilters = () => {
     setProductSort("qty-desc");
@@ -286,35 +215,72 @@ function AdminReportsPage() {
     setProductSearch("");
   };
 
-  const visitsInRange = useMemo(() => {
-    const normalizedVisits = (siteVisits || []).map((visit) => ({
-      ...visit,
-      createdAt: parseDateValue(visit.createdAt || visit.timestamp),
-    }));
-    return normalizedVisits.filter((visit) => inRange(visit.createdAt));
-  }, [siteVisits, rangeBounds]);
-
   return (
     <div className="admin-panel">
+
+      {/* ── Page header ─────────────────────────────────────────────── */}
       <header className="admin-panel__header">
         <div>
           <h2>Reports</h2>
-          <p className="modal__meta">Compare online and POS performance by date range.</p>
+          <p className="modal__meta">Online orders + POS performance by date range.</p>
         </div>
       </header>
 
-      <div className="report-filters">
-        <label className="modal__meta">
-          Start date
-          <input className="input" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+      {/* ── Date filter bar ──────────────────────────────────────────── */}
+      <div className="report-filters" role="search" aria-label="Date range filter">
+        <label>
+          From
+          <input
+            className="input"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            aria-label="Start date"
+          />
         </label>
-        <label className="modal__meta">
-          End date
-          <input className="input" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+        <label>
+          To
+          <input
+            className="input"
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            aria-label="End date"
+          />
         </label>
       </div>
 
+      {/* ── KPI summary strip ────────────────────────────────────────── */}
+      <div className="admin-kpi-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+        <div className="admin-kpi">
+          <p className="admin-kpi__label">Total Revenue</p>
+          <p className="admin-kpi__value">{moneyFormatter.format(combinedRevenue)}</p>
+        </div>
+        <div className="admin-kpi">
+          <p className="admin-kpi__label">Online</p>
+          <p className="admin-kpi__value">{moneyFormatter.format(onlineRevenue)}</p>
+        </div>
+        <div className="admin-kpi">
+          <p className="admin-kpi__label">POS</p>
+          <p className="admin-kpi__value">{moneyFormatter.format(posRevenue)}</p>
+        </div>
+        <div className="admin-kpi">
+          <p className="admin-kpi__label">Transactions</p>
+          <p className="admin-kpi__value">{filteredOrders.length + filteredSales.length}</p>
+        </div>
+        <div className="admin-kpi">
+          <p className="admin-kpi__label">Voided</p>
+          <p className="admin-kpi__value">{moneyFormatter.format(voidedAmount)}</p>
+        </div>
+        <div className="admin-kpi">
+          <p className="admin-kpi__label">Site Visits</p>
+          <p className="admin-kpi__value">{visitsInRange.length}</p>
+        </div>
+      </div>
+
+      {/* ── Detail cards ─────────────────────────────────────────────── */}
       <div className="report-grid">
+
         <div className="report-card">
           <h3>Revenue</h3>
           <div className="report-stat">
@@ -338,17 +304,17 @@ function AdminReportsPage() {
             <strong>{moneyFormatter.format(posCashTotal)}</strong>
           </div>
           <div className="report-stat">
-            <span>Card</span>
+            <span>Card / EFT</span>
             <strong>{moneyFormatter.format(posCardTotal)}</strong>
           </div>
-          <div className="report-stat">
+          <div className="report-stat report-stat--total">
             <span>POS transactions</span>
             <strong>{activeReceiptCount}</strong>
           </div>
         </div>
 
         <div className="report-card">
-          <h3>Orders</h3>
+          <h3>Order counts</h3>
           <div className="report-stat">
             <span>Online orders</span>
             <strong>{filteredOrders.length}</strong>
@@ -357,8 +323,8 @@ function AdminReportsPage() {
             <span>POS receipts</span>
             <strong>{filteredSales.length}</strong>
           </div>
-          <div className="report-stat">
-            <span>Total transactions</span>
+          <div className="report-stat report-stat--total">
+            <span>All transactions</span>
             <strong>{filteredOrders.length + filteredSales.length}</strong>
           </div>
         </div>
@@ -369,117 +335,135 @@ function AdminReportsPage() {
             <span>Voided receipts</span>
             <strong>{voidedReceiptCount}</strong>
           </div>
-          <div className="report-stat">
+          <div className="report-stat report-stat--total">
             <span>Voided amount</span>
             <strong>{moneyFormatter.format(voidedAmount)}</strong>
           </div>
-          <div className="report-stat">
-            <span>Latest status mix</span>
-            <strong className={`badge ${filteredSales[0] ? getPosSaleStatusBadgeClass(filteredSales[0].status) : "badge--muted"}`}>
-              {filteredSales[0] ? formatPosSaleStatusLabel(filteredSales[0].status) : "No receipts"}
-            </strong>
-          </div>
         </div>
 
-        <div className="report-card">
-          <h3>Site visits</h3>
-          {visitsInRange.length === 0 ? (
-            <p className="modal__meta">No visit data yet. Connect analytics to enable this.</p>
-          ) : (
-            <div className="report-stat">
-              <span>Visits</span>
+        {visitsInRange.length > 0 && (
+          <div className="report-card">
+            <h3>Site Visits</h3>
+            <div className="report-stat report-stat--total">
+              <span>Unique visits</span>
               <strong>{visitsInRange.length}</strong>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
       </div>
 
-      <div className="report-grid">
-        <div className="report-card report-card--wide">
-          <h3>Product totals</h3>
-          <p className="modal__meta">Online product orders only (bookings and POS excluded).</p>
-          <div className="report-product-controls">
-            <label className="report-product-controls__field modal__meta">
-              Search
-              <input
-                className="input"
-                type="search"
-                placeholder="Product or variant"
-                value={productSearch}
-                onChange={(event) => setProductSearch(event.target.value)}
-              />
-            </label>
-            <label className="report-product-controls__field modal__meta">
-              Min qty
-              <input
-                className="input"
-                type="number"
-                min="1"
-                step="1"
-                value={minQty}
-                onChange={(event) => setMinQty(event.target.value)}
-              />
-            </label>
-            <label className="report-product-controls__field modal__meta">
-              Min revenue
-              <input
-                className="input"
-                type="number"
-                min="0"
-                step="0.01"
-                value={minRevenue}
-                onChange={(event) => setMinRevenue(event.target.value)}
-              />
-            </label>
-            <label className="report-product-controls__field modal__meta">
-              Sort by
-              <select
-                className="input"
-                value={productSort}
-                onChange={(event) => setProductSort(event.target.value)}
-              >
-                <option value="qty-desc">Qty high to low</option>
-                <option value="qty-asc">Qty low to high</option>
-                <option value="revenue-desc">Revenue high to low</option>
-                <option value="revenue-asc">Revenue low to high</option>
-                <option value="name-asc">Product A-Z</option>
-                <option value="name-desc">Product Z-A</option>
-              </select>
-            </label>
-            <div className="report-product-controls__actions">
-              <button className="btn btn--secondary" type="button" onClick={handleResetProductFilters}>
-                Clear
-              </button>
-            </div>
+      {/* ── Product totals ────────────────────────────────────────────── */}
+      <div className="report-card report-card--wide">
+        <h3>Product totals</h3>
+        <p className="admin-panel__note" style={{ marginBottom: "1rem" }}>
+          Online product orders only — bookings and POS excluded.
+        </p>
+
+        {/* Product filter controls */}
+        <div className="report-product-controls">
+          <label className="report-product-controls__field modal__meta">
+            Search
+            <input
+              className="input"
+              type="search"
+              placeholder="Product or variant…"
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+              aria-label="Filter products by name"
+            />
+          </label>
+          <label className="report-product-controls__field modal__meta">
+            Min qty
+            <input
+              className="input"
+              type="number"
+              min="1"
+              step="1"
+              value={minQty}
+              onChange={(e) => setMinQty(e.target.value)}
+              aria-label="Minimum quantity sold"
+            />
+          </label>
+          <label className="report-product-controls__field modal__meta">
+            Min revenue (R)
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={minRevenue}
+              onChange={(e) => setMinRevenue(e.target.value)}
+              aria-label="Minimum revenue"
+            />
+          </label>
+          <label className="report-product-controls__field modal__meta">
+            Sort by
+            <select
+              className="input"
+              value={productSort}
+              onChange={(e) => setProductSort(e.target.value)}
+              aria-label="Sort products"
+            >
+              <option value="qty-desc">Qty — high to low</option>
+              <option value="qty-asc">Qty — low to high</option>
+              <option value="revenue-desc">Revenue — high to low</option>
+              <option value="revenue-asc">Revenue — low to high</option>
+              <option value="name-asc">Name A → Z</option>
+              <option value="name-desc">Name Z → A</option>
+            </select>
+          </label>
+          <div className="report-product-controls__actions">
+            <button className="btn btn--secondary" type="button" onClick={handleResetProductFilters}>
+              Clear filters
+            </button>
           </div>
-          {!hasProductSales ? (
-            <p className="modal__meta">No product sales recorded in this range.</p>
-          ) : visibleProductTotals.length === 0 ? (
-            <p className="modal__meta">No products match the current filters.</p>
-          ) : (
-            <div className="admin-table__wrapper">
-              <table className="admin-table admin-table--compact">
-                <thead>
-                  <tr>
-                    <th scope="col">Product / Variant</th>
-                    <th scope="col">Qty sold</th>
-                    <th scope="col">Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleProductTotals.map((item) => (
-                    <tr key={item.key}>
-                      <td>{item.name}</td>
-                      <td>{item.quantity}</td>
-                      <td>{moneyFormatter.format(item.revenue)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
+
+        {/* Table */}
+        {!hasProductSales ? (
+          <p className="modal__meta">No product sales recorded in this date range.</p>
+        ) : visibleProductTotals.length === 0 ? (
+          <p className="modal__meta">No products match the current filters.</p>
+        ) : (
+          <div className="admin-table__wrapper">
+            <table className="admin-table admin-table--compact">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Product / Variant</th>
+                  <th scope="col">Qty sold</th>
+                  <th scope="col">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleProductTotals.map((item, index) => (
+                  <tr key={item.key}>
+                    <td style={{ color: "var(--admin-text-muted)", fontSize: "0.78rem" }}>{index + 1}</td>
+                    <td><strong style={{ fontWeight: 600 }}>{item.name}</strong></td>
+                    <td>{item.quantity}</td>
+                    <td><strong>{moneyFormatter.format(item.revenue)}</strong></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: "rgba(183,196,169,0.1)" }}>
+                  <td colSpan={2} style={{ fontWeight: 700, paddingTop: "0.85rem", paddingBottom: "0.85rem" }}>
+                    Totals
+                  </td>
+                  <td style={{ fontWeight: 700 }}>
+                    {visibleProductTotals.reduce((s, i) => s + i.quantity, 0)}
+                  </td>
+                  <td style={{ fontWeight: 700, color: "var(--color-accent)" }}>
+                    {moneyFormatter.format(visibleProductTotals.reduce((s, i) => s + i.revenue, 0))}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
       </div>
+
     </div>
   );
 }

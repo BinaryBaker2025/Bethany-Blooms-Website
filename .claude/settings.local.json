@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep \"\\\\.jsx$\")",
+      "Bash(node -e \"const d=JSON.parse\\(require\\(''fs''\\).readFileSync\\(''C:/Users/Bradley/.claude/projects/c--Users-Bradley-OneDrive-Desktop-Applications-Bethany-Blooms-Website/ae49f1f3-6849-420f-ac23-b58f1a534aed/tool-results/toolu_01Bv6Qdf7GvLrri9Y1zt4PWX.json'',''utf8''\\)\\); console.log\\(d[0].text.slice\\(0,12000\\)\\);\")",
+      "Bash(node -e \"const d=JSON.parse\\(require\\(''fs''\\).readFileSync\\(''C:/Users/Bradley/.claude/projects/c--Users-Bradley-OneDrive-Desktop-Applications-Bethany-Blooms-Website/ae49f1f3-6849-420f-ac23-b58f1a534aed/tool-results/toolu_01Bv6Qdf7GvLrri9Y1zt4PWX.json'',''utf8''\\)\\); console.log\\(d[0].text.slice\\(12000,28000\\)\\);\")",
+      "Bash(node -e \"const d=JSON.parse\\(require\\(''fs''\\).readFileSync\\(''C:/Users/Bradley/.claude/projects/c--Users-Bradley-OneDrive-Desktop-Applications-Bethany-Blooms-Website/ae49f1f3-6849-420f-ac23-b58f1a534aed/tool-results/toolu_01Bv6Qdf7GvLrri9Y1zt4PWX.json'',''utf8''\\)\\); console.log\\(d[0].text.slice\\(28000\\)\\);\")",
+      "Bash(xargs grep -l \"buildWhatsAppLink\\\\|buildEventWhatsAppLink\")",
+      "Bash(grep -n \"const.*Formatter = new Intl.DateTimeFormat\" \"/c/Users/Bradley/OneDrive/Desktop/Applications/Bethany-Blooms-Website/frontend/src/pages/\"*.jsx)",
+      "Bash(grep -n \"editorial-band--center\" /c/Users/Bradley/OneDrive/Desktop/Applications/Bethany-Blooms-Website/frontend/src/pages/*.jsx)",
+      "Bash(xargs grep -l \"eyebrow\\\\|editorial-band\")",
+      "Bash(npx vite build --mode development)",
+      "Bash(wc -l \"c:\\\\Users\\\\Bradley\\\\OneDrive\\\\Desktop\\\\Applications\\\\Bethany-Blooms-Website\\\\frontend\\\\src\\\\components\\\\admin\"/*.jsx)",
+      "Bash(xargs grep -l \"admin\")",
+      "Bash(\"c:/Users/Bradley/OneDrive/Desktop/Applications/Bethany-Blooms-Website/frontend/src/styles.css\":*)",
+      "Bash(\"c:\\\\Users\\\\Bradley\\\\OneDrive\\\\Desktop\\\\Applications\\\\Bethany-Blooms-Website\\\\frontend\\\\src\\\\styles.css\")",
+      "Bash(\"/c/Users/Bradley/OneDrive/Desktop/Applications/Bethany-Blooms-Website/frontend/src/styles.css\")",
+      "Bash(find c:/Users/Bradley/OneDrive/Desktop/Applications/Bethany-Blooms-Website/frontend/src -name *AdminPage* -o -name *admin*modal*)"
+    ]
+  }
+}

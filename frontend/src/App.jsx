@@ -157,7 +157,7 @@ function App() {
                 <Route path="invoices" element={<AdminInvoicePreviewView />} />
                 <Route
                   path="commerce/gift-cards/preview"
-                  element={<AdminGiftCardPreviewView />}
+                  element={<Navigate to="/admin/commerce/gift-cards/generate" replace />}
                 />
                 <Route
                   path="commerce/gift-cards/generate"
@@ -165,7 +165,7 @@ function App() {
                 />
                 <Route
                   path="gift-cards"
-                  element={<Navigate to="/admin/commerce/gift-cards/preview" replace />}
+                  element={<Navigate to="/admin/commerce/gift-cards/generate" replace />}
                 />
                 <Route path="pos" element={<AdminPosPage />} />
                 <Route path="pos/cash-up" element={<AdminPosCashUpPage />} />

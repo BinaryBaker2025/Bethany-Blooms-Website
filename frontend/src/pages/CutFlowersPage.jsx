@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import { useMemo, useRef } from "react";
-import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useModal } from "../context/ModalContext.jsx";
@@ -349,21 +348,13 @@ function CutFlowersPage() {
 
   return (
     <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Hero
-            variant="cut"
-            background={CUT_FLOWER_PAGE_IMAGES.cutFlowersHeroBackground}
-            media={
-              <img
-                src={CUT_FLOWER_PAGE_IMAGES.cutFlowersHeroMedia}
-                alt="Visitors cutting flowers at the Bethany Blooms farm"
-                loading="lazy"
-                decoding="async"
-              />
-            }
-          >
-            <span className="badge">Cut Flowers</span>
+      {/* Page hero */}
+      <section className="section--no-pad">
+        <div className="page-hero">
+          <img className="page-hero__bg" src={CUT_FLOWER_PAGE_IMAGES.homeHeroMedia} alt="" aria-hidden="true" loading="eager" decoding="async" />
+          <div className="page-hero__overlay" aria-hidden="true" />
+          <div className="page-hero__content">
+            <span className="editorial-eyebrow">Cut Flowers</span>
             <h1>Visit The Farm & Cut Your Own Flowers</h1>
             <p>
               Bethany Blooms cut flowers are a flower-farm experience: come to the farm, walk the rows, cut from the
@@ -373,39 +364,47 @@ function CutFlowersPage() {
               <button className="btn btn--primary" type="button" onClick={handleStartBookingClick}>
                 Book A Farm Session
               </button>
-              <Link className="btn btn--secondary" to="/contact">
-                Ask About Farm Visits
-              </Link>
+              <Link className="btn btn--secondary" to="/contact">Ask About Farm Visits</Link>
             </div>
-          </Hero>
+          </div>
         </div>
       </section>
 
-      <section className="section">
-        <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Offerings</span>
+      {/* Offerings — editorial split with offering list */}
+      <section className="section section--no-pad band--cream">
+        <Reveal as="div" className="editorial-split">
+          <div className="editorial-split__media">
+            <img
+              src={CUT_FLOWER_PAGE_IMAGES.cutFlowersHeroMedia}
+              alt="Visitors cutting flowers at the Bethany Blooms farm"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <div className="editorial-split__body">
+            <span className="editorial-eyebrow">Offerings</span>
             <h2>What To Expect At The Farm</h2>
             <p>
               This is a hands-on flower farm experience where you do the cutting yourself. We do not provide off-site
               event styling from this page.
             </p>
-          </Reveal>
-          <div className="cards-grid">
-            {offerings.map((item) => (
-              <article className="card" key={item.title}>
-                <h3 className="card__title">{item.title}</h3>
-                <p>{item.description}</p>
-              </article>
-            ))}
+            <ul className="editorial-offering-list">
+              {offerings.map((item) => (
+                <li key={item.title}>
+                  <strong>{item.title}</strong>
+                  <p>{item.description}</p>
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
+        </Reveal>
       </section>
 
-      <section className="section section--tight" id="cut-flower-classes" ref={classesSectionRef}>
+      {/* Upcoming sessions */}
+      <section className="section band--white" id="cut-flower-classes" ref={classesSectionRef}>
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Upcoming Sessions</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Upcoming Sessions</span>
             <h2>Book A Cut Flower Farm Session</h2>
             <p>Reserve your spot, visit the farm, and enjoy cutting your own fresh flowers.</p>
           </Reveal>
@@ -471,9 +470,10 @@ function CutFlowersPage() {
         </div>
       </section>
 
-      <section className="section section--tight">
-        <div className="section__inner cut-flowers-process">
-          <div className="cut-flowers-process__media">
+      {/* Process — editorial split reversed with stacked process steps */}
+      <section className="section section--no-pad band--cream">
+        <Reveal as="div" className="editorial-split editorial-split--reverse">
+          <div className="editorial-split__media">
             <img
               src={CUT_FLOWER_PAGE_IMAGES.cutFlowersProcess}
               alt="Cut flowers styled on a Bethany Blooms table"
@@ -481,24 +481,22 @@ function CutFlowersPage() {
               decoding="async"
             />
           </div>
-          <div className="cut-flowers-process__steps">
-            <Reveal as="div">
-              <span className="badge">The Process</span>
-              <h2>Your Farm Visit, Simplified</h2>
-            </Reveal>
-            <ol>
+          <div className="editorial-split__body">
+            <span className="editorial-eyebrow">The Process</span>
+            <h2>Your Farm Visit, Simplified</h2>
+            <div className="editorial-process editorial-process--stacked">
               {processSteps.map((step) => (
-                <li key={step.title}>
+                <div className="editorial-process__step" key={step.title}>
                   <h3>{step.title}</h3>
                   <p>{step.description}</p>
-                </li>
+                </div>
               ))}
-            </ol>
-            <Link className="btn btn--primary" to="/contact">
-              Request Farm Availability
-            </Link>
+            </div>
+            <div className="cta-group">
+              <Link className="btn btn--primary" to="/contact">Request Farm Availability</Link>
+            </div>
           </div>
-        </div>
+        </Reveal>
       </section>
     </>
   );

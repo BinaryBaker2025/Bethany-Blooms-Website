@@ -10,6 +10,13 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
+import { Link } from "react-router-dom";
+import PosCartPanel from "../../components/admin/PosCartPanel.jsx";
+import PosCatalogBrowser from "../../components/admin/PosCatalogBrowser.jsx";
+import PosOrderSummary from "../../components/admin/PosOrderSummary.jsx";
+import PosPaymentPanel from "../../components/admin/PosPaymentPanel.jsx";
+import PosReceiptActions from "../../components/admin/PosReceiptActions.jsx";
+import PosStepperHeader from "../../components/admin/PosStepperHeader.jsx";
 import PosVoidDialog from "../../components/admin/PosVoidDialog.jsx";
 import { useAdminData } from "../../context/AdminDataContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
@@ -55,6 +62,11 @@ const DEFAULT_CUSTOMER = {
   phone: "",
 };
 
+const POS_STEP_ORDER = 1;
+const POS_STEP_CUSTOMER = 2;
+const POS_STEP_PAYMENT = 3;
+const POS_STEP_CONFIRM = 4;
+
 const parseNumber = (value, fallback = null) => {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -73,6 +85,9 @@ const formatCurrency = (value) => {
   const amount = parseNumber(value, 0);
   return moneyFormatter.format(amount);
 };
+
+const isValidEmailAddress = (value = "") =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || "").toString().trim());
 
 const formatDateKey = (date) => {
   if (!date) return "";
@@ -178,6 +193,29 @@ const buildCatalogItemSummary = (catalogItemRef = null) => {
     .join(" | ");
 };
 
+const normalizePaymentStatus = (value) => (value || "").toString().trim().toLowerCase();
+
+const isBookingCompleted = (booking, type) => {
+  const status = normalizePaymentStatus(booking?.status);
+  const paymentStatus = normalizePaymentStatus(
+    booking?.paymentStatus || booking?.payment_status,
+  );
+  const isPaid =
+    booking?.paid === true ||
+    paymentStatus === "paid" ||
+    paymentStatus === "complete" ||
+    paymentStatus === "completed";
+  if (type === "cut-flower") {
+    return (
+      status === "fulfilled" ||
+      status === "completed" ||
+      status === "cancelled" ||
+      isPaid
+    );
+  }
+  return status === "fulfilled" || status === "completed" || isPaid;
+};
+
 function AdminPosPage() {
   usePageMetadata({
     title: "Admin - POS",
@@ -207,6 +245,13 @@ function AdminPosPage() {
     orderByField: "createdAt",
     orderDirection: "desc",
   });
+  const { items: adminPosSettings, status: adminPosSettingsStatus } = useFirestoreCollection(
+    "adminPosSettings",
+    {
+      orderByField: null,
+      orderDirection: null,
+    },
+  );
 
   const functionsInstance = useMemo(() => {
     try {
@@ -218,12 +263,15 @@ function AdminPosPage() {
 
   const [activeTab, setActiveTab] = useState(POS_TABS[0].id);
   const [searchTerm, setSearchTerm] = useState("");
+  const [currentStep, setCurrentStep] = useState(POS_STEP_ORDER);
+  const [posMobilePanel, setPosMobilePanel] = useState("browse"); // "browse" | "cart"
   const [cartItems, setCartItems] = useState([]);
+  const [toasts, setToasts] = useState([]);
+  const toastIdRef = useRef(0);
   const [customer, setCustomer] = useState(DEFAULT_CUSTOMER);
-  const [paymentMethod, setPaymentMethod] = useState("card");
+  const [paymentMethod, setPaymentMethod] = useState("");
   const [notes, setNotes] = useState("");
   const [sendEmailReceipt, setSendEmailReceipt] = useState(false);
-  const [showPrintableReceipt, setShowPrintableReceipt] = useState(false);
   const [showDiscountSection, setShowDiscountSection] = useState(false);
   const [showGiftCardSection, setShowGiftCardSection] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState("idle");
@@ -236,8 +284,9 @@ function AdminPosPage() {
   const [giftCardMatches, setGiftCardMatches] = useState([]);
   const [giftCardLookupLoading, setGiftCardLookupLoading] = useState(false);
   const [giftCardLookupError, setGiftCardLookupError] = useState(null);
-  const [changeConfirmOpen, setChangeConfirmOpen] = useState(false);
-  const changeConfirmRef = useRef(false);
+  const [recentSalesOpen, setRecentSalesOpen] = useState(false);
+  const [stepOneAttemptedNext, setStepOneAttemptedNext] = useState(false);
+  const [emailBlurred, setEmailBlurred] = useState(false);
   const [voidSaleTarget, setVoidSaleTarget] = useState(null);
 
   const [posProductForm, setPosProductForm] = useState(INITIAL_POS_PRODUCT);
@@ -252,12 +301,12 @@ function AdminPosPage() {
   const [classOptionSelections, setClassOptionSelections] = useState({});
   const [eventSelections, setEventSelections] = useState({});
   const [activeCategoryId, setActiveCategoryId] = useState("all");
-  const [posCatalogOpen, setPosCatalogOpen] = useState(false);
   const [bookingTab, setBookingTab] = useState("workshop");
   const [bookingDateFilter, setBookingDateFilter] = useState(() => formatDateKey(new Date()));
   const [bookingEdits, setBookingEdits] = useState({});
   const [bookingSavingId, setBookingSavingId] = useState(null);
   const [bookingError, setBookingError] = useState(null);
+  const [activeBookingEditor, setActiveBookingEditor] = useState(null);
 
   const handleDiscountSectionToggle = (nextValue = "no") => {
     const shouldShow = nextValue === "yes";
@@ -386,30 +435,6 @@ function AdminPosPage() {
     });
     return map;
   }, [normalizedWorkshops]);
-
-  const normalizePaymentStatus = (value) =>
-    (value || "").toString().trim().toLowerCase();
-
-  const isBookingCompleted = (booking, type) => {
-    const status = normalizePaymentStatus(booking?.status);
-    const paymentStatus = normalizePaymentStatus(
-      booking?.paymentStatus || booking?.payment_status,
-    );
-    const isPaid =
-      booking?.paid === true ||
-      paymentStatus === "paid" ||
-      paymentStatus === "complete" ||
-      paymentStatus === "completed";
-    if (type === "cut-flower") {
-      return (
-        status === "fulfilled" ||
-        status === "completed" ||
-        status === "cancelled" ||
-        isPaid
-      );
-    }
-    return status === "fulfilled" || status === "completed" || isPaid;
-  };
 
   const normalizedWorkshopBookings = useMemo(() => {
     return (bookings || []).map((booking) => {
@@ -550,14 +575,6 @@ function AdminPosPage() {
     });
   }, [cutFlowerClasses, sessionFormatter]);
 
-  const classLookup = useMemo(() => {
-    const map = new Map();
-    normalizedClasses.forEach((classDoc) => {
-      if (classDoc.id) map.set(classDoc.id, classDoc);
-    });
-    return map;
-  }, [normalizedClasses]);
-
   const cutFlowerOptions = useMemo(() => {
     const seen = new Set();
     const options = [];
@@ -693,13 +710,6 @@ function AdminPosPage() {
     filteredWorkshopBookings.length,
   ]);
 
-  const hasBookingItems = useMemo(
-    () => cartItems.some((item) => item.type === "workshop" || item.type === "class"),
-    [cartItems],
-  );
-
-  const requiresCustomerDetails = sendEmailReceipt;
-
   const pricing = useMemo(() => {
     const cartSubtotal = cartItems.reduce(
       (sum, item) => sum + parseNumber(item.price, 0) * Math.max(1, Number.parseInt(item.quantity, 10) || 1),
@@ -780,6 +790,87 @@ function AdminPosPage() {
       .slice(0, 12);
   }, [posSales]);
 
+  const activePosSettings = useMemo(
+    () =>
+      adminPosSettings.find((entry) => entry.uid === user?.uid || entry.id === user?.uid) || null,
+    [adminPosSettings, user?.uid],
+  );
+
+  const showPinWarning =
+    adminPosSettingsStatus !== "loading" && !activePosSettings?.pinConfigured;
+
+  const stockIssues = useMemo(() => {
+    return cartItems
+      .map((item) => {
+        if (item.type === "product") {
+          const product = normalizedProducts.find((entry) => entry.id === item.sourceId);
+          const variantId = (item?.metadata?.variantId || "").toString().trim();
+          if (variantId) {
+            const variant = product?.variants?.find((entry) => entry.id === variantId) || null;
+            const available = getTrackedQuantity(variant);
+            if (available !== null && available < item.quantity) {
+              return { key: item.key, available, item };
+            }
+            return null;
+          }
+          const available = getTrackedQuantity(product);
+          if (available !== null && available < item.quantity) {
+            return { key: item.key, available, item };
+          }
+          return null;
+        }
+        if (item.type === "pos-product") {
+          const product = normalizedPosProducts.find((entry) => entry.id === item.sourceId);
+          const available = getTrackedQuantity(product);
+          if (available !== null && available < item.quantity) {
+            return { key: item.key, available, item };
+          }
+        }
+        return null;
+      })
+      .filter(Boolean);
+  }, [cartItems, normalizedPosProducts, normalizedProducts]);
+
+  const stockIssuesByKey = useMemo(
+    () => new Map(stockIssues.map((issue) => [issue.key, issue])),
+    [stockIssues],
+  );
+
+  const emailValue = customer.email.trim();
+  const emailRequired = sendEmailReceipt;
+  const emailValid = !emailRequired || isValidEmailAddress(emailValue);
+  const fullyCoveredByGiftCard = pricing.amountDue <= 0 && giftCardMatches.length > 0;
+  const resolvedPaymentMethod = fullyCoveredByGiftCard ? "gift-card" : paymentMethod;
+  const stepOneValid = cartItems.length > 0 && stockIssues.length === 0;
+  const stepTwoValid = !emailRequired || (Boolean(emailValue) && emailValid);
+  const stepThreeValid =
+    fullyCoveredByGiftCard ||
+    (Boolean(paymentMethod) &&
+      (paymentMethod !== "cash" ||
+        (Number.isFinite(cashStats.cashReceived) && cashStats.isValid)));
+
+  const completedSteps = useMemo(() => {
+    const next = new Set();
+    if (currentStep > POS_STEP_ORDER && stepOneValid) next.add(POS_STEP_ORDER);
+    if (currentStep > POS_STEP_CUSTOMER && stepOneValid && stepTwoValid) next.add(POS_STEP_CUSTOMER);
+    if (currentStep > POS_STEP_PAYMENT && stepOneValid && stepTwoValid && stepThreeValid) {
+      next.add(POS_STEP_PAYMENT);
+    }
+    return next;
+  }, [currentStep, stepOneValid, stepThreeValid, stepTwoValid]);
+
+  const stepThreeError = useMemo(() => {
+    if (fullyCoveredByGiftCard) return "";
+    if (!paymentMethod) return "Select a payment method to continue";
+    if (paymentMethod === "cash" && !Number.isFinite(cashStats.cashReceived)) {
+      return "Cash received is required before you can continue";
+    }
+    if (paymentMethod === "cash" && !cashStats.isValid) {
+      return "Cash received is less than the amount due";
+    }
+    return "";
+  }, [cashStats.cashReceived, cashStats.isValid, fullyCoveredByGiftCard, paymentMethod]);
+
   const updateCustomerField = (field) => (event) => {
     const value = event.target.value;
     setCustomer((prev) => ({ ...prev, [field]: value }));
@@ -787,11 +878,14 @@ function AdminPosPage() {
 
   const handleGiftCardCodeLookup = async () => {
     if (!functionsInstance || !inventoryEnabled) {
-      setGiftCardLookupError("Gift card lookup is unavailable. Please check admin permissions.");
+      const msg = "Gift card lookup is unavailable. Please check admin permissions.";
+      setGiftCardLookupError(msg);
+      showToast(msg, "error");
       return;
     }
     const normalizedCode = normalizeGiftCardCode(giftCardCodeInput);
     if (!normalizedCode) {
+      showToast("Enter a gift card code first", "error");
       setGiftCardLookupError("Enter a gift card code.");
       return;
     }
@@ -800,6 +894,7 @@ function AdminPosPage() {
         (entry) => normalizeGiftCardCode(entry.code || "") === normalizedCode,
       )
     ) {
+      showToast("This gift card code has already been added", "error");
       setGiftCardLookupError("This gift card code has already been added.");
       return;
     }
@@ -902,6 +997,7 @@ function AdminPosPage() {
         })
         .filter(Boolean);
 
+      showToast(`Gift card ${resolvedGiftCardCode} applied`, "success");
       setGiftCardMatches((prev) => [
         ...prev,
         {
@@ -1051,9 +1147,9 @@ function AdminPosPage() {
       });
       setGiftCardCodeInput("");
     } catch (error) {
-      setGiftCardLookupError(
-        error.message || "Unable to validate gift card code.",
-      );
+      const msg = error.message || "Unable to validate gift card code.";
+      setGiftCardLookupError(msg);
+      showToast(msg, "error");
     } finally {
       setGiftCardLookupLoading(false);
     }
@@ -1092,6 +1188,19 @@ function AdminPosPage() {
     setGiftCardLookupError(null);
   };
 
+  const showToast = (message, type = "success", action = null) => {
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, message, type, action }]);
+    const duration = type === "error" ? 5500 : type === "info" ? 3500 : 4000;
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, duration);
+  };
+
+  const dismissToast = (id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
   const handleAddToCart = (item) => {
     setCartItems((prev) => {
       const existingIndex = prev.findIndex((entry) => entry.key === item.key);
@@ -1105,6 +1214,11 @@ function AdminPosPage() {
       };
       return next;
     });
+    showToast(
+      `Added: ${item.name}`,
+      "success",
+      { label: "View cart", onClick: () => setPosMobilePanel("cart") },
+    );
   };
 
   const handleRemoveCartItem = (key) => {
@@ -1356,31 +1470,75 @@ function AdminPosPage() {
         originalPaymentMethod: booking.paymentMethod || null,
       },
     });
+    setActiveBookingEditor(null);
   };
 
   const resetCheckout = () => {
     setCartItems([]);
     setCustomer(DEFAULT_CUSTOMER);
     setNotes("");
-    setPaymentMethod("card");
+    setPaymentMethod("");
     setShowDiscountSection(false);
     setShowGiftCardSection(false);
     setDiscountType("none");
     setDiscountValue("");
     setCashReceived("");
-    changeConfirmRef.current = false;
-    setChangeConfirmOpen(false);
     setGiftCardCodeInput("");
     setGiftCardMatches([]);
     setGiftCardLookupLoading(false);
     setGiftCardLookupError(null);
     setCheckoutStatus("idle");
     setCheckoutError(null);
+    setReceiptData(null);
+    setCurrentStep(POS_STEP_ORDER);
+    setPosMobilePanel("browse");
+    setStepOneAttemptedNext(false);
+    setEmailBlurred(false);
+    setActiveBookingEditor(null);
   };
 
   const handleVoidCompleted = () => {
     setVoidSaleTarget(null);
     setCheckoutError(null);
+  };
+
+  const handleStepClick = (step) => {
+    if (checkoutStatus === "saving" || checkoutStatus === "success") return;
+    if (completedSteps.has(step)) {
+      setCurrentStep(step);
+    }
+  };
+
+  const goToCustomerStep = () => {
+    setStepOneAttemptedNext(true);
+    if (!stepOneValid) {
+      if (cartItems.length === 0) {
+        showToast("Add at least one item to continue", "error");
+      } else if (stockIssues.length > 0) {
+        showToast("Resolve all stock issues before continuing", "error");
+      }
+      return;
+    }
+    showToast(`${cartItems.length} item${cartItems.length !== 1 ? "s" : ""} in cart — add customer details`, "info");
+    setCurrentStep(POS_STEP_CUSTOMER);
+  };
+
+  const goToPaymentStep = () => {
+    if (!stepTwoValid) {
+      showToast("A valid email address is required to send the receipt", "error");
+      return;
+    }
+    showToast("Customer info saved — select payment method", "info");
+    setCurrentStep(POS_STEP_PAYMENT);
+  };
+
+  const goToConfirmStep = () => {
+    if (!stepThreeValid) {
+      showToast(stepThreeError || "Complete the payment details before continuing", "error");
+      return;
+    }
+    showToast("Payment set — review and confirm the order", "info");
+    setCurrentStep(POS_STEP_CONFIRM);
   };
 
   const handleSavePosProduct = async (event) => {
@@ -1460,26 +1618,20 @@ function AdminPosPage() {
   };
 
   const openPosItemsModal = () => {
-    setPosCatalogOpen(false);
     setPosItemsOpen(true);
-  };
-
-  const closeCatalogModal = () => {
-    setPosCatalogOpen(false);
-  };
-
-  const openCatalogModal = () => {
-    setPosItemsOpen(false);
-    setPosCatalogOpen(true);
   };
 
   const handleCheckout = async () => {
     if (!db || !inventoryEnabled) {
-      setCheckoutError("POS is unavailable. Please check your admin permissions.");
+      const msg = "POS is unavailable. Please check your admin permissions.";
+      setCheckoutError(msg);
+      showToast(msg, "error");
       return;
     }
     if (cartItems.length === 0) {
-      setCheckoutError("Add at least one item to the cart.");
+      const msg = "Add at least one item to the cart.";
+      setCheckoutError(msg);
+      showToast(msg, "error");
       return;
     }
 
@@ -1490,7 +1642,9 @@ function AdminPosPage() {
     };
 
     if (sendEmailReceipt && !trimmedCustomer.email) {
-      setCheckoutError("Please provide a customer email to send the receipt.");
+      const msg = "Please provide a customer email to send the receipt.";
+      setCheckoutError(msg);
+      showToast(msg, "error");
       return;
     }
 
@@ -1527,20 +1681,19 @@ function AdminPosPage() {
     let confirmedChange = null;
     if (resolvedPaymentMethod === "cash" && pricing.amountDue > 0) {
       if (!Number.isFinite(cashStats.cashReceived)) {
-        setCheckoutError("Enter the cash amount received.");
+        const msg = "Enter the cash amount received.";
+        setCheckoutError(msg);
+        showToast(msg, "error");
         return;
       }
       if (!cashStats.isValid) {
-        setCheckoutError("Cash received is less than the amount due.");
-        return;
-      }
-      if (!changeConfirmRef.current) {
-        setChangeConfirmOpen(true);
+        const msg = "Cash received is less than the amount due.";
+        setCheckoutError(msg);
+        showToast(msg, "error");
         return;
       }
       confirmedChange = true;
     }
-    changeConfirmRef.current = false;
 
     const outOfStockItems = cartItems.filter((item) => {
       if (item.type === "product") {
@@ -1563,7 +1716,9 @@ function AdminPosPage() {
     });
 
     if (outOfStockItems.length > 0) {
-      setCheckoutError("Some items do not have enough stock. Please adjust quantities.");
+      const msg = "Some items do not have enough stock. Please adjust quantities.";
+      setCheckoutError(msg);
+      showToast(msg, "error");
       return;
     }
 
@@ -1912,16 +2067,703 @@ function AdminPosPage() {
         giftCardMatchedCount: normalizedGiftCardMatches.length,
       });
       setCheckoutStatus("success");
-      if (showPrintableReceipt) {
-        setTimeout(() => window.print(), 100);
-      }
-      resetCheckout();
+      showToast(`Sale complete! Receipt #${receiptNumber}`, "success");
     } catch (error) {
       setCheckoutStatus("error");
-      setCheckoutError(error.message || "Unable to complete the sale.");
+      const msg = error.message || "Unable to complete the sale.";
+      setCheckoutError(msg);
+      showToast(msg, "error");
     }
   };
 
+  const customerEmailError = !emailRequired
+    ? ""
+    : !emailValue
+      ? "Valid email required to send receipt"
+      : emailBlurred && !emailValid
+        ? "Valid email required to send receipt"
+        : "";
+  const disableStepNavigation = checkoutStatus === "saving" || checkoutStatus === "success";
+  const todayDateKey = formatDateKey(new Date());
+
+  return (
+    <div className="admin-panel pos-panel pos-wizard">
+      <header className="admin-panel__header pos-panel__header">
+        <div>
+          <h2>Point of Sale</h2>
+          <p className="modal__meta">Process in-store orders, bookings, and class sales.</p>
+        </div>
+        <div className="pos-panel__actions">
+          <button
+            className="btn btn--secondary"
+            type="button"
+            onClick={openPosItemsModal}
+            disabled={!inventoryEnabled || checkoutStatus === "saving"}
+          >
+            Manage POS-only Items
+          </button>
+        </div>
+      </header>
+
+      {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+
+      <PosStepperHeader
+        currentStep={currentStep}
+        completedSteps={completedSteps}
+        onStepClick={handleStepClick}
+        disabled={disableStepNavigation}
+      />
+
+      {showPinWarning && (
+        <div className="pos-warning-banner pos-pin-warning">
+          <span>
+            &#9888; Your POS PIN is not set. You won&apos;t be able to void sales until you set
+            one in your profile.
+          </span>
+          <Link className="pos-pin-warning__link" to="/admin/profile">
+            Set POS PIN
+          </Link>
+        </div>
+      )}
+
+      <section className="pos-wizard__card pos-recent-sales pos-recent-sales--accordion">
+        <div className="pos-recent-sales__header">
+          <div>
+            <h3>Recent Sales (Today)</h3>
+            <p className="modal__meta">
+              Today&apos;s receipts can be voided here if an admin needs to correct a sale.
+            </p>
+          </div>
+          <button
+            className="btn btn--secondary btn--small"
+            type="button"
+            onClick={() => setRecentSalesOpen((prev) => !prev)}
+            disabled={checkoutStatus === "saving"}
+            aria-expanded={recentSalesOpen}
+          >
+            {recentSalesOpen ? "Hide" : "Show"} {recentSales.length}
+          </button>
+        </div>
+
+        {recentSalesOpen && (
+          <>
+            {recentSales.length === 0 ? (
+              <p className="empty-state">No sales recorded yet today.</p>
+            ) : (
+              <div className="pos-recent-sales__list">
+                {recentSales.map((sale) => (
+                  <article className="pos-recent-sales__item" key={sale.id || sale.receiptNumber}>
+                    <div className="pos-recent-sales__item-header">
+                      <div>
+                        <strong>{sale.receiptNumber || sale.id}</strong>
+                        <p className="modal__meta">
+                          {sale.createdAt
+                            ? sale.createdAt.toLocaleTimeString("en-ZA", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "Time unavailable"}
+                        </p>
+                      </div>
+                      <span className={`badge ${getPosSaleStatusBadgeClass(sale.status)}`}>
+                        {formatPosSaleStatusLabel(sale.status)}
+                      </span>
+                    </div>
+                    <div className="pos-recent-sales__meta">
+                      <span>{(sale.paymentMethod || "-").toString()}</span>
+                      <strong>{formatCurrency(getPosSaleNetTotal(sale))}</strong>
+                    </div>
+                    <button
+                      className="btn btn--secondary btn--small"
+                      type="button"
+                      onClick={() => setVoidSaleTarget(sale)}
+                      disabled={!functionsInstance || checkoutStatus === "saving"}
+                    >
+                      Void / Correct
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      {checkoutStatus === "saving" ? (
+        <section className="pos-wizard__card pos-wizard__loading">
+          <div className="admin-spinner" aria-hidden="true" />
+          <div>
+            <h3>Processing sale...</h3>
+            <p className="modal__meta">Please wait while the sale is written and stock updates run.</p>
+          </div>
+        </section>
+      ) : checkoutStatus === "success" && receiptData ? (
+        <>
+          <PosReceiptActions
+            receiptData={receiptData}
+            formatCurrency={formatCurrency}
+            emailReceiptRequested={sendEmailReceipt}
+            onPrint={() => window.print()}
+            onNewSale={resetCheckout}
+          />
+
+          <section className="pos-receipt">
+            <header className="pos-receipt__header">
+              <div>
+                <h3>Receipt {receiptData.receiptNumber}</h3>
+                <p className="modal__meta">{receiptData.createdAt.toLocaleString("en-ZA")}</p>
+              </div>
+            </header>
+            <div className="pos-receipt__body">
+              <div className="pos-receipt__section">
+                <p>
+                  <strong>Customer:</strong> {receiptData.customer.name || "Walk-in"}
+                </p>
+                {receiptData.customer.email && (
+                  <p>
+                    <strong>Email:</strong> {receiptData.customer.email}
+                  </p>
+                )}
+                {receiptData.customer.phone && (
+                  <p>
+                    <strong>Phone:</strong> {receiptData.customer.phone}
+                  </p>
+                )}
+                <p>
+                  <strong>Payment:</strong> {receiptData.paymentMethod}
+                </p>
+                {receiptData.paymentMethod === "cash" && receiptData.cashReceived !== null && (
+                  <>
+                    <p>
+                      <strong>Cash received:</strong> {formatCurrency(receiptData.cashReceived)}
+                    </p>
+                    <p>
+                      <strong>Change due:</strong> {formatCurrency(receiptData.changeDue || 0)}
+                    </p>
+                  </>
+                )}
+                {Array.isArray(receiptData.giftCardMatches) &&
+                  receiptData.giftCardMatches.length > 0 && (
+                    <p>
+                      <strong>Gift card matches:</strong> {receiptData.giftCardMatches.length}
+                    </p>
+                  )}
+                {Number(receiptData.giftCardApplied || 0) > 0 && (
+                  <p>
+                    <strong>Gift cards applied:</strong> -
+                    {formatCurrency(receiptData.giftCardApplied)}
+                  </p>
+                )}
+              </div>
+              {Array.isArray(receiptData.giftCardMatches) &&
+                receiptData.giftCardMatches.length > 0 && (
+                  <div className="pos-receipt__section">
+                    <ul>
+                      {receiptData.giftCardMatches.map((match, index) => {
+                        const statusLabel = (match.status || "unknown")
+                          .toString()
+                          .trim()
+                          .toLowerCase()
+                          .replace(/_/g, " ");
+                        return (
+                          <li key={`${match.code}-${index}`}>
+                            {match.code} - {statusLabel}
+                            {match.isExpired ? " (expired)" : ""}
+                            {match.isActive ? " (active)" : ""}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              <div className="pos-receipt__section">
+                <ul>
+                  {receiptData.items.map((item, index) => (
+                    <li key={`${item.id}-${index}`}>
+                      {item.name} x{item.quantity} - {formatCurrency(item.price * item.quantity)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="pos-receipt__section pos-receipt__totals">
+                {receiptData.discount?.amount > 0 && (
+                  <p>
+                    <strong>Discount:</strong> -{formatCurrency(receiptData.discount.amount)}
+                  </p>
+                )}
+                <p>
+                  <strong>Amount due:</strong> {formatCurrency(receiptData.total)}
+                </p>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : (
+        <>
+          {currentStep === POS_STEP_ORDER && (
+            <>
+              {/* Mobile tab toggle — hidden on desktop/tablet via CSS */}
+              <div className="pos-panel-tab-bar" role="tablist" aria-label="POS view">
+                <button
+                  className={`pos-panel-tab-bar__btn ${posMobilePanel === "browse" ? "is-active" : ""}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={posMobilePanel === "browse"}
+                  onClick={() => setPosMobilePanel("browse")}
+                >
+                  Browse
+                </button>
+                <button
+                  className={`pos-panel-tab-bar__btn ${posMobilePanel === "cart" ? "is-active" : ""}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={posMobilePanel === "cart"}
+                  onClick={() => setPosMobilePanel("cart")}
+                >
+                  Cart
+                  {cartItems.length > 0 && (
+                    <span className="pos-panel-tab-bar__badge">{cartItems.length}</span>
+                  )}
+                </button>
+              </div>
+
+            <section className="pos-wizard__build">
+              <div data-mobile-panel="browse" className={posMobilePanel === "browse" ? "is-active" : ""}>
+              <PosCatalogBrowser
+                tabs={POS_TABS}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                activeCount={activeCount}
+                inventoryLoading={inventoryLoading}
+                bookingTab={bookingTab}
+                setBookingTab={setBookingTab}
+                bookingDateFilter={bookingDateFilter}
+                setBookingDateFilter={setBookingDateFilter}
+                todayDateKey={todayDateKey}
+                categoryOptions={categoryOptions}
+                activeCategoryId={activeCategoryId}
+                setActiveCategoryId={setActiveCategoryId}
+                filteredProducts={filteredProducts}
+                variantSelections={variantSelections}
+                setVariantSelections={setVariantSelections}
+                filteredPosProducts={filteredPosProducts}
+                filteredWorkshops={filteredWorkshops}
+                workshopSelections={workshopSelections}
+                setWorkshopSelections={setWorkshopSelections}
+                filteredClasses={filteredClasses}
+                classSelections={classSelections}
+                setClassSelections={setClassSelections}
+                classOptionSelections={classOptionSelections}
+                setClassOptionSelections={setClassOptionSelections}
+                filteredWorkshopBookings={filteredWorkshopBookings}
+                filteredCutFlowerBookings={filteredCutFlowerBookings}
+                activeBookingEditor={activeBookingEditor}
+                setActiveBookingEditor={setActiveBookingEditor}
+                getBookingEditState={getBookingEditState}
+                handleBookingEditChange={handleBookingEditChange}
+                handleSaveBookingChanges={handleSaveBookingChanges}
+                handleAddBookingToCart={handleAddBookingToCart}
+                bookingSavingId={bookingSavingId}
+                bookingError={bookingError}
+                workshopLookup={workshopLookup}
+                cutFlowerOptions={cutFlowerOptions}
+                cutFlowerOptionPriceMap={cutFlowerOptionPriceMap}
+                filteredEvents={filteredEvents}
+                eventSelections={eventSelections}
+                setEventSelections={setEventSelections}
+                formatCurrency={formatCurrency}
+                handleAddToCart={handleAddToCart}
+              />
+              </div>
+
+              <div data-mobile-panel="cart" className={posMobilePanel === "cart" ? "is-active" : ""}>
+              <PosCartPanel
+                title="Current order"
+                cartItems={cartItems}
+                subtotal={pricing.cartSubtotal}
+                formatCurrency={formatCurrency}
+                onRemoveItem={handleRemoveCartItem}
+                onChangeQuantity={handleCartQuantityChange}
+                onAdjustQuantity={adjustCartQuantity}
+                stockIssuesByKey={stockIssuesByKey}
+                footerContent={
+                  <div className="pos-cart-panel__cta">
+                    {stepOneAttemptedNext && cartItems.length === 0 && (
+                      <p className="pos-inline-error">Add at least one item to continue.</p>
+                    )}
+                    {stockIssues.length > 0 && (
+                      <div className="pos-warning-banner">
+                        Resolve all stock warnings before continuing.
+                      </div>
+                    )}
+                    <button
+                      className={`btn btn--primary pos-wizard__next-button ${
+                        !stepOneValid ? "is-disabled" : ""
+                      }`}
+                      type="button"
+                      onClick={goToCustomerStep}
+                      aria-disabled={!stepOneValid}
+                    >
+                      Next: Customer Details &rarr;
+                    </button>
+                  </div>
+                }
+              />
+              </div>
+            </section>
+            </>
+          )}
+
+          {currentStep === POS_STEP_CUSTOMER && (
+            <section className="pos-wizard__narrow">
+              <div className="pos-wizard__card pos-customer-card">
+                <div className="pos-wizard__section-header">
+                  <div>
+                    <h3>Customer &amp; Notes</h3>
+                    <p className="modal__meta">Keep this short unless the customer wants a receipt emailed.</p>
+                  </div>
+                </div>
+
+                <div className="pos-customer-card__fields">
+                  <label className="modal__meta pos-customer-card__field">
+                    Customer name
+                    <input
+                      className="input"
+                      type="text"
+                      value={customer.name}
+                      onChange={updateCustomerField("name")}
+                    />
+                  </label>
+
+                  <label className="admin-checkbox pos-customer-card__checkbox">
+                    <input
+                      type="checkbox"
+                      checked={sendEmailReceipt}
+                      onChange={(event) => {
+                        setSendEmailReceipt(event.target.checked);
+                        if (!event.target.checked) {
+                          setEmailBlurred(false);
+                        }
+                      }}
+                    />
+                    Email receipt to customer
+                  </label>
+
+                  {sendEmailReceipt && (
+                    <p className="modal__meta">
+                      Receipt will be sent after payment is confirmed
+                    </p>
+                  )}
+
+                  <label className="modal__meta pos-customer-card__field">
+                    Customer email
+                    <input
+                      className={`input ${customerEmailError ? "pos-input--error" : ""}`}
+                      type="email"
+                      value={customer.email}
+                      onChange={updateCustomerField("email")}
+                      onBlur={() => setEmailBlurred(true)}
+                    />
+                    {customerEmailError && (
+                      <span className="pos-inline-error">{customerEmailError}</span>
+                    )}
+                  </label>
+
+                  <label className="modal__meta pos-customer-card__field">
+                    Order notes
+                    <textarea
+                      className="input"
+                      rows="4"
+                      value={notes}
+                      onChange={(event) => setNotes(event.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="pos-wizard__actions">
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    onClick={() => setCurrentStep(POS_STEP_ORDER)}
+                  >
+                    &larr; Back
+                  </button>
+                  <button
+                    className="btn btn--primary"
+                    type="button"
+                    onClick={goToPaymentStep}
+                    disabled={!stepTwoValid}
+                  >
+                    Next: Payment &rarr;
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {currentStep === POS_STEP_PAYMENT && (
+            <section className="pos-wizard__narrow pos-wizard__narrow--wide">
+              <PosPaymentPanel
+                formatCurrency={formatCurrency}
+                pricing={pricing}
+                showGiftCardSection={showGiftCardSection}
+                onToggleGiftCardSection={handleGiftCardSectionToggle}
+                giftCardCodeInput={giftCardCodeInput}
+                onGiftCardCodeChange={(value) => {
+                  setGiftCardCodeInput(value);
+                  setGiftCardLookupError(null);
+                }}
+                onLookupGiftCard={handleGiftCardCodeLookup}
+                giftCardLookupLoading={giftCardLookupLoading}
+                canLookupGiftCard={Boolean(functionsInstance) && giftCardCodeInput.trim().length > 0}
+                giftCardLookupError={giftCardLookupError}
+                giftCardMatches={giftCardMatches}
+                onRemoveGiftCard={handleRemoveGiftCardMatch}
+                showDiscountSection={showDiscountSection}
+                onToggleDiscountSection={handleDiscountSectionToggle}
+                discountType={discountType}
+                onDiscountTypeChange={setDiscountType}
+                discountValue={discountValue}
+                onDiscountValueChange={setDiscountValue}
+                paymentMethod={paymentMethod}
+                onPaymentMethodChange={setPaymentMethod}
+                paymentMethodResolved={resolvedPaymentMethod}
+                cashReceived={cashReceived}
+                onCashReceivedChange={setCashReceived}
+                cashStats={cashStats}
+                paymentError={stepThreeError}
+                onBack={() => setCurrentStep(POS_STEP_CUSTOMER)}
+                onNext={goToConfirmStep}
+                nextDisabled={!stepThreeValid}
+              />
+            </section>
+          )}
+
+          {currentStep === POS_STEP_CONFIRM && (
+            <section className="pos-wizard__narrow pos-wizard__narrow--wide">
+              <PosOrderSummary
+                cartItems={cartItems}
+                customer={customer}
+                notes={notes}
+                formatCurrency={formatCurrency}
+                pricing={pricing}
+                resolvedPaymentMethod={resolvedPaymentMethod}
+                giftCardMatches={giftCardMatches}
+                discountAmount={pricing.discountAmount}
+                cashReceived={cashStats.cashReceived}
+                changeDue={cashStats.changeDue}
+              />
+
+              {checkoutError && (
+                <div className="pos-inline-error-card">
+                  <p>{checkoutError}</p>
+                  <button className="btn btn--secondary btn--small" type="button" onClick={handleCheckout}>
+                    Try again
+                  </button>
+                </div>
+              )}
+
+              <div className="pos-wizard__card pos-confirm-actions">
+                <div className="pos-wizard__actions">
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    onClick={() => setCurrentStep(POS_STEP_PAYMENT)}
+                  >
+                    &larr; Back
+                  </button>
+                  <button
+                    className="btn btn--primary pos-complete-button"
+                    type="button"
+                    onClick={handleCheckout}
+                    disabled={checkoutStatus === "saving"}
+                  >
+                    Complete Sale
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      <PosVoidDialog
+        open={Boolean(voidSaleTarget)}
+        sale={voidSaleTarget}
+        functionsInstance={functionsInstance}
+        onClose={() => setVoidSaleTarget(null)}
+        onVoided={handleVoidCompleted}
+      />
+
+      {posItemsOpen && (
+        <div
+          className="modal is-active admin-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pos-items-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closePosItemsModal();
+            }
+          }}
+        >
+          <div className="modal__content">
+            <button className="modal__close" type="button" onClick={closePosItemsModal} aria-label="Close">
+              &times;
+            </button>
+            <h3 className="modal__title" id="pos-items-title">
+              POS-only Products
+            </h3>
+            <p className="modal__meta">Add items sold only at the studio (cool drinks, add-ons, etc).</p>
+            <div className="admin-panel__content pos-products__content">
+              <form className="admin-form" onSubmit={handleSavePosProduct}>
+                <input
+                  className="input"
+                  placeholder="POS product name"
+                  value={posProductForm.name}
+                  onChange={(event) =>
+                    setPosProductForm((prev) => ({
+                      ...prev,
+                      name: event.target.value,
+                    }))
+                  }
+                  required
+                />
+                <input
+                  className="input"
+                  placeholder="Price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={posProductForm.price}
+                  onChange={(event) =>
+                    setPosProductForm((prev) => ({
+                      ...prev,
+                      price: event.target.value,
+                    }))
+                  }
+                  required
+                />
+                <input
+                  className="input"
+                  placeholder="Quantity"
+                  type="number"
+                  min="0"
+                  value={posProductForm.quantity}
+                  onChange={(event) =>
+                    setPosProductForm((prev) => ({
+                      ...prev,
+                      quantity: event.target.value,
+                    }))
+                  }
+                />
+                <label className="admin-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={posProductForm.forceOutOfStock}
+                    onChange={(event) =>
+                      setPosProductForm((prev) => ({
+                        ...prev,
+                        forceOutOfStock: event.target.checked,
+                      }))
+                    }
+                  />
+                  Mark as out of stock
+                </label>
+                <div className="admin-form__actions">
+                  <button className="btn btn--primary" type="submit" disabled={posProductSaving}>
+                    {editingPosProductId ? "Update POS Product" : "Add POS Product"}
+                  </button>
+                  {editingPosProductId && (
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={() => {
+                        setEditingPosProductId(null);
+                        setPosProductForm(INITIAL_POS_PRODUCT);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+                {posProductError && <p className="admin-panel__error">{posProductError}</p>}
+              </form>
+
+              <div className="admin-panel__list">
+                {normalizedPosProducts.length === 0 ? (
+                  <p className="empty-state">No POS-only products yet.</p>
+                ) : (
+                  normalizedPosProducts.map((product) => (
+                    <div className="admin-category-card" key={product.id}>
+                      <div>
+                        <strong>{product.name}</strong>
+                        <p className="modal__meta">{product.displayPrice}</p>
+                      </div>
+                      <div className="admin-panel__header-actions">
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={() => handleEditPosProduct(product)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={() => handleDeletePosProduct(product.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast notifications */}
+      {toasts.length > 0 && (
+        <div className="pos-toast-stack" aria-live="polite" aria-atomic="false">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`pos-toast pos-toast--${toast.type}`}>
+              <span className="pos-toast__icon" aria-hidden="true">
+                {toast.type === "success" ? "✓" : toast.type === "info" ? "→" : "✕"}
+              </span>
+              <span className="pos-toast__message">{toast.message}</span>
+              {toast.action && (
+                <button
+                  className="pos-toast__action"
+                  type="button"
+                  onClick={() => {
+                    toast.action.onClick();
+                    dismissToast(toast.id);
+                  }}
+                >
+                  {toast.action.label}
+                </button>
+              )}
+              <button
+                className="pos-toast__close"
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => dismissToast(toast.id)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  /*
   return (
     <div className="admin-panel pos-panel">
       <header className="admin-panel__header pos-panel__header">
@@ -3384,6 +4226,7 @@ function AdminPosPage() {
       )}
     </div>
   );
+  */
 }
 
 export default AdminPosPage;

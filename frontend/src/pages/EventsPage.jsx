@@ -1,11 +1,9 @@
 import { Link } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { buildWhatsAppLink } from "../lib/contactInfo.js";
-import heroBackground from "../assets/photos/workshop-outdoor-venue.jpg";
 import galleryHero from "../assets/photos/workshop-table-long-close.jpg";
 
 const eventDateFormatter = new Intl.DateTimeFormat("en-ZA", {
@@ -17,6 +15,10 @@ const eventDayFormatter = new Intl.DateTimeFormat("en-ZA", {
 });
 const timeOnlyFormatter = new Intl.DateTimeFormat("en-ZA", {
   timeStyle: "short",
+});
+const listingDayFormatter = new Intl.DateTimeFormat("en-ZA", {
+  day: "2-digit",
+  month: "short",
 });
 const weekdayLabels = [
   "Sunday",
@@ -182,22 +184,27 @@ function EventsPage() {
 
   return (
     <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Hero variant="gallery" background={heroBackground} media={<img src={galleryHero} alt="Bethany Blooms events" loading="lazy" decoding="async"/>}>
+      {/* Page hero */}
+      <section className="section--no-pad">
+        <div className="page-hero">
+          <img className="page-hero__bg" src={galleryHero} alt="" aria-hidden="true" loading="eager" decoding="async" />
+          <div className="page-hero__overlay" aria-hidden="true" />
+          <div className="page-hero__content">
+            <span className="editorial-eyebrow">Studio Events & Pop-ups</span>
             <h1>Studio Events & Pop-ups</h1>
             <p>
               Join Bethany Blooms on the road and in the studio for collaborative creative sessions, floral pop-ups, and
               intimate event styling moments tailored with pressed blooms.
             </p>
-          </Hero>
+          </div>
         </div>
       </section>
 
-      <section className="section">
+      {/* Editorial event listing */}
+      <section className="section band--white">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Upcoming</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Upcoming</span>
             <h2>See Us In Person</h2>
             <p>
               These limited events are crafted with partners and clients around Gauteng and beyond. Secure your spot, or
@@ -206,28 +213,35 @@ function EventsPage() {
           </Reveal>
 
           {hasEvents ? (
-            <div className="events-grid">
+            <div className="editorial-listing">
               {events.map((event) => (
-                <article className="event-card" key={event.id}>
-                  {event.image && (
-                    <button
-                      className="event-card__media"
-                      type="button"
-                      onClick={() => openLightbox(event)}
-                      aria-label={`Open ${event.title} image`}
-                    >
-                      <img src={event.image} alt={`${event.title} event banner`} loading="lazy" decoding="async"/>
-                    </button>
-                  )}
-                  <div className="event-card__body">
-                    <span className="badge badge--muted">{event.displayDate}</span>
-                    <h3>{event.title}</h3>
-                    <p className="event-card__meta">{event.location}</p>
+                <Reveal as="article" className="editorial-listing__item" key={event.id}>
+                  <div className="editorial-listing__date">
+                    {event.eventDate
+                      ? listingDayFormatter.format(event.eventDate)
+                      : "—"}
+                    <span className="editorial-listing__date-sub">{event.displayDate}</span>
+                  </div>
+                  <div className="editorial-listing__body">
+                    <h3 className="editorial-listing__title">{event.title}</h3>
+                    <p className="editorial-listing__meta">{event.location}</p>
                     {event.showTimes && (
-                      <p className="event-card__meta">Times: {event.timeText}</p>
+                      <p className="editorial-listing__meta">Times: {event.timeText}</p>
                     )}
-                    {event.description && <p>{event.description}</p>}
-                    <div className="event-card__actions">
+                    {event.description && (
+                      <p className="editorial-listing__desc">{event.description}</p>
+                    )}
+                    {event.image && (
+                      <button
+                        className="editorial-listing__thumb"
+                        type="button"
+                        onClick={() => openLightbox(event)}
+                        aria-label={`View ${event.title} image`}
+                      >
+                        <img src={event.image} alt={`${event.title} banner`} loading="lazy" decoding="async" />
+                      </button>
+                    )}
+                    <div className="editorial-listing__actions">
                       {event.workshopId && (
                         <Link className="btn btn--primary" to={`/workshops/${event.workshopId}`}>
                           View Workshop
@@ -237,13 +251,13 @@ function EventsPage() {
                         className="btn btn--secondary"
                         href={buildEventWhatsAppLink(event)}
                         target="_blank"
-                        rel="noopener"
+                        rel="noopener noreferrer"
                       >
                         Contact Us
                       </a>
                     </div>
                   </div>
-                </article>
+                </Reveal>
               ))}
             </div>
           ) : (
@@ -260,7 +274,7 @@ function EventsPage() {
             <button className="lightbox__close" type="button" onClick={() => setLightboxImage(null)}>
               Close
             </button>
-            <img className="lightbox__image" src={lightboxImage.src} alt={lightboxImage.alt} loading="lazy" decoding="async"/>
+            <img className="lightbox__image" src={lightboxImage.src} alt={lightboxImage.alt} loading="lazy" decoding="async" />
           </div>
         </div>
       )}

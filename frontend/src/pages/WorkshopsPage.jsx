@@ -1,9 +1,7 @@
 import { Link } from "react-router-dom";
-import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
-import heroBackground from "../assets/photos/workshop-table-long.jpg";
 import workshopDetailImage from "../assets/photos/workshop-table-details-1.png";
 
 function WorkshopsPage() {
@@ -46,13 +44,13 @@ function WorkshopsPage() {
 
   return (
     <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Hero
-            variant="workshops"
-            background={heroBackground}
-            media={<img src={workshopDetailImage} alt="Bethany Blooms workshop table set with flowers and tools" loading="lazy" decoding="async"/>}
-          >
+      {/* Page hero */}
+      <section className="section--no-pad">
+        <div className="page-hero">
+          <img className="page-hero__bg" src={workshopDetailImage} alt="" aria-hidden="true" loading="eager" decoding="async" />
+          <div className="page-hero__overlay" aria-hidden="true" />
+          <div className="page-hero__content">
+            <span className="editorial-eyebrow">Pressed Flower Workshops</span>
             <h1>Bespoke Pressed Flower Workshops</h1>
             <p>
               Slow down with a day of making, guided by Bethany Blooms. Craft a framed arrangement, learn pressing
@@ -68,22 +66,21 @@ function WorkshopsPage() {
                   View Workshop Details
                 </a>
               )}
-              <a href="#workshop-details" className="btn btn--secondary">
-                Workshop Details
-              </a>
+              <a href="#workshop-details" className="btn btn--secondary">See All Dates</a>
             </div>
-          </Hero>
+          </div>
         </div>
       </section>
 
-      <section className="section" id="workshop-details">
+      {/* Upcoming workshops cards */}
+      <section className="section band--cream" id="workshop-details">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Upcoming</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Upcoming</span>
             <h2>Upcoming Workshops</h2>
             <p>
-              We gather at a light-filled studio in Vereeniging, with refreshments, blooms, and framing included. Explore
-              the next available dates below.
+              We gather at a light-filled studio in Vereeniging, with refreshments, blooms, and framing included.
+              Explore the next available dates below.
             </p>
           </Reveal>
           <div className="cards-grid">
@@ -115,43 +112,41 @@ function WorkshopsPage() {
         </div>
       </section>
 
-      <section className="section section--tight">
+      {/* A Day in Bloom — editorial-process */}
+      <section className="section band--white">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">What to Expect</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">What to Expect</span>
             <h2>A Day in Bloom</h2>
           </Reveal>
-          <div className="cards-grid">
-            <Reveal as="article" className="card">
-              <h3 className="card__title">Guided Creative Flow</h3>
+          <Reveal as="div" className="editorial-process">
+            <div className="editorial-process__step">
+              <h3>Guided Creative Flow</h3>
               <p>
-                Learn foundational techniques for pressing, arranging, and preserving florals while crafting a frame that
-                reflects your unique style.
+                Learn foundational techniques for pressing, arranging, and preserving florals while crafting a frame
+                that reflects your unique style.
               </p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={120}>
-              <h3 className="card__title">All Materials Included</h3>
-              <p>We provide tools, florals, frames, and refreshments. Simply arrive, breathe deeply, and create.</p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={240}>
-              <h3 className="card__title">Take-Home Keepsakes</h3>
+            </div>
+            <div className="editorial-process__step">
+              <h3>All Materials Included</h3>
+              <p>
+                We provide tools, florals, frames, and refreshments. Simply arrive, breathe deeply, and create.
+              </p>
+            </div>
+            <div className="editorial-process__step">
+              <h3>Take-Home Keepsakes</h3>
               <p>
                 Leave with your completed framed art, a curated mini bloom pack, and a guide to keep pressing at home.
               </p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={360}>
-              <h3 className="card__title">Upgrade with Fresh Blooms</h3>
+            </div>
+            <div className="editorial-process__step">
+              <h3>Upgrade with Fresh Blooms</h3>
               <p>
-                Pair your workshop with market buckets, bouquet subscriptions, or a bespoke pressed art commission to
-                keep the story blooming long after class.
+                Pair your workshop with market buckets, bouquet subscriptions, or a bespoke pressed art commission.
               </p>
-              <div className="card__actions">
-                <Link className="btn btn--secondary" to="/products">
-                  Explore Products
-                </Link>
-              </div>
-            </Reveal>
-          </div>
+              <Link className="btn btn--secondary" to="/products">Explore Products</Link>
+            </div>
+          </Reveal>
         </div>
       </section>
     </>

@@ -1,6 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import Hero from "../components/Hero.jsx";
 import Reveal from "../components/Reveal.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
@@ -56,8 +55,33 @@ const normalizePriceAmount = (value = "") => {
 
 function ProductsPage() {
   const { openCart } = useModal();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   const activeCategoryParam = (searchParams.get("category") || "").toString().trim();
+  const searchQuery = (searchParams.get("q") || "").toString().trim();
+  const sortBy = (searchParams.get("sort") || "newest").toString().trim();
+  const stockFilter = (searchParams.get("stock") || "all").toString().trim();
+  const onSaleOnly = searchParams.get("sale") === "1";
+  const priceMin = Number(searchParams.get("min") || "") || null;
+  const priceMax = Number(searchParams.get("max") || "") || null;
+
+  const setParam = (key, value) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === null || value === "" || value === "all" || value === "newest" || value === "0") {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+      return next;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setSearchParams({});
+    setFiltersOpen(false);
+  };
   const { items: remoteProducts, status } = useFirestoreCollection("products", {
     orderByField: "createdAt",
     orderDirection: "desc",
@@ -391,9 +415,49 @@ function ProductsPage() {
     });
   }, [activeCategoryKeys, hasCategoryFilter, normalizedSubscriptionPlans]);
 
-  const displayProducts = hasCategoryFilter
+  const baseProducts = hasCategoryFilter
     ? [...filteredSubscriptionPlans, ...filteredProducts]
-    : filteredProducts;
+    : [...normalizedSubscriptionPlans, ...normalizedProducts];
+
+  const displayProducts = useMemo(() => {
+    let result = [...baseProducts];
+
+    // Search
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (p) =>
+          (p.title || "").toLowerCase().includes(q) ||
+          (p.description || "").toLowerCase().includes(q) ||
+          (p.categoryLabels || []).some((l) => l.toLowerCase().includes(q)),
+      );
+    }
+
+    // Stock filter
+    if (stockFilter === "in") result = result.filter((p) => p.stockStatus?.state === "in");
+    else if (stockFilter === "out") result = result.filter((p) => p.stockStatus?.state === "out");
+    else if (stockFilter === "preorder") result = result.filter((p) => p.stockStatus?.state === "preorder");
+
+    // On sale
+    if (onSaleOnly) result = result.filter((p) => Boolean(p.originalPrice));
+
+    // Price range
+    if (priceMin !== null) result = result.filter((p) => p.numericPrice !== null && p.numericPrice >= priceMin);
+    if (priceMax !== null) result = result.filter((p) => p.numericPrice !== null && p.numericPrice <= priceMax);
+
+    // Sort
+    if (sortBy === "price-asc") result.sort((a, b) => (a.numericPrice ?? Infinity) - (b.numericPrice ?? Infinity));
+    else if (sortBy === "price-desc") result.sort((a, b) => (b.numericPrice ?? -Infinity) - (a.numericPrice ?? -Infinity));
+    else if (sortBy === "name-az") result.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+    else if (sortBy === "name-za") result.sort((a, b) => (b.title || "").localeCompare(a.title || ""));
+    // "newest" keeps original server order
+
+    return result;
+  }, [baseProducts, searchQuery, stockFilter, onSaleOnly, priceMin, priceMax, sortBy]);
+
+  const hasActiveFilters = Boolean(
+    searchQuery || activeCategoryParam || stockFilter !== "all" || onSaleOnly || priceMin || priceMax || sortBy !== "newest",
+  );
 
   const isCutFlowerCategory = useMemo(() => {
     if (!hasCategoryFilter) return false;
@@ -429,40 +493,157 @@ function ProductsPage() {
 
   return (
     <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Hero
-            variant="kits"
-            background={heroImage || heroBackground}
-            media={<img src={heroImage} alt={heroTitle} loading="lazy" decoding="async"/>}
-          >
+      {/* Page hero */}
+      <section className="section--no-pad">
+        <div className="page-hero">
+          <img className="page-hero__bg" src={heroImage || heroBackground} alt="" aria-hidden="true" loading="eager" decoding="async" fetchpriority="high" />
+          <div className="page-hero__overlay" aria-hidden="true" />
+          <div className="page-hero__content">
+            <span className="editorial-eyebrow">Studio Collection</span>
             <h1>{heroTitle}</h1>
             <p>{heroDescription}</p>
             <div className="cta-group">
-              <a href="#product-collection" className="btn btn--secondary">
-                Browse Collection
-              </a>
-              <button className="btn btn--primary" type="button" onClick={openCart}>
-                View Cart
-              </button>
+              <a href="#product-collection" className="btn btn--secondary">Browse Collection</a>
+              <button className="btn btn--primary" type="button" onClick={openCart}>View Cart</button>
             </div>
-          </Hero>
+          </div>
         </div>
       </section>
 
-      <section className="section" id="product-collection">
+      <section className="section band--white" id="product-collection">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Curated by Bethany Blooms</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Curated by Bethany Blooms</span>
             <h2>{collectionHeading}</h2>
             <p>{collectionDescription}</p>
           </Reveal>
-          {hasCategoryFilter && (
-            <p className="modal__meta">
-              Showing {activeCategory?.name || activeCategoryParam} items.{" "}
-              <a href="/products">View all products</a>
-            </p>
-          )}
+
+          {/* ── Filter & Search bar ── */}
+          <div className="shop-filters">
+            {/* Row 1: search + sort + filter toggle */}
+            <div className="shop-filters__bar">
+              <div className="shop-filters__search-wrap">
+                <input
+                  className="shop-filters__search"
+                  type="search"
+                  placeholder="Search products…"
+                  value={searchQuery}
+                  onChange={(e) => setParam("q", e.target.value)}
+                  aria-label="Search products"
+                />
+                {searchQuery && (
+                  <button className="shop-filters__search-clear" type="button" onClick={() => setParam("q", "")}>×</button>
+                )}
+              </div>
+              <select
+                className="shop-filters__sort"
+                value={sortBy}
+                onChange={(e) => setParam("sort", e.target.value)}
+                aria-label="Sort products"
+              >
+                <option value="newest">Newest</option>
+                <option value="price-asc">Price: Low to High</option>
+                <option value="price-desc">Price: High to Low</option>
+                <option value="name-az">Name: A – Z</option>
+                <option value="name-za">Name: Z – A</option>
+              </select>
+              <button
+                className={`shop-filters__toggle ${filtersOpen ? "is-active" : ""}`}
+                type="button"
+                onClick={() => setFiltersOpen((v) => !v)}
+                aria-expanded={filtersOpen}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+                Filters
+                {hasActiveFilters && <span className="shop-filters__dot" aria-hidden="true" />}
+              </button>
+            </div>
+
+            {/* Row 2: category chips */}
+            {categoryOptions.length > 0 && (
+              <div className="shop-filters__chips">
+                <button
+                  className={`shop-chip ${!activeCategoryParam ? "shop-chip--active" : ""}`}
+                  type="button"
+                  onClick={() => setParam("category", "")}
+                >All</button>
+                {categoryOptions.map((cat) => (
+                  <button
+                    key={cat.id}
+                    className={`shop-chip ${activeCategoryParam === cat.slug || activeCategoryParam === cat.id ? "shop-chip--active" : ""}`}
+                    type="button"
+                    onClick={() => setParam("category", cat.slug || cat.id)}
+                  >{cat.name}</button>
+                ))}
+              </div>
+            )}
+
+            {/* Row 3: expandable extra filters */}
+            {filtersOpen && (
+              <div className="shop-filters__panel">
+                <div className="shop-filters__group">
+                  <span className="shop-filters__group-label">Stock</span>
+                  {[["all","All"],["in","In stock"],["preorder","Pre-order"],["out","Out of stock"]].map(([val, label]) => (
+                    <button
+                      key={val}
+                      className={`shop-chip ${stockFilter === val ? "shop-chip--active" : ""}`}
+                      type="button"
+                      onClick={() => setParam("stock", val)}
+                    >{label}</button>
+                  ))}
+                </div>
+
+                <div className="shop-filters__group">
+                  <span className="shop-filters__group-label">Price range</span>
+                  <div className="shop-filters__price">
+                    <label className="shop-filters__price-label">
+                      From
+                      <input
+                        className="shop-filters__price-input"
+                        type="number"
+                        min="0"
+                        placeholder="R 0"
+                        value={priceMin ?? ""}
+                        onChange={(e) => setParam("min", e.target.value || null)}
+                      />
+                    </label>
+                    <span className="shop-filters__price-sep">—</span>
+                    <label className="shop-filters__price-label">
+                      To
+                      <input
+                        className="shop-filters__price-input"
+                        type="number"
+                        min="0"
+                        placeholder="Any"
+                        value={priceMax ?? ""}
+                        onChange={(e) => setParam("max", e.target.value || null)}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="shop-filters__group">
+                  <span className="shop-filters__group-label">Deals</span>
+                  <button
+                    className={`shop-chip ${onSaleOnly ? "shop-chip--active" : ""}`}
+                    type="button"
+                    onClick={() => setParam("sale", onSaleOnly ? null : "1")}
+                  >On sale</button>
+                </div>
+              </div>
+            )}
+
+            {/* Results count + clear */}
+            <div className="shop-filters__meta">
+              <span>{displayProducts.length} {displayProducts.length === 1 ? "product" : "products"}</span>
+              {hasActiveFilters && (
+                <button className="shop-filters__clear" type="button" onClick={clearAllFilters}>
+                  Clear all filters
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="kits-grid">
             {displayProducts.map((product, index) => {
               const displayPrice = product.displayPrice;
@@ -484,7 +665,7 @@ function ProductsPage() {
                 >
                   <span className="product-card__category">{categoryLabel}</span>
                   <div className="product-card__media" aria-hidden="true">
-                    <img className="product-card__image" src={product.image} alt="" loading="lazy" decoding="async"/>
+                    <img className="product-card__image" src={product.image} alt="" loading={index < 4 ? "eager" : "lazy"} decoding="async"/>
                     {product.stockBadgeLabel && (
                       <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
                         {product.stockBadgeLabel}
@@ -514,11 +695,14 @@ function ProductsPage() {
           {displayProducts.length === 0 &&
             status !== "loading" &&
             (!hasCategoryFilter || subscriptionPlansStatus !== "loading") && (
-            <p className="empty-state">
-              {hasCategoryFilter
-                ? "No items are available in this category right now."
-                : "No products are available right now. Please check back soon."}
-            </p>
+            <div className="empty-state">
+              <p>{hasActiveFilters ? "No products match your search or filters." : hasCategoryFilter ? "No items are available in this category right now." : "No products are available right now. Please check back soon."}</p>
+              {hasActiveFilters && (
+                <button className="btn btn--secondary" type="button" onClick={clearAllFilters}>
+                  Clear all filters
+                </button>
+              )}
+            </div>
           )}
           {(status === "loading" || (hasCategoryFilter && subscriptionPlansStatus === "loading")) && (
             <p className="empty-state">Loading products...</p>
@@ -532,49 +716,47 @@ function ProductsPage() {
         </div>
       </section>
 
-      <section className="section section--tight">
+      {/* What You'll Find — editorial-process */}
+      <section className="section band--cream">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Thoughtfully Made</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Thoughtfully Made</span>
             <h2>What You'll Find</h2>
           </Reveal>
-          <div className="cards-grid">
-            <Reveal as="article" className="card">
-              <h3 className="card__title">Pressed Floral Artworks</h3>
+          <Reveal as="div" className="editorial-process">
+            <div className="editorial-process__step">
+              <h3>Pressed Floral Artworks</h3>
               <p>Seasonally curated blooms preserved behind glass to honour treasured moments.</p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={120}>
-              <h3 className="card__title">Customisable Keepsakes</h3>
+            </div>
+            <div className="editorial-process__step">
+              <h3>Customisable Keepsakes</h3>
               <p>From bespoke commissions to meaningful gifts, each piece is created with intention.</p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={240}>
-              <h3 className="card__title">Ready-to-Arrange Blooms</h3>
+            </div>
+            <div className="editorial-process__step">
+              <h3>Ready-to-Arrange Blooms</h3>
               <p>Fresh and dried florals styled to elevate events, devotional spaces, and gifting.</p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={360}>
-              <h3 className="card__title">DIY Creativity</h3>
+            </div>
+            <div className="editorial-process__step">
+              <h3>DIY Creativity</h3>
               <p>Beautifully curated kits with scripture reflections, guidance, and thoughtful tools.</p>
-            </Reveal>
-          </div>
+            </div>
+          </Reveal>
         </div>
       </section>
 
-      <section className="section section--tight">
+      {/* CTA band */}
+      <section className="section band--white">
         <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Style the Moment</span>
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">Style the Moment</span>
             <h2>From Fresh Stem to Framed Heirloom</h2>
             <p>
               Start with a fresh arrangement, then preserve your favourite stems in a bespoke artwork or DIY creation.
-              We're here for every step-concept, styling, and keepsake.
+              We're here for every step — concept, styling, and keepsake.
             </p>
             <div className="cta-group">
-              <a className="btn btn--primary" href="/workshops">
-                Join a Workshop
-              </a>
-              <a className="btn btn--secondary" href="/contact">
-                Start a Bespoke Project
-              </a>
+              <a className="btn btn--primary" href="/workshops">Join a Workshop</a>
+              <a className="btn btn--secondary" href="/contact">Start a Bespoke Project</a>
             </div>
           </Reveal>
         </div>
