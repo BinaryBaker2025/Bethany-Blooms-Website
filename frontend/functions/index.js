@@ -3020,6 +3020,31 @@ async function generateSubscriptionInvoiceDocument({
 }
 
 function buildOrderInvoiceLineItems(order = {}) {
+  const buildWorkshopScheduleMetaParts = (metadata = {}, formatter = (value) => value) => {
+    const isRequested =
+      (metadata?.sessionSource || "").toString().trim().toLowerCase() === "customer-requested";
+    const dateLabel =
+      metadata?.sessionDayLabel ||
+      metadata?.scheduledDateLabel ||
+      "";
+    const timeLabel =
+      metadata?.sessionTimeRange ||
+      metadata?.sessionLabel ||
+      metadata?.sessionTime ||
+      "";
+    const parts = [];
+    if (isRequested) {
+      if (dateLabel) parts.push(`Requested date: ${formatter(dateLabel)}`);
+      if (timeLabel) parts.push(`Requested time: ${formatter(timeLabel)}`);
+      return parts;
+    }
+    const sessionLabel = dateLabel || timeLabel;
+    if (sessionLabel) parts.push(`Workshop: ${formatter(sessionLabel)}`);
+    if (timeLabel && timeLabel !== sessionLabel) {
+      parts.push(`Time: ${formatter(timeLabel)}`);
+    }
+    return parts;
+  };
   const items = Array.isArray(order?.items) ? order.items : [];
   return items.map((item = {}) => {
     const quantityValue = Number(item?.quantity ?? 1);
@@ -3033,12 +3058,17 @@ function buildOrderInvoiceLineItems(order = {}) {
       detailParts.push(`Variant: ${trimToLength(metadata.variantLabel, 140)}`);
     }
     if (metadata.type === "workshop") {
-      const workshopSession = metadata.sessionDayLabel || metadata.sessionLabel || metadata.sessionTimeRange || "";
-      if (workshopSession) {
-        detailParts.push(`Workshop: ${trimToLength(workshopSession, 180)}`);
-      }
+      detailParts.push(
+        ...buildWorkshopScheduleMetaParts(
+          metadata,
+          (value) => trimToLength(value, 180),
+        ),
+      );
     }
-    if (metadata.type === "cut-flower" && metadata.optionLabel) {
+    if (
+      (metadata.type === "cut-flower" || metadata.type === "workshop") &&
+      metadata.optionLabel
+    ) {
       detailParts.push(`Option: ${trimToLength(metadata.optionLabel, 180)}`);
     }
     const preorderLabel = formatPreorderSendMonth(
@@ -4114,7 +4144,13 @@ function buildCatalogGiftCardSelectedOption({
   const safeOptionLabel = truncateText(optionLabel || "", 160);
   const labelParts = [safeTitle];
   if (kind === GIFT_CARD_CATALOG_KIND_PRODUCT && safeVariantLabel) labelParts.push(safeVariantLabel);
-  if (kind === GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS && safeOptionLabel) labelParts.push(safeOptionLabel);
+  if (
+    (kind === GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS ||
+      kind === GIFT_CARD_CATALOG_KIND_WORKSHOP) &&
+    safeOptionLabel
+  ) {
+    labelParts.push(safeOptionLabel);
+  }
   const label =
     labelParts
       .filter(Boolean)
@@ -4239,7 +4275,23 @@ async function resolveAdminCatalogGiftCardInput(payload = {}) {
 
   if (itemType === GIFT_CARD_CATALOG_KIND_WORKSHOP) {
     const title = truncateText(source?.title || source?.name || "Bethany Blooms Workshop", 160);
-    const unitPrice = normalizeGiftCardAmount(source?.price, null);
+    const options = Array.isArray(source?.options) ? source.options : [];
+    const selectedOptionId = (payload?.optionId || "").toString().trim();
+    let selectedOption = null;
+    if (options.length > 0) {
+      if (!selectedOptionId) {
+        throw new Error("Select a workshop option.");
+      }
+      selectedOption =
+        options.find((option) => (option?.id || option?.value || "").toString().trim() === selectedOptionId) || null;
+      if (!selectedOption) {
+        throw new Error("Selected workshop option could not be found.");
+      }
+    }
+    const unitPrice = normalizeGiftCardAmount(
+      selectedOption?.price ?? selectedOption?.amount ?? source?.price,
+      null,
+    );
     if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
       throw new Error("Selected workshop does not have a valid price.");
     }
@@ -4249,6 +4301,8 @@ async function resolveAdminCatalogGiftCardInput(payload = {}) {
         collection: collectionName,
         sourceId,
         title,
+        optionId: selectedOption?.id || selectedOption?.value || "",
+        optionLabel: selectedOption?.label || selectedOption?.name || "",
         amount: unitPrice,
         quantity,
       }),
@@ -4279,6 +4333,8 @@ async function resolveAdminCatalogGiftCardInput(payload = {}) {
         kind: itemType,
         sourceId,
         titleSnapshot: title,
+        optionId: selectedOption?.id || selectedOption?.value || "",
+        optionLabel: selectedOption?.label || selectedOption?.name || "",
         unitPriceSnapshot: unitPrice,
         quantity,
         fulfillmentMode: "booking-later",
@@ -4504,7 +4560,16 @@ async function resolveAdminMultiItemGiftCardInput(payload = {}) {
       variantLabel = selectedVariant?.label || selectedVariant?.name || "";
     } else if (itemType === GIFT_CARD_CATALOG_KIND_WORKSHOP) {
       title = truncateText(source?.title || "Workshop", 160);
-      unitPrice = normalizeGiftCardAmount(source?.price, null);
+      const options = Array.isArray(source?.options) ? source.options : [];
+      const selectedOptionId = (item?.optionId || "").toString().trim();
+      if (options.length > 0 && !selectedOptionId) throw new Error(`Item ${i + 1}: workshop option is required.`);
+      const selectedOption = options.find((o) => (o?.id || o?.value || "").toString().trim() === selectedOptionId) || null;
+      if (options.length > 0 && !selectedOption) {
+        throw new Error(`Item ${i + 1}: workshop option could not be found.`);
+      }
+      unitPrice = normalizeGiftCardAmount(selectedOption?.price ?? selectedOption?.amount ?? source?.price, null);
+      optionId = selectedOption?.id || selectedOption?.value || "";
+      optionLabel = selectedOption?.label || selectedOption?.name || "";
     } else if (itemType === GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS) {
       title = truncateText(source?.title || "Class", 160);
       const options = Array.isArray(source?.options) ? source.options : [];
@@ -4933,11 +4998,14 @@ function buildGiftCardInvitationLine({
   return `For ${recipient} to come and join us at our farm.`;
 }
 
-function normalizeCutFlowerClassGiftCardOption(option = {}, { fallbackId = "" } = {}) {
+function normalizeLiveGiftCardOption(
+  option = {},
+  { fallbackId = "", idPrefix = "", labelPrefix = "" } = {},
+) {
   const label = (option?.label || option?.name || option?.value || "").toString().trim();
   const amount = normalizeGiftCardAmount(option?.price ?? option?.amount);
   if (!label || !Number.isFinite(amount)) return null;
-  const id = (
+  const baseId = (
     option?.value ||
     option?.id ||
     option?.label ||
@@ -4946,22 +5014,46 @@ function normalizeCutFlowerClassGiftCardOption(option = {}, { fallbackId = "" } 
   )
     .toString()
     .trim();
-  if (!id) return null;
-  return { id, label, amount };
+  if (!baseId) return null;
+  return {
+    id: `${idPrefix}${baseId}`,
+    label: labelPrefix ? `${labelPrefix} - ${label}` : label,
+    amount,
+  };
 }
 
 async function getCutFlowerGiftCardOptions() {
-  const snapshot = await db.collection("cutFlowerClasses").get();
+  const [classSnapshot, workshopSnapshot] = await Promise.all([
+    db.collection("cutFlowerClasses").get(),
+    db.collection("workshops").get(),
+  ]);
   const unique = new Map();
 
-  snapshot.forEach((docSnap) => {
+  classSnapshot.forEach((docSnap) => {
     const classData = docSnap.data() || {};
     const status = (classData.status ?? "live").toString().trim().toLowerCase();
     if (status && status !== "live") return;
     const classOptions = Array.isArray(classData.options) ? classData.options : [];
     classOptions.forEach((option, index) => {
-      const normalized = normalizeCutFlowerClassGiftCardOption(option, {
+      const normalized = normalizeLiveGiftCardOption(option, {
         fallbackId: `${docSnap.id}-option-${index + 1}`,
+      });
+      if (!normalized) return;
+      unique.set(normalized.id, normalized);
+    });
+  });
+
+  workshopSnapshot.forEach((docSnap) => {
+    const workshopData = docSnap.data() || {};
+    const status = (workshopData.status ?? "live").toString().trim().toLowerCase();
+    if (status && status !== "live") return;
+    const title = (workshopData.title || workshopData.name || "Workshop").toString().trim();
+    const workshopOptions = Array.isArray(workshopData.options) ? workshopData.options : [];
+    workshopOptions.forEach((option, index) => {
+      const normalized = normalizeLiveGiftCardOption(option, {
+        fallbackId: `${docSnap.id}-option-${index + 1}`,
+        idPrefix: `workshop:${docSnap.id}:`,
+        labelPrefix: title,
       });
       if (!normalized) return;
       unique.set(normalized.id, normalized);
@@ -6537,10 +6629,33 @@ function buildOrderItemsHtml(items = []) {
         metaParts.push(`Variant: ${escapeHtml(item.metadata.variantLabel)}`);
       }
       if (item.metadata?.type === "workshop") {
-        const sessionLabel = item.metadata.sessionDayLabel || item.metadata.sessionLabel || "Session";
-        metaParts.push(`Workshop: ${escapeHtml(sessionLabel)}`);
+        const isRequested =
+          (item.metadata?.sessionSource || "").toString().trim().toLowerCase() ===
+          "customer-requested";
+        const dateLabel =
+          item.metadata?.sessionDayLabel ||
+          item.metadata?.scheduledDateLabel ||
+          "";
+        const timeLabel =
+          item.metadata?.sessionTimeRange ||
+          item.metadata?.sessionLabel ||
+          item.metadata?.sessionTime ||
+          "";
+        if (isRequested) {
+          if (dateLabel) metaParts.push(`Requested date: ${escapeHtml(dateLabel)}`);
+          if (timeLabel) metaParts.push(`Requested time: ${escapeHtml(timeLabel)}`);
+        } else {
+          const sessionLabel = dateLabel || timeLabel || "Session";
+          metaParts.push(`Workshop: ${escapeHtml(sessionLabel)}`);
+          if (timeLabel && timeLabel !== sessionLabel) {
+            metaParts.push(`Time: ${escapeHtml(timeLabel)}`);
+          }
+        }
       }
-      if (item.metadata?.type === "cut-flower" && item.metadata?.optionLabel) {
+      if (
+        (item.metadata?.type === "cut-flower" || item.metadata?.type === "workshop") &&
+        item.metadata?.optionLabel
+      ) {
         metaParts.push(`Option: ${escapeHtml(item.metadata.optionLabel)}`);
       }
       if (isGiftCardOrderItem(item)) {
@@ -8601,14 +8716,28 @@ function buildCutFlowerCustomerHtml(booking = {}) {
 }
 
 function buildWorkshopBookingHtml(booking = {}) {
+  const isRequested =
+    (booking.sessionSource || "").toString().trim().toLowerCase() === "customer-requested";
+  const bookingDateLabel =
+    booking.sessionDateLabel ||
+    booking.scheduledDateLabel ||
+    booking.sessionDayLabel ||
+    booking.sessionDate ||
+    "TBC";
+  const bookingTimeLabel =
+    booking.sessionTimeRange ||
+    booking.sessionLabel ||
+    booking.sessionTime ||
+    "TBC";
   return `
     <p style="margin:0 0 6px;"><strong>Customer:</strong> ${escapeHtml(booking.fullName || "Guest")}</p>
     <p style="margin:0 0 6px;"><strong>Email:</strong> ${escapeHtml(booking.email || "Not provided")}</p>
     <p style="margin:0 0 6px;"><strong>Phone:</strong> ${escapeHtml(booking.phone || "Not provided")}</p>
     <p style="margin:0 0 6px;"><strong>Workshop:</strong> ${escapeHtml(booking.workshopTitle || "Workshop")}</p>
-    <p style="margin:0 0 6px;"><strong>Session:</strong> ${escapeHtml(booking.sessionLabel || "TBC")}</p>
-    <p style="margin:0 0 6px;"><strong>Date:</strong> ${escapeHtml(booking.sessionDateLabel || booking.sessionDate || "TBC")}</p>
+    <p style="margin:0 0 6px;"><strong>${isRequested ? "Requested date" : "Date"}:</strong> ${escapeHtml(bookingDateLabel)}</p>
+    <p style="margin:0 0 6px;"><strong>${isRequested ? "Requested time" : "Session"}:</strong> ${escapeHtml(bookingTimeLabel)}</p>
     <p style="margin:0 0 6px;"><strong>Attendees:</strong> ${escapeHtml(booking.attendeeCount || "1")}</p>
+    <p style="margin:0 0 6px;"><strong>Option:</strong> ${escapeHtml(booking.optionLabel || booking.framePreference || booking.frame || "Standard")}</p>
     <p style="margin:0;"><strong>Notes:</strong> ${escapeHtml(booking.notes || "None")}</p>
   `;
 }
@@ -8719,8 +8848,11 @@ async function getNextInvoiceNumber() {
 }
 
 function buildBookingData(item, customer = {}, orderId) {
+  const sessionSource =
+    (item.metadata?.sessionSource || "").toString().trim().toLowerCase() || "admin-session";
+  const requestedDurationHoursValue = Number(item.metadata?.requestedDurationHours);
   const frameValue =
-    (item.metadata?.framePreference || "Workshop").toString().slice(0, 20) || "Workshop";
+    (item.metadata?.optionLabel || item.metadata?.framePreference || "Workshop").toString().slice(0, 20) || "Workshop";
   const notesParts = [
     item.metadata?.sessionDayLabel ||
       item.metadata?.scheduledDateLabel ||
@@ -8763,10 +8895,28 @@ function buildBookingData(item, customer = {}, orderId) {
     name: bookingName,
     email: bookingEmail,
     frame: frameValue,
+    optionLabel: item.metadata?.optionLabel || null,
+    optionValue: item.metadata?.optionValue || item.metadata?.optionId || item.metadata?.framePreference || null,
     notes: notesValue,
+    sessionSource,
+    requestedDurationHours:
+      Number.isFinite(requestedDurationHoursValue) && requestedDurationHoursValue > 0
+        ? requestedDurationHoursValue
+        : null,
+    sessionId: item.metadata?.sessionId || null,
     sessionDate: sessionDateValue,
+    sessionDateLabel: item.metadata?.sessionDayLabel || item.metadata?.scheduledDateLabel || null,
     sessionLabel: sessionLabelValue,
+    sessionTimeRange: item.metadata?.sessionTimeRange || null,
     workshopId: item.metadata?.workshopId || null,
+    workshopTitle: item.metadata?.workshopTitle || item.name || null,
+    location: item.metadata?.location || null,
+    attendeeCount: Math.max(1, Number.parseInt(item.metadata?.attendeeCount, 10) || 1),
+    price: Number.isFinite(Number(item.metadata?.perAttendeePrice))
+      ? Number(item.metadata.perAttendeePrice)
+      : Number.isFinite(Number(item?.price))
+        ? Number(item.price)
+        : null,
     orderId,
     paid: true,
     paymentStatus: "paid",

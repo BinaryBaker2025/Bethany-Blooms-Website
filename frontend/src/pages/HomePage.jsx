@@ -4,7 +4,7 @@ import TestimonialCarousel from "../components/TestimonialCarousel.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { getProductCardStockStatus, getStockBadgeLabel } from "../lib/stockStatus.js";
-import heroBackground from "../assets/photos/workshop-outdoor-venue.jpg";
+import heroBackground from "../assets/photos/hero-cut-flowers.jpg";
 import homePhotoOne from "../assets/photos/workshop-frame-hand-pink.jpeg";
 import homePhotoTwo from "../assets/photos/workshop-frame-hand-neutral.jpeg";
 import homePhotoThree from "../assets/photos/workshop-flowers-trays.jpg";

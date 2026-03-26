@@ -157,6 +157,25 @@ const formatTimeRange = (startTime, endTime) => {
 const buildCartKey = ({ type, sourceId, variantId, sessionId }) =>
   [type, sourceId, variantId || "base", sessionId || "default"].join(":");
 
+const normalizeWorkshopOption = (option, index, workshopId = "") => {
+  const label = (option?.label || option?.name || option?.value || "").toString().trim();
+  if (!label) return null;
+  const id = (
+    option?.id ||
+    option?.value ||
+    option?.label ||
+    `workshop-option-${index + 1}-${workshopId || "workshop"}`
+  )
+    .toString()
+    .trim();
+  if (!id) return null;
+  return {
+    id,
+    label,
+    price: parseNumber(option?.price ?? option?.amount, null),
+  };
+};
+
 const normalizeGiftCardCode = (value = "") =>
   value
     .toString()
@@ -297,6 +316,7 @@ function AdminPosPage() {
 
   const [variantSelections, setVariantSelections] = useState({});
   const [workshopSelections, setWorkshopSelections] = useState({});
+  const [workshopOptionSelections, setWorkshopOptionSelections] = useState({});
   const [classSelections, setClassSelections] = useState({});
   const [classOptionSelections, setClassOptionSelections] = useState({});
   const [eventSelections, setEventSelections] = useState({});
@@ -396,6 +416,15 @@ function AdminPosPage() {
   const normalizedWorkshops = useMemo(() => {
     return (workshops || []).map((workshop) => {
       const priceNumber = parseNumber(workshop.price, null);
+      const options = Array.isArray(workshop.options)
+        ? workshop.options
+            .map((option, index) => normalizeWorkshopOption(option, index, workshop.id))
+            .filter(Boolean)
+        : [];
+      const optionPrices = options
+        .map((option) => parseNumber(option?.price, null))
+        .filter((price) => Number.isFinite(price) && price > 0);
+      const minOptionPrice = optionPrices.length > 0 ? Math.min(...optionPrices) : null;
       const sessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
       const normalizedSessions = sessions
         .map((session, index) => {
@@ -414,7 +443,13 @@ function AdminPosPage() {
         ...workshop,
         title: workshop.title || workshop.name || "Workshop",
         numericPrice: priceNumber,
-        displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
+        displayPrice:
+          Number.isFinite(minOptionPrice) && minOptionPrice > 0
+            ? `From ${formatCurrency(minOptionPrice)}`
+            : Number.isFinite(priceNumber)
+              ? formatCurrency(priceNumber)
+              : "Price on request",
+        options,
         sessions: normalizedSessions,
       };
     });
@@ -445,8 +480,14 @@ function AdminPosPage() {
       const workshop = workshopLookup.get(booking.workshopId);
       const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
       const attendeeCount = Number.isFinite(attendeeCountValue) ? attendeeCountValue : 1;
+      const matchedOption =
+        workshop?.options?.find((option) => option.id === booking.optionValue) ||
+        workshop?.options?.find((option) => option.id === booking.optionId) ||
+        workshop?.options?.find((option) => option.label === booking.optionLabel) ||
+        workshop?.options?.find((option) => option.label === booking.frame) ||
+        null;
       const priceNumber = parseNumber(
-        booking.price ?? workshop?.numericPrice ?? workshop?.price,
+        booking.price ?? matchedOption?.price ?? workshop?.numericPrice ?? workshop?.price,
         null,
       );
       return {
@@ -458,6 +499,8 @@ function AdminPosPage() {
         workshopTitle: workshop?.title || "Workshop",
         numericPrice: priceNumber,
         attendeeCount,
+        optionId: matchedOption?.id || booking.optionValue || booking.optionId || "",
+        optionLabel: matchedOption?.label || booking.optionLabel || booking.frame || "",
         completed: isBookingCompleted(booking, "workshop"),
       };
     });
@@ -1261,17 +1304,25 @@ function AdminPosPage() {
     if (type === "workshop") {
       const workshop = workshopLookup.get(booking.workshopId);
       const sessions = workshop?.sessions || [];
+      const options = workshop?.options || [];
       const matchedSession =
         sessions.find((session) => session.id === booking.sessionId) ||
         sessions.find((session) => session.label === booking.sessionLabel) ||
         sessions.find((session) => session.date === booking.sessionDate) ||
         sessions[0] ||
         null;
+      const matchedOption =
+        options.find((option) => option.id === booking.optionValue) ||
+        options.find((option) => option.id === booking.optionId) ||
+        options.find((option) => option.label === booking.optionLabel) ||
+        options.find((option) => option.label === booking.frame) ||
+        options[0] ||
+        null;
       return {
         date: booking.dateKey || "",
         attendeeCount: Math.max(1, Number.parseInt(attendeeCount, 10) || 1),
         sessionId: matchedSession?.id || "",
-        optionId: "",
+        optionId: matchedOption?.id || "",
       };
     }
     const attendeeSelections = Array.isArray(booking.attendeeSelections)
@@ -1360,11 +1411,30 @@ function AdminPosPage() {
         const selectedSession = workshop?.sessions?.find(
           (session) => session.id === editState.sessionId,
         );
+        const selectedOption =
+          workshop?.options?.find((option) => option.id === editState.optionId) || null;
+        if (workshop?.options?.length > 0 && !selectedOption) {
+          setBookingError("Select a workshop option before saving.");
+          return;
+        }
+        const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
+        const perAttendeePrice = parseNumber(
+          selectedOption?.price ?? workshop?.numericPrice ?? workshop?.price,
+          null,
+        );
         await updateDoc(doc(db, "bookings", booking.id), {
           sessionDate: editState.date,
           sessionLabel: selectedSession?.label || booking.sessionLabel || null,
           sessionId: selectedSession?.id || booking.sessionId || null,
-          attendeeCount: Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1),
+          attendeeCount,
+          frame:
+            selectedOption?.label || booking.optionLabel || booking.frame || "Workshop",
+          optionLabel: selectedOption?.label || booking.optionLabel || null,
+          optionValue: selectedOption?.id || booking.optionValue || null,
+          price:
+            Number.isFinite(perAttendeePrice) && perAttendeePrice > 0
+              ? perAttendeePrice
+              : booking.price ?? null,
           updatedAt: serverTimestamp(),
         });
       } else {
@@ -1413,9 +1483,19 @@ function AdminPosPage() {
     const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
     let priceValue = Number.isFinite(booking.numericPrice) ? booking.numericPrice : 0;
     let quantityValue = 1;
+    let selectedWorkshopOption = null;
     if (type === "workshop") {
       const workshop = workshopLookup.get(booking.workshopId);
-      const workshopPrice = parseNumber(workshop?.numericPrice ?? workshop?.price, null);
+      selectedWorkshopOption =
+        workshop?.options?.find((option) => option.id === editState.optionId) || null;
+      if (workshop?.options?.length > 0 && !selectedWorkshopOption) {
+        setBookingError("Select a workshop option before adding this booking to cart.");
+        return;
+      }
+      const workshopPrice = parseNumber(
+        selectedWorkshopOption?.price ?? workshop?.numericPrice ?? workshop?.price,
+        null,
+      );
       if (Number.isFinite(workshopPrice)) {
         priceValue = workshopPrice;
         quantityValue = attendeeCount;
@@ -1446,9 +1526,15 @@ function AdminPosPage() {
       type === "workshop"
         ? `${booking.workshopTitle || "Workshop"} booking`
         : `${booking.customerName || "Cut flower"} booking`;
+    const selectedWorkshopSession =
+      type === "workshop"
+        ? workshopLookup
+            .get(booking.workshopId)
+            ?.sessions?.find((session) => session.id === editState.sessionId) || null
+        : null;
     const sessionLabel =
       type === "workshop"
-        ? booking.sessionLabel || booking.displayDate
+        ? selectedWorkshopSession?.label || booking.sessionLabel || booking.displayDate
         : booking.displayDate;
     handleAddToCart({
       key: buildCartKey({ type: `${type}-booking`, sourceId: booking.id }),
@@ -1462,7 +1548,18 @@ function AdminPosPage() {
         bookingType: type,
         attendeeCount,
         sessionLabel,
-        optionId: type === "cut-flower" ? editState.optionId || null : null,
+        optionId:
+          type === "workshop"
+            ? selectedWorkshopOption?.id || editState.optionId || booking.optionId || null
+            : editState.optionId || null,
+        optionLabel:
+          type === "workshop"
+            ? selectedWorkshopOption?.label || booking.optionLabel || booking.frame || null
+            : null,
+        framePreference:
+          type === "workshop"
+            ? selectedWorkshopOption?.id || editState.optionId || booking.optionId || null
+            : null,
         attendeeOptions: type === "cut-flower" ? editState.attendeeOptions || [] : null,
         originalStatus: booking.status || null,
         originalPaid: booking.paid === true,
@@ -1944,16 +2041,27 @@ function AdminPosPage() {
           const payload = {
             name: trimmedCustomer.name,
             email: trimmedCustomer.email,
-            frame: "POS",
+            frame: item.metadata?.optionLabel || item.metadata?.framePreference || "POS",
             sessionDate: item.metadata?.sessionDate || "TBC",
             sessionLabel: item.metadata?.sessionLabel || "TBC",
             workshopId: item.sourceId,
+            attendeeCount: Math.max(1, Number.parseInt(item.quantity, 10) || 1),
+            price: parseNumber(
+              item.metadata?.optionPrice ?? item.metadata?.perAttendeePrice ?? item.price,
+              null,
+            ),
             posSaleId: saleRef.id,
             posSaleLineId: saleItem?.lineId || item.key,
             createdAt: serverTimestamp(),
           };
           if (notesValue) {
             payload.notes = notesValue;
+          }
+          if (item.metadata?.optionLabel) {
+            payload.optionLabel = item.metadata.optionLabel;
+          }
+          if (item.metadata?.optionId) {
+            payload.optionValue = item.metadata.optionId;
           }
           if (!bookingRef) return null;
           return setDoc(bookingRef, payload);
@@ -2352,6 +2460,8 @@ function AdminPosPage() {
                 filteredWorkshops={filteredWorkshops}
                 workshopSelections={workshopSelections}
                 setWorkshopSelections={setWorkshopSelections}
+                workshopOptionSelections={workshopOptionSelections}
+                setWorkshopOptionSelections={setWorkshopOptionSelections}
                 filteredClasses={filteredClasses}
                 classSelections={classSelections}
                 setClassSelections={setClassSelections}
@@ -3059,12 +3169,23 @@ function AdminPosPage() {
               {filteredWorkshops.map((workshop) => {
                 const selectedSessionId = workshopSelections[workshop.id] || workshop.sessions[0]?.id || "";
                 const selectedSession = workshop.sessions.find((session) => session.id === selectedSessionId) || null;
-                const price = Number.isFinite(workshop.numericPrice) ? workshop.numericPrice : 0;
+                const selectedOptionId = workshopOptionSelections[workshop.id] || workshop.options[0]?.id || "";
+                const selectedOption = workshop.options.find((option) => option.id === selectedOptionId) || null;
+                const optionPrice = Number.isFinite(selectedOption?.price) ? selectedOption.price : null;
+                const price = Number.isFinite(optionPrice)
+                  ? optionPrice
+                  : Number.isFinite(workshop.numericPrice)
+                    ? workshop.numericPrice
+                    : 0;
+                const priceLabel = Number.isFinite(optionPrice)
+                  ? formatCurrency(optionPrice)
+                  : workshop.displayPrice;
+                const canAdd = workshop.options.length === 0 || Boolean(selectedOption);
                 return (
                   <article className="pos-item-card" key={workshop.id}>
                     <div>
                       <h4>{workshop.title}</h4>
-                      <p className="modal__meta">{workshop.displayPrice}</p>
+                      <p className="modal__meta">{priceLabel}</p>
                       {workshop.sessions.length > 0 && (
                         <label className="modal__meta pos-item-card__field">
                           Session
@@ -3086,10 +3207,36 @@ function AdminPosPage() {
                           </select>
                         </label>
                       )}
+                      {workshop.options.length > 0 && (
+                        <label className="modal__meta pos-item-card__field">
+                          Option
+                          <select
+                            className="input"
+                            value={selectedOptionId}
+                            onChange={(event) =>
+                              setWorkshopOptionSelections((prev) => ({
+                                ...prev,
+                                [workshop.id]: event.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">Select option</option>
+                            {workshop.options.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.label}
+                                {Number.isFinite(option.price)
+                                  ? ` - ${formatCurrency(option.price)}`
+                                  : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                     </div>
                     <button
                       className="btn btn--secondary"
                       type="button"
+                      disabled={!canAdd}
                       onClick={() => {
                         const metadata = {
                           type: "workshop",
@@ -3097,11 +3244,16 @@ function AdminPosPage() {
                           sessionId: selectedSession?.id || null,
                           sessionLabel: selectedSession?.label || null,
                           sessionDate: selectedSession?.date || "",
+                          optionId: selectedOption?.id || null,
+                          optionLabel: selectedOption?.label || null,
+                          optionPrice,
+                          framePreference: selectedOption?.id || null,
                         };
                         handleAddToCart({
                           key: buildCartKey({
                             type: "workshop",
                             sourceId: workshop.id,
+                            variantId: selectedOption?.id,
                             sessionId: selectedSession?.id,
                           }),
                           sourceId: workshop.id,
@@ -3258,8 +3410,26 @@ function AdminPosPage() {
                           return Number.isFinite(price) ? sum + price : sum;
                         }, 0)
                       : null;
+                  const selectedWorkshopOption =
+                    type === "workshop"
+                      ? workshop?.options?.find((option) => option.id === editState.optionId) || null
+                      : null;
+                  const workshopTotal =
+                    type === "workshop"
+                      ? (() => {
+                          const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
+                          const perAttendeePrice = Number.isFinite(selectedWorkshopOption?.price)
+                            ? selectedWorkshopOption.price
+                            : Number.isFinite(booking.numericPrice)
+                              ? booking.numericPrice
+                              : null;
+                          return Number.isFinite(perAttendeePrice) ? perAttendeePrice * attendeeCount : null;
+                        })()
+                      : null;
                   const priceLabel = Number.isFinite(totalFromOptions) && totalFromOptions > 0
                     ? formatCurrency(totalFromOptions)
+                    : Number.isFinite(workshopTotal) && workshopTotal > 0
+                      ? formatCurrency(workshopTotal)
                     : Number.isFinite(booking.numericPrice)
                       ? formatCurrency(booking.numericPrice)
                       : "Price on request";
@@ -3274,6 +3444,9 @@ function AdminPosPage() {
                         <p className="modal__meta">{booking.displayDate}</p>
                         {type === "workshop" && booking.sessionLabel && (
                           <p className="modal__meta">{booking.sessionLabel}</p>
+                        )}
+                        {type === "workshop" && booking.optionLabel && (
+                          <p className="modal__meta">{booking.optionLabel}</p>
                         )}
                         <p className="modal__meta">{priceLabel}</p>
                         {type === "workshop" && workshop?.sessions?.length > 0 && (
@@ -3294,6 +3467,33 @@ function AdminPosPage() {
                               {workshop.sessions.map((session) => (
                                 <option key={session.id} value={session.id}>
                                   {session.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        {type === "workshop" && workshop?.options?.length > 0 && (
+                          <label className="modal__meta pos-item-card__field">
+                            Option
+                            <select
+                              className="input"
+                              value={editState.optionId}
+                              onChange={(event) =>
+                                handleBookingEditChange(
+                                  booking,
+                                  type,
+                                  "optionId",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              <option value="">Select option</option>
+                              {workshop.options.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                  {Number.isFinite(option.price)
+                                    ? ` - ${formatCurrency(option.price)}`
+                                    : ""}
                                 </option>
                               ))}
                             </select>

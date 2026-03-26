@@ -32,7 +32,7 @@ import {
 } from "../lib/freshFlowerDelivery.js";
 import {
   buildSelectedGiftCardOptions,
-  collectLiveCutFlowerGiftCardOptions,
+  collectLiveBookingGiftCardOptions,
   getWholeCrewSelectionValidation,
   isWholeCrewOption,
   normalizeGiftCardOptionQuantity,
@@ -189,6 +189,7 @@ const INITIAL_WORKSHOP_FORM = {
   ctaNote: "",
   dateGroups: [createDateGroup()],
   repeatWeekdays: false,
+  options: [createCutFlowerOption()],
 };
 
 const createEventTimeSlot = () => ({
@@ -198,13 +199,15 @@ const createEventTimeSlot = () => ({
   label: "",
 });
 
-const createCutFlowerOption = () => ({
-  id: `class-option-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-  label: "",
-  price: "",
-  minAttendees: "",
-  isExtra: false,
-});
+function createCutFlowerOption() {
+  return {
+    id: `class-option-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    label: "",
+    price: "",
+    minAttendees: "",
+    isExtra: false,
+  };
+}
 
 const createProductVariant = () => ({
   id: `product-variant-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -1472,11 +1475,31 @@ const getPrimarySession = (workshop) => {
 };
 
 const getSessionLabel = (session) => {
-  if (!session) return "No session";
+  if (!session) return "By request";
   if (session.label) return session.label;
   const dateTime = combineDateAndTime(session.date, session.time);
   if (!dateTime) return session.time || "Session";
   return bookingDateFormatter.format(dateTime);
+};
+
+const isCustomerRequestedWorkshopBooking = (booking) =>
+  (booking?.sessionSource || "").toString().trim().toLowerCase() === "customer-requested";
+
+const getWorkshopBookingDateLabel = (booking) => {
+  const explicitLabel =
+    booking?.sessionDateLabel || booking?.scheduledDateLabel || booking?.sessionDayLabel || "";
+  if (typeof explicitLabel === "string" && explicitLabel.trim()) {
+    return explicitLabel.trim();
+  }
+  const parsed = parseDateValue(booking?.sessionDate);
+  return parsed ? bookingDateFormatter.format(parsed) : "Date to be confirmed";
+};
+
+const getWorkshopBookingTimeLabel = (booking) => {
+  const explicitLabel = booking?.sessionTimeRange || booking?.sessionLabel || booking?.sessionTime || "";
+  return typeof explicitLabel === "string" && explicitLabel.trim()
+    ? explicitLabel.trim()
+    : "Time to be confirmed";
 };
 
 function useUploadAsset(storage) {
@@ -1778,6 +1801,7 @@ export function AdminProductsView() {
   const [tagSaving, setTagSaving] = useState(false);
   const [tagStatusMessage, setTagStatusMessage] = useState(null);
   const [pendingCategoryDelete, setPendingCategoryDelete] = useState(null);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [productSaving, setProductSaving] = useState(false);
   const [productPage, setProductPage] = useState(0);
   const productMainPreviewUrlRef = useRef(null);
@@ -2179,6 +2203,7 @@ export function AdminProductsView() {
     setCategoryCoverFile(null);
     setCategoryCoverPreview("");
     setEditingCategory(null);
+    setIsCategoryModalOpen(false);
   };
 
   const handleEditCategory = (category) => {
@@ -2199,6 +2224,7 @@ export function AdminProductsView() {
     setEditingCategory(category);
     setCategoryError(null);
     setCategoryStatusMessage(null);
+    setIsCategoryModalOpen(true);
   };
 
   const uploadProductMedia = async (file) => {
@@ -3748,19 +3774,107 @@ export function AdminProductsView() {
       )}
 
       {activeTab === "categories" && (
-        <div className="admin-panel__content admin-panel__content--split">
-          <div>
-            <h3>{editingCategory ? "Edit category" : "Create category"}</h3>
+        <div className="admin-panel__content">
+          <div className="admin-panel__toolbar">
+            <button
+              className="btn btn--primary"
+              type="button"
+              disabled={!inventoryEnabled}
+              onClick={() => { resetCategoryForm(); setIsCategoryModalOpen(true); }}
+            >
+              Add category
+            </button>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={handleSeedCategoriesFromProducts}
+              disabled={categorySaving || !inventoryEnabled || products.length === 0}
+            >
+              {categorySaving ? "Working..." : "Seed from existing products"}
+            </button>
+          </div>
+          {categoryStatusMessage && (
+            <p className="admin-panel__status">{categoryStatusMessage}</p>
+          )}
+          {inventoryError && (
+            <p className="admin-panel__error">{inventoryError}</p>
+          )}
+          <div className="admin-panel__list">
+            {categoryOptions.length ? (
+              categoryOptions.map((category) => {
+                const usageCount = categoryUsage.get(category.id) || 0;
+                return (
+                  <div className="admin-category-card" key={category.id}>
+                    <div>
+                      <strong>{category.name}</strong>
+                      <p className="modal__meta">
+                        {usageCount}
+                        {usageCount === 1 ? " product" : " products"}
+                      </p>
+                    </div>
+                    <div className="admin-category-card__actions">
+                      <button
+                        className="icon-btn"
+                        type="button"
+                        disabled={categorySaving || !inventoryEnabled}
+                        onClick={() => handleEditCategory(category)}
+                        title="Edit category"
+                      >
+                        <IconEdit aria-hidden="true" />
+                      </button>
+                      <button
+                        className="icon-btn icon-btn--danger"
+                        type="button"
+                        disabled={categorySaving || !inventoryEnabled}
+                        onClick={() => setPendingCategoryDelete(category)}
+                        title={
+                          usageCount > 0
+                            ? "Delete category (will be removed from products)"
+                            : "Delete category"
+                        }
+                      >
+                        <IconTrash aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <p className="admin-panel__notice">No categories yet. Click "Add category" to create one.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`modal admin-modal ${isCategoryModalOpen ? "is-active" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={isCategoryModalOpen ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) resetCategoryForm();
+        }}
+      >
+        <div className="modal__content admin-modal__content">
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close"
+            onClick={resetCategoryForm}
+          >
+            &times;
+          </button>
+          <h3 className="modal__title">
+            {editingCategory ? "Edit category" : "Add category"}
+          </h3>
+          <div className="admin-workshop-modal__body">
             <form className="admin-form" onSubmit={handleCreateCategory}>
               <input
                 className="input"
                 placeholder="Category name"
                 value={categoryForm.name}
                 onChange={(event) =>
-                  setCategoryForm((prev) => ({
-                    ...prev,
-                    name: event.target.value,
-                  }))
+                  setCategoryForm((prev) => ({ ...prev, name: event.target.value }))
                 }
                 required
               />
@@ -3770,10 +3884,7 @@ export function AdminProductsView() {
                 placeholder="Short category description"
                 value={categoryForm.description}
                 onChange={(event) =>
-                  setCategoryForm((prev) => ({
-                    ...prev,
-                    description: event.target.value,
-                  }))
+                  setCategoryForm((prev) => ({ ...prev, description: event.target.value }))
                 }
               />
               <input
@@ -3781,10 +3892,7 @@ export function AdminProductsView() {
                 placeholder="Collection sub heading"
                 value={categoryForm.subHeading}
                 onChange={(event) =>
-                  setCategoryForm((prev) => ({
-                    ...prev,
-                    subHeading: event.target.value,
-                  }))
+                  setCategoryForm((prev) => ({ ...prev, subHeading: event.target.value }))
                 }
               />
               <textarea
@@ -3793,10 +3901,7 @@ export function AdminProductsView() {
                 placeholder="Collection product description"
                 value={categoryForm.productDescription}
                 onChange={(event) =>
-                  setCategoryForm((prev) => ({
-                    ...prev,
-                    productDescription: event.target.value,
-                  }))
+                  setCategoryForm((prev) => ({ ...prev, productDescription: event.target.value }))
                 }
               />
               <label className="admin-form__field admin-form__full">
@@ -3818,109 +3923,45 @@ export function AdminProductsView() {
                 </div>
                 {categoryCoverPreview && (
                   <div className="admin-preview-grid">
-                    <img src={categoryCoverPreview} alt="Category cover preview" className="admin-preview" loading="lazy" decoding="async"/>
+                    <img
+                      src={categoryCoverPreview}
+                      alt="Category cover preview"
+                      className="admin-preview"
+                      loading="lazy"
+                      decoding="async"
+                    />
                   </div>
                 )}
               </label>
               <p className="modal__meta">
                 Categories appear in the Shop dropdown and power the category hero on the products page.
               </p>
-              <div className="admin-form__actions">
+              <div className="admin-modal__actions admin-form__actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={resetCategoryForm}
+                  disabled={categorySaving}
+                >
+                  Cancel
+                </button>
                 <button
                   className="btn btn--primary"
                   type="submit"
                   disabled={categorySaving || !inventoryEnabled}
                 >
                   {categorySaving
-                    ? editingCategory
-                      ? "Updating..."
-                      : "Saving..."
-                    : editingCategory
-                      ? "Update Category"
-                      : "Save Category"}
+                    ? editingCategory ? "Updating..." : "Saving..."
+                    : editingCategory ? "Update Category" : "Save Category"}
                 </button>
-                {editingCategory && (
-                  <button
-                    className="btn btn--secondary"
-                    type="button"
-                    disabled={categorySaving}
-                    onClick={resetCategoryForm}
-                  >
-                    Cancel
-                  </button>
-                )}
               </div>
               {categoryError && (
                 <p className="admin-panel__error">{categoryError}</p>
               )}
-              {categoryStatusMessage && (
-                <p className="admin-panel__status">{categoryStatusMessage}</p>
-              )}
             </form>
-            <button
-              className="btn btn--secondary"
-              type="button"
-              onClick={handleSeedCategoriesFromProducts}
-              disabled={categorySaving || !inventoryEnabled || products.length === 0}
-            >
-              {categorySaving ? "Working..." : "Seed from existing products"}
-            </button>
-            <p className="modal__meta">
-              Use this to create categories from products you already imported.
-            </p>
-          </div>
-          <div>
-            <h3>Existing categories</h3>
-            <div className="admin-panel__list">
-              {categoryOptions.length ? (
-                categoryOptions.map((category) => {
-                  const usageCount = categoryUsage.get(category.id) || 0;
-                  return (
-                    <div className="admin-category-card" key={category.id}>
-                      <div>
-                        <strong>{category.name}</strong>
-                        <p className="modal__meta">
-                          {usageCount}
-                          {usageCount === 1 ? " product" : " products"}
-                        </p>
-                      </div>
-                      <div className="admin-category-card__actions">
-                        <button
-                          className="icon-btn"
-                          type="button"
-                          disabled={categorySaving || !inventoryEnabled}
-                          onClick={() => handleEditCategory(category)}
-                          title="Edit category"
-                        >
-                          <IconEdit aria-hidden="true" />
-                        </button>
-                        <button
-                          className="icon-btn icon-btn--danger"
-                          type="button"
-                          disabled={categorySaving || !inventoryEnabled}
-                          onClick={() => setPendingCategoryDelete(category)}
-                          title={
-                            usageCount > 0 ?
-                               "Delete category (will be removed from products)"
-                              : "Delete category"
-                          }
-                        >
-                          <IconTrash aria-hidden="true" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="admin-panel__notice">No categories yet.</p>
-              )}
-            </div>
-            {inventoryError && (
-              <p className="admin-panel__error">{inventoryError}</p>
-            )}
           </div>
         </div>
-      )}
+      </div>
 
       <ConfirmDialog
         open={Boolean(pendingCategoryDelete)}
@@ -4168,6 +4209,7 @@ export function AdminProductsView() {
                 ? "Add Subscription Plan"
                 : "Add Product"}
           </h3>
+          <div className="admin-workshop-modal__body">
           <form className="admin-form" onSubmit={handleCreateProduct}>
             <div className="admin-form__section admin-form__full">
               <div className="admin-form__section-header">
@@ -4892,6 +4934,7 @@ export function AdminProductsView() {
               <p className="admin-panel__error">{productError}</p>
             )}
           </form>
+          </div>
         </div>
       </div>
 
@@ -5402,6 +5445,7 @@ export function AdminSubscriptionsView() {
             &times;
           </button>
           <h3 className="modal__title">{editingPlanId ? "Edit Subscription Plan" : "Add Subscription Plan"}</h3>
+          <div className="admin-workshop-modal__body">
           <form className="admin-form" onSubmit={handleSavePlan}>
             <div className="admin-form__section admin-form__full">
               <div className="admin-form__section-header">
@@ -5547,6 +5591,7 @@ export function AdminSubscriptionsView() {
             </div>
             {planError && <p className="admin-panel__error">{planError}</p>}
           </form>
+          </div>
         </div>
       </div>
 
@@ -8424,6 +8469,23 @@ export function AdminWorkshopsView() {
     const start = workshopPage * ADMIN_PAGE_SIZE;
     return workshops.slice(start, start + ADMIN_PAGE_SIZE);
   }, [workshops, workshopPage]);
+  const workshopHasSessionTemplate = useMemo(
+    () =>
+      (workshopForm.dateGroups || []).some((group) => {
+        const dateValue = (group?.date || "").toString().trim();
+        if (!dateValue) return false;
+        return (group?.times || []).some((slot) => (slot?.time || "").toString().trim());
+      }),
+    [workshopForm.dateGroups],
+  );
+
+  useEffect(() => {
+    if (workshopHasSessionTemplate || !workshopForm.repeatWeekdays) return;
+    setWorkshopForm((prev) => ({
+      ...prev,
+      repeatWeekdays: false,
+    }));
+  }, [workshopHasSessionTemplate, workshopForm.repeatWeekdays]);
 
   const openWorkshopModal = () => {
     setWorkshopForm({
@@ -8537,6 +8599,32 @@ export function AdminWorkshopsView() {
     }));
   };
 
+  const handleAddWorkshopOption = () => {
+    setWorkshopForm((prev) => ({
+      ...prev,
+      options: [...(prev.options || []), createCutFlowerOption()],
+    }));
+  };
+
+  const handleWorkshopOptionChange = (optionId, field, value) => {
+    setWorkshopForm((prev) => ({
+      ...prev,
+      options: (prev.options || []).map((option) =>
+        option.id === optionId ? { ...option, [field]: value } : option
+      ),
+    }));
+  };
+
+  const handleRemoveWorkshopOption = (optionId) => {
+    setWorkshopForm((prev) => {
+      const remaining = (prev.options || []).filter((option) => option.id !== optionId);
+      return {
+        ...prev,
+        options: remaining.length > 0 ? remaining : [createCutFlowerOption()],
+      };
+    });
+  };
+
   const handleEditWorkshop = (workshop) => {
     setEditingWorkshopId(workshop.id);
     setWorkshopForm({
@@ -8559,6 +8647,15 @@ export function AdminWorkshopsView() {
       whyPeopleLove: workshop.whyPeopleLove || "",
       ctaNote: workshop.ctaNote || "",
       repeatWeekdays: false,
+      options: Array.isArray(workshop.options) && workshop.options.length > 0
+        ? workshop.options.map((opt) => ({
+            id: opt.id || createCutFlowerOption().id,
+            label: opt.label || "",
+            price: opt.price === null || opt.price === undefined ? "" : String(opt.price),
+            minAttendees: opt.minAttendees === null || opt.minAttendees === undefined ? "" : String(opt.minAttendees),
+            isExtra: Boolean(opt.isExtra),
+          }))
+        : [createCutFlowerOption()],
       dateGroups: (() => {
         const rawSessions = Array.isArray(workshop.sessions) ?
            workshop.sessions
@@ -8566,6 +8663,7 @@ export function AdminWorkshopsView() {
         if (rawSessions.length === 0) return [createDateGroup()];
         const grouped = new Map();
         rawSessions.forEach((session, index) => {
+          if (!session) return;
           const startDate = parseDateValue(
             session.start || session.startDate || workshop.scheduledFor
           );
@@ -8664,36 +8762,75 @@ export function AdminWorkshopsView() {
       : [];
     const sanitizedSessions = [];
     const manualDates = new Set();
+    const validRepeatGroups = [];
 
-    dateGroups.forEach((group) => {
-      const dateValue = group.date.trim();
-      if (dateValue) manualDates.add(dateValue);
-      (group.times || []).forEach((slot) =>
+    for (const [groupIndex, group] of dateGroups.entries()) {
+      const dateValue = (group?.date || "").trim();
+      const validSlots = [];
+      let groupHasAnyValues = Boolean(dateValue);
+
+      for (const slot of group?.times || []) {
+        const timeValue = (slot?.time || "").trim();
+        const labelValue = (slot?.label || "").trim();
+        const slotHasValues = Boolean(timeValue || labelValue);
+        if (slotHasValues) {
+          groupHasAnyValues = true;
+        }
+
+        if (!slotHasValues) continue;
+
+        if (!dateValue) {
+          setWorkshopError(
+            `Date #${groupIndex + 1} has a time slot without a date. Complete both fields or leave the row blank.`,
+          );
+          return;
+        }
+
+        if (!timeValue) {
+          setWorkshopError(
+            `Date #${groupIndex + 1} has a session label without a start time. Add the time or clear the row.`,
+          );
+          return;
+        }
+
+        validSlots.push(slot);
+      }
+
+      if (!groupHasAnyValues) continue;
+
+      if (!dateValue || validSlots.length === 0) {
+        setWorkshopError(
+          `Date #${groupIndex + 1} needs at least one complete time slot, or leave the entire date blank.`,
+        );
+        return;
+      }
+
+      manualDates.add(dateValue);
+      validRepeatGroups.push({
+        date: dateValue,
+        times: validSlots,
+      });
+      validSlots.forEach((slot) =>
         addSessionFromSlot(sanitizedSessions, dateValue, slot)
       );
-    });
+    }
 
-    if (workshopForm.repeatWeekdays) {
-      const sortedGroups = dateGroups
-        .filter((group) => group.date.trim())
-        .sort((a, b) => a.date.localeCompare(b.date));
-      if (sortedGroups.length > 0) {
-        const templateGroup = sortedGroups[0];
-        const templateDate = templateGroup.date;
-        const templateTimes = templateGroup.times || [];
-        const startDateLiteral = new Date(templateDate);
-        if (!Number.isNaN(startDateLiteral.getTime())) {
-          for (let offset = 1; offset <= AUTO_REPEAT_DAYS; offset += 1) {
-            const nextDate = new Date(startDateLiteral);
-            nextDate.setDate(nextDate.getDate() + offset);
-            if (nextDate.getDay() === 0) continue; // skip Sundays
-            const isoDate = formatDateInput(nextDate);
-            if (manualDates.has(isoDate)) continue;
-            manualDates.add(isoDate);
-            templateTimes.forEach((slot) =>
-              addSessionFromSlot(sanitizedSessions, isoDate, slot)
-            );
-          }
+    if (workshopForm.repeatWeekdays && validRepeatGroups.length > 0) {
+      const [templateGroup] = [...validRepeatGroups].sort((a, b) =>
+        a.date.localeCompare(b.date)
+      );
+      const startDateLiteral = new Date(templateGroup.date);
+      if (!Number.isNaN(startDateLiteral.getTime())) {
+        for (let offset = 1; offset <= AUTO_REPEAT_DAYS; offset += 1) {
+          const nextDate = new Date(startDateLiteral);
+          nextDate.setDate(nextDate.getDate() + offset);
+          if (nextDate.getDay() === 0) continue; // skip Sundays
+          const isoDate = formatDateInput(nextDate);
+          if (manualDates.has(isoDate)) continue;
+          manualDates.add(isoDate);
+          templateGroup.times.forEach((slot) =>
+            addSessionFromSlot(sanitizedSessions, isoDate, slot)
+          );
         }
       }
     }
@@ -8703,17 +8840,34 @@ export function AdminWorkshopsView() {
       const bTime = new Date(b.start).getTime();
       return aTime - bTime;
     });
-
-    if (sanitizedSessions.length === 0) {
-      setWorkshopError("Please add at least one session (date & time).");
-      return;
-    }
-
-    const primarySession = sanitizedSessions[0];
+    const primarySession = sanitizedSessions[0] ?? null;
     const priceNumber = Number(workshopForm.price);
     const priceValue = Number.isFinite(priceNumber) ?
        priceNumber
       : workshopForm.price.trim();
+    const sanitizedOptions = (workshopForm.options || [])
+      .map((option) => {
+        const label = option.label.trim() || "";
+        if (!label) return null;
+        const rawPrice = option.price;
+        const priceNum =
+          rawPrice === "" || rawPrice === null || rawPrice === undefined
+            ? null
+            : Number(rawPrice);
+        const minAttendeesValue = Number.parseInt(option.minAttendees, 10);
+        const minAttendees =
+          Number.isFinite(minAttendeesValue) && minAttendeesValue > 0
+            ? minAttendeesValue
+            : null;
+        return {
+          id: option.id || createCutFlowerOption().id,
+          label,
+          price: Number.isFinite(priceNum) ? priceNum : null,
+          minAttendees,
+          isExtra: Boolean(option.isExtra),
+        };
+      })
+      .filter(Boolean);
 
     try {
       setWorkshopSaving(true);
@@ -8728,8 +8882,8 @@ export function AdminWorkshopsView() {
       const payload = {
         title: workshopForm.title.trim(),
         description: workshopForm.description.trim(),
-        scheduledFor: primarySession.start,
-        primarySessionId: primarySession.id,
+        scheduledFor: primarySession?.start ?? null,
+        primarySessionId: primarySession?.id ?? null,
         price: priceValue,
         location: workshopForm.location.trim(),
         image: imageUrl,
@@ -8743,6 +8897,7 @@ export function AdminWorkshopsView() {
         whyPeopleLove: workshopForm.whyPeopleLove.trim(),
         ctaNote: workshopForm.ctaNote.trim(),
         sessions: sanitizedSessions,
+        options: sanitizedOptions,
         status: workshopForm.status || "draft",
       };
 
@@ -8838,7 +8993,7 @@ export function AdminWorkshopsView() {
                         </td>
                         <td>
                           <p>{sessionLabel}</p>
-                          {primarySession.time && (
+                          {primarySession?.time && (
                             <p className="modal__meta">{primarySession.time}</p>
                           )}
                         </td>
@@ -8920,9 +9075,35 @@ export function AdminWorkshopsView() {
                           )}
                         </td>
                         <td>
-                          {bookingEntry.frame && (
+                          {bookingEntry.workshopTitle && (
                             <p className="modal__meta">
-                              Frame: {bookingEntry.frame}
+                              Workshop: {bookingEntry.workshopTitle}
+                            </p>
+                          )}
+                          {isCustomerRequestedWorkshopBooking(bookingEntry) ? (
+                            <>
+                              <p className="modal__meta">
+                                Requested date: {getWorkshopBookingDateLabel(bookingEntry)}
+                              </p>
+                              <p className="modal__meta">
+                                Requested time: {getWorkshopBookingTimeLabel(bookingEntry)}
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="modal__meta">
+                                Date: {getWorkshopBookingDateLabel(bookingEntry)}
+                              </p>
+                              {bookingEntry.sessionLabel && (
+                                <p className="modal__meta">
+                                  Session: {bookingEntry.sessionLabel}
+                                </p>
+                              )}
+                            </>
+                          )}
+                          {(bookingEntry.optionLabel || bookingEntry.frame) && (
+                            <p className="modal__meta">
+                              Option: {bookingEntry.optionLabel || bookingEntry.frame}
                             </p>
                           )}
                           {bookingEntry.notes && (
@@ -8983,6 +9164,7 @@ export function AdminWorkshopsView() {
           <h3 className="modal__title">
             {editingWorkshopId ? "Edit Workshop" : "Add Workshop"}
           </h3>
+          <div className="admin-workshop-modal__body">
           <form className="admin-form" onSubmit={handleCreateWorkshop}>
             <div className="admin-file-input admin-form__full">
               <label htmlFor="workshop-image-upload" className="sr-only">
@@ -9018,9 +9200,85 @@ export function AdminWorkshopsView() {
               }
               required
             />
+            <div className="admin-session-panel admin-form__full">
+              <div className="admin-session-panel__header">
+                <h4>Workshop options</h4>
+                <button
+                  className="icon-btn"
+                  type="button"
+                  onClick={handleAddWorkshopOption}
+                  aria-label="Add option"
+                >
+                  <IconPlus aria-hidden="true" />
+                </button>
+              </div>
+              <p className="admin-panel__note">
+                Add each ticket type with its own price. Leave the base price below blank if you use options only.
+              </p>
+              {(workshopForm.options || []).map((option, index) => (
+                <div className="admin-session-row" key={option.id}>
+                  <div className="admin-session-field admin-session-field--label">
+                    <label className="admin-session-label" htmlFor={`workshop-option-label-${option.id}`}>
+                      Option #{index + 1}
+                    </label>
+                    <input
+                      className="input"
+                      id={`workshop-option-label-${option.id}`}
+                      value={option.label}
+                      onChange={(event) =>
+                        handleWorkshopOptionChange(option.id, "label", event.target.value)
+                      }
+                      placeholder="Adult, Child, Group, etc."
+                    />
+                  </div>
+                  <div className="admin-session-field">
+                    <label className="admin-session-label" htmlFor={`workshop-option-price-${option.id}`}>
+                      Price (R)
+                    </label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      id={`workshop-option-price-${option.id}`}
+                      value={option.price}
+                      onChange={(event) =>
+                        handleWorkshopOptionChange(option.id, "price", event.target.value)
+                      }
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="admin-session-field">
+                    <label className="admin-session-label" htmlFor={`workshop-option-min-${option.id}`}>
+                      Min attendees
+                    </label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="1"
+                      step="1"
+                      id={`workshop-option-min-${option.id}`}
+                      value={option.minAttendees}
+                      onChange={(event) =>
+                        handleWorkshopOptionChange(option.id, "minAttendees", event.target.value)
+                      }
+                      placeholder="Optional"
+                    />
+                  </div>
+                  <button
+                    className="icon-btn icon-btn--danger admin-session-remove"
+                    type="button"
+                    onClick={() => handleRemoveWorkshopOption(option.id)}
+                    aria-label={`Remove option ${index + 1}`}
+                  >
+                    <IconTrash aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
             <input
               className="input"
-              placeholder="Price (numbers or text)"
+              placeholder="Base price fallback (optional, if no options above)"
               value={workshopForm.price}
               onChange={(event) =>
                 setWorkshopForm((prev) => ({
@@ -9079,8 +9337,8 @@ export function AdminWorkshopsView() {
                 </button>
               </div>
               <p className="admin-panel__note">
-                Add one or more dates, then include every time slot offered on
-                each day.
+                Sessions are optional. Leave every date and time blank to let customers request a preferred date and
+                start window when they book this workshop.
               </p>
               {(workshopForm.dateGroups || []).map((group, index) => (
                 <div className="admin-session-date-group" key={group.id}>
@@ -9212,6 +9470,7 @@ export function AdminWorkshopsView() {
                 <input
                   type="checkbox"
                   checked={workshopForm.repeatWeekdays}
+                  disabled={!workshopHasSessionTemplate}
                   onChange={(event) =>
                     setWorkshopForm((prev) => ({
                       ...prev,
@@ -9222,8 +9481,7 @@ export function AdminWorkshopsView() {
                 <span>Auto-schedule future dates (Mon-Sat)</span>
               </label>
               <p className="admin-panel__note">
-                When enabled, the first date's time slots repeat for the next 90
-                days, skipping Sundays.
+                When enabled, the first completed date's time slots repeat for the next 90 days, skipping Sundays.
               </p>
             </div>
 
@@ -9340,6 +9598,7 @@ export function AdminWorkshopsView() {
               <p className="admin-panel__error">{workshopError}</p>
             )}
           </form>
+          </div>
         </div>
       </div>
     </div>
@@ -9798,10 +10057,23 @@ export function AdminWorkshopsCalendarView() {
                   <li key={booking.id}>
                     <div>
                       <strong>{booking.name}</strong>
-                      <p className="modal__meta">
-                        {booking.sessionLabel || "Session"}  - {" "}
-                        {booking.frame || "Workshop"}
-                      </p>
+                      {booking.workshopTitle && (
+                        <p className="modal__meta">{booking.workshopTitle}</p>
+                      )}
+                      {isCustomerRequestedWorkshopBooking(booking) ? (
+                        <>
+                          <p className="modal__meta">
+                            Requested date: {getWorkshopBookingDateLabel(booking)}
+                          </p>
+                          <p className="modal__meta">
+                            Requested time: {getWorkshopBookingTimeLabel(booking)}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="modal__meta">
+                          {booking.sessionLabel || "Session"} - {booking.optionLabel || booking.frame || "Workshop"}
+                        </p>
+                      )}
                     </div>
                     <div className="admin-calendar__details-actions">
                       <a href={`mailto:${booking.email}`}>{booking.email}</a>
@@ -10313,7 +10585,7 @@ export function AdminEventsView() {
       eventDate && (eventDate.getHours() || eventDate.getMinutes()) ?
          formatTimeInput(eventDate)
         : "";
-    const rawTimeSlots = Array.isArray(eventDoc.timeSlots) ? eventDoc.timeSlots : [];
+    const rawTimeSlots = Array.isArray(eventDoc.timeSlots) ? eventDoc.timeSlots.filter(Boolean) : [];
     const normalizedSlots =
       rawTimeSlots.length > 0
         ? rawTimeSlots.map((slot, index) => ({
@@ -10389,6 +10661,7 @@ export function AdminEventsView() {
       }
 
       const sanitizedSlots = (eventForm.timeSlots || [])
+        .filter(Boolean)
         .map((slot) => ({
           id: slot.id || createEventTimeSlot().id,
           time: slot.time.trim() || "",
@@ -11482,7 +11755,7 @@ function AdminLegacyGiftCardControls({
         </div>
         {liveGiftCardOptions.length === 0 ? (
           <p className="admin-panel__note">
-            No live cut-flower options were found. Add options in Cut Flower Classes.
+            No live workshop or cut-flower options were found. Add options in Workshops or Cut Flower Classes.
           </p>
         ) : (
           <div className="admin-giftcard-studio__options-grid">
@@ -11739,6 +12012,7 @@ function LegacyAdminGiftCardPreviewView() {
 
   const {
     products,
+    workshops,
     cutFlowerClasses,
     inventoryEnabled,
     inventoryLoading,
@@ -11816,8 +12090,12 @@ function LegacyAdminGiftCardPreviewView() {
   }, [statusMessage]);
 
   const liveGiftCardOptions = useMemo(
-    () => collectLiveCutFlowerGiftCardOptions(cutFlowerClasses),
-    [cutFlowerClasses],
+    () =>
+      collectLiveBookingGiftCardOptions({
+        workshops,
+        classes: cutFlowerClasses,
+      }),
+    [cutFlowerClasses, workshops],
   );
 
   const selectedOptions = useMemo(
@@ -12032,7 +12310,7 @@ function LegacyAdminGiftCardPreviewView() {
             </div>
             {liveGiftCardOptions.length === 0 ? (
               <p className="admin-panel__note">
-                No live cut-flower options were found. Add options in Cut Flower Classes.
+                No live workshop or cut-flower options were found. Add options in Workshops or Cut Flower Classes.
               </p>
             ) : (
               <div className="admin-giftcard-studio__options-grid">
@@ -12171,6 +12449,7 @@ function LegacyAdminGiftCardGenerateManageView() {
 
   const {
     products,
+    workshops,
     cutFlowerClasses,
     inventoryEnabled,
     inventoryLoading,
@@ -12227,8 +12506,12 @@ function LegacyAdminGiftCardGenerateManageView() {
   const [lastSyncSummary, setLastSyncSummary] = useState(null);
 
   const liveGiftCardOptions = useMemo(
-    () => collectLiveCutFlowerGiftCardOptions(cutFlowerClasses),
-    [cutFlowerClasses],
+    () =>
+      collectLiveBookingGiftCardOptions({
+        workshops,
+        classes: cutFlowerClasses,
+      }),
+    [cutFlowerClasses, workshops],
   );
   const giftCardProducts = useMemo(() => {
     return (Array.isArray(products) ? products : [])
@@ -13076,7 +13359,7 @@ function LegacyAdminGiftCardGenerateManageView() {
               </div>
               {liveGiftCardOptions.length === 0 ? (
                 <p className="admin-panel__note">
-                  No live cut-flower options were found. Add options in Cut Flower Classes.
+                  No live workshop or cut-flower options were found. Add options in Workshops or Cut Flower Classes.
                 </p>
               ) : (
                 <div className="admin-giftcard-studio__options-grid">
@@ -13577,7 +13860,7 @@ export function AdminCutFlowerClassesView() {
       eventDate && (eventDate.getHours() || eventDate.getMinutes()) ?
          formatTimeInput(eventDate)
         : "";
-    const rawTimeSlots = Array.isArray(classDoc.timeSlots) ? classDoc.timeSlots : [];
+    const rawTimeSlots = Array.isArray(classDoc.timeSlots) ? classDoc.timeSlots.filter(Boolean) : [];
     const normalizedSlots =
       rawTimeSlots.length > 0
         ? rawTimeSlots.map((slot, index) => ({
@@ -13695,6 +13978,7 @@ export function AdminCutFlowerClassesView() {
       }
 
       const sanitizedSlots = (classForm.timeSlots || [])
+        .filter(Boolean)
         .map((slot) => ({
           id: slot.id || createEventTimeSlot().id,
           time: slot.time.trim() || "",
@@ -13882,6 +14166,7 @@ export function AdminCutFlowerClassesView() {
             &times;
           </button>
           <h3 className="modal__title">{editingClassId ? "Edit Class" : "Create Class"}</h3>
+          <div className="admin-workshop-modal__body">
           <form className="admin-form" onSubmit={handleSaveClass}>
             <input
               className="input"
@@ -14185,6 +14470,7 @@ export function AdminCutFlowerClassesView() {
             </div>
             {classError && <p className="admin-panel__error">{classError}</p>}
           </form>
+          </div>
         </div>
       </div>
       <ConfirmDialog
@@ -17658,12 +17944,30 @@ export function AdminOrdersView() {
                         <strong>{item.name}</strong> x{item.quantity || 1}
                         <span className="modal__meta">{formatPriceLabel(item.price)}</span>
                         {item.metadata?.type === "workshop" && (
-                          <span className="modal__meta">
-                            {item.metadata?.sessionDayLabel ||
-                              item.metadata?.sessionLabel ||
-                              "Session"}{" "}
-                            - {item.metadata?.attendeeCount || 1} attendee(s)
-                          </span>
+                          <>
+                            <span className="modal__meta">
+                              {item.metadata?.sessionSource === "customer-requested"
+                                ? `Requested date: ${
+                                    item.metadata?.sessionDayLabel ||
+                                    item.metadata?.scheduledDateLabel ||
+                                    "Date to be confirmed"
+                                  }`
+                                : `Session: ${
+                                    item.metadata?.sessionDayLabel ||
+                                    item.metadata?.sessionLabel ||
+                                    "Session"
+                                  }`}
+                            </span>
+                            {(item.metadata?.sessionTimeRange || item.metadata?.sessionTime) && (
+                              <span className="modal__meta">
+                                {item.metadata?.sessionSource === "customer-requested" ? "Requested time" : "Time"}:{" "}
+                                {item.metadata?.sessionTimeRange || item.metadata?.sessionTime}
+                              </span>
+                            )}
+                            <span className="modal__meta">
+                              {item.metadata?.attendeeCount || 1} attendee(s)
+                            </span>
+                          </>
                         )}
                         {item.metadata?.type === "product" && item.metadata?.variantLabel && (
                           <span className="modal__meta">
@@ -17810,12 +18114,30 @@ export function AdminOrdersView() {
                         <strong>{item.name}</strong> x{item.quantity || 1}
                         <span className="modal__meta">{formatPriceLabel(item.price)}</span>
                         {item.metadata?.type === "workshop" && (
-                          <span className="modal__meta">
-                            {item.metadata?.sessionDayLabel ||
-                              item.metadata?.sessionLabel ||
-                              "Session"}{" "}
-                            - {item.metadata?.attendeeCount || 1} attendee(s)
-                          </span>
+                          <>
+                            <span className="modal__meta">
+                              {item.metadata?.sessionSource === "customer-requested"
+                                ? `Requested date: ${
+                                    item.metadata?.sessionDayLabel ||
+                                    item.metadata?.scheduledDateLabel ||
+                                    "Date to be confirmed"
+                                  }`
+                                : `Session: ${
+                                    item.metadata?.sessionDayLabel ||
+                                    item.metadata?.sessionLabel ||
+                                    "Session"
+                                  }`}
+                            </span>
+                            {(item.metadata?.sessionTimeRange || item.metadata?.sessionTime) && (
+                              <span className="modal__meta">
+                                {item.metadata?.sessionSource === "customer-requested" ? "Requested time" : "Time"}:{" "}
+                                {item.metadata?.sessionTimeRange || item.metadata?.sessionTime}
+                              </span>
+                            )}
+                            <span className="modal__meta">
+                              {item.metadata?.attendeeCount || 1} attendee(s)
+                            </span>
+                          </>
                         )}
                         {item.metadata?.type === "product" && item.metadata?.variantLabel && (
                           <span className="modal__meta">

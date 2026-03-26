@@ -386,9 +386,20 @@ function AccountOrderDetailPage() {
                   const key = `${order.id}-${item?.id || item?.name || "item"}-${index}`;
                   const itemType = (item?.metadata?.type || "").toString().trim().toLowerCase();
                   const variantLabel = (item?.metadata?.variantLabel || "").toString().trim();
+                  const isRequestedWorkshop =
+                    (item?.metadata?.sessionSource || "").toString().trim().toLowerCase() ===
+                    "customer-requested";
                   const sessionLabel = (
                     item?.metadata?.sessionDayLabel ||
+                    item?.metadata?.scheduledDateLabel ||
                     item?.metadata?.sessionLabel ||
+                    ""
+                  )
+                    .toString()
+                    .trim();
+                  const sessionTimeLabel = (
+                    item?.metadata?.sessionTimeRange ||
+                    item?.metadata?.sessionTime ||
                     ""
                   )
                     .toString()
@@ -422,7 +433,14 @@ function AccountOrderDetailPage() {
                         )}
                       </div>
                       {itemType === "workshop" && sessionLabel && (
-                        <p className="modal__meta">Session: {sessionLabel}</p>
+                        <p className="modal__meta">
+                          {isRequestedWorkshop ? "Requested date" : "Session"}: {sessionLabel}
+                        </p>
+                      )}
+                      {itemType === "workshop" && sessionTimeLabel && (
+                        <p className="modal__meta">
+                          {isRequestedWorkshop ? "Requested time" : "Time"}: {sessionTimeLabel}
+                        </p>
                       )}
                       {itemType === "workshop" && Number.isFinite(attendeeCount) && (
                         <p className="modal__meta">Attendees: {attendeeCount}</p>

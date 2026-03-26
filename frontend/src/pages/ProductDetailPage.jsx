@@ -21,6 +21,7 @@ import {
   getStockStatus,
   getVariantStockStatus,
 } from "../lib/stockStatus.js";
+import { collectLiveBookingGiftCardOptions } from "../lib/giftCardStudio.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 
 const normalizeNumber = (value) => {
@@ -82,46 +83,6 @@ const normalizeGiftCardOptions = (input = []) =>
       };
     })
     .filter(Boolean);
-
-const normalizeCutFlowerGiftCardOptions = (classes = []) => {
-  const unique = new Map();
-  (Array.isArray(classes) ? classes : [])
-    .filter((classDoc) => (classDoc?.status ?? "live") === "live")
-    .forEach((classDoc) => {
-      const options = Array.isArray(classDoc?.options) ? classDoc.options : [];
-      options.forEach((option, index) => {
-        if (!option || typeof option !== "object") return;
-        const label = (option.label || option.name || option.value || "").toString().trim();
-        const amount = normalizeGiftCardAmount(option.price ?? option.amount);
-        if (!label || !Number.isFinite(amount)) return;
-        const rawId =
-          option.value ||
-          option.id ||
-          option.label ||
-          `${classDoc?.id || "class"}-option-${index + 1}`;
-        const id = rawId.toString().trim();
-        if (!id) return;
-        if (!unique.has(id)) {
-          unique.set(id, {
-            id,
-            label,
-            amount,
-          });
-          return;
-        }
-        const existing = unique.get(id);
-        unique.set(id, {
-          id,
-          label: existing?.label || label,
-          amount,
-        });
-      });
-    });
-  return Array.from(unique.values()).sort((a, b) => {
-    if (a.amount !== b.amount) return a.amount - b.amount;
-    return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
-  });
-};
 
 const buildGiftCardCartItemId = ({
   productId = "",
@@ -250,6 +211,10 @@ function ProductDetailPage() {
   });
   const { items: cutFlowerClassItems } = useFirestoreCollection("cutFlowerClasses", {
     orderByField: "eventDate",
+    orderDirection: "asc",
+  });
+  const { items: workshopItems } = useFirestoreCollection("workshops", {
+    orderByField: "scheduledFor",
     orderDirection: "asc",
   });
   const [selectedVariantId, setSelectedVariantId] = useState("");
@@ -479,7 +444,8 @@ function ProductDetailPage() {
 
   useEffect(() => {
     if (!product?.id) return;
-    setSelectedVariantId("");
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    setSelectedVariantId(variants.length === 1 ? variants[0].id : "");
     setGiftCardOptionQuantities({});
     setGiftCardPurchaserName("");
     setGiftCardRecipientName("");
@@ -490,8 +456,12 @@ function ProductDetailPage() {
   const selectedVariant = product?.variants?.find((variant) => variant.id === selectedVariantId) || null;
   const isGiftCardProduct = Boolean(product?.isGiftCard);
   const dynamicGiftCardOptions = useMemo(
-    () => normalizeCutFlowerGiftCardOptions(cutFlowerClassItems),
-    [cutFlowerClassItems],
+    () =>
+      collectLiveBookingGiftCardOptions({
+        classes: cutFlowerClassItems,
+        workshops: workshopItems,
+      }),
+    [cutFlowerClassItems, workshopItems],
   );
   const effectiveGiftCardOptions = useMemo(() => {
     if (!isGiftCardProduct) return [];
@@ -981,7 +951,7 @@ function ProductDetailPage() {
                   <div className="product-detail__gift-card-config">
                     <h2>Build your gift card</h2>
                     <p className="modal__meta">
-                      Pick cut flower options and set quantities. The total gift card value updates automatically.
+                      Pick workshop or cut flower options and set quantities. The total gift card value updates automatically.
                     </p>
                     {effectiveGiftCardOptions?.length > 0 ? (
                       <div className="product-detail__gift-card-options">
@@ -1041,11 +1011,13 @@ function ProductDetailPage() {
                       </div>
                     ) : (
                       <p className="admin-panel__error">
-                        No cut flower options are available yet. Add pricing options in Cut Flower Classes.
+                        No workshop or cut flower options are available yet. Add pricing options in Workshops or Cut Flower Classes.
                       </p>
                     )}
                     {dynamicGiftCardOptions.length > 0 && (
-                      <p className="modal__meta">Options are synced live from Cut Flower Classes.</p>
+                      <p className="modal__meta">
+                        Options are synced live from Workshops and Cut Flower Classes.
+                      </p>
                     )}
                     <p className="modal__meta">
                       Selected options: {giftCardSelectedCount} | Option types: {selectedGiftCardOptions.length} | Gift
@@ -1100,7 +1072,7 @@ function ProductDetailPage() {
                   </div>
                 )}
 
-                {!isGiftCardProduct && hasVariants && (
+                {!isGiftCardProduct && hasVariants && product.variants.length > 1 && (
                   <label className="modal__meta product-detail__variant">
                     Variant
                     <select

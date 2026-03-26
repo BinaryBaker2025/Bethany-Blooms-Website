@@ -21,6 +21,8 @@ function PosCatalogBrowser({
   filteredWorkshops,
   workshopSelections,
   setWorkshopSelections,
+  workshopOptionSelections,
+  setWorkshopOptionSelections,
   filteredClasses,
   classSelections,
   setClassSelections,
@@ -286,11 +288,25 @@ function PosCatalogBrowser({
                 workshopSelections[workshop.id] || workshop.sessions[0]?.id || "";
               const selectedSession =
                 workshop.sessions.find((session) => session.id === selectedSessionId) || null;
+              const selectedOptionId =
+                workshopOptionSelections[workshop.id] || workshop.options[0]?.id || "";
+              const selectedOption =
+                workshop.options.find((option) => option.id === selectedOptionId) || null;
+              const optionPrice = Number.isFinite(selectedOption?.price) ? selectedOption.price : null;
+              const price = Number.isFinite(optionPrice)
+                ? optionPrice
+                : Number.isFinite(workshop.numericPrice)
+                  ? workshop.numericPrice
+                  : 0;
+              const priceLabel = Number.isFinite(optionPrice)
+                ? formatCurrency(optionPrice)
+                : workshop.displayPrice;
+              const canAdd = workshop.options.length === 0 || Boolean(selectedOption);
               return (
                 <article className="pos-item-card" key={workshop.id}>
                   <div>
                     <h4>{workshop.title}</h4>
-                    <p className="modal__meta">{workshop.displayPrice}</p>
+                    <p className="modal__meta">{priceLabel}</p>
                     {workshop.sessions.length > 0 && (
                       <label className="modal__meta pos-item-card__field">
                         Session
@@ -312,17 +328,48 @@ function PosCatalogBrowser({
                         </select>
                       </label>
                     )}
+                    {workshop.options.length > 0 && (
+                      <label className="modal__meta pos-item-card__field">
+                        Option
+                        <select
+                          className="input"
+                          value={selectedOptionId}
+                          onChange={(event) =>
+                            setWorkshopOptionSelections((prev) => ({
+                              ...prev,
+                              [workshop.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select option</option>
+                          {workshop.options.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                              {Number.isFinite(option.price)
+                                ? ` - ${formatCurrency(option.price)}`
+                                : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                   </div>
                   <button
                     className="btn btn--secondary"
                     type="button"
+                    disabled={!canAdd}
                     onClick={() =>
                       handleAddToCart({
-                        key: ["workshop", workshop.id, "base", selectedSession?.id || "default"].join(":"),
+                        key: [
+                          "workshop",
+                          workshop.id,
+                          selectedOption?.id || "base",
+                          selectedSession?.id || "default",
+                        ].join(":"),
                         sourceId: workshop.id,
                         type: "workshop",
                         name: workshop.title,
-                        price: Number.isFinite(workshop.numericPrice) ? workshop.numericPrice : 0,
+                        price,
                         quantity: 1,
                         metadata: {
                           type: "workshop",
@@ -330,6 +377,10 @@ function PosCatalogBrowser({
                           sessionId: selectedSession?.id || null,
                           sessionLabel: selectedSession?.label || null,
                           sessionDate: selectedSession?.date || "",
+                          optionId: selectedOption?.id || null,
+                          optionLabel: selectedOption?.label || null,
+                          optionPrice,
+                          framePreference: selectedOption?.id || null,
                         },
                       })
                     }
@@ -485,9 +536,27 @@ function PosCatalogBrowser({
                         return Number.isFinite(price) ? sum + price : sum;
                       }, 0)
                     : null;
+                const selectedWorkshopOption =
+                  type === "workshop"
+                    ? workshop?.options?.find((option) => option.id === editState.optionId) || null
+                    : null;
+                const workshopTotal =
+                  type === "workshop"
+                    ? (() => {
+                        const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
+                        const perAttendeePrice = Number.isFinite(selectedWorkshopOption?.price)
+                          ? selectedWorkshopOption.price
+                          : Number.isFinite(booking.numericPrice)
+                            ? booking.numericPrice
+                            : null;
+                        return Number.isFinite(perAttendeePrice) ? perAttendeePrice * attendeeCount : null;
+                      })()
+                    : null;
                 const priceLabel =
                   Number.isFinite(totalFromOptions) && totalFromOptions > 0
                     ? formatCurrency(totalFromOptions)
+                    : Number.isFinite(workshopTotal) && workshopTotal > 0
+                      ? formatCurrency(workshopTotal)
                     : Number.isFinite(booking.numericPrice)
                       ? formatCurrency(booking.numericPrice)
                       : "Price on request";
@@ -502,6 +571,9 @@ function PosCatalogBrowser({
                       <p className="modal__meta">{booking.displayDate}</p>
                       {type === "workshop" && booking.sessionLabel && (
                         <p className="modal__meta">{booking.sessionLabel}</p>
+                      )}
+                      {type === "workshop" && booking.optionLabel && (
+                        <p className="modal__meta">{booking.optionLabel}</p>
                       )}
                       <p className="modal__meta">{priceLabel}</p>
                       <p className="modal__meta">Booking will be marked paid on checkout.</p>
@@ -539,6 +611,34 @@ function PosCatalogBrowser({
                               {workshop.sessions.map((session) => (
                                 <option key={session.id} value={session.id}>
                                   {session.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+
+                        {type === "workshop" && workshop?.options?.length > 0 && (
+                          <label className="modal__meta pos-item-card__field">
+                            Option
+                            <select
+                              className="input"
+                              value={editState.optionId}
+                              onChange={(event) =>
+                                handleBookingEditChange(
+                                  booking,
+                                  type,
+                                  "optionId",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              <option value="">Select option</option>
+                              {workshop.options.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                  {Number.isFinite(option.price)
+                                    ? ` - ${formatCurrency(option.price)}`
+                                    : ""}
                                 </option>
                               ))}
                             </select>

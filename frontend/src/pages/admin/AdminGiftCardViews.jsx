@@ -7,7 +7,7 @@ import { useFirestoreCollection } from "../../hooks/useFirestoreCollection.js";
 import { getFirebaseFunctions } from "../../lib/firebase.js";
 import {
   buildSelectedGiftCardOptions,
-  collectLiveCutFlowerGiftCardOptions,
+  collectLiveBookingGiftCardOptions,
   getWholeCrewSelectionValidation,
   isWholeCrewOption,
   normalizeGiftCardOptionQuantity,
@@ -160,7 +160,20 @@ const resolveAdminCatalogGiftCardClassBasePrice = (classDoc = {}) => {
   return Number.isFinite(price) && price > 0 ? price : null;
 };
 
-const buildLegacyAdminGiftCardProducts = (products = []) =>
+const resolveAdminCatalogGiftCardWorkshopBasePrice = (workshop = {}) => {
+  const raw = workshop?.price;
+  if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? raw : null;
+  if (typeof raw === "string") {
+    const match = raw.match(/\d[\d\s]*(?:[.,]\d+)?/);
+    if (match) {
+      const price = parseFloat(match[0].replace(/[\s,]/g, "").replace(",", "."));
+      return Number.isFinite(price) && price > 0 ? price : null;
+    }
+  }
+  return null;
+};
+
+const _buildLegacyAdminGiftCardProducts = (products = []) =>
   (Array.isArray(products) ? products : [])
     .filter((product) => {
       const isGiftCard = Boolean(product?.isGiftCard || product?.is_gift_card);
@@ -259,14 +272,30 @@ function useAdminCatalogGiftCardInventory({
     const workshopItems = (Array.isArray(workshops) ? workshops : [])
       .filter((workshop) => {
         if (!isLivePublicCatalogItem(workshop)) return false;
-        const price = parseNumber(workshop?.price, null);
-        return Number.isFinite(price) && price > 0;
+        const basePrice = resolveAdminCatalogGiftCardWorkshopBasePrice(workshop);
+        if (basePrice !== null) return true;
+        const options = Array.isArray(workshop?.options) ? workshop.options : [];
+        return options.some((opt) => {
+          const p = parseNumber(opt?.price, null);
+          return Number.isFinite(p) && p > 0;
+        });
       })
       .map((workshop) => ({
         id: (workshop?.id || "").toString().trim(),
         title: (workshop?.title || workshop?.name || "Workshop").toString().trim(),
-        unitPrice: parseNumber(workshop?.price, 0),
-        metaLabel: formatAdminGiftCardItemDate(workshop?.scheduledFor),
+        unitPrice: resolveAdminCatalogGiftCardWorkshopBasePrice(workshop) ?? null,
+        options: (Array.isArray(workshop?.options) ? workshop.options : [])
+          .map((opt, index) => {
+            const label = (opt?.label || "").toString().trim();
+            const price = parseNumber(opt?.price, null);
+            if (!label || !Number.isFinite(price) || price <= 0) return null;
+            return {
+              id: (opt?.id || `workshop-option-${index}`).toString().trim(),
+              label,
+              price,
+            };
+          })
+          .filter(Boolean),
         type: ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP,
       }))
       .filter((workshop) => workshop.id)
@@ -328,7 +357,9 @@ const resolveAdminCatalogGiftCardSelection = ({
       ? selectedItem.variants.find((variant) => variant.id === variantId) || null
       : null;
   const selectedOption =
-    itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS && selectedItem?.options?.length
+    (itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS ||
+      itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP) &&
+    selectedItem?.options?.length
       ? selectedItem.options.find((option) => option.id === optionId) || null
       : null;
   const quantityValue = normalizeGiftCardOptionQuantity(quantity, 0);
@@ -341,7 +372,11 @@ const resolveAdminCatalogGiftCardSelection = ({
         ? selectedItem?.options?.length
           ? selectedOption?.price ?? null
           : selectedItem?.unitPrice ?? null
-        : selectedItem?.unitPrice ?? null;
+        : itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP
+          ? selectedItem?.options?.length
+            ? selectedOption?.price ?? null
+            : selectedItem?.unitPrice ?? null
+          : selectedItem?.unitPrice ?? null;
   const quantityLabel =
     itemType === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT ? "Quantity" : "Attendees";
   let errorMessage = "";
@@ -359,6 +394,12 @@ const resolveAdminCatalogGiftCardSelection = ({
     !selectedOption
   ) {
     errorMessage = "Select a class option.";
+  } else if (
+    itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP &&
+    selectedItem?.options?.length > 0 &&
+    !selectedOption
+  ) {
+    errorMessage = "Select a workshop option.";
   } else if (quantityValue <= 0) {
     errorMessage = `Enter a valid ${quantityLabel.toLowerCase()}.`;
   } else if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
@@ -382,7 +423,7 @@ const resolveAdminCatalogGiftCardSelection = ({
   };
 };
 
-const buildAdminCatalogGiftCardPayload = ({
+const _buildAdminCatalogGiftCardPayload = ({
   itemType,
   sourceId,
   variantId,
@@ -546,7 +587,7 @@ function AdminLegacyGiftCardControls({
         </div>
         {liveGiftCardOptions.length === 0 ? (
           <p className="admin-panel__note">
-            No live cut-flower options were found. Add options in Cut Flower Classes.
+            No live workshop or cut-flower options were found. Add options in Workshops or Cut Flower Classes.
           </p>
         ) : (
           <div className="admin-giftcard-studio__options-grid">
@@ -689,10 +730,15 @@ function AdminCatalogGiftCardControls({
             </select>
           </label>
         )}
-        {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS &&
+        {(formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS ||
+          formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP) &&
           selectedItem?.options?.length > 0 && (
             <label className="admin-form__field" htmlFor={`${idPrefix}-option`}>
-              <span>Class option</span>
+              <span>
+                {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP
+                  ? "Workshop option"
+                  : "Class option"}
+              </span>
               <select
                 className="input"
                 id={`${idPrefix}-option`}
@@ -865,12 +911,12 @@ export function AdminGiftCardPreviewExperience() {
       const found = items.find((i) => i.id === item.sourceId) || null;
       const variant = item.type === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT && found?.variants?.length
         ? found.variants.find((v) => v.id === item.variantId) || null : null;
-      const option = item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS && found?.options?.length
+      const option = (item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS || item.type === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP) && found?.options?.length
         ? found.options.find((o) => o.id === item.optionId) || null : null;
       const unitPrice =
         item.type === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT
           ? (found?.variants?.length ? variant?.price : found?.unitPrice) ?? 0
-          : item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS
+          : (item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS || item.type === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP)
             ? (found?.options?.length ? option?.price : found?.unitPrice) ?? 0
             : found?.unitPrice ?? 0;
       const subtitle = [variant?.label, option?.label].filter(Boolean).join(" | ");
@@ -1188,8 +1234,12 @@ export function AdminGiftCardGenerateManageExperience() {
   const [lastSyncSummary, setLastSyncSummary] = useState(null);
 
   const liveGiftCardOptions = useMemo(
-    () => collectLiveCutFlowerGiftCardOptions(cutFlowerClasses),
-    [cutFlowerClasses],
+    () =>
+      collectLiveBookingGiftCardOptions({
+        workshops,
+        classes: cutFlowerClasses,
+      }),
+    [cutFlowerClasses, workshops],
   );
   const liveOptionIdSet = useMemo(
     () => new Set(liveGiftCardOptions.map((option) => option.id)),
@@ -1223,13 +1273,13 @@ export function AdminGiftCardGenerateManageExperience() {
             ? selectedItem.variants.find((variant) => variant.id === item.variantId) || null
             : null;
         const selectedOption =
-          item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS && selectedItem?.options?.length
+          (item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS || item.type === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP) && selectedItem?.options?.length
             ? selectedItem.options.find((option) => option.id === item.optionId) || null
             : null;
         const unitPrice =
           item.type === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT
             ? (selectedItem?.variants?.length ? selectedVariant?.price : selectedItem?.unitPrice) ?? 0
-            : item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS
+            : (item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS || item.type === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP)
               ? (selectedItem?.options?.length ? selectedOption?.price : selectedItem?.unitPrice) ?? 0
               : selectedItem?.unitPrice ?? 0;
         return {
@@ -1258,7 +1308,8 @@ export function AdminGiftCardGenerateManageExperience() {
         ? quickCatalogForm.variantId
         : "";
     const nextOptionId =
-      quickCatalogForm.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS &&
+      (quickCatalogForm.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS ||
+        quickCatalogForm.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP) &&
       selectedItem?.options?.some((option) => option.id === quickCatalogForm.optionId)
         ? quickCatalogForm.optionId
         : "";

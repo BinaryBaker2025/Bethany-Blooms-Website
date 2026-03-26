@@ -427,7 +427,7 @@ function AdminReportsPage() {
           <p className="modal__meta">No products match the current filters.</p>
         ) : (
           <div className="admin-table__wrapper">
-            <table className="admin-table admin-table--compact">
+            <table className="admin-table admin-table--compact report-products-table">
               <thead>
                 <tr>
                   <th scope="col">#</th>
@@ -440,7 +440,7 @@ function AdminReportsPage() {
                 {visibleProductTotals.map((item, index) => (
                   <tr key={item.key}>
                     <td style={{ color: "var(--admin-text-muted)", fontSize: "0.78rem" }}>{index + 1}</td>
-                    <td><strong style={{ fontWeight: 600 }}>{item.name}</strong></td>
+                    <td className="report-products-table__name"><strong style={{ fontWeight: 600 }}>{item.name}</strong></td>
                     <td>{item.quantity}</td>
                     <td><strong>{moneyFormatter.format(item.revenue)}</strong></td>
                   </tr>

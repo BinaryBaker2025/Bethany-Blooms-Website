@@ -4228,6 +4228,13 @@ main {
   gap: 0.75rem;
 }
 
+.admin-panel__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
 .admin-subscription-ops__hero-copy {
   display: grid;
   gap: 0.55rem;
@@ -5474,7 +5481,8 @@ main {
 .admin-modal .modal__content {
   max-width: min(96vw, 1100px);
   width: min(100%, 1020px);
-  max-height: calc(100vh - 2rem);
+  max-height: calc(100vh - 4rem);
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
@@ -5490,6 +5498,14 @@ main {
   display: grid;
   gap: 1.25rem;
   overflow-y: auto;
+}
+
+.admin-workshop-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  padding-bottom: 0.5rem;
 }
 
 .order-detail-modal .modal__content {
@@ -6180,7 +6196,8 @@ main {
   .admin-modal .modal__content {
     max-width: min(96vw, 560px);
     width: min(100%, 560px);
-    max-height: calc(100vh - 1rem);
+    max-height: calc(100vh - 2rem);
+    min-height: 0;
     border-radius: 16px;
     padding: 1.1rem 1.1rem 1.35rem;
   }
@@ -8413,6 +8430,123 @@ main {
   margin: 0 auto;
 }
 
+.workshop-detail-hero .hero__content {
+  gap: 1.5rem;
+}
+
+.workshop-detail-hero__facts {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0.25rem 0 0;
+}
+
+.workshop-detail-hero__fact {
+  padding: 1rem 1.1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(85, 107, 47, 0.14);
+  box-shadow: 0 18px 36px -28px rgba(47, 54, 36, 0.28);
+  display: grid;
+  gap: 0.3rem;
+}
+
+.workshop-detail-hero__fact-label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(47, 54, 36, 0.52);
+  font-weight: 700;
+}
+
+.workshop-detail-hero__fact-value {
+  font-size: 0.98rem;
+  color: var(--color-text);
+  line-height: 1.45;
+}
+
+.workshop-booking-section {
+  display: grid;
+  gap: 2rem;
+}
+
+.workshop-planner {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.workshop-planner__summary {
+  position: sticky;
+  top: 1.5rem;
+  display: grid;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(209, 191, 167, 0.32);
+  box-shadow: 0 30px 60px -44px rgba(47, 54, 36, 0.32);
+}
+
+.workshop-planner__summary h3 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.workshop-planner__summary .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.workshop-planner__summary-copy {
+  margin: 0;
+  color: rgba(47, 54, 36, 0.72);
+  line-height: 1.65;
+}
+
+.workshop-planner__meta {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.workshop-planner__meta-item {
+  display: grid;
+  gap: 0.25rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid rgba(209, 191, 167, 0.32);
+}
+
+.workshop-planner__meta-item span {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(47, 54, 36, 0.52);
+  font-weight: 700;
+}
+
+.workshop-planner__meta-item strong {
+  font-size: 0.96rem;
+  line-height: 1.45;
+  color: var(--color-text);
+}
+
+.workshop-planner__note {
+  margin: 0;
+  color: rgba(58, 58, 58, 0.72);
+  line-height: 1.6;
+}
+
+.workshop-planner__selectors {
+  display: grid;
+  gap: 1rem;
+}
+
+.workshop-planner__selectors .session-picker,
+.workshop-planner__selectors .session-slot-picker {
+  margin-top: 0;
+}
+
 .detail-section {
   background: rgba(255, 255, 255, 0.9);
   border-radius: 18px;
@@ -8536,7 +8670,7 @@ main {
 .kits-grid {
   display: grid;
   gap: clamp(1.5rem, 4vw, 2.5rem);
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
 }
 
 .kit-card {
@@ -8995,8 +9129,22 @@ main {
 }
 
 @media (max-width: 640px) {
+  .workshop-detail-hero__facts {
+    grid-template-columns: 1fr;
+  }
+
   .session-picker {
     padding: 1.15rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .workshop-planner {
+    grid-template-columns: 1fr;
+  }
+
+  .workshop-planner__summary {
+    position: static;
   }
 }
 
@@ -18238,6 +18386,33 @@ a.card p,
 .admin-table--compact th { padding: 0.4rem 0.75rem; }
 .admin-table--compact td { padding: 0.45rem 0.75rem; }
 
+/* Product totals report table gets its own sizing instead of inheriting the
+   generic admin product-list widths. */
+.admin-table.report-products-table th:nth-child(1),
+.admin-table.report-products-table td:nth-child(1) { width: 6% !important; }
+.admin-table.report-products-table th:nth-child(2),
+.admin-table.report-products-table td:nth-child(2) { width: 56% !important; }
+.admin-table.report-products-table th:nth-child(3),
+.admin-table.report-products-table td:nth-child(3) { width: 12% !important; }
+.admin-table.report-products-table th:nth-child(4),
+.admin-table.report-products-table td:nth-child(4) { width: 26% !important; }
+
+.admin-table.report-products-table td.report-products-table__name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.report-products-table__name,
+.report-products-table__name strong {
+  display: block;
+  max-width: 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
+}
+
 /* ── Clickable rows ───────────────────────────────────────────────────────── */
 .admin-table__row--clickable { cursor: pointer; }
 .admin-table__row--clickable:hover { background: #fafcf8; }
@@ -21921,21 +22096,25 @@ td.admin-table__actions {
   position: relative !important;
 }
 
-/* Photo fills right half only */
+/* Photo lives in right column only — no clip-path needed */
 .home-hero__bg-img {
-  clip-path: inset(0 0 0 50%) !important;
-  object-position: center 20% !important;
+  position: relative !important;
+  inset: unset !important;
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
   object-fit: cover !important;
+  object-position: center 20% !important;
+  clip-path: none !important;
+  z-index: 1 !important;
+  display: block !important;
 }
 
-/* Gradient overlay — fades left edge of photo into the green panel */
+/* Overlay not needed on desktop split layout — hidden here, restored on mobile */
 .home-hero__overlay {
-  clip-path: inset(0 0 0 44%) !important;
-  background: linear-gradient(
-    to left,
-    rgba(55, 69, 32, 0.20) 0%,
-    rgba(55, 69, 32, 0.75) 100%
-  ) !important;
+  display: none !important;
 }
 
 /* Decorative vertical rule between panels */
@@ -22029,11 +22208,16 @@ td.admin-table__actions {
   }
 
   .home-hero__bg-img {
+    position: absolute !important;
+    inset: 0 !important;
+    grid-column: unset !important;
+    grid-row: unset !important;
     clip-path: none !important;
     object-position: center 25% !important;
   }
 
   .home-hero__overlay {
+    display: block !important;
     clip-path: none !important;
     background: linear-gradient(
       to bottom,
@@ -22862,6 +23046,20 @@ td.admin-table__actions {
 /* Any modal that has overflow-y auto but no min-height set */
 .modal__content {
   min-height: 0 !important;
+}
+
+.booking-modal {
+  align-items: flex-start !important;
+  padding-block: 1rem !important;
+}
+
+.booking-modal .modal__content {
+  max-height: calc(100dvh - 2rem) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 /* Gift card admin dialogs */

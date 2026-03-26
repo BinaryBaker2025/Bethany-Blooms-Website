@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import Hero from "../components/Hero.jsx";
@@ -20,9 +20,9 @@ function renderRichText(content) {
   let listItems = [];
 
   lines.forEach((line, index) => {
-    if (line.startsWith("-")) {
+    if (/^[-*\u2022]\s*/.test(line)) {
       listItems.push(
-        <li key={`item-${index}`}>{line.replace(/^[-•]\s*/, "").trim()}</li>,
+        <li key={`item-${index}`}>{line.replace(/^[-*\u2022]\s*/, "").trim()}</li>,
       );
     } else {
       if (listItems.length) {
@@ -102,6 +102,8 @@ const DEFAULT_TIME_RANGES = {
   "13:00": "13:00 - 16:00",
 };
 
+const WORKSHOP_REQUEST_WINDOWS = ["08:00 - 11:00", "12:00 - 15:00"];
+
 const slotTimeFormatter = new Intl.DateTimeFormat("en-ZA", {
   hour: "2-digit",
   minute: "2-digit",
@@ -142,6 +144,8 @@ function WorkshopDetailPage() {
   const [error, setError] = useState(null);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
+  const [selectedOptionId, setSelectedOptionId] = useState(null);
+  const bookingSectionRef = useRef(null);
   const { openBooking } = useModal();
   const canonicalWorkshopPath = workshopId
     ? `/workshops/${encodeURIComponent(workshopId)}`
@@ -175,6 +179,7 @@ function WorkshopDetailPage() {
           setStatus("not-found");
           return;
         }
+
         const data = snapshot.data();
         const now = Date.now();
         const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
@@ -202,10 +207,12 @@ function WorkshopDetailPage() {
               startDate = combineDateAndTime(dateValue, timeValue);
             }
             if (!startDate) return null;
+
             const capacityNumber = Number(entry.capacity);
             const customLabel = typeof entry.label === "string" ? entry.label.trim() : "";
             const formatted = customLabel || sessionFormatter.format(startDate);
             const timeRangeLabel = getSlotRangeLabel(timeValue, startDate);
+
             return {
               id: sessionId,
               label: customLabel || null,
@@ -249,18 +256,38 @@ function WorkshopDetailPage() {
         const upcomingSession = normalizedSessions.find((session) => !session.isPast) ?? null;
         const fallbackSession = normalizedSessions[0] ?? null;
         const headlineSession = upcomingSession ?? fallbackSession;
-        let scheduledDateLabel = "Date to be confirmed";
+        const storedScheduledLabel =
+          typeof data.scheduledDateLabel === "string" && data.scheduledDateLabel.trim()
+            ? data.scheduledDateLabel.trim()
+            : "";
+        let scheduledDateLabel = storedScheduledLabel || "By request";
         if (headlineSession?.formatted) {
           scheduledDateLabel = headlineSession.formatted;
         }
+
         const primarySessionId =
           (typeof data.primarySessionId === "string" &&
             normalizedSessions.some((session) => session.id === data.primarySessionId) &&
             data.primarySessionId) ||
           headlineSession?.id ||
           null;
+
         const priceNumber = typeof data.price === "number" ? data.price : Number(data.price);
         const unitPrice = Number.isFinite(priceNumber) ? priceNumber : null;
+        const rawOptions = Array.isArray(data.options) ? data.options : [];
+        const normalizedOptions = rawOptions
+          .map((opt, index) => {
+            const label = (opt?.label || "").toString().trim();
+            const priceNum = typeof opt?.price === "number" ? opt.price : Number(opt?.price);
+            if (!label || !Number.isFinite(priceNum) || priceNum <= 0) return null;
+            return {
+              id: (opt?.id || `option-${index}`).toString().trim(),
+              label,
+              price: priceNum,
+            };
+          })
+          .filter(Boolean);
+
         setWorkshop({
           id: snapshot.id,
           ...data,
@@ -268,7 +295,9 @@ function WorkshopDetailPage() {
           sessions: normalizedSessions,
           primarySessionId,
           unitPrice,
+          options: normalizedOptions,
         });
+        setSelectedOptionId(normalizedOptions.length > 0 ? normalizedOptions[0].id : null);
         setStatus("success");
       } catch (err) {
         setError(err.message);
@@ -285,12 +314,14 @@ function WorkshopDetailPage() {
       setSelectedDay(null);
       return;
     }
+
     const sessionList = Array.isArray(workshop.sessions) ? workshop.sessions : [];
     if (sessionList.length === 0) {
       setSelectedSessionId(null);
       setSelectedDay(null);
       return;
     }
+
     const hasActive = sessionList.some((session) => !session.isPast);
     let nextSessionId = selectedSessionId;
     if (!nextSessionId || !sessionList.some((session) => session.id === nextSessionId)) {
@@ -320,6 +351,7 @@ function WorkshopDetailPage() {
     () => (Array.isArray(workshop?.sessions) ? workshop.sessions : []),
     [workshop],
   );
+  const isByRequest = sessions.length === 0;
 
   const sessionDays = useMemo(() => {
     if (!sessions.length) return [];
@@ -337,6 +369,7 @@ function WorkshopDetailPage() {
       }
       map.get(dateKey).sessions.push(session);
     });
+
     const grouped = Array.from(map.values()).map((group) => ({
       ...group,
       sessions: group.sessions.sort((a, b) => {
@@ -346,6 +379,7 @@ function WorkshopDetailPage() {
         return a.startDate.getTime() - b.startDate.getTime();
       }),
     }));
+
     grouped.sort((a, b) => {
       const aTime = a.sessions[0]?.startDate instanceof Date ? a.sessions[0].startDate.getTime() : Number.POSITIVE_INFINITY;
       const bTime = b.sessions[0]?.startDate instanceof Date ? b.sessions[0].startDate.getTime() : Number.POSITIVE_INFINITY;
@@ -377,6 +411,68 @@ function WorkshopDetailPage() {
     setSelectedSessionId(firstAvailable?.id ?? null);
   }, [selectedDayData, selectedDaySlots, selectedSession]);
 
+  const selectedOption =
+    (Array.isArray(workshop?.options) ? workshop.options : []).find(
+      (option) => option.id === selectedOptionId,
+    ) ?? (Array.isArray(workshop?.options) ? workshop.options[0] : null);
+
+  const whenLabel = (() => {
+    if (isByRequest) return "By request";
+    const timeLabel = selectedSession?.timeRangeLabel || selectedSession?.formatted || workshop?.scheduledDateLabel;
+    if (selectedDayLabel && timeLabel) {
+      return timeLabel.includes(selectedDayLabel) ? timeLabel : `${selectedDayLabel} - ${timeLabel}`;
+    }
+    return timeLabel || "Date to be confirmed";
+  })();
+
+  const capacityText =
+    !isByRequest && typeof selectedSession?.capacity === "number"
+      ? `${selectedSession.capacity} seat${selectedSession.capacity === 1 ? "" : "s"} available`
+      : null;
+
+  const requestModeNote = `Choose any Monday to Saturday from tomorrow onward. Available windows: ${WORKSHOP_REQUEST_WINDOWS.join(
+    " or ",
+  )}.`;
+
+  const sections = [
+    { key: "whatToExpect", title: "What to Expect" },
+    { key: "bookingPricing", title: "Booking & Pricing" },
+    { key: "goodToKnow", title: "Good to Know" },
+    { key: "cancellations", title: "Cancellations & Policies" },
+    { key: "groupsInfo", title: "Groups & Private Events" },
+    { key: "careInfo", title: "Caring for Your Art" },
+    { key: "whyPeopleLove", title: "Why People Love Our Workshops" },
+  ];
+
+  const locationLabel = workshop?.location || "Vereeniging Studio";
+  const investmentLabel = (() => {
+    if (selectedOption) {
+      return `${selectedOption.label} - R${selectedOption.price}`;
+    }
+    if (Array.isArray(workshop?.options) && workshop.options.length > 0) {
+      const lowest = Math.min(...workshop.options.map((option) => option.price));
+      return `From R${lowest}`;
+    }
+    if (workshop?.price) return `From R${workshop.price}`;
+    return "Pricing shared below";
+  })();
+
+  const bookingSectionTitle = isByRequest ? "Request Your Workshop Date" : "Choose Your Session";
+  const bookingSectionDescription = isByRequest
+    ? "Pick your workshop option first. After that you can request your preferred date and start window in the booking form."
+    : "Work through the session details below, choose the option that suits you, and then reserve your place.";
+  const bookingButtonDisabled = !isByRequest && !selectedSession;
+  const detailSections = sections.filter(({ key }) => Boolean(workshop?.[key]));
+  const heroSummary =
+    workshop?.description?.trim() ||
+    "Choose your preferred workshop format, review the session details, and reserve your place below.";
+  const summaryCopy = workshop?.ctaNote?.trim()
+    || (isByRequest
+      ? "This workshop is booked by request. Choose your option, then submit the date and start window that suits you best."
+      : "Use the booking planner to choose your date, time, and workshop option before reserving your place.");
+  const heroImage = workshop?.image || heroBackground;
+  const anyFutureSessionDay = sessionDays.some((entry) => entry.sessions.some((slot) => !slot.isPast));
+
   const handleSelectDay = (date) => {
     setSelectedDay(date);
   };
@@ -385,18 +481,36 @@ function WorkshopDetailPage() {
     setSelectedSessionId(sessionId);
   };
 
+  const handleScrollToBooking = () => {
+    bookingSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
   const handleOpenBooking = () => {
     if (!workshop) return;
     const customerSeed = items.find((item) => item.metadata?.customer)?.metadata?.customer ?? null;
-    if (!selectedSession) return;
-    openBooking({
+    const options = Array.isArray(workshop.options) ? workshop.options : [];
+    const chosenOption = options.find((opt) => opt.id === selectedOptionId) ?? null;
+    const bookingPayload = {
+      type: "workshop",
       workshop,
-      sessionId: selectedSession.id,
-      session: selectedSession,
       customer: customerSeed || undefined,
-      date: selectedDay,
-      dayLabel: selectedDayLabel,
-    });
+      selectedOption: chosenOption,
+      optionId: chosenOption?.id || chosenOption?.value || "",
+      optionValue: chosenOption?.id || chosenOption?.value || "",
+      optionLabel: chosenOption?.label || chosenOption?.name || "",
+      framePreference: chosenOption?.id || chosenOption?.value || "",
+      sessionSource: isByRequest ? "customer-requested" : "admin-session",
+    };
+    if (!isByRequest && selectedSession) {
+      bookingPayload.sessionId = selectedSession.id;
+      bookingPayload.session = selectedSession;
+      bookingPayload.date = selectedDay;
+      bookingPayload.dayLabel = selectedDayLabel;
+    }
+    openBooking(bookingPayload);
   };
 
   if (status === "loading") {
@@ -435,187 +549,253 @@ function WorkshopDetailPage() {
     );
   }
 
-  const whenLabel = (() => {
-    const timeLabel = selectedSession?.timeRangeLabel || selectedSession?.formatted || workshop.scheduledDateLabel;
-    if (selectedDayLabel && timeLabel) {
-      return timeLabel.includes(selectedDayLabel) ? timeLabel : `${selectedDayLabel} · ${timeLabel}`;
-    }
-    return timeLabel || "Date to be confirmed";
-  })();
-  const capacityText =
-    typeof selectedSession?.capacity === "number"
-      ? `${selectedSession.capacity} seat${selectedSession.capacity === 1 ? "" : "s"} available`
-      : null;
-  const sections = [
-    { key: "whatToExpect", title: "What to Expect" },
-    { key: "bookingPricing", title: "Booking & Pricing" },
-    { key: "goodToKnow", title: "Good to Know" },
-    { key: "cancellations", title: "Cancellations & Policies" },
-    { key: "groupsInfo", title: "Groups & Private Events" },
-    { key: "careInfo", title: "Caring for Your Art" },
-    { key: "whyPeopleLove", title: "Why People Love Our Workshops" },
-  ];
-
   return (
     <>
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Hero
-            variant="workshops"
-            background={workshop.image || heroBackground}
-            media={workshop.image ? <img src={workshop.image} alt={`${workshop.title} workshop`} loading="lazy" decoding="async"/> : null}
-          >
-            <h1>{workshop.title}</h1>
-            <p>{workshop.description}</p>
-            <div className="cta-group">
-              <button className="btn btn--primary" type="button" onClick={handleOpenBooking} disabled={!selectedSession}>
-                Reserve Your Seat
-              </button>
-              <Link className="btn btn--secondary" to="/workshops">
-                Back to Workshops
-              </Link>
+      <section className="section section--no-pad band--cream">
+        <Hero
+          variant="editorial-split"
+          className="workshop-detail-hero"
+          background={heroImage}
+          media={
+            <img
+              src={heroImage}
+              alt={`${workshop.title} workshop`}
+              loading="eager"
+              decoding="async"
+            />
+          }
+          captionText={
+            isByRequest
+              ? "Workshop available by request."
+              : "Review the open session details below."
+          }
+        >
+          <span className="editorial-eyebrow">Workshops</span>
+          <h1>{workshop.title}</h1>
+          <p>{heroSummary}</p>
+          <div className="workshop-detail-hero__facts">
+            <div className="workshop-detail-hero__fact">
+              <span className="workshop-detail-hero__fact-label">When</span>
+              <span className="workshop-detail-hero__fact-value">{whenLabel}</span>
             </div>
-          </Hero>
-        </div>
-      </section>
-
-      <section className="section section--tight">
-        <div className="section__inner">
-          <Reveal as="div">
-            <span className="badge">Workshop Snapshot</span>
-            <h2>Plan Ahead</h2>
-          </Reveal>
-          <div className="cards-grid">
-            <Reveal as="article" className="card">
-              <h3 className="card__title">When</h3>
-              <p>{whenLabel}</p>
-              {capacityText && <p className="modal__meta">{capacityText}</p>}
-            </Reveal>
-            <Reveal as="article" className="card" delay={120}>
-              <h3 className="card__title">Where</h3>
-              <p>{workshop.location || "Vereeniging Studio"}</p>
-            </Reveal>
-            <Reveal as="article" className="card" delay={240}>
-              <h3 className="card__title">Investment</h3>
-              <p>{workshop.price ? `Starting from R${workshop.price}` : "Pricing shared below"}</p>
-            </Reveal>
+            <div className="workshop-detail-hero__fact">
+              <span className="workshop-detail-hero__fact-label">Where</span>
+              <span className="workshop-detail-hero__fact-value">{locationLabel}</span>
+            </div>
+            <div className="workshop-detail-hero__fact">
+              <span className="workshop-detail-hero__fact-label">Investment</span>
+              <span className="workshop-detail-hero__fact-value">{investmentLabel}</span>
+            </div>
           </div>
-          {sessionDays.length > 0 && (
-            <Reveal as="div" className="session-picker" delay={360}>
-              <h3 className="session-picker__title">Choose Your Day</h3>
-              <p className="session-picker__note">
-                Pick the workshop day that suits you best, then select the time slot you'd like to attend.
-              </p>
-              <div className="session-picker__grid session-picker__grid--dates">
-                {sessionDays.map((day) => {
-                  const isActive = day.date === selectedDay;
-                  const allPast = day.sessions.every((slot) => slot.isPast);
-                  const anyFutureDay = sessionDays.some((entry) => entry.sessions.some((slot) => !slot.isPast));
-                  return (
-                    <label
-                      key={day.date}
-                      className={`session-day-chip ${isActive ? "session-day-chip--active" : ""} ${
-                        allPast ? "session-day-chip--disabled" : ""
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="workshop-day"
-                        value={day.date}
-                        checked={isActive}
-                        onChange={() => handleSelectDay(day.date)}
-                        disabled={allPast && anyFutureDay}
-                      />
-                      <span className="session-day-chip__label">{day.label}</span>
-                      <span className="session-day-chip__meta">
-                        {day.sessions.length} slot{day.sessions.length === 1 ? "" : "s"} available
-                      </span>
-                      {allPast && (
-                        <span className="session-day-chip__meta session-day-chip__meta--warning">Past day</span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            </Reveal>
-          )}
-
-          {selectedDaySlots.length > 0 && (
-            <Reveal as="div" className="session-slot-picker" delay={420}>
-              <h3 className="session-slot-picker__title">Pick a Time</h3>
-              <p className="session-slot-picker__note">
-                Morning sessions run 09:00 - 12:00 and afternoons 13:00 - 16:00. Capacity defaults to 10 guests but may differ per venue.
-              </p>
-              <div className="session-slot-picker__grid">
-                {selectedDaySlots.map((slot) => {
-                  const disabled = slot.isPast && dayHasActiveSlots;
-                  return (
-                    <label
-                      key={slot.id}
-                      className={`session-chip ${
-                        selectedSessionId === slot.id ? "session-chip--active" : ""
-                      } ${disabled ? "session-chip--disabled" : ""}`}
-                    >
-                      <input
-                        type="radio"
-                        name="workshop-session"
-                        value={slot.id}
-                        checked={selectedSessionId === slot.id}
-                        onChange={() => handleSelectSlot(slot.id)}
-                        disabled={disabled}
-                      />
-                      <span className="session-chip__label">{slot.timeRangeLabel || slot.formatted}</span>
-                      <span className="session-chip__meta">
-                        {slot.capacity
-                          ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
-                          : "Open booking"}
-                      </span>
-                      {slot.isPast && (
-                        <span className="session-chip__meta session-chip__meta--warning">Past session</span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            </Reveal>
-          )}
-
-          {sessionDays.length === 0 && (
-            <Reveal as="p" className="modal__meta session-picker__empty" delay={360}>
-              We're finalising new workshop dates. Follow us on social or send us a note to reserve your spot.
-            </Reveal>
-          )}
-          {sessionDays.length > 0 && selectedDaySlots.length === 0 && (
-            <Reveal as="p" className="modal__meta session-picker__empty" delay={420}>
-              No time slots are currently open for the selected day. Choose a different date to continue.
-            </Reveal>
-          )}
-        </div>
+          <div className="cta-group">
+            <button className="btn btn--primary" type="button" onClick={handleScrollToBooking}>
+              View Booking Options
+            </button>
+            <Link className="btn btn--secondary" to="/workshops">
+              Back to Workshops
+            </Link>
+          </div>
+        </Hero>
       </section>
 
-      <section className="section section--tight">
-        <div className="section__inner workshop-detail">
-          {sections.map(({ key, title }) => {
-            const content = workshop[key];
-            if (!content) return null;
-            return (
-              <Reveal as="article" className="detail-section" key={key}>
-                <h2>{title}</h2>
-                {renderRichText(content)}
-              </Reveal>
-            );
-          })}
+      <section className="section band--white" id="workshop-booking" ref={bookingSectionRef}>
+        <div className="section__inner">
+          <Reveal as="div" className="editorial-band editorial-band--center">
+            <span className="editorial-eyebrow">{isByRequest ? "By Request" : "Booking Planner"}</span>
+            <h2>{bookingSectionTitle}</h2>
+            <p>{bookingSectionDescription}</p>
+          </Reveal>
 
-          {workshop.ctaNote && (
-            <Reveal as="div" className="detail-cta">
-              <p>{workshop.ctaNote}</p>
-              <button className="btn btn--primary" type="button" onClick={handleOpenBooking} disabled={!selectedSession}>
+          <div className="workshop-booking-section workshop-planner">
+            <Reveal as="aside" className="workshop-planner__summary">
+              <span className="badge">{isByRequest ? "By Request" : "Reserve A Seat"}</span>
+              <h3>{workshop.title}</h3>
+              <p className="workshop-planner__summary-copy">{summaryCopy}</p>
+
+              <div className="workshop-planner__meta">
+                <div className="workshop-planner__meta-item">
+                  <span>When</span>
+                  <strong>{whenLabel}</strong>
+                </div>
+                <div className="workshop-planner__meta-item">
+                  <span>Where</span>
+                  <strong>{locationLabel}</strong>
+                </div>
+                <div className="workshop-planner__meta-item">
+                  <span>Investment</span>
+                  <strong>{investmentLabel}</strong>
+                </div>
+                {selectedOption && (
+                  <div className="workshop-planner__meta-item">
+                    <span>Selected Option</span>
+                    <strong>{selectedOption.label}</strong>
+                  </div>
+                )}
+              </div>
+
+              {capacityText && <p className="workshop-planner__note">{capacityText}</p>}
+              {isByRequest && <p className="workshop-planner__note">{requestModeNote}</p>}
+
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={handleOpenBooking}
+                disabled={bookingButtonDisabled}
+              >
                 Reserve Your Seat
               </button>
             </Reveal>
-          )}
+
+            <div className="workshop-planner__selectors">
+              {!isByRequest && sessionDays.length > 0 && (
+                <Reveal as="div" className="session-picker" delay={120}>
+                  <h3 className="session-picker__title">Choose Your Day</h3>
+                  <p className="session-picker__note">
+                    Pick the workshop day that suits you best, then choose the time slot you want to attend.
+                  </p>
+                  <div className="session-picker__grid session-picker__grid--dates">
+                    {sessionDays.map((day) => {
+                      const isActive = day.date === selectedDay;
+                      const allPast = day.sessions.every((slot) => slot.isPast);
+                      return (
+                        <label
+                          key={day.date}
+                          className={`session-day-chip ${isActive ? "session-day-chip--active" : ""} ${
+                            allPast ? "session-day-chip--disabled" : ""
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="workshop-day"
+                            value={day.date}
+                            checked={isActive}
+                            onChange={() => handleSelectDay(day.date)}
+                            disabled={allPast && anyFutureSessionDay}
+                          />
+                          <span className="session-day-chip__label">{day.label}</span>
+                          <span className="session-day-chip__meta">
+                            {day.sessions.length} slot{day.sessions.length === 1 ? "" : "s"} available
+                          </span>
+                          {allPast && (
+                            <span className="session-day-chip__meta session-day-chip__meta--warning">
+                              Past day
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </Reveal>
+              )}
+
+              {!isByRequest && selectedDaySlots.length > 0 && (
+                <Reveal as="div" className="session-picker session-slot-picker" delay={180}>
+                  <h3 className="session-slot-picker__title">Pick A Time</h3>
+                  <p className="session-slot-picker__note">
+                    Morning sessions run 09:00 - 12:00 and afternoon sessions run 13:00 - 16:00.
+                  </p>
+                  <div className="session-slot-picker__grid">
+                    {selectedDaySlots.map((slot) => {
+                      const disabled = slot.isPast && dayHasActiveSlots;
+                      return (
+                        <label
+                          key={slot.id}
+                          className={`session-chip ${
+                            selectedSessionId === slot.id ? "session-chip--active" : ""
+                          } ${disabled ? "session-chip--disabled" : ""}`}
+                        >
+                          <input
+                            type="radio"
+                            name="workshop-session"
+                            value={slot.id}
+                            checked={selectedSessionId === slot.id}
+                            onChange={() => handleSelectSlot(slot.id)}
+                            disabled={disabled}
+                          />
+                          <span className="session-chip__label">{slot.timeRangeLabel || slot.formatted}</span>
+                          <span className="session-chip__meta">
+                            {slot.capacity
+                              ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
+                              : "Open booking"}
+                          </span>
+                          {slot.isPast && (
+                            <span className="session-chip__meta session-chip__meta--warning">
+                              Past session
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </Reveal>
+              )}
+
+              {Array.isArray(workshop.options) && workshop.options.length > 0 && (
+                <Reveal as="div" className="session-picker" delay={240}>
+                  <h3 className="session-picker__title">Choose Your Option</h3>
+                  <p className="session-picker__note">
+                    Select the workshop format or package you want before continuing to the reservation form.
+                  </p>
+                  <div className="session-slot-picker__grid">
+                    {workshop.options.map((option) => (
+                      <label
+                        key={option.id}
+                        className={`session-chip ${selectedOptionId === option.id ? "session-chip--active" : ""}`}
+                      >
+                        <input
+                          type="radio"
+                          name="workshop-option"
+                          value={option.id}
+                          checked={selectedOptionId === option.id}
+                          onChange={() => setSelectedOptionId(option.id)}
+                        />
+                        <span className="session-chip__label">{option.label}</span>
+                        <span className="session-chip__meta">R{option.price}</span>
+                      </label>
+                    ))}
+                  </div>
+                </Reveal>
+              )}
+
+              {isByRequest && (
+                <Reveal as="div" className="session-picker workshop-planner__request" delay={120}>
+                  <h3 className="session-picker__title">Booked By Request</h3>
+                  <p className="session-picker__note">
+                    No fixed public sessions are published for this workshop yet. Use the reservation form to request a
+                    date and one of the available start windows.
+                  </p>
+                  <p className="workshop-planner__note">{requestModeNote}</p>
+                </Reveal>
+              )}
+
+              {!isByRequest && sessionDays.length > 0 && selectedDaySlots.length === 0 && (
+                <Reveal as="p" className="modal__meta session-picker__empty" delay={180}>
+                  No time slots are currently open for the selected day. Choose a different date to continue.
+                </Reveal>
+              )}
+            </div>
+          </div>
         </div>
       </section>
+
+      {detailSections.length > 0 && (
+        <section className="section band--cream">
+          <div className="section__inner workshop-detail">
+            <Reveal as="div" className="editorial-band editorial-band--center">
+              <span className="editorial-eyebrow">Workshop Details</span>
+              <h2>Everything You Need To Know</h2>
+              <p>Review the experience, practical notes, and policies before you reserve your place.</p>
+            </Reveal>
+
+            {detailSections.map(({ key, title }, index) => (
+              <Reveal as="article" className="detail-section" key={key} delay={index * 60}>
+                <h2>{title}</h2>
+                {renderRichText(workshop[key])}
+              </Reveal>
+            ))}
+          </div>
+        </section>
+      )}
     </>
   );
 }

@@ -27,11 +27,14 @@ export const isWholeCrewOption = (option = {}) => {
   return optionId.includes(WHOLE_CREW_OPTION_KEY) || optionLabel.includes(WHOLE_CREW_OPTION_KEY);
 };
 
-const normalizeCutFlowerGiftCardOption = (option = {}, fallbackId = "") => {
+const normalizeLiveGiftCardOption = (
+  option = {},
+  { fallbackId = "", idPrefix = "", labelPrefix = "" } = {},
+) => {
   const label = (option?.label || option?.name || option?.value || "").toString().trim();
   const amount = normalizeGiftCardOptionAmount(option?.price ?? option?.amount);
   if (!label || !Number.isFinite(amount)) return null;
-  const id = (
+  const baseId = (
     option?.value ||
     option?.id ||
     option?.label ||
@@ -40,25 +43,42 @@ const normalizeCutFlowerGiftCardOption = (option = {}, fallbackId = "") => {
   )
     .toString()
     .trim();
-  if (!id) return null;
+  if (!baseId) return null;
   return {
-    id,
-    label,
+    id: `${idPrefix}${baseId}`,
+    label: labelPrefix ? `${labelPrefix} - ${label}` : label,
     amount,
   };
 };
 
-export const collectLiveCutFlowerGiftCardOptions = (classes = []) => {
+export const collectLiveBookingGiftCardOptions = ({
+  classes = [],
+  workshops = [],
+} = {}) => {
   const unique = new Map();
   (Array.isArray(classes) ? classes : []).forEach((classDoc) => {
     const status = (classDoc?.status ?? "live").toString().trim().toLowerCase();
     if (status && status !== "live") return;
     const options = Array.isArray(classDoc?.options) ? classDoc.options : [];
     options.forEach((option, index) => {
-      const normalized = normalizeCutFlowerGiftCardOption(
-        option,
-        `${classDoc?.id || "class"}-option-${index + 1}`,
-      );
+      const normalized = normalizeLiveGiftCardOption(option, {
+        fallbackId: `${classDoc?.id || "class"}-option-${index + 1}`,
+      });
+      if (!normalized) return;
+      unique.set(normalized.id, normalized);
+    });
+  });
+  (Array.isArray(workshops) ? workshops : []).forEach((workshop) => {
+    const status = (workshop?.status ?? "live").toString().trim().toLowerCase();
+    if (status && status !== "live") return;
+    const title = (workshop?.title || workshop?.name || "Workshop").toString().trim();
+    const options = Array.isArray(workshop?.options) ? workshop.options : [];
+    options.forEach((option, index) => {
+      const normalized = normalizeLiveGiftCardOption(option, {
+        fallbackId: `${workshop?.id || "workshop"}-option-${index + 1}`,
+        idPrefix: `workshop:${workshop?.id || "workshop"}:`,
+        labelPrefix: title,
+      });
       if (!normalized) return;
       unique.set(normalized.id, normalized);
     });
@@ -68,6 +88,9 @@ export const collectLiveCutFlowerGiftCardOptions = (classes = []) => {
     return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
   });
 };
+
+export const collectLiveCutFlowerGiftCardOptions = (classes = []) =>
+  collectLiveBookingGiftCardOptions({ classes });
 
 export const buildSelectedGiftCardOptions = (options = [], quantityMap = {}) =>
   (Array.isArray(options) ? options : [])

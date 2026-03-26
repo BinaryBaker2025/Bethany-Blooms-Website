@@ -5,6 +5,63 @@ import { useAuth } from "./AuthContext.jsx";
 
 const AdminDataContext = createContext(null);
 
+function parseSortableWorkshopDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value?.toDate === "function") {
+    try {
+      const converted = value.toDate();
+      return Number.isNaN(converted.getTime()) ? null : converted;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object" && typeof value.seconds === "number") {
+    const converted = new Date(value.seconds * 1000);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+function resolveWorkshopSortDate(workshop = {}) {
+  const explicitDate = parseSortableWorkshopDate(workshop?.scheduledFor);
+  if (explicitDate) return explicitDate;
+  const sessions = Array.isArray(workshop?.sessions) ? workshop.sessions : [];
+  for (const session of sessions) {
+    const directStart = parseSortableWorkshopDate(session?.start || session?.startDate);
+    if (directStart) return directStart;
+    const dateValue = (session?.date || "").toString().trim();
+    const timeValue = (session?.time || "").toString().trim();
+    if (!dateValue) continue;
+    const parsed = parseSortableWorkshopDate(`${dateValue}T${timeValue || "00:00"}`);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function sortWorkshops(items = []) {
+  return [...items].sort((left, right) => {
+    const leftDate = resolveWorkshopSortDate(left);
+    const rightDate = resolveWorkshopSortDate(right);
+    if (leftDate && rightDate) {
+      return leftDate.getTime() - rightDate.getTime();
+    }
+    if (leftDate) return -1;
+    if (rightDate) return 1;
+    return (left?.title || left?.name || "").localeCompare(
+      right?.title || right?.name || "",
+      undefined,
+      { sensitivity: "base" },
+    );
+  });
+}
+
 export function AdminDataProvider({ children }) {
   const { user, isAdmin, role } = useAuth();
   const [inventoryLoading, setInventoryLoading] = useState(false);
@@ -122,9 +179,13 @@ export function AdminDataProvider({ children }) {
     );
 
     const workshopsUnsub = onSnapshot(
-      query(collection(db, "workshops"), orderBy("scheduledFor", "asc")),
+      collection(db, "workshops"),
       (snapshot) => {
-        setWorkshops(snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })));
+        const workshopDocs = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...docSnapshot.data(),
+        }));
+        setWorkshops(sortWorkshops(workshopDocs));
         setInventoryError(null);
         markReady("workshops");
       },
@@ -239,6 +300,7 @@ export function AdminDataProvider({ children }) {
   return <AdminDataContext.Provider value={value}>{children}</AdminDataContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAdminData() {
   const context = useContext(AdminDataContext);
   if (!context) throw new Error("useAdminData must be used within AdminDataProvider");

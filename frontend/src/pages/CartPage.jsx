@@ -1104,21 +1104,34 @@ function CartPage() {
                           </div>
                           {item.metadata?.type === "workshop" && (
                             <div className="cart-list__meta">
-                              <p>
-                                <strong>Workshop:</strong> {item.metadata.workshopTitle}
-                              </p>
-                              <p>
-                                <strong>Day:</strong>{" "}
-                                {item.metadata.sessionDayLabel ||
-                                  item.metadata.sessionLabel ||
+                              {(() => {
+                                const isRequestedWorkshop =
+                                  item.metadata.sessionSource === "customer-requested";
+                                const workshopDateLabel =
+                                  item.metadata.sessionDayLabel ||
                                   item.metadata.scheduledDateLabel ||
-                                  "Date to be confirmed"}
-                              </p>
-                              {(item.metadata.sessionTimeRange || item.metadata.sessionTime) && (
-                                <p>
-                                  <strong>Time:</strong> {item.metadata.sessionTimeRange || item.metadata.sessionTime}
-                                </p>
-                              )}
+                                  item.metadata.sessionLabel ||
+                                  "Date to be confirmed";
+                                const workshopTimeLabel =
+                                  item.metadata.sessionTimeRange || item.metadata.sessionTime || "";
+                                return (
+                                  <>
+                                    <p>
+                                      <strong>Workshop:</strong> {item.metadata.workshopTitle}
+                                    </p>
+                                    <p>
+                                      <strong>{isRequestedWorkshop ? "Requested Date:" : "Day:"}</strong>{" "}
+                                      {workshopDateLabel}
+                                    </p>
+                                    {workshopTimeLabel && (
+                                      <p>
+                                        <strong>{isRequestedWorkshop ? "Requested Time:" : "Time:"}</strong>{" "}
+                                        {workshopTimeLabel}
+                                      </p>
+                                    )}
+                                  </>
+                                );
+                              })()}
                               <p>
                                 <strong>Location:</strong> {item.metadata.location || "Vereeniging Studio"}
                               </p>
@@ -1137,7 +1150,7 @@ function CartPage() {
                               )}
                               {(item.metadata.optionLabel || item.metadata.framePreference) && (
                                 <p>
-                                  <strong>{item.metadata.type === "cut-flower" ? "Option" : "Frame"}:</strong>{" "}
+                                  <strong>Option:</strong>{" "}
                                   {item.metadata.optionLabel || item.metadata.framePreference}
                                 </p>
                               )}
