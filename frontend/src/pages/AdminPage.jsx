@@ -5678,6 +5678,8 @@ export function AdminSubscriptionOpsView() {
   const [activeManageTab, setActiveManageTab] = useState(
     SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB,
   );
+  const [correctionResendBusy, setCorrectionResendBusy] = useState(false);
+  const [correctionResendResult, setCorrectionResendResult] = useState(null);
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -5826,8 +5828,8 @@ export function AdminSubscriptionOpsView() {
         const city = (address?.city || "").toString().trim();
         const province = (address?.province || "").toString().trim();
         const addressLabel = formatShippingAddress(address);
-        const invoiceAmount = Number(invoice?.amount || 0);
-        const invoiceBaseAmount = Number(invoice?.baseAmount || invoice?.amount || 0);
+        const invoiceAmount = Number(invoice?.amount || invoice?.cycleAmount || 0);
+        const invoiceBaseAmount = Number(invoice?.baseAmount || invoice?.amount || invoice?.cycleAmount || 0);
         const invoiceAdjustmentsTotal = Number(invoice?.adjustmentsTotal || 0);
         const cyclePaidAmount =
           invoice && invoiceStatus === "paid"
@@ -5845,10 +5847,10 @@ export function AdminSubscriptionOpsView() {
           ? formatSubscriptionInvoiceStatusLabel(latestInvoiceStatus)
           : "No invoices yet";
         const latestInvoiceAmount = latestInvoice
-          ? Number(latestInvoice?.amount || 0)
+          ? Number(latestInvoice?.amount || latestInvoice?.cycleAmount || 0)
           : null;
         const latestInvoiceBaseAmount = latestInvoice
-          ? Number(latestInvoice?.baseAmount || latestInvoice?.amount || 0)
+          ? Number(latestInvoice?.baseAmount || latestInvoice?.amount || latestInvoice?.cycleAmount || 0)
           : null;
         const latestInvoiceAdjustmentsTotal = latestInvoice
           ? Number(latestInvoice?.adjustmentsTotal || 0)
@@ -6420,6 +6422,30 @@ export function AdminSubscriptionOpsView() {
     return true;
   };
 
+  const handleResendCorrectedInvoices = async () => {
+    if (!functionsInstance) {
+      setErrorMessage("Cloud Functions are not available.");
+      return;
+    }
+    if (!window.confirm("This will find all pending invoices with R 0.00, repair the amounts and resend corrected emails with an apology to affected customers. Continue?")) {
+      return;
+    }
+    setCorrectionResendBusy(true);
+    setCorrectionResendResult(null);
+    setErrorMessage(null);
+    try {
+      const callable = httpsCallable(functionsInstance, "adminResendCorrectedSubscriptionInvoices");
+      const result = await callable({});
+      const data = result?.data || {};
+      setCorrectionResendResult(data);
+      setStatusMessage(`Done: ${data.emailsSent ?? 0} corrected email(s) sent, ${data.repaired ?? 0} invoice(s) repaired.`);
+    } catch (err) {
+      setErrorMessage(err?.message || "Failed to resend corrected invoices.");
+    } finally {
+      setCorrectionResendBusy(false);
+    }
+  };
+
   const handleExportCsv = () => {
     if (csvExportScope === "filtered") {
       return handleExportFiltered();
@@ -6750,6 +6776,19 @@ export function AdminSubscriptionOpsView() {
     return result?.data || {};
   };
 
+  const executeSubscriptionInvoiceEmailResend = async ({ row, reason }) => {
+    if (!functionsInstance) {
+      throw new Error("Cloud Functions are not available.");
+    }
+    const callable = httpsCallable(functionsInstance, "adminSendSubscriptionInvoiceEmailNow");
+    const result = await callable({
+      subscriptionId: row.subscriptionId,
+      cycleMonth: selectedCycleMonth,
+      reason,
+    });
+    return result?.data || {};
+  };
+
   const resolveActionResultCycleMonth = (value = {}) => {
     const normalizedDirectCycle = normalizeCycleMonthValue(value?.cycleMonth || "");
     if (normalizedDirectCycle) return normalizedDirectCycle;
@@ -6848,6 +6887,27 @@ export function AdminSubscriptionOpsView() {
           reason,
         });
         nextStatusMessage = `${row.customerName || "Subscription"} recurring charge removed.`;
+      } else if (actionType === "invoice-email-resend") {
+        actionResult = await executeSubscriptionInvoiceEmailResend({
+          row,
+          reason,
+        });
+        const resolvedPaymentMethod = normalizeSubscriptionOpsPaymentMethod(
+          actionResult?.paymentMethod || row.paymentMethod,
+        );
+        const invoiceLabel = (actionResult?.invoiceId || row.invoiceId || "").toString().slice(0, 8);
+        const sentLabel =
+          resolvedPaymentMethod === PAYMENT_METHODS.EFT
+            ? `Invoice email sent for ${row.customerName || "subscription"}`
+            : `Pay link sent for ${row.customerName || "subscription"}`;
+        const warningLabel =
+          resolvedPaymentMethod === PAYMENT_METHODS.EFT
+            ? `Invoice email refreshed for ${row.customerName || "subscription"}, but delivery needs attention.`
+            : `Pay link refreshed for ${row.customerName || "subscription"}, but email delivery needs attention.`;
+        nextStatusMessage =
+          actionResult?.emailStatus === "sent"
+            ? `${sentLabel}${invoiceLabel ? ` (${invoiceLabel})` : ""}.`
+            : warningLabel;
       }
 
       const effectiveCycleMonth = resolveActionResultCycleMonth(actionResult);
@@ -7071,6 +7131,44 @@ export function AdminSubscriptionOpsView() {
     });
   };
 
+  const handleResendSubscriptionInvoiceEmail = (row) => {
+    const draft = getDraft(row.subscriptionId, row);
+    const reason = (draft.reason || "").toString().trim();
+    if (!reason) {
+      setErrorMessage("A reason is required before resending a pay link or invoice email.");
+      return;
+    }
+    const paymentMethod = normalizeSubscriptionOpsPaymentMethod(row.paymentMethod);
+    const isEft = paymentMethod === PAYMENT_METHODS.EFT;
+    const actionLabel = isEft
+      ? row.isMissingInvoice
+        ? "send the invoice email"
+        : "resend the invoice email"
+      : row.isMissingInvoice
+        ? "send the pay link"
+        : "resend the pay link";
+    requestActionConfirmation({
+      row,
+      actionType: "invoice-email-resend",
+      reason,
+      title: isEft
+        ? row.isMissingInvoice
+          ? "Send invoice email"
+          : "Resend invoice email"
+        : row.isMissingInvoice
+          ? "Send pay link"
+          : "Resend pay link",
+      message: `Use the current ${formatSubscriptionPaymentMethodLabel(paymentMethod)} billing method to ${actionLabel} for ${row.customerName || row.subscriptionId}?`,
+      confirmLabel: isEft
+        ? row.isMissingInvoice
+          ? "Send invoice"
+          : "Resend invoice"
+        : row.isMissingInvoice
+          ? "Send pay link"
+          : "Resend pay link",
+    });
+  };
+
   return (
     <div className="admin-panel admin-panel--full admin-subscription-ops">
       <Reveal as="div" className="admin-panel__header">
@@ -7081,6 +7179,15 @@ export function AdminSubscriptionOpsView() {
           </p>
         </div>
         <div className="admin-panel__header-actions admin-subscription-ops__hero-actions">
+          <button
+            className="btn btn--secondary admin-subscription-ops__hero-btn"
+            type="button"
+            onClick={handleResendCorrectedInvoices}
+            disabled={correctionResendBusy}
+            title="Repair and resend all pending R0 invoices with an apology"
+          >
+            {correctionResendBusy ? "Sending…" : "Resend Corrected Invoices"}
+          </button>
           <button
             className="btn btn--primary admin-subscription-ops__hero-btn"
             type="button"
@@ -7094,6 +7201,11 @@ export function AdminSubscriptionOpsView() {
             Plans
           </Link>
         </div>
+        {correctionResendResult && (
+          <div className="admin-panel__note" style={{ marginTop: "8px", color: "var(--color-accent)" }}>
+            Repaired: {correctionResendResult.repaired} | Emails sent: {correctionResendResult.emailsSent} | Failed: {correctionResendResult.emailsFailed} | Skipped: {correctionResendResult.skipped}
+          </div>
+        )}
       </Reveal>
 
       {exportDialogOpen ? (
@@ -7591,50 +7703,50 @@ export function AdminSubscriptionOpsView() {
               >
                 x
               </button>
+              <div className="admin-subscription-ops-manage__inner">
+                <header className="admin-subscription-ops-manage__header">
+                  <h3 className="modal__title" id="subscription-ops-manage-title">
+                    Manage {manageRow.customerName || "subscription"}
+                  </h3>
+                  <p className="modal__meta admin-subscription-ops-manage__meta">
+                    {selectedCycleLabel} - {manageRow.subscriptionId}
+                  </p>
+                  <div className="admin-subscription-ops-manage__badges">
+                    <span className={`badge badge--stock-${manageRow.readyToSend ? "in" : "out"}`}>
+                      {manageRow.readyToSend ? "Ready to send" : "Not ready"}
+                    </span>
+                    <span className={`badge badge--stock-${manageRow.invoiceStatus === "paid" ? "in" : "out"}`}>
+                      Paid for {selectedCycleLabel}: {manageRow.invoiceStatus === "paid" ? "Yes" : "No"}
+                    </span>
+                    <span className="badge badge--stock-in">
+                      {formatSubscriptionPaymentMethodLabel(manageRow.paymentMethod)}
+                    </span>
+                  </div>
+                </header>
 
-              <header className="admin-subscription-ops-manage__header">
-                <h3 className="modal__title" id="subscription-ops-manage-title">
-                  Manage {manageRow.customerName || "subscription"}
-                </h3>
-                <p className="modal__meta admin-subscription-ops-manage__meta">
-                  {selectedCycleLabel} - {manageRow.subscriptionId}
-                </p>
-                <div className="admin-subscription-ops-manage__badges">
-                  <span className={`badge badge--stock-${manageRow.readyToSend ? "in" : "out"}`}>
-                    {manageRow.readyToSend ? "Ready to send" : "Not ready"}
-                  </span>
-                  <span className={`badge badge--stock-${manageRow.invoiceStatus === "paid" ? "in" : "out"}`}>
-                    Paid for {selectedCycleLabel}: {manageRow.invoiceStatus === "paid" ? "Yes" : "No"}
-                  </span>
-                  <span className="badge badge--stock-in">
-                    {formatSubscriptionPaymentMethodLabel(manageRow.paymentMethod)}
-                  </span>
+                <div
+                  className="admin-subscription-ops-manage__tabs"
+                  role="tablist"
+                  aria-label="Subscription management sections"
+                  onKeyDown={handleManageTabKeyDown}
+                >
+                  {SUBSCRIPTION_OPS_MANAGE_TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      id={`admin-subscription-ops-manage-tab-${tab.id}`}
+                      className={`admin-subscription-ops-manage__tab ${activeManageTab === tab.id ? "is-active" : ""}`}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeManageTab === tab.id ? "true" : "false"}
+                      aria-controls={`admin-subscription-ops-manage-panel-${tab.id}`}
+                      onClick={() => setActiveManageTab(tab.id)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
-              </header>
 
-              <div
-                className="admin-subscription-ops-manage__tabs"
-                role="tablist"
-                aria-label="Subscription management sections"
-                onKeyDown={handleManageTabKeyDown}
-              >
-                {SUBSCRIPTION_OPS_MANAGE_TABS.map((tab) => (
-                  <button
-                    key={tab.id}
-                    id={`admin-subscription-ops-manage-tab-${tab.id}`}
-                    className={`admin-subscription-ops-manage__tab ${activeManageTab === tab.id ? "is-active" : ""}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeManageTab === tab.id ? "true" : "false"}
-                    aria-controls={`admin-subscription-ops-manage-panel-${tab.id}`}
-                    onClick={() => setActiveManageTab(tab.id)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="admin-subscription-ops-manage__layout">
+                <div className="admin-subscription-ops-manage__layout">
                 {activeManageTab === "overview" && (
                 <section
                   className="admin-subscription-ops-manage__summary"
@@ -8009,6 +8121,22 @@ export function AdminSubscriptionOpsView() {
                           >
                             {rowBusy ? "Working..." : "Update payment method"}
                           </button>
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            disabled={rowBusy || !inventoryEnabled}
+                            onClick={() => handleResendSubscriptionInvoiceEmail(manageRow)}
+                          >
+                            {rowBusy
+                              ? "Working..."
+                              : normalizeSubscriptionOpsPaymentMethod(manageRow.paymentMethod) === PAYMENT_METHODS.EFT
+                                ? manageRow.isMissingInvoice
+                                  ? "Send invoice email"
+                                  : "Resend invoice email"
+                                : manageRow.isMissingInvoice
+                                  ? "Send pay link"
+                                  : "Resend pay link"}
+                          </button>
                         </div>
                       </>
                     )}
@@ -8165,6 +8293,7 @@ export function AdminSubscriptionOpsView() {
                   </div>
                 </section>
                 )}
+                </div>
               </div>
             </div>
           </div>

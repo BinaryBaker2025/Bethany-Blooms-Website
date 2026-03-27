@@ -93,7 +93,9 @@ const SUBSCRIPTION_INVOICE_DOCUMENTS_DIRECTORY = "subscription-invoices";
 const SUBSCRIPTION_INVOICE_PDF_CONTENT_TYPE = "application/pdf";
 const ORDER_INVOICE_DOCUMENTS_DIRECTORY = "order-invoices";
 const ORDER_INVOICE_PDF_CONTENT_TYPE = "application/pdf";
-const SUBSCRIPTION_PAYLINK_TTL_MS = 45 * 24 * 60 * 60 * 1000;
+const SUBSCRIPTION_PAYLINK_TTL_DAYS = 7;
+const SUBSCRIPTION_PAYLINK_TTL_MS =
+  SUBSCRIPTION_PAYLINK_TTL_DAYS * 24 * 60 * 60 * 1000;
 const SUBSCRIPTION_STATUSES = Object.freeze({
   ACTIVE: "active",
   PAUSED: "paused",
@@ -1281,6 +1283,9 @@ function buildCycleInvoicePlan({
     timeZone,
   });
   const totalDeliveries = Number(deliverySchedule.totalDeliveries || 0);
+  if (totalDeliveries <= 0) {
+    throw new Error(`No delivery dates could be resolved for ${normalizedCycleMonth}. Cannot create a zero-amount invoice.`);
+  }
   const cycleAmount = roundMoney(perDeliveryAmount * totalDeliveries);
   return {
     cycleMonth: normalizedCycleMonth,
@@ -2234,17 +2239,85 @@ function createSubscriptionPayLinkToken() {
   return crypto.randomBytes(32).toString("hex");
 }
 
-function verifySubscriptionPayLinkToken(invoice = {}, token = "") {
-  const expectedHash = (invoice?.payLink?.tokenHash || "").toString().trim();
+function doesSubscriptionPayLinkHashMatch(expectedHash = "", token = "") {
+  const normalizedExpectedHash = (expectedHash || "").toString().trim();
   const providedToken = (token || "").toString().trim();
-  if (!expectedHash || !providedToken) return false;
+  if (!normalizedExpectedHash || !providedToken) return false;
   const actualHash = hashSubscriptionPayLinkToken(providedToken);
-  if (!actualHash || actualHash.length !== expectedHash.length) return false;
+  if (!actualHash || actualHash.length !== normalizedExpectedHash.length) return false;
   try {
-    return crypto.timingSafeEqual(Buffer.from(actualHash), Buffer.from(expectedHash));
+    return crypto.timingSafeEqual(Buffer.from(actualHash), Buffer.from(normalizedExpectedHash));
   } catch {
     return false;
   }
+}
+
+function normalizeActiveSubscriptionPayLinkHistory(history = [], now = new Date()) {
+  const nowTime = now instanceof Date && !Number.isNaN(now.getTime()) ? now.getTime() : Date.now();
+  const seen = new Set();
+  const entries = [];
+
+  (Array.isArray(history) ? history : []).forEach((entry) => {
+    const tokenHash = (entry?.tokenHash || "").toString().trim();
+    const expiresAtDate = coerceTimestampToDate(entry?.expiresAt);
+    if (!tokenHash || !expiresAtDate) return;
+    if (expiresAtDate.getTime() <= nowTime) return;
+    if (seen.has(tokenHash)) return;
+    seen.add(tokenHash);
+    entries.push({
+      tokenHash,
+      issuedAt: coerceTimestampToDate(entry?.issuedAt) || null,
+      expiresAt: expiresAtDate,
+    });
+  });
+
+  return entries
+    .sort((left, right) => {
+      const leftTime = left?.expiresAt?.getTime?.() || 0;
+      const rightTime = right?.expiresAt?.getTime?.() || 0;
+      return rightTime - leftTime;
+    })
+    .slice(0, 10);
+}
+
+function buildSubscriptionPayLinkHistoryUpdate(invoice = {}, nextTokenHash = "", now = new Date()) {
+  const history = normalizeActiveSubscriptionPayLinkHistory(invoice?.payLink?.history || [], now);
+  const currentTokenHash = (invoice?.payLink?.tokenHash || "").toString().trim();
+  const currentExpiresAt = coerceTimestampToDate(invoice?.payLink?.expiresAt);
+  if (!currentTokenHash || !currentExpiresAt) return history;
+  if (currentExpiresAt.getTime() <= now.getTime()) return history;
+
+  const normalizedNextTokenHash = (nextTokenHash || "").toString().trim();
+  if (normalizedNextTokenHash && currentTokenHash === normalizedNextTokenHash) {
+    return history;
+  }
+
+  return normalizeActiveSubscriptionPayLinkHistory(
+    [
+      {
+        tokenHash: currentTokenHash,
+        issuedAt: invoice?.payLink?.issuedAt || null,
+        expiresAt: invoice?.payLink?.expiresAt || currentExpiresAt,
+      },
+      ...history,
+    ],
+    now,
+  );
+}
+
+function verifySubscriptionPayLinkToken(invoice = {}, token = "") {
+  const providedToken = (token || "").toString().trim();
+  if (!providedToken) return false;
+
+  if (doesSubscriptionPayLinkHashMatch(invoice?.payLink?.tokenHash || "", providedToken)) {
+    return true;
+  }
+
+  const history = normalizeActiveSubscriptionPayLinkHistory(
+    invoice?.payLink?.history || [],
+    new Date(),
+  );
+  return history.some((entry) => doesSubscriptionPayLinkHashMatch(entry?.tokenHash || "", providedToken));
 }
 
 function buildSubscriptionInvoiceDocumentId(subscriptionId = "", cycleMonth = "") {
@@ -7708,6 +7781,7 @@ function buildSubscriptionInvoiceEmailHtml({
   invoice = {},
   payLinkUrl = "",
   invoiceDownloadUrl = "",
+  correctionNote = "",
 } = {}) {
   const customerName = escapeHtml(subscription.customer?.fullName || "there");
   const planLabel = buildSubscriptionPlanLabel(subscription, invoice);
@@ -7784,6 +7858,9 @@ function buildSubscriptionInvoiceEmailHtml({
         If the button does not work, copy this link:<br/>
         <a href="${escapeHtml(payLinkUrl)}" style="color:${EMAIL_BRAND.primary};text-decoration:none;word-break:break-all;">${escapeHtml(payLinkUrl)}</a>
       </p>
+      <p style="margin:0 0 8px;font-size:12px;color:${EMAIL_BRAND.muted};">
+        This pay link expires in ${SUBSCRIPTION_PAYLINK_TTL_DAYS} days. If it expires, request a new pay link from your account.
+      </p>
     `
     : "";
   const invoiceDownloadMarkup = invoiceDownloadUrl
@@ -7799,8 +7876,16 @@ function buildSubscriptionInvoiceEmailHtml({
     `
     : "";
 
+  const correctionBanner = correctionNote
+    ? `<div style="padding:12px 16px;border-radius:10px;background:#fff3cd;border:1px solid #ffc107;margin-bottom:16px;">
+        <p style="margin:0;font-weight:700;color:#856404;">Corrected Invoice</p>
+        <p style="margin:6px 0 0;color:#856404;">${escapeHtml(correctionNote)}</p>
+      </div>`
+    : "";
+
   const body = `
     <p style="margin:0 0 16px;">Hi ${customerName},</p>
+    ${correctionBanner}
     <p style="margin:0 0 12px;">Your flower subscription invoice is ready.</p>
     <div style="padding:14px 16px;border-radius:14px;background:rgba(245,234,215,0.6);margin-bottom:16px;">
       <p style="margin:0 0 6px;"><strong>Invoice:</strong> ${escapeHtml(invoiceNumberLabel)}</p>
@@ -7841,6 +7926,7 @@ function buildSubscriptionEftInvoiceEmailHtml({
   subscription = {},
   invoice = {},
   invoiceDownloadUrl = "",
+  correctionNote = "",
 } = {}) {
   const customerName = escapeHtml(subscription.customer?.fullName || "there");
   const planLabel = buildSubscriptionPlanLabel(subscription, invoice);
@@ -7898,8 +7984,16 @@ function buildSubscriptionEftInvoiceEmailHtml({
     `
     : "";
 
+  const eftCorrectionBanner = correctionNote
+    ? `<div style="padding:12px 16px;border-radius:10px;background:#fff3cd;border:1px solid #ffc107;margin-bottom:16px;">
+        <p style="margin:0;font-weight:700;color:#856404;">Corrected Invoice</p>
+        <p style="margin:6px 0 0;color:#856404;">${escapeHtml(correctionNote)}</p>
+      </div>`
+    : "";
+
   const body = `
     <p style="margin:0 0 16px;">Hi ${customerName},</p>
+    ${eftCorrectionBanner}
     <p style="margin:0 0 12px;">Your subscription invoice is ready for EFT payment and awaits admin approval once paid.</p>
     <div style="padding:14px 16px;border-radius:14px;background:rgba(245,234,215,0.6);margin-bottom:16px;">
       <p style="margin:0 0 6px;"><strong>Invoice:</strong> ${escapeHtml(invoiceNumberLabel)}</p>
@@ -11313,11 +11407,26 @@ async function createOrGetSubscriptionInvoice({
       if (!existingData.invoiceType) {
         patchPayload.invoiceType = SUBSCRIPTION_INVOICE_TYPES.CYCLE;
       }
-      if (!Object.prototype.hasOwnProperty.call(existingData, "baseAmount")) {
-        patchPayload.baseAmount = existingFinancials.baseAmount;
-      }
-      if (!Object.prototype.hasOwnProperty.call(existingData, "adjustmentsTotal")) {
+      // Repair zero-amount invoices: use the recomputed financials (which fall back to cycleAmount),
+      // or fall back to the proposed amount passed by the caller (e.g. from the scheduler).
+      const existingStoredAmount = Number(existingData.amount);
+      const proposedAmount = roundMoney(Number(amount || 0));
+      const repairAmount = existingFinancials.amount > 0
+        ? existingFinancials.amount
+        : proposedAmount > 0
+          ? proposedAmount
+          : 0;
+      if ((!Number.isFinite(existingStoredAmount) || existingStoredAmount <= 0) && repairAmount > 0) {
+        patchPayload.amount = repairAmount;
+        patchPayload.baseAmount = repairAmount;
         patchPayload.adjustmentsTotal = existingFinancials.adjustmentsTotal;
+      } else {
+        if (!Object.prototype.hasOwnProperty.call(existingData, "baseAmount")) {
+          patchPayload.baseAmount = existingFinancials.baseAmount;
+        }
+        if (!Object.prototype.hasOwnProperty.call(existingData, "adjustmentsTotal")) {
+          patchPayload.adjustmentsTotal = existingFinancials.adjustmentsTotal;
+        }
       }
       if (!Array.isArray(existingData.adjustments) && existingFinancials.adjustments.length) {
         patchPayload.adjustments = existingFinancials.adjustments;
@@ -11677,6 +11786,8 @@ async function issueSubscriptionInvoiceEmail({
   invoiceId = "",
   invoice = {},
   triggerContext = null,
+  forceResend = false,
+  correctionNote = "",
 } = {}) {
   const normalizedSubscriptionId = (subscriptionId || "").toString().trim();
   const normalizedInvoiceId = (invoiceId || "").toString().trim();
@@ -11699,11 +11810,11 @@ async function issueSubscriptionInvoiceEmail({
     invoicePaymentMethod,
   );
   const attempts = Number(invoice?.email?.attempts || 0) + 1;
-  
+
   // Limit emails: Only send on attempt 1 (initial) and attempt 2 (next day follow-up)
-  // Do not send on attempts 3+
+  // Do not send on attempts 3+. forceResend bypasses this for admin corrections.
   const maxEmailAttempts = 2;
-  const shouldSkipEmail = attempts > maxEmailAttempts;
+  const shouldSkipEmail = !forceResend && attempts > maxEmailAttempts;
   
   const payToken =
     invoicePaymentMethod === SUBSCRIPTION_PAYMENT_METHODS.PAYFAST
@@ -11717,6 +11828,10 @@ async function issueSubscriptionInvoiceEmail({
     invoicePaymentMethod === SUBSCRIPTION_PAYMENT_METHODS.PAYFAST
       ? new Date(Date.now() + SUBSCRIPTION_PAYLINK_TTL_MS)
       : null;
+  const payLinkHistory =
+    invoicePaymentMethod === SUBSCRIPTION_PAYMENT_METHODS.PAYFAST
+      ? buildSubscriptionPayLinkHistoryUpdate(invoice, tokenHash, new Date())
+      : [];
   const payLinkUrl =
     invoicePaymentMethod === SUBSCRIPTION_PAYMENT_METHODS.PAYFAST
       ? buildSubscriptionPayLinkUrl(normalizedInvoiceId, payToken)
@@ -11792,6 +11907,7 @@ async function issueSubscriptionInvoiceEmail({
           },
           invoice: normalizedInvoicePayload,
           invoiceDownloadUrl: (invoiceDocument?.downloadUrl || "").toString().trim(),
+          correctionNote,
         })
       : buildSubscriptionInvoiceEmailHtml({
           subscription: {
@@ -11802,10 +11918,12 @@ async function issueSubscriptionInvoiceEmail({
           invoice: normalizedInvoicePayload,
           payLinkUrl,
           invoiceDownloadUrl: (invoiceDocument?.downloadUrl || "").toString().trim(),
+          correctionNote,
         });
-    const emailSubject = invoicePaymentMethod === SUBSCRIPTION_PAYMENT_METHODS.EFT
+    const emailSubjectBase = invoicePaymentMethod === SUBSCRIPTION_PAYMENT_METHODS.EFT
       ? `Bethany Blooms - Subscription EFT invoice ${invoice?.cycleMonth || ""}`.trim()
       : `Bethany Blooms - Subscription invoice ${invoice?.cycleMonth || ""}`.trim();
+    const emailSubject = correctionNote ? `Corrected: ${emailSubjectBase}` : emailSubjectBase;
     const sendResult = await sendEmailWithRetry({
       to: customerEmail,
       subject: emailSubject,
@@ -11829,6 +11947,11 @@ async function issueSubscriptionInvoiceEmail({
           tokenHash,
           issuedAt: FIELD_VALUE.serverTimestamp(),
           expiresAt: admin.firestore.Timestamp.fromDate(expiresAtDate),
+          history: payLinkHistory.map((entry) => ({
+            tokenHash: (entry?.tokenHash || "").toString().trim(),
+            issuedAt: entry?.issuedAt ? admin.firestore.Timestamp.fromDate(entry.issuedAt) : null,
+            expiresAt: admin.firestore.Timestamp.fromDate(entry.expiresAt),
+          })),
         }
       : null;
 
@@ -12943,7 +13066,9 @@ exports.createSubscriptionPayfastPaymentHttp = onRequest((req, res) => {
 
       const payLinkExpiry = coerceTimestampToDate(invoice?.payLink?.expiresAt);
       if (!payLinkExpiry || payLinkExpiry.getTime() < Date.now()) {
-        throw new Error("This payment link has expired. Request a new pay link from your account.");
+        throw new Error(
+          `This payment link has expired. Subscription pay links expire after ${SUBSCRIPTION_PAYLINK_TTL_DAYS} days. Request a new pay link from your account.`,
+        );
       }
 
       const subscriptionId = (invoice.subscriptionId || "").toString().trim();
@@ -12985,8 +13110,9 @@ exports.createSubscriptionPayfastPaymentHttp = onRequest((req, res) => {
 
       const pendingRef = db.collection(PENDING_SUBSCRIPTION_PAYFAST_COLLECTION).doc();
       const paymentReference = pendingRef.id;
-      const amount = Number(invoice.amount || 0);
-      
+      const invoiceFinancials = resolveSubscriptionInvoiceFinancialSnapshot(invoice);
+      const amount = invoiceFinancials.amount;
+
       // Validate that the invoice amount is valid and greater than zero
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new Error(
@@ -13583,6 +13709,114 @@ exports.updateCustomerSubscriptionStatus = onCall(async (request) => {
   };
 });
 
+async function sendSubscriptionInvoiceEmailNowForResolvedInvoice({
+  subscriptionId = "",
+  subscription = {},
+  invoiceId = "",
+  invoice = {},
+  forceResend = true,
+} = {}) {
+  const normalizedSubscriptionId = (subscriptionId || "").toString().trim();
+  const normalizedInvoiceId = (invoiceId || invoice?.id || invoice?.invoiceId || "").toString().trim();
+  if (!normalizedSubscriptionId || !normalizedInvoiceId) {
+    throw new HttpsError("invalid-argument", "Subscription invoice reference is required.");
+  }
+  const normalizedInvoiceStatus = normalizeSubscriptionInvoiceStatus(invoice.status);
+  const normalizedPaymentMethod = normalizeSubscriptionPaymentMethod(
+    invoice?.paymentMethod || subscription?.paymentMethod,
+  );
+  const normalizedPaymentApprovalStatus = normalizeSubscriptionPaymentApprovalStatus(
+    invoice?.paymentApprovalStatus || invoice?.paymentApproval?.decision || "",
+    normalizedPaymentMethod,
+  );
+  invoice = {
+    ...(invoice || {}),
+    status: normalizedInvoiceStatus,
+    paymentMethod: normalizedPaymentMethod,
+    paymentApprovalStatus: normalizedPaymentApprovalStatus,
+  };
+  if (normalizedInvoiceStatus !== SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
+    throw new HttpsError("failed-precondition", "No pending invoice is available for this subscription.");
+  }
+
+  const emailDispatch = await issueSubscriptionInvoiceEmail({
+    subscriptionId: normalizedSubscriptionId,
+    subscription,
+    invoiceId: normalizedInvoiceId,
+    invoice,
+    forceResend,
+    triggerContext: {
+      trigger: SUBSCRIPTION_INVOICE_EMAIL_TRIGGERS.MANUAL,
+      cycleMonth: invoice?.cycleMonth || "",
+    },
+  });
+
+  await db.collection(SUBSCRIPTIONS_COLLECTION).doc(normalizedSubscriptionId).set(
+    {
+      lastInvoiceId: normalizedInvoiceId,
+      lastInvoiceMonth: invoice?.cycleMonth || null,
+      updatedAt: FIELD_VALUE.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  const normalizedTier = normalizeSubscriptionTier(
+    subscription?.tier || subscription?.subscriptionPlan?.tier,
+  );
+  const schedule = invoice?.deliverySchedule || {};
+  const cycleMonth = normalizePreorderSendMonth(invoice?.cycleMonth || "") || "";
+  const mondaySlots = normalizeMondaySlotsForTier(
+    normalizedTier,
+    schedule?.slots || subscription?.deliveryPreference?.slots || [],
+    { allowDefaults: true },
+  );
+  const deliveryDates = Array.isArray(schedule?.includedDeliveryDates)
+    ? schedule.includedDeliveryDates.map((dateKey) => normalizeIsoDateKey(dateKey)).filter(Boolean)
+    : [];
+  const cycleDeliveryDates = Array.isArray(schedule?.cycleDeliveryDates)
+    ? schedule.cycleDeliveryDates.map((dateKey) => normalizeIsoDateKey(dateKey)).filter(Boolean)
+    : [];
+  const perDeliveryAmount = roundMoney(
+    Number(
+      resolveSubscriptionRecurringAmount(subscription) ||
+      invoice?.perDeliveryAmount ||
+      invoice?.monthlyAmount ||
+      0,
+    ),
+  );
+  const totalDeliveries = Number(schedule?.totalDeliveries || cycleDeliveryDates.length || 0);
+  const cycleAmount = roundMoney(Number(invoice?.cycleAmount || perDeliveryAmount * totalDeliveries || 0));
+
+  return {
+    subscriptionId: normalizedSubscriptionId,
+    invoiceId: normalizedInvoiceId,
+    paymentMethod: normalizedPaymentMethod,
+    paymentApprovalStatus: normalizedPaymentApprovalStatus,
+    cycleMonth,
+    invoiceAmount: roundMoney(Number(invoice?.amount || 0)),
+    monthlyAmount: perDeliveryAmount,
+    perDeliveryAmount,
+    cycleAmount,
+    nextBillingMonth: normalizePreorderSendMonth(subscription?.nextBillingMonth || "") || "",
+    firstDeliveryDate:
+      normalizeIsoDateKey(schedule?.firstDeliveryDate || "") || deliveryDates[0] || cycleDeliveryDates[0] || "",
+    deliveryDates,
+    cycleDeliveryDates,
+    mondaySlots,
+    isProrated: Boolean(invoice?.isProrated),
+    prorationRatio: Number(
+      invoice?.prorationRatio ||
+        invoice?.proration?.ratio ||
+        (invoice?.isProrated ? 0 : 1),
+    ),
+    emailStatus: emailDispatch.emailStatus,
+    emailError: emailDispatch.emailError,
+    payLinkUrl: emailDispatch.payLinkUrl,
+    invoiceDownloadUrl: emailDispatch.invoiceDownloadUrl || "",
+    invoiceFileName: emailDispatch.invoiceFileName || "",
+  };
+}
+
 exports.sendSubscriptionInvoiceEmailNow = onCall(async (request) => {
   await assertCustomerSubscriptionRequest(request.auth || {});
 
@@ -13654,98 +13888,95 @@ exports.sendSubscriptionInvoiceEmailNow = onCall(async (request) => {
     invoiceId = createdInvoice.invoiceId;
   }
 
-  const normalizedInvoiceStatus = normalizeSubscriptionInvoiceStatus(invoice.status);
-  const normalizedPaymentMethod = normalizeSubscriptionPaymentMethod(
-    invoice?.paymentMethod || subscription?.paymentMethod,
-  );
-  const normalizedPaymentApprovalStatus = normalizeSubscriptionPaymentApprovalStatus(
-    invoice?.paymentApprovalStatus || invoice?.paymentApproval?.decision || "",
-    normalizedPaymentMethod,
-  );
-  invoice = {
-    ...(invoice || {}),
-    status: normalizedInvoiceStatus,
-    paymentMethod: normalizedPaymentMethod,
-    paymentApprovalStatus: normalizedPaymentApprovalStatus,
-  };
-  if (normalizedInvoiceStatus !== SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
-    throw new HttpsError("failed-precondition", "No pending invoice is available for this subscription.");
-  }
-
-  const emailDispatch = await issueSubscriptionInvoiceEmail({
+  return sendSubscriptionInvoiceEmailNowForResolvedInvoice({
     subscriptionId,
     subscription,
     invoiceId,
     invoice,
-    triggerContext: {
-      trigger: SUBSCRIPTION_INVOICE_EMAIL_TRIGGERS.MANUAL,
-      cycleMonth: invoice?.cycleMonth || "",
+    forceResend: true,
+  });
+});
+
+exports.adminSendSubscriptionInvoiceEmailNow = onCall(async (request) => {
+  await assertAdminRequest(request);
+
+  const payload = request.data || {};
+  const subscriptionId = (payload.subscriptionId || "").toString().trim();
+  const requestedCycleMonth = normalizePreorderSendMonth(payload.cycleMonth || "");
+  const reason = normalizeAdminOverrideReason(payload.reason || "");
+  if (!subscriptionId) {
+    throw new HttpsError("invalid-argument", "Subscription ID is required.");
+  }
+  if (!requestedCycleMonth) {
+    throw new HttpsError("invalid-argument", "Cycle month must be in YYYY-MM format.");
+  }
+  if (!reason) {
+    throw new HttpsError("invalid-argument", "A reason is required.");
+  }
+
+  const actorUid = (request.auth?.uid || "").toString().trim();
+  const actorEmail = (request.auth?.token?.email || "").toString().trim().toLowerCase();
+  const { subscription } = await resolveSubscriptionByIdForAdmin(subscriptionId);
+  const cycleContext = await ensureCycleBaseInvoiceForAdmin({
+    subscriptionId,
+    subscription,
+    cycleMonth: requestedCycleMonth,
+    createIfMissing: true,
+  });
+  const pendingTopUpInvoice = getLatestPendingTopUpInvoice(cycleContext?.cycleInvoices || []);
+  const targetInvoice = pendingTopUpInvoice || cycleContext?.baseInvoice || null;
+  const targetInvoiceId = (
+    targetInvoice?.id ||
+    targetInvoice?.invoiceId ||
+    cycleContext?.baseInvoiceId ||
+    ""
+  ).toString().trim();
+
+  if (!targetInvoice || !targetInvoiceId) {
+    throw new HttpsError("failed-precondition", "No invoice is available for this cycle.");
+  }
+
+  const actionResult = await sendSubscriptionInvoiceEmailNowForResolvedInvoice({
+    subscriptionId,
+    subscription,
+    invoiceId: targetInvoiceId,
+    invoice: targetInvoice,
+    forceResend: true,
+  });
+  const effectiveCycleMonth =
+    normalizePreorderSendMonth(actionResult?.cycleMonth || cycleContext?.cycleMonth || "") ||
+    requestedCycleMonth;
+  const shiftedCycleMonth = effectiveCycleMonth !== requestedCycleMonth;
+  const invoiceType = normalizeSubscriptionInvoiceType(targetInvoice?.invoiceType || "");
+
+  await writeSubscriptionAdminAuditLog({
+    actionType: "subscription-invoice-email-resend",
+    actorUid,
+    actorEmail,
+    subscriptionId,
+    invoiceId: targetInvoiceId,
+    cycleMonth: effectiveCycleMonth,
+    fromStatus: null,
+    toStatus: null,
+    reason,
+    meta: {
+      requestedCycleMonth,
+      effectiveCycleMonth,
+      shiftedCycleMonth,
+      invoiceType,
+      invoiceCreated: Boolean(cycleContext?.created),
+      paymentMethod: actionResult?.paymentMethod || null,
+      emailStatus: actionResult?.emailStatus || ORDER_NOTIFICATION_STATUSES.SKIPPED,
     },
   });
 
-  await db.collection(SUBSCRIPTIONS_COLLECTION).doc(subscriptionId).set(
-    {
-      lastInvoiceId: invoiceId,
-      lastInvoiceMonth: invoice?.cycleMonth || null,
-      updatedAt: FIELD_VALUE.serverTimestamp(),
-    },
-    { merge: true },
-  );
-
-  const normalizedTier = normalizeSubscriptionTier(
-    subscription?.tier || subscription?.subscriptionPlan?.tier,
-  );
-  const schedule = invoice?.deliverySchedule || {};
-  const cycleMonth = normalizePreorderSendMonth(invoice?.cycleMonth || "") || "";
-  const mondaySlots = normalizeMondaySlotsForTier(
-    normalizedTier,
-    schedule?.slots || subscription?.deliveryPreference?.slots || [],
-    { allowDefaults: true },
-  );
-  const deliveryDates = Array.isArray(schedule?.includedDeliveryDates)
-    ? schedule.includedDeliveryDates.map((dateKey) => normalizeIsoDateKey(dateKey)).filter(Boolean)
-    : [];
-  const cycleDeliveryDates = Array.isArray(schedule?.cycleDeliveryDates)
-    ? schedule.cycleDeliveryDates.map((dateKey) => normalizeIsoDateKey(dateKey)).filter(Boolean)
-    : [];
-  const perDeliveryAmount = roundMoney(
-    Number(
-      resolveSubscriptionRecurringAmount(subscription) ||
-      invoice?.perDeliveryAmount ||
-      invoice?.monthlyAmount ||
-      0,
-    ),
-  );
-  const totalDeliveries = Number(schedule?.totalDeliveries || cycleDeliveryDates.length || 0);
-  const cycleAmount = roundMoney(Number(invoice?.cycleAmount || perDeliveryAmount * totalDeliveries || 0));
-
   return {
-    subscriptionId,
-    invoiceId,
-    paymentMethod: normalizedPaymentMethod,
-    paymentApprovalStatus: normalizedPaymentApprovalStatus,
-    cycleMonth,
-    invoiceAmount: roundMoney(Number(invoice?.amount || 0)),
-    monthlyAmount: perDeliveryAmount,
-    perDeliveryAmount,
-    cycleAmount,
-    nextBillingMonth: normalizePreorderSendMonth(subscription?.nextBillingMonth || "") || "",
-    firstDeliveryDate:
-      normalizeIsoDateKey(schedule?.firstDeliveryDate || "") || deliveryDates[0] || cycleDeliveryDates[0] || "",
-    deliveryDates,
-    cycleDeliveryDates,
-    mondaySlots,
-    isProrated: Boolean(invoice?.isProrated),
-    prorationRatio: Number(
-      invoice?.prorationRatio ||
-        invoice?.proration?.ratio ||
-        (invoice?.isProrated ? 0 : 1),
-    ),
-    emailStatus: emailDispatch.emailStatus,
-    emailError: emailDispatch.emailError,
-    payLinkUrl: emailDispatch.payLinkUrl,
-    invoiceDownloadUrl: emailDispatch.invoiceDownloadUrl || "",
-    invoiceFileName: emailDispatch.invoiceFileName || "",
+    ...actionResult,
+    requestedCycleMonth,
+    effectiveCycleMonth,
+    shiftedCycleMonth,
+    invoiceType,
+    invoiceCreated: Boolean(cycleContext?.created),
   };
 });
 
@@ -13958,7 +14189,7 @@ exports.sendMonthlySubscriptionInvoices = onSchedule(
           continue;
         }
         const pendingInvoice = await loadLatestPendingSubscriptionInvoice(subscriptionId);
-        if (pendingInvoice) {
+        if (pendingInvoice && normalizeSubscriptionInvoiceType(pendingInvoice?.invoiceType || "") === SUBSCRIPTION_INVOICE_TYPES.CYCLE) {
           const pendingInvoiceId =
             (pendingInvoice.id || pendingInvoice.invoiceId || "").toString().trim();
           if (!pendingInvoiceId) {
@@ -13975,6 +14206,17 @@ exports.sendMonthlySubscriptionInvoices = onSchedule(
             continue;
           }
 
+          const pendingInvoiceResolvedAmount = resolveSubscriptionInvoiceFinancialSnapshot(pendingInvoice).amount;
+          if (!pendingInvoiceResolvedAmount || pendingInvoiceResolvedAmount <= 0) {
+            emailsFailed += 1;
+            functions.logger.error("Pending subscription invoice has zero amount — skipping resend", {
+              subscriptionId,
+              invoiceId: pendingInvoiceId,
+              invoiceAmount: pendingInvoice.amount,
+              cycleAmount: pendingInvoice.cycleAmount,
+            });
+            continue;
+          }
           resentInvoices += 1;
           if (cycleComparison < 0) {
             carryForwardResends += 1;
@@ -14062,6 +14304,17 @@ exports.sendMonthlySubscriptionInvoices = onSchedule(
         const invoiceStatus = normalizeSubscriptionInvoiceStatus(invoice.status);
         if (invoiceStatus !== SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
           skipped += 1;
+          continue;
+        }
+        const resolvedInvoiceAmount = resolveSubscriptionInvoiceFinancialSnapshot(invoice).amount;
+        if (!resolvedInvoiceAmount || resolvedInvoiceAmount <= 0) {
+          emailsFailed += 1;
+          functions.logger.error("Subscription invoice has zero amount after repair — skipping email", {
+            subscriptionId,
+            invoiceId: invoiceResult.invoiceId,
+            invoiceAmount: invoice.amount,
+            cycleAmount: invoice.cycleAmount,
+          });
           continue;
         }
 
@@ -16726,6 +16979,161 @@ exports.createAdminEftOrder = onCall(async (request) => {
     orderNumber,
     status: "pending-payment-approval",
     paymentApprovalStatus: "pending",
+  };
+});
+
+exports.adminResendCorrectedSubscriptionInvoices = onCall(async (request) => {
+  await assertAdminRequest(request);
+
+  const APOLOGY = "We sincerely apologise for sending an invoice with an incorrect amount of R 0.00. This was a technical error on our side. The corrected amount is shown below. We are sorry for any inconvenience caused.";
+
+  const invoicesSnap = await db
+    .collection(SUBSCRIPTION_INVOICES_COLLECTION)
+    .where("status", "==", SUBSCRIPTION_INVOICE_STATUSES.PENDING)
+    .get();
+
+  let repaired = 0;
+  let emailsSent = 0;
+  let emailsFailed = 0;
+  let skipped = 0;
+
+  for (const invoiceDoc of invoicesSnap.docs) {
+    const invoiceId = invoiceDoc.id;
+    const invoice = invoiceDoc.data() || {};
+
+    // Only process CYCLE invoices
+    if (normalizeSubscriptionInvoiceType(invoice.invoiceType || "") !== SUBSCRIPTION_INVOICE_TYPES.CYCLE) {
+      skipped += 1;
+      continue;
+    }
+
+    // Only process invoices with amount <= 0
+    const storedAmount = Number(invoice.amount || 0);
+    if (storedAmount > 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const subscriptionId = (invoice.subscriptionId || "").toString().trim();
+    if (!subscriptionId) {
+      skipped += 1;
+      continue;
+    }
+
+    const subscriptionSnap = await db.collection(SUBSCRIPTIONS_COLLECTION).doc(subscriptionId).get();
+    if (!subscriptionSnap.exists) {
+      skipped += 1;
+      continue;
+    }
+    const subscription = subscriptionSnap.data() || {};
+
+    const recurringAmount = resolveSubscriptionRecurringAmount({
+      ...subscription,
+      monthlyAmount: subscription.monthlyAmount || subscription?.subscriptionPlan?.monthlyAmount,
+    });
+    if (!recurringAmount || recurringAmount <= 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const normalizedTier = normalizeSubscriptionTier(
+      subscription?.tier || subscription?.subscriptionPlan?.tier,
+    );
+    if (!normalizedTier) {
+      skipped += 1;
+      continue;
+    }
+
+    const cycleMonth = normalizePreorderSendMonth(invoice.cycleMonth || "");
+    if (!cycleMonth) {
+      skipped += 1;
+      continue;
+    }
+
+    const deliveryPreference = resolveSubscriptionDeliveryPreference(subscription);
+    const deliverySchedule = buildDeliveryScheduleSnapshot({
+      tier: normalizedTier,
+      mondaySlots: deliveryPreference.slots,
+      cycleMonth,
+      timeZone: SUBSCRIPTION_TIMEZONE,
+    });
+
+    const totalDeliveries = Number(deliverySchedule.totalDeliveries || 0);
+    if (totalDeliveries <= 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const correctAmount = roundMoney(recurringAmount * totalDeliveries);
+    if (correctAmount <= 0) {
+      skipped += 1;
+      continue;
+    }
+
+    // Repair the invoice in Firestore
+    const invoiceRef = db.collection(SUBSCRIPTION_INVOICES_COLLECTION).doc(invoiceId);
+    await invoiceRef.set(
+      {
+        amount: correctAmount,
+        baseAmount: correctAmount,
+        adjustmentsTotal: 0,
+        cycleAmount: correctAmount,
+        deliverySchedule,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    repaired += 1;
+
+    // Send corrected email, bypassing the attempt limit
+    const repairedInvoice = {
+      ...invoice,
+      invoiceId,
+      amount: correctAmount,
+      baseAmount: correctAmount,
+      adjustmentsTotal: 0,
+      cycleAmount: correctAmount,
+      deliverySchedule,
+    };
+
+    try {
+      const emailDispatch = await issueSubscriptionInvoiceEmail({
+        subscriptionId,
+        subscription: { ...subscription, monthlyAmount: recurringAmount },
+        invoiceId,
+        invoice: repairedInvoice,
+        triggerContext: { trigger: SUBSCRIPTION_INVOICE_EMAIL_TRIGGERS.MANUAL, cycleMonth },
+        forceResend: true,
+        correctionNote: APOLOGY,
+      });
+      if (emailDispatch.emailStatus === ORDER_NOTIFICATION_STATUSES.SENT) {
+        emailsSent += 1;
+      } else {
+        emailsFailed += 1;
+        functions.logger.warn("Corrected invoice email not sent", {
+          subscriptionId,
+          invoiceId,
+          emailStatus: emailDispatch.emailStatus,
+          emailError: emailDispatch.emailError,
+        });
+      }
+    } catch (err) {
+      emailsFailed += 1;
+      functions.logger.error("Corrected invoice email failed", {
+        subscriptionId,
+        invoiceId,
+        error: err?.message || err,
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    repaired,
+    emailsSent,
+    emailsFailed,
+    skipped,
+    total: invoicesSnap.size,
   };
 });
 

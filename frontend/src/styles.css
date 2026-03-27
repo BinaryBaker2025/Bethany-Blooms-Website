@@ -3780,8 +3780,14 @@ main {
 }
 
 .admin-subscription-ops-manage__content {
+  padding: 0 !important;
+}
+
+.admin-subscription-ops-manage__inner {
   display: grid;
   gap: 1.05rem;
+  min-width: 0;
+  padding: clamp(1.05rem, 2.2vw, 1.45rem) clamp(1.15rem, 2.8vw, 1.8rem) clamp(1.15rem, 2.4vw, 1.55rem) !important;
 }
 
 .admin-subscription-ops-manage__header {
@@ -23022,6 +23028,15 @@ td.admin-table__actions {
   max-height: calc(100dvh - 2rem) !important;
 }
 
+.admin-subscription-ops-manage .modal__content {
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain !important;
+  touch-action: pan-y;
+}
+
 .admin-modal__content {
   flex: 1 1 auto !important;
   min-height: 0 !important;         /* KEY — allows flex child to shrink & scroll */
@@ -23842,4 +23857,49 @@ td.admin-table__actions {
   .shop-filters__search-wrap { min-width: 0; flex: 1 1 100%; }
   .shop-filters__sort { flex: 1; }
   .shop-filters__price-input { width: 70px; }
+}
+
+/* Final modal override: the users profile dialog uses one element as both shell and body. */
+.admin-modal.admin-users-modal .modal__content.admin-modal__content.admin-users-modal__content {
+  max-height: calc(100dvh - 2rem) !important;
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain !important;
+  touch-action: pan-y;
+}
+
+/* Final admin dialog spacing pass: keep modals away from the viewport edges. */
+.admin-modal {
+  padding-inline: clamp(1.2rem, 4vw, 2.75rem) !important;
+  padding-block: clamp(1rem, 3vw, 2.25rem) !important;
+}
+
+.admin-modal .modal__content {
+  max-width: min(560px, calc(100vw - clamp(2.4rem, 8vw, 5.5rem))) !important;
+}
+
+.admin-subscription-ops-manage .modal__content,
+.admin-modal.modal--wide .modal__content,
+.admin-order-detail.modal__content,
+.order-detail-modal .modal__content {
+  max-width: min(1120px, calc(100vw - clamp(2.4rem, 8vw, 5.5rem))) !important;
+}
+
+/* Final sitewide dialog inner gutter: keep dialog content off the box edges. */
+.modal__content,
+.admin-modal__content,
+.admin-users-modal__content,
+.admin-order-detail.modal__content,
+.order-detail-modal .modal__content,
+.admin-modal.admin-users-modal .modal__content.admin-modal__content.admin-users-modal__content {
+  padding-inline: clamp(1rem, 2.4vw, 1.5rem) !important;
+}
+
+.modal__content,
+.admin-modal__content,
+.admin-users-modal__content,
+.admin-modal.admin-users-modal .modal__content.admin-modal__content.admin-users-modal__content {
+  padding-bottom: clamp(1rem, 2vw, 1.35rem) !important;
 }
