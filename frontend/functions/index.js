@@ -7614,6 +7614,55 @@ function buildContactConfirmationHtml(data = {}) {
   return wrapEmail({ title: "We received your message", subtitle: "Thanks for reaching out to Bethany Blooms.", body });
 }
 
+function buildPasswordResetEmailHtml(data = {}) {
+  const name = escapeHtml(data.name || "there");
+  const resetUrl = escapeHtml((data.resetUrl || "").toString().trim());
+  const body = `
+    <p style="margin:0 0 16px;">Hi ${name},</p>
+    <p style="margin:0 0 16px;">We received a request to reset the password for your Bethany Blooms account. Click the button below to choose a new password.</p>
+    <div style="margin:16px 0;">
+      <a href="${resetUrl}" style="display:inline-block;padding:12px 20px;background:${EMAIL_BRAND.primary};color:#fff;text-decoration:none;border-radius:999px;font-weight:700;">
+        Reset my password
+      </a>
+    </div>
+    <p style="margin:0 0 12px;font-size:13px;color:${EMAIL_BRAND.muted};">
+      This link expires in 1 hour. If you did not request a password reset, you can safely ignore this email — your password will not change.
+    </p>
+    <p style="margin:0;font-size:12px;color:${EMAIL_BRAND.muted};">
+      If the button does not work, copy this link:<br/>
+      <a href="${resetUrl}" style="color:${EMAIL_BRAND.primary};text-decoration:none;word-break:break-all;">${resetUrl}</a>
+    </p>
+  `;
+  return wrapEmail({
+    title: "Reset your password",
+    subtitle: "A password reset was requested for your account.",
+    body,
+  });
+}
+
+function buildPasswordResetSuccessEmailHtml(data = {}) {
+  const name = escapeHtml(data.name || "there");
+  const accountUrl = escapeHtml(`${getCanonicalSiteUrl()}/account`);
+  const body = `
+    <p style="margin:0 0 16px;">Hi ${name},</p>
+    <p style="margin:0 0 16px;">This is a confirmation that the password for your Bethany Blooms account has just been successfully changed.</p>
+    <p style="margin:0 0 16px;">You can now sign in with your new password.</p>
+    <div style="margin:16px 0;">
+      <a href="${accountUrl}" style="display:inline-block;padding:12px 20px;background:${EMAIL_BRAND.primary};color:#fff;text-decoration:none;border-radius:999px;font-weight:700;">
+        Sign in to my account
+      </a>
+    </div>
+    <p style="margin:0;font-size:13px;color:${EMAIL_BRAND.muted};">
+      If you did not make this change, please contact us immediately by replying to this email or calling us so we can secure your account.
+    </p>
+  `;
+  return wrapEmail({
+    title: "Password changed successfully",
+    subtitle: "Your Bethany Blooms account password has been updated.",
+    body,
+  });
+}
+
 function buildAccountWelcomeEmailHtml(data = {}) {
   const name = escapeHtml(
     trimToLength(
@@ -19052,3 +19101,75 @@ exports.onGiftCardWrittenSyncRegistry = onDocumentWritten(
     );
   },
 );
+
+exports.sendPasswordResetSuccessEmail = onCall(async (request) => {
+  const email = ((request.data && request.data.email) || "").toString().trim().toLowerCase();
+  if (!email) {
+    throw new functions.https.HttpsError("invalid-argument", "Email is required.");
+  }
+
+  if (!getResendClient()) {
+    throw new functions.https.HttpsError("unavailable", "Email service is not configured.");
+  }
+
+  let displayName = "";
+  try {
+    const userRecord = await admin.auth().getUserByEmail(email);
+    displayName = userRecord.displayName || "";
+  } catch {
+    // Not critical — fall back to generic greeting.
+  }
+
+  const html = buildPasswordResetSuccessEmailHtml({ name: displayName });
+  await sendEmail({ to: email, subject: "Your Bethany Blooms password has been changed", html });
+
+  return { success: true };
+});
+
+exports.sendPasswordResetEmailCustom = onCall(async (request) => {
+  const email = ((request.data && request.data.email) || "").toString().trim().toLowerCase();
+  if (!email) {
+    throw new functions.https.HttpsError("invalid-argument", "Email is required.");
+  }
+
+  if (!getResendClient()) {
+    throw new functions.https.HttpsError("unavailable", "Email service is not configured.");
+  }
+
+  let firebaseResetLink;
+  try {
+    firebaseResetLink = await admin.auth().generatePasswordResetLink(email);
+  } catch (error) {
+    // Firebase throws auth/user-not-found if the email isn't registered.
+    // Return success anyway so we don't reveal whether the email exists.
+    functions.logger.info("generatePasswordResetLink skipped", { code: error.code });
+    return { success: true };
+  }
+
+  // Extract the oobCode from Firebase's generated link and build our own
+  // branded reset URL so the user lands on our custom /reset-password page.
+  let resetUrl;
+  try {
+    const parsed = new URL(firebaseResetLink);
+    const oobCode = parsed.searchParams.get("oobCode");
+    if (!oobCode) throw new Error("oobCode missing from generated link");
+    resetUrl = `${getCanonicalSiteUrl()}/reset-password?oobCode=${encodeURIComponent(oobCode)}`;
+  } catch (err) {
+    functions.logger.error("Failed to parse reset link", err);
+    resetUrl = firebaseResetLink; // fall back to Firebase's own page
+  }
+
+  // Try to get the user's display name for a personalised greeting.
+  let displayName = "";
+  try {
+    const userRecord = await admin.auth().getUserByEmail(email);
+    displayName = userRecord.displayName || "";
+  } catch {
+    // Not critical — fall back to generic greeting.
+  }
+
+  const html = buildPasswordResetEmailHtml({ name: displayName, resetUrl });
+  await sendEmail({ to: email, subject: "Reset your Bethany Blooms password", html });
+
+  return { success: true };
+});

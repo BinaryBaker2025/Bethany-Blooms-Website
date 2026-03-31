@@ -29,6 +29,7 @@ const DesignSystemPage = lazy(() => import("./pages/DesignSystemPage.jsx"));
 const PrivacyPolicyPage = lazy(() => import("./pages/PrivacyPolicyPage.jsx"));
 const DisclaimerPage = lazy(() => import("./pages/DisclaimerPage.jsx"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage.jsx"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage.jsx"));
 
 const loadAdminPageModule = () => import("./pages/AdminPage.jsx");
 const AdminDashboardView = lazy(() =>
@@ -133,6 +134,7 @@ function App() {
                 <Route path="/payment/cancel" element={<PaymentCancelPage />} />
                 <Route path="/payment/eft-submitted" element={<EftSubmittedPage />} />
                 <Route path="/gift-cards/:giftCardId" element={<GiftCardPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
                 <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
                 <Route path="/disclaimer" element={<DisclaimerPage />} />
                 <Route path="/design" element={<DesignSystemPage />} />

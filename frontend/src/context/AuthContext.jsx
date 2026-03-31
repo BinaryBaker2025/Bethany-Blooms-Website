@@ -2,12 +2,12 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, useCal
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
-  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
 import { doc, getDoc, getDocFromCache, serverTimestamp, setDoc } from "firebase/firestore";
-import { getFirebaseAuth, getFirebaseDb } from "../lib/firebase.js";
+import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "../lib/firebase.js";
 
 const AuthContext = createContext(null);
 const ROLE_CACHE_KEY = "bethany-blooms-auth-role-cache-v1";
@@ -332,7 +332,10 @@ export function AuthProvider({ children }) {
           }
         : () => Promise.reject(initError ?? new Error("Firebase not configured")),
       resetPassword: auth
-        ? (email) => sendPasswordResetEmail(auth, (email || "").toString().trim())
+        ? async (email) => {
+            const fn = httpsCallable(getFirebaseFunctions(), "sendPasswordResetEmailCustom");
+            await fn({ email: (email || "").toString().trim() });
+          }
         : () => Promise.reject(initError ?? new Error("Firebase not configured")),
       signOut: auth ? () => signOut(auth) : () => Promise.resolve(),
     }),

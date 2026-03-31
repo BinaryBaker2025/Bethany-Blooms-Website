@@ -1089,10 +1089,7 @@ const getCurrentJohannesburgDateKey = (value = new Date()) => {
 };
 
 const getDefaultSubscriptionOpsCycleMonth = (value = new Date()) => {
-  const currentCycleMonth = getCurrentJohannesburgCycleMonth(value);
-  if (!currentCycleMonth) return "";
-  if (!isInJohannesburgPrebillWindow(value)) return currentCycleMonth;
-  return getNextCycleMonthKey(currentCycleMonth) || currentCycleMonth;
+  return getCurrentJohannesburgCycleMonth(value) || "";
 };
 
 const formatCycleMonthLabel = (monthKey = "") => {
@@ -1209,6 +1206,108 @@ const normalizeIsoDateValue = (value = "") => {
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return "";
   if (month < 1 || month > 12 || day < 1 || day > 31) return "";
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+
+const buildUtcDateFromIsoDateValue = (value = "") => {
+  const normalized = normalizeIsoDateValue(value);
+  if (!normalized) return null;
+  const [yearText, monthText, dayText] = normalized.split("-");
+  const date = new Date(Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText), 12, 0, 0));
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatUtcDateAsIsoDateValue = (value) => {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "";
+  return normalizeIsoDateValue(
+    `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(
+      value.getUTCDate(),
+    ).padStart(2, "0")}`,
+  );
+};
+
+const addDaysToIsoDateValue = (value = "", days = 0) => {
+  const date = buildUtcDateFromIsoDateValue(value);
+  if (!date || !Number.isFinite(days)) return "";
+  date.setUTCDate(date.getUTCDate() + Number(days));
+  return formatUtcDateAsIsoDateValue(date);
+};
+
+const getCurrentWeekMondayDateKey = (value = "") => {
+  const date = buildUtcDateFromIsoDateValue(value || getCurrentJohannesburgDateKey());
+  if (!date) return "";
+  const weekday = date.getUTCDay();
+  const offset = weekday === 0 ? -6 : 1 - weekday;
+  date.setUTCDate(date.getUTCDate() + offset);
+  return formatUtcDateAsIsoDateValue(date);
+};
+
+const getCycleMonthForIsoDateValue = (value = "") => {
+  const normalizedDate = normalizeIsoDateValue(value);
+  return normalizedDate ? normalizeCycleMonthValue(normalizedDate.slice(0, 7)) : "";
+};
+
+const getNextMondayDateKey = (value = "", { includeCurrent = false } = {}) => {
+  const date = buildUtcDateFromIsoDateValue(value);
+  if (!date) return "";
+  const weekday = date.getUTCDay();
+  let offset = (8 - weekday) % 7;
+  if (offset === 0 && !includeCurrent) {
+    offset = 7;
+  }
+  date.setUTCDate(date.getUTCDate() + offset);
+  return formatUtcDateAsIsoDateValue(date);
+};
+
+const getUpcomingMondayDateKeys = (count = 5, { fromDateKey = "", includeCurrent = false } = {}) => {
+  const total = Number(count);
+  if (!Number.isFinite(total) || total <= 0) return [];
+  const startDateKey = normalizeIsoDateValue(fromDateKey || getCurrentJohannesburgDateKey());
+  const firstMonday = getNextMondayDateKey(startDateKey, { includeCurrent });
+  if (!firstMonday) return [];
+  const mondays = [firstMonday];
+  while (mondays.length < total) {
+    mondays.push(addDaysToIsoDateValue(mondays[mondays.length - 1], 7));
+  }
+  return mondays.filter(Boolean);
+};
+
+const resolveEarliestSubscriptionOpsCycleMonth = ({
+  subscriptions = [],
+  subscriptionInvoices = [],
+} = {}) => {
+  const cycleMonths = [];
+  const appendCycleMonth = (value = "") => {
+    const normalized = normalizeCycleMonthValue(value);
+    if (normalized) {
+      cycleMonths.push(normalized);
+    }
+  };
+  const appendDateCycleMonth = (value) => {
+    const normalizedDate = normalizeIsoDateValue(value || "");
+    if (normalizedDate) {
+      appendCycleMonth(normalizedDate.slice(0, 7));
+      return;
+    }
+    const parsed = parseDateValue(value);
+    if (parsed) {
+      appendCycleMonth(getJohannesburgDateParts(parsed).monthKey);
+    }
+  };
+
+  (Array.isArray(subscriptions) ? subscriptions : []).forEach((subscription) => {
+    appendDateCycleMonth(subscription?.firstDeliveryDate);
+    appendCycleMonth(subscription?.currentCycleMonth || "");
+    appendDateCycleMonth(subscription?.createdAt);
+  });
+
+  (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach((invoice) => {
+    appendCycleMonth(invoice?.cycleMonth || "");
+    appendDateCycleMonth(invoice?.deliverySchedule?.firstDeliveryDate);
+    appendDateCycleMonth(invoice?.cycleStartDate);
+    appendDateCycleMonth(invoice?.createdAt);
+  });
+
+  return cycleMonths.sort((left, right) => left.localeCompare(right))[0] || "";
 };
 
 const compareIsoDateValues = (left = "", right = "") => {
@@ -1344,16 +1443,13 @@ const resolveSubscriptionRosterDeliveryDates = (row = {}) => {
   return normalizeUniqueDeliveryDates(sourceDates);
 };
 
-const collectSubscriptionRosterMondays = (rows = [], cycleMonth = "") => {
-  const deliveryDates = Array.from(
-    new Set(
-      (Array.isArray(rows) ? rows : []).flatMap((row) => resolveSubscriptionRosterDeliveryDates(row)),
-    ),
-  ).sort((leftDate, rightDate) => compareIsoDateValues(leftDate, rightDate));
-  if (deliveryDates.length > 0) {
-    return deliveryDates;
-  }
-  return listSubscriptionMondaysForCycle(cycleMonth);
+const collectSubscriptionRosterMondays = () => {
+  const currentMonday = getCurrentWeekMondayDateKey(getCurrentJohannesburgDateKey());
+  if (!currentMonday) return [];
+  return getUpcomingMondayDateKeys(6, {
+    fromDateKey: currentMonday,
+    includeCurrent: true,
+  });
 };
 
 const resolveSubscriptionDisplayPlanName = (entry = {}) => {
@@ -5692,6 +5788,39 @@ export function AdminSubscriptionOpsView() {
     [selectedCycleMonth],
   );
 
+  const minSelectableCycleMonth = useMemo(
+    () =>
+      resolveEarliestSubscriptionOpsCycleMonth({
+        subscriptions,
+        subscriptionInvoices,
+      }),
+    [subscriptionInvoices, subscriptions],
+  );
+
+  const maxSelectableCycleMonth = useMemo(
+    () => {
+      const upcomingMondays = getUpcomingMondayDateKeys(5, { includeCurrent: false });
+      const lastUpcomingMonday = upcomingMondays[upcomingMondays.length - 1] || "";
+      return (
+        getCycleMonthForIsoDateValue(lastUpcomingMonday) ||
+        getNextCycleMonthKey(getCurrentJohannesburgCycleMonth()) ||
+        ""
+      );
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!selectedCycleMonth) return;
+    if (minSelectableCycleMonth && selectedCycleMonth < minSelectableCycleMonth) {
+      setSelectedCycleMonth(minSelectableCycleMonth);
+      return;
+    }
+    if (maxSelectableCycleMonth && selectedCycleMonth > maxSelectableCycleMonth) {
+      setSelectedCycleMonth(maxSelectableCycleMonth);
+    }
+  }, [maxSelectableCycleMonth, minSelectableCycleMonth, selectedCycleMonth]);
+
   const liveSubscriptionPlans = useMemo(
     () =>
       (Array.isArray(subscriptionPlans) ? subscriptionPlans : [])
@@ -6142,11 +6271,11 @@ export function AdminSubscriptionOpsView() {
 
   const mondayRosterOptions = useMemo(
     () =>
-      collectSubscriptionRosterMondays(allRows, selectedCycleMonth).map((dateKey) => ({
+      collectSubscriptionRosterMondays().map((dateKey) => ({
         value: dateKey,
         label: formatSubscriptionDeliveryDateLabel(dateKey) || dateKey,
       })),
-    [allRows, selectedCycleMonth],
+    [],
   );
 
   const mondayRosterRows = useMemo(() => {
@@ -6167,20 +6296,8 @@ export function AdminSubscriptionOpsView() {
     if (mondayRosterOptions.some((option) => option.value === selectedDeliveryMonday)) {
       return;
     }
-    const normalizedSelectedCycleMonth = normalizeCycleMonthValue(selectedCycleMonth);
-    const normalizedCurrentCycleMonth = normalizeCycleMonthValue(getCurrentJohannesburgCycleMonth());
-    const normalizedTodayDateKey = normalizeIsoDateValue(getCurrentJohannesburgDateKey());
-    const defaultOption =
-      normalizedSelectedCycleMonth &&
-      normalizedCurrentCycleMonth &&
-      normalizedSelectedCycleMonth === normalizedCurrentCycleMonth &&
-      normalizedTodayDateKey
-        ? mondayRosterOptions.find(
-            (option) => compareIsoDateValues(option.value, normalizedTodayDateKey) >= 0,
-          ) || mondayRosterOptions[0]
-        : mondayRosterOptions[0];
-    setSelectedDeliveryMonday(defaultOption?.value || "");
-  }, [mondayRosterOptions, selectedCycleMonth, selectedDeliveryMonday]);
+    setSelectedDeliveryMonday(mondayRosterOptions[0]?.value || "");
+  }, [mondayRosterOptions, selectedDeliveryMonday]);
 
   const metrics = useMemo(() => {
     const activeCount = allRows.filter((row) => row.subscriptionStatus === "active").length;
@@ -7262,7 +7379,12 @@ export function AdminSubscriptionOpsView() {
                     value={selectedDeliveryMonday}
                     onChange={(event) => {
                       setErrorMessage(null);
-                      setSelectedDeliveryMonday(event.target.value);
+                      const nextMonday = normalizeIsoDateValue(event.target.value);
+                      setSelectedDeliveryMonday(nextMonday);
+                      const nextCycleMonth = getCycleMonthForIsoDateValue(nextMonday);
+                      if (nextCycleMonth) {
+                        setSelectedCycleMonth(nextCycleMonth);
+                      }
                     }}
                   >
                     {mondayRosterOptions.length ? (
@@ -7367,9 +7489,13 @@ export function AdminSubscriptionOpsView() {
             className="input"
             type="month"
             value={selectedCycleMonth}
+            min={minSelectableCycleMonth || undefined}
+            max={maxSelectableCycleMonth || undefined}
             onChange={(event) => {
               const nextMonth = normalizeCycleMonthValue(event.target.value);
               if (!nextMonth) return;
+              if (minSelectableCycleMonth && nextMonth < minSelectableCycleMonth) return;
+              if (maxSelectableCycleMonth && nextMonth > maxSelectableCycleMonth) return;
               setSelectedCycleMonth(nextMonth);
             }}
           />
