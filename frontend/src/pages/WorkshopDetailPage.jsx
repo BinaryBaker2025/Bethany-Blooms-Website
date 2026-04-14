@@ -558,6 +558,7 @@ function WorkshopDetailPage() {
           background={heroImage}
           media={
             <img
+              className="workshop-detail-hero__image"
               src={heroImage}
               alt={`${workshop.title} workshop`}
               loading="eager"
@@ -567,7 +568,7 @@ function WorkshopDetailPage() {
           captionText={
             isByRequest
               ? "Workshop available by request."
-              : "Review the open session details below."
+              : null
           }
         >
           <span className="editorial-eyebrow">Workshops</span>
@@ -589,7 +590,7 @@ function WorkshopDetailPage() {
           </div>
           <div className="cta-group">
             <button className="btn btn--primary" type="button" onClick={handleScrollToBooking}>
-              View Booking Options
+              Book Now
             </button>
             <Link className="btn btn--secondary" to="/workshops">
               Back to Workshops
@@ -597,6 +598,25 @@ function WorkshopDetailPage() {
           </div>
         </Hero>
       </section>
+
+      {detailSections.length > 0 && (
+        <section className="section band--cream">
+          <div className="section__inner workshop-detail">
+            <Reveal as="div" className="editorial-band editorial-band--center">
+              <span className="editorial-eyebrow">Workshop Details</span>
+              <h2>Everything You Need To Know</h2>
+              <p>Review the experience, practical notes, and policies before you reserve your place.</p>
+            </Reveal>
+
+            {detailSections.map(({ key, title }, index) => (
+              <Reveal as="article" className="detail-section" key={key} delay={index * 60}>
+                <h2>{title}</h2>
+                {renderRichText(workshop[key])}
+              </Reveal>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="section band--white" id="workshop-booking" ref={bookingSectionRef}>
         <div className="section__inner">
@@ -642,7 +662,7 @@ function WorkshopDetailPage() {
                 onClick={handleOpenBooking}
                 disabled={bookingButtonDisabled}
               >
-                Reserve Your Seat
+                Book Now
               </button>
             </Reveal>
 
@@ -777,25 +797,6 @@ function WorkshopDetailPage() {
           </div>
         </div>
       </section>
-
-      {detailSections.length > 0 && (
-        <section className="section band--cream">
-          <div className="section__inner workshop-detail">
-            <Reveal as="div" className="editorial-band editorial-band--center">
-              <span className="editorial-eyebrow">Workshop Details</span>
-              <h2>Everything You Need To Know</h2>
-              <p>Review the experience, practical notes, and policies before you reserve your place.</p>
-            </Reveal>
-
-            {detailSections.map(({ key, title }, index) => (
-              <Reveal as="article" className="detail-section" key={key} delay={index * 60}>
-                <h2>{title}</h2>
-                {renderRichText(workshop[key])}
-              </Reveal>
-            ))}
-          </div>
-        </section>
-      )}
     </>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   addDoc,
@@ -43,6 +44,13 @@ import {
   getProductPreorderSendMonth,
   normalizePreorderSendMonth,
 } from "../lib/preorder.js";
+import { printOrderInvoice } from "../lib/orderInvoicePrint.js";
+import {
+  ORDER_STATUSES,
+  formatOrderStatusLabel,
+  isCollectionDeliveryMethod,
+  normalizeOrderStatus,
+} from "../lib/orderStatus.js";
 import {
   downloadSubscriptionOpsRosterPdf,
   printSubscriptionOpsRosterPdf,
@@ -216,6 +224,10 @@ const createProductVariant = () => ({
   quantity: "",
 });
 
+const ORDER_ROW_MENU_WIDTH = 232;
+const ORDER_ROW_MENU_ESTIMATED_HEIGHT = 260;
+const ORDER_ROW_MENU_VIEWPORT_PADDING = 12;
+
 const EVENT_REPEAT_WEEKDAYS = [
   { value: 1, label: "Mon" },
   { value: 2, label: "Tue" },
@@ -271,18 +283,6 @@ const INITIAL_CUT_FLOWER_CLASS_FORM = {
   repeatWeekly: false,
   repeatDays: [],
 };
-const ORDER_STATUSES = [
-  "pending-payment-approval",
-  "payment-rejected",
-  "order-placed",
-  "packing-order",
-  "order-ready-for-shipping",
-  "out-for-delivery",
-  "delivered",
-  "shipped",
-  "completed",
-  "cancelled",
-];
 const ORDER_PAGE_SIZE_OPTIONS = Object.freeze([10, 25, 50]);
 const CREATE_ORDER_FILTER_DEFAULTS = Object.freeze({
   categoryId: "all",
@@ -317,30 +317,6 @@ const normalizeGiftCardExpiryDays = (value, fallback = 365) => {
 
 const buildAdminOrderCartKey = ({ sourceId, variantId }) =>
   ["admin-order", sourceId, variantId || "base"].join(":");
-
-const normalizeOrderStatus = (status) => {
-  const normalized = (status || "")
-    .toString()
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-");
-  if (!normalized) return "order-placed";
-  const legacyMap = {
-    pending: "order-placed",
-    processing: "packing-order",
-    ready: "order-ready-for-shipping",
-    fulfilled: "completed",
-    "pending-payment": "pending-payment-approval",
-  };
-  return legacyMap[normalized] || normalized;
-};
-
-const formatOrderStatusLabel = (status) =>
-  (status || "")
-    .toString()
-    .trim()
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const DELIVERY_METHODS = ["company", "courier"];
 const ORDER_DETAIL_TABS = Object.freeze([
@@ -642,6 +618,26 @@ const IconPrinter = ({ title = "Print", ...props }) => (
     <path d="M7 17H5a2 2 0 0 1-2-2v-4a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v4a2 2 0 0 1-2 2h-2" />
     <path d="M7 14h10v6H7z" />
     <path d="M17 11h.01" />
+  </svg>
+);
+
+const IconMoreVertical = ({ title = "More actions", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.9"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <circle cx="12" cy="5" r="1.25" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="19" r="1.25" fill="currentColor" stroke="none" />
   </svg>
 );
 
@@ -1596,6 +1592,73 @@ const getWorkshopBookingTimeLabel = (booking) => {
   return typeof explicitLabel === "string" && explicitLabel.trim()
     ? explicitLabel.trim()
     : "Time to be confirmed";
+};
+
+const getWorkshopBookingIsoDate = (booking) => {
+  const parsed = parseDateValue(booking?.sessionDate);
+  return parsed ? formatDateInput(parsed) : "";
+};
+
+const getWorkshopOrderItemForBooking = (order, booking) => {
+  if (!order || !Array.isArray(order.items)) return null;
+  const workshopItems = order.items.filter((item) => item?.metadata?.type === "workshop");
+  if (workshopItems.length === 0) return null;
+
+  const bookingDate = getWorkshopBookingIsoDate(booking);
+  const matchesBooking = (item) => {
+    const metadata = item?.metadata || {};
+    if (booking?.workshopId && metadata.workshopId && metadata.workshopId !== booking.workshopId) {
+      return false;
+    }
+    if (booking?.sessionId && metadata.sessionId && metadata.sessionId !== booking.sessionId) {
+      return false;
+    }
+    const itemDate = (metadata.sessionDate || metadata.session?.date || "").toString().trim();
+    if (bookingDate && itemDate && itemDate !== bookingDate) {
+      return false;
+    }
+    if (
+      booking?.sessionTimeRange &&
+      metadata.sessionTimeRange &&
+      metadata.sessionTimeRange !== booking.sessionTimeRange
+    ) {
+      return false;
+    }
+    return true;
+  };
+
+  return (
+    workshopItems.find(matchesBooking) ||
+    workshopItems.find((item) => item?.metadata?.workshopId === booking?.workshopId) ||
+    workshopItems[0]
+  );
+};
+
+const normalizeWorkshopBookingAttendeeSelections = (selections) => {
+  if (!Array.isArray(selections)) return [];
+  return selections
+    .map((selection, index) => {
+      if (!selection) return null;
+      if (typeof selection === "string") {
+        return {
+          attendee: index + 1,
+          optionLabel: selection,
+          optionValue: selection,
+          estimatedPrice: null,
+        };
+      }
+      if (typeof selection !== "object") return null;
+      const attendeeValue = Number.parseInt(selection.attendee, 10);
+      return {
+        attendee: Number.isFinite(attendeeValue) ? attendeeValue : index + 1,
+        optionLabel: selection.optionLabel || selection.label || selection.optionValue || selection.value || "Option",
+        optionValue: selection.optionValue || selection.optionId || selection.value || selection.optionLabel || null,
+        estimatedPrice: Number.isFinite(Number(selection.estimatedPrice))
+          ? Number(selection.estimatedPrice)
+          : null,
+      };
+    })
+    .filter(Boolean);
 };
 
 function useUploadAsset(storage) {
@@ -8674,16 +8737,31 @@ export function AdminMediaLibraryView() {
   );
 }
 
-export function AdminWorkshopsView() {
+function AdminWorkshopsPage({ view = "workshops" }) {
+  const showWorkshopManagement = view === "workshops";
+  const showWorkshopBookings = view === "bookings";
+  const pageTitle =
+    view === "bookings" ? "Admin - Workshop Bookings" : "Admin - Workshops";
+  const pageDescription =
+    view === "bookings"
+      ? "Review and manage Bethany Blooms workshop bookings."
+      : "Manage Bethany Blooms workshops, sessions, and booking settings.";
+  const panelHeading = view === "bookings" ? "Workshop Bookings" : "Workshops";
+  const panelNote =
+    view === "bookings"
+      ? "Review submitted workshop bookings and keep customer details organised."
+      : "Create immersive experiences with custom slots and booking rules.";
+
   usePageMetadata({
-    title: "Admin - Workshops",
-    description: "Manage Bethany Blooms workshops, sessions, and bookings.",
+    title: pageTitle,
+    description: pageDescription,
   });
   const {
     db,
     storage,
     workshops,
     bookings,
+    orders,
     inventoryEnabled,
     inventoryLoading,
     inventoryError,
@@ -8699,6 +8777,13 @@ export function AdminWorkshopsView() {
   const [workshopError, setWorkshopError] = useState(null);
   const workshopPreviewUrlRef = useRef(null);
   const [workshopPage, setWorkshopPage] = useState(0);
+  const [visibleMonth, setVisibleMonth] = useState(() => {
+    const today = new Date();
+    today.setDate(1);
+    return today;
+  });
+  const [selectedDate, setSelectedDate] = useState(() => formatDateInput(new Date()));
+  const [activeWorkshopBooking, setActiveWorkshopBooking] = useState(null);
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -8719,6 +8804,163 @@ export function AdminWorkshopsView() {
     const maxPage = Math.max(0, Math.ceil(workshops.length / ADMIN_PAGE_SIZE) - 1);
     setWorkshopPage((prev) => Math.min(prev, maxPage));
   }, [workshops.length]);
+
+  const bookingOrdersById = useMemo(
+    () =>
+      new Map(
+        (Array.isArray(orders) ? orders : [])
+          .filter((order) => order?.id)
+          .map((order) => [order.id, order]),
+      ),
+    [orders],
+  );
+
+  const workshopBookingsByDate = useMemo(() => {
+    const map = new Map();
+    bookings.forEach((booking) => {
+      const isoDate = getWorkshopBookingIsoDate(booking);
+      if (!isoDate) return;
+      if (!map.has(isoDate)) {
+        map.set(isoDate, []);
+      }
+      map.get(isoDate).push(booking);
+    });
+    return map;
+  }, [bookings]);
+
+  const monthMatrix = useMemo(() => {
+    const matrix = [];
+    const year = visibleMonth.getFullYear();
+    const month = visibleMonth.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const offset = firstDay.getDay();
+    const startDate = new Date(year, month, 1 - offset);
+    const todayIso = formatDateInput(new Date());
+
+    for (let week = 0; week < 6; week += 1) {
+      const weekRow = [];
+      for (let day = 0; day < 7; day += 1) {
+        const cellDate = new Date(startDate);
+        cellDate.setDate(startDate.getDate() + week * 7 + day);
+        const iso = formatDateInput(cellDate);
+        weekRow.push({
+          iso,
+          label: cellDate.getDate(),
+          isCurrentMonth: cellDate.getMonth() === month,
+          isToday: iso === todayIso,
+          hasBookings: workshopBookingsByDate.has(iso),
+        });
+      }
+      matrix.push(weekRow);
+    }
+    return matrix;
+  }, [visibleMonth, workshopBookingsByDate]);
+
+  const selectedDateBookings = useMemo(() => {
+    const entries = [...(workshopBookingsByDate.get(selectedDate) || [])];
+    entries.sort((left, right) => {
+      const leftDate = parseDateValue(left?.sessionDate)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const rightDate = parseDateValue(right?.sessionDate)?.getTime() ?? Number.POSITIVE_INFINITY;
+      if (leftDate !== rightDate) return leftDate - rightDate;
+      const leftCreated = left?.createdAt?.toDate?.()?.getTime?.() ?? Number.POSITIVE_INFINITY;
+      const rightCreated = right?.createdAt?.toDate?.()?.getTime?.() ?? Number.POSITIVE_INFINITY;
+      return leftCreated - rightCreated;
+    });
+    return entries;
+  }, [selectedDate, workshopBookingsByDate]);
+
+  const selectedDateLabel = useMemo(() => {
+    const parsed = new Date(selectedDate);
+    if (Number.isNaN(parsed.getTime())) return selectedDate;
+    return parsed.toLocaleString("en-ZA", { dateStyle: "long" });
+  }, [selectedDate]);
+
+  const visibleMonthLabel = useMemo(
+    () =>
+      visibleMonth.toLocaleString("en-ZA", {
+        month: "long",
+        year: "numeric",
+      }),
+    [visibleMonth],
+  );
+
+  const selectedWorkshopBookingDetails = useMemo(() => {
+    if (!activeWorkshopBooking) return null;
+    const linkedOrder =
+      activeWorkshopBooking.orderId ? bookingOrdersById.get(activeWorkshopBooking.orderId) || null : null;
+    const linkedOrderItem = getWorkshopOrderItemForBooking(linkedOrder, activeWorkshopBooking);
+    const linkedMetadata = linkedOrderItem?.metadata || {};
+    const attendeeSelections = normalizeWorkshopBookingAttendeeSelections(linkedMetadata.attendeeSelections);
+    const attendeeCountValue =
+      Number.parseInt(linkedMetadata.attendeeCount, 10) ||
+      Number.parseInt(activeWorkshopBooking.attendeeCount, 10) ||
+      attendeeSelections.length ||
+      1;
+    const attendeeCount = Number.isFinite(attendeeCountValue) ? attendeeCountValue : 1;
+    const perAttendeePriceValue = Number(linkedMetadata.perAttendeePrice);
+    const totalPriceValue = Number(linkedOrderItem?.price);
+    const createdAt =
+      activeWorkshopBooking.createdAt?.toDate?.() instanceof Date
+        ? activeWorkshopBooking.createdAt.toDate()
+        : null;
+
+    return {
+      booking: activeWorkshopBooking,
+      order: linkedOrder,
+      orderItem: linkedOrderItem,
+      customerName:
+        linkedOrder?.customer?.fullName ||
+        activeWorkshopBooking.name ||
+        "Guest",
+      customerEmail:
+        linkedOrder?.customer?.email ||
+        activeWorkshopBooking.email ||
+        "-",
+      customerPhone:
+        linkedOrder?.customer?.phone ||
+        activeWorkshopBooking.phone ||
+        "",
+      customerAddress:
+        linkedOrder?.customer?.address ||
+        linkedMetadata.customer?.address ||
+        "",
+      workshopTitle:
+        activeWorkshopBooking.workshopTitle ||
+        linkedMetadata.workshopTitle ||
+        linkedOrderItem?.name ||
+        "Workshop",
+      workshopDateLabel: getWorkshopBookingDateLabel(activeWorkshopBooking),
+      workshopTimeLabel: getWorkshopBookingTimeLabel(activeWorkshopBooking),
+      location:
+        activeWorkshopBooking.location ||
+        linkedMetadata.location ||
+        "",
+      attendeeCount,
+      attendeeSelections,
+      optionLabel:
+        activeWorkshopBooking.optionLabel ||
+        activeWorkshopBooking.frame ||
+        linkedMetadata.optionLabel ||
+        linkedMetadata.framePreference ||
+        "",
+      perAttendeePrice:
+        Number.isFinite(perAttendeePriceValue) ? perAttendeePriceValue : null,
+      totalPrice:
+        Number.isFinite(totalPriceValue) ? totalPriceValue : null,
+      orderLabel:
+        linkedOrder?.orderNumber ?
+          `#${linkedOrder.orderNumber}`
+        : activeWorkshopBooking.orderId || "",
+      submittedLabel:
+        createdAt ? bookingDateFormatter.format(createdAt) : "Pending",
+      notes:
+        activeWorkshopBooking.notes ||
+        linkedMetadata.notes ||
+        "",
+      sessionCapacity:
+        typeof linkedMetadata.sessionCapacity === "number" ? linkedMetadata.sessionCapacity : null,
+    };
+  }, [activeWorkshopBooking, bookingOrdersById]);
 
   const paginatedWorkshops = useMemo(() => {
     const start = workshopPage * ADMIN_PAGE_SIZE;
@@ -8969,6 +9211,38 @@ export function AdminWorkshopsView() {
     setStatusMessage("Workshop removed");
   };
 
+  const handleDeleteBooking = async (bookingId) => {
+    if (!db) return;
+    await deleteDoc(doc(db, "bookings", bookingId));
+    if (activeWorkshopBooking?.id === bookingId) {
+      setActiveWorkshopBooking(null);
+    }
+    setStatusMessage("Booking removed");
+  };
+
+  const handleBookingMonthChange = (offset) => {
+    setVisibleMonth((prev) => {
+      const next = new Date(prev);
+      next.setMonth(prev.getMonth() + offset);
+      return next;
+    });
+  };
+
+  const openWorkshopBookingDetails = (booking) => {
+    setActiveWorkshopBooking(booking);
+  };
+
+  const closeWorkshopBookingDetails = () => {
+    setActiveWorkshopBooking(null);
+  };
+
+  const handleWorkshopBookingRowKeyDown = (event, booking) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openWorkshopBookingDetails(booking);
+    }
+  };
+
   const handleCreateWorkshop = async (event) => {
     event.preventDefault();
     if (!inventoryEnabled || !db) {
@@ -9179,219 +9453,495 @@ export function AdminWorkshopsView() {
     <div className="admin-panel admin-panel--full">
       <Reveal as="div" className="admin-panel__header">
         <div>
-          <h2>Workshops & Bookings</h2>
+          <h2>{panelHeading}</h2>
           <p className="admin-panel__note">
-            Create immersive experiences with custom slots and booking rules.
+            {panelNote}
           </p>
         </div>
-        <div className="admin-panel__header-actions">
-          <button
-            className="btn btn--primary"
-            type="button"
-            onClick={openWorkshopModal}
-            disabled={!inventoryEnabled}
-          >
-            <IconPlus className="btn__icon" aria-hidden="true" />
-            Add Workshop
-          </button>
-        </div>
+        {showWorkshopManagement && (
+          <div className="admin-panel__header-actions">
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={openWorkshopModal}
+              disabled={!inventoryEnabled}
+            >
+              <IconPlus className="btn__icon" aria-hidden="true" />
+              Add Workshop
+            </button>
+          </div>
+        )}
       </Reveal>
 
       <div className="admin-stack">
-        <Reveal as="section" className="admin-panel" delay={60}>
-          <div className="admin-panel__header">
-            <h3>Workshops</h3>
-            {inventoryLoading && (
-              <span className="badge badge--muted">Syncing...</span>
-            )}
-          </div>
-          {workshops.length > 0 ? (
-            <div className="admin-table__wrapper">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Listing</th>
-                    <th scope="col">Next Session</th>
-                    <th scope="col">Price</th>
-                    <th scope="col" className="admin-table__actions">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedWorkshops.map((workshop) => {
-                    const primarySession = getPrimarySession(workshop);
-                    const sessionLabel = getSessionLabel(primarySession);
-                    return (
-                      <tr key={workshop.id}>
-                        <td>
-                          <div className="admin-table__product">
-                            {workshop.image ? (
-                              <img
-                                src={workshop.image}
-                                alt={workshop.title}
-                                className="admin-table__thumb" loading="lazy" decoding="async"/>
-                            ) : (
-                              <span className="admin-table__thumb admin-table__thumb--placeholder">
-                                <IconImage aria-hidden="true" />
-                              </span>
-                            )}
-                            <div>
-                              <strong>{workshop.title}</strong>
-                              {workshop.location && (
-                                <p className="modal__meta">
-                                  {workshop.location}
-                                </p>
+        {showWorkshopManagement && (
+          <Reveal as="section" className="admin-panel" delay={60}>
+            <div className="admin-panel__header">
+              <h3>Workshops</h3>
+              {inventoryLoading && (
+                <span className="badge badge--muted">Syncing...</span>
+              )}
+            </div>
+            {workshops.length > 0 ? (
+              <div className="admin-table__wrapper">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Listing</th>
+                      <th scope="col">Next Session</th>
+                      <th scope="col">Price</th>
+                      <th scope="col" className="admin-table__actions">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedWorkshops.map((workshop) => {
+                      const primarySession = getPrimarySession(workshop);
+                      const sessionLabel = getSessionLabel(primarySession);
+                      return (
+                        <tr key={workshop.id}>
+                          <td>
+                            <div className="admin-table__product">
+                              {workshop.image ? (
+                                <img
+                                  src={workshop.image}
+                                  alt={workshop.title}
+                                  className="admin-table__thumb" loading="lazy" decoding="async"/>
+                              ) : (
+                                <span className="admin-table__thumb admin-table__thumb--placeholder">
+                                  <IconImage aria-hidden="true" />
+                                </span>
                               )}
+                              <div>
+                                <strong>{workshop.title}</strong>
+                                {workshop.location && (
+                                  <p className="modal__meta">
+                                    {workshop.location}
+                                  </p>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                        <td>
-                          <p>{sessionLabel}</p>
-                          {primarySession?.time && (
-                            <p className="modal__meta">{primarySession.time}</p>
-                          )}
-                        </td>
-                        <td>{formatPriceLabel(workshop.price)}</td>
-                        <td className="admin-table__actions">
-                          <button
-                            className="icon-btn"
-                            type="button"
-                            onClick={() => handleEditWorkshop(workshop)}
-                          >
-                            <IconEdit aria-hidden="true" />
-                          </button>
-                          <button
-                            className="icon-btn icon-btn--danger"
-                            type="button"
-                            onClick={() => handleDeleteWorkshop(workshop.id)}
-                          >
-                            <IconTrash aria-hidden="true" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="admin-panel__notice">
-              No workshops yet. Create one to start selling seats.
-            </p>
-          )}
-          <AdminPagination page={workshopPage} total={workshops.length} onPageChange={setWorkshopPage} />
-          {statusMessage && (
-            <p className="admin-panel__status">{statusMessage}</p>
-          )}
-        </Reveal>
-
-        <Reveal as="section" className="admin-panel" delay={90}>
-          <div className="admin-panel__header">
-            <h3>Bookings</h3>
-            {inventoryLoading && (
-              <span className="badge badge--muted">Syncing...</span>
+                          </td>
+                          <td>
+                            <p>{sessionLabel}</p>
+                            {primarySession?.time && (
+                              <p className="modal__meta">{primarySession.time}</p>
+                            )}
+                          </td>
+                          <td>{formatPriceLabel(workshop.price)}</td>
+                          <td className="admin-table__actions">
+                            <button
+                              className="icon-btn"
+                              type="button"
+                              onClick={() => handleEditWorkshop(workshop)}
+                            >
+                              <IconEdit aria-hidden="true" />
+                            </button>
+                            <button
+                              className="icon-btn icon-btn--danger"
+                              type="button"
+                              onClick={() => handleDeleteWorkshop(workshop.id)}
+                            >
+                              <IconTrash aria-hidden="true" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="admin-panel__notice">
+                No workshops yet. Create one to start selling seats.
+              </p>
             )}
-          </div>
-          {bookings.length > 0 ? (
-            <div className="admin-table__wrapper">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Guest</th>
-                    <th scope="col">Contact</th>
-                    <th scope="col">Details</th>
-                    <th scope="col">Received</th>
-                    <th scope="col" className="admin-table__actions">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bookings.map((bookingEntry) => {
-                    const submittedAt = bookingEntry.createdAt?.toDate?.()
-                      ? bookingDateFormatter.format(
-                          bookingEntry.createdAt.toDate()
-                        )
-                      : "Pending";
-                    return (
-                      <tr key={bookingEntry.id}>
-                        <td>{bookingEntry.name || "-"}</td>
-                        <td>
-                          {bookingEntry.email ? (
-                            <a href={`mailto:${bookingEntry.email}`}>
-                              {bookingEntry.email}
-                            </a>
-                          ) : (
-                            "-"
-                          )}
-                          {bookingEntry.phone && (
-                            <p className="modal__meta">{bookingEntry.phone}</p>
-                          )}
-                        </td>
-                        <td>
-                          {bookingEntry.workshopTitle && (
-                            <p className="modal__meta">
-                              Workshop: {bookingEntry.workshopTitle}
-                            </p>
-                          )}
-                          {isCustomerRequestedWorkshopBooking(bookingEntry) ? (
-                            <>
-                              <p className="modal__meta">
-                                Requested date: {getWorkshopBookingDateLabel(bookingEntry)}
-                              </p>
-                              <p className="modal__meta">
-                                Requested time: {getWorkshopBookingTimeLabel(bookingEntry)}
-                              </p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="modal__meta">
-                                Date: {getWorkshopBookingDateLabel(bookingEntry)}
-                              </p>
-                              {bookingEntry.sessionLabel && (
-                                <p className="modal__meta">
-                                  Session: {bookingEntry.sessionLabel}
-                                </p>
-                              )}
-                            </>
-                          )}
-                          {(bookingEntry.optionLabel || bookingEntry.frame) && (
-                            <p className="modal__meta">
-                              Option: {bookingEntry.optionLabel || bookingEntry.frame}
-                            </p>
-                          )}
-                          {bookingEntry.notes && (
-                            <p className="modal__meta">
-                              Notes: {bookingEntry.notes}
-                            </p>
-                          )}
-                        </td>
-                        <td>{submittedAt}</td>
-                        <td className="admin-table__actions">
-                          <button
-                            className="icon-btn icon-btn--danger"
-                            type="button"
-                            onClick={() => {
-                              if (!db) return;
-                              deleteDoc(doc(db, "bookings", bookingEntry.id));
-                            }}
-                          >
-                            <IconTrash aria-hidden="true" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <AdminPagination page={workshopPage} total={workshops.length} onPageChange={setWorkshopPage} />
+            {statusMessage && (
+              <p className="admin-panel__status">{statusMessage}</p>
+            )}
+          </Reveal>
+        )}
+
+        {showWorkshopBookings && (
+          <Reveal as="section" className="admin-panel" delay={showWorkshopManagement ? 90 : 60}>
+            <div className="admin-panel__header">
+              <h3>Bookings</h3>
+              {inventoryLoading && (
+                <span className="badge badge--muted">Syncing...</span>
+              )}
             </div>
-          ) : (
-            <p className="admin-panel__notice">
-              Bookings will appear here once submitted.
-            </p>
+            {bookings.length > 0 ? (
+              <>
+                <div className="admin-calendar">
+                  <div className="card admin-calendar__panel">
+                    <div className="admin-calendar__header">
+                      <button
+                        className="btn btn--secondary btn--icon admin-calendar__nav"
+                        type="button"
+                        onClick={() => handleBookingMonthChange(-1)}
+                        aria-label="Previous month"
+                        title="Previous month"
+                      >
+                        <IconChevronLeft className="btn__icon" title="Previous month" />
+                        <span className="sr-only">Previous month</span>
+                      </button>
+                      <div>
+                        <h4>{visibleMonthLabel}</h4>
+                        <p className="modal__meta">
+                          Bookings are shown for the selected day. The page opens on today.
+                        </p>
+                      </div>
+                      <button
+                        className="btn btn--secondary btn--icon admin-calendar__nav"
+                        type="button"
+                        onClick={() => handleBookingMonthChange(1)}
+                        aria-label="Next month"
+                        title="Next month"
+                      >
+                        <IconChevronRight className="btn__icon" title="Next month" />
+                        <span className="sr-only">Next month</span>
+                      </button>
+                    </div>
+
+                    <div className="admin-calendar__legend">
+                      <span>
+                        <span className="legend-dot legend-dot--booked" /> Booking days
+                      </span>
+                      <span>
+                        <span className="legend-dot legend-dot--today" /> Today
+                      </span>
+                      <span>
+                        <span className="legend-dot legend-dot--selected" /> Selected date
+                      </span>
+                    </div>
+
+                    <div className="admin-calendar__grid">
+                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                        <div key={label} className="admin-calendar__weekday">
+                          {label}
+                        </div>
+                      ))}
+                      {monthMatrix.flat().map((day) => (
+                        <button
+                          key={day.iso}
+                          type="button"
+                          className={`admin-calendar__cell ${
+                            day.isCurrentMonth ? "" : "is-muted"
+                          } ${day.hasBookings ? "has-bookings" : ""} ${
+                            selectedDate === day.iso ? "is-selected" : ""
+                          } ${day.isToday ? "is-today" : ""}`}
+                          onClick={() => setSelectedDate(day.iso)}
+                        >
+                          <span>{day.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="card admin-calendar__details">
+                    <div className="admin-calendar__details-header">
+                      <div>
+                        <h4>{selectedDateLabel}</h4>
+                        <p className="modal__meta">
+                          {selectedDateBookings.length} booking{selectedDateBookings.length === 1 ? "" : "s"} scheduled
+                        </p>
+                      </div>
+                    </div>
+                    <div className="admin-calendar__details-group">
+                      <h5>Workshop bookings</h5>
+                      {selectedDateBookings.length > 0 ? (
+                        <ul>
+                          {selectedDateBookings.map((bookingEntry) => (
+                            <li key={`calendar-booking-${bookingEntry.id}`}>
+                              <div>
+                                <strong>{bookingEntry.name || "Guest"}</strong>
+                                {bookingEntry.workshopTitle && (
+                                  <p className="modal__meta">{bookingEntry.workshopTitle}</p>
+                                )}
+                                <p className="modal__meta">
+                                  {getWorkshopBookingTimeLabel(bookingEntry)}
+                                </p>
+                              </div>
+                              <div className="admin-calendar__details-actions">
+                                {bookingEntry.email ? (
+                                  <a
+                                    href={`mailto:${bookingEntry.email}`}
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    {bookingEntry.email}
+                                  </a>
+                                ) : (
+                                  <span className="modal__meta">No email</span>
+                                )}
+                                <button
+                                  className="btn btn--secondary"
+                                  type="button"
+                                  onClick={() => openWorkshopBookingDetails(bookingEntry)}
+                                >
+                                  View Booking
+                                </button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="modal__meta">
+                          No workshop bookings recorded for this date yet.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedDateBookings.length > 0 ? (
+                  <div className="admin-table__wrapper">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Guest</th>
+                          <th scope="col">Contact</th>
+                          <th scope="col">Details</th>
+                          <th scope="col">Received</th>
+                          <th scope="col" className="admin-table__actions">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedDateBookings.map((bookingEntry) => {
+                          const submittedAt = bookingEntry.createdAt?.toDate?.()
+                            ? bookingDateFormatter.format(
+                                bookingEntry.createdAt.toDate()
+                              )
+                            : "Pending";
+                          return (
+                            <tr
+                              key={bookingEntry.id}
+                              className={`admin-table__row admin-table__row--clickable${
+                                activeWorkshopBooking?.id === bookingEntry.id ? " is-active" : ""
+                              }`}
+                              onClick={() => openWorkshopBookingDetails(bookingEntry)}
+                              onKeyDown={(event) => handleWorkshopBookingRowKeyDown(event, bookingEntry)}
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`View booking for ${bookingEntry.name || "guest"}`}
+                            >
+                              <td>{bookingEntry.name || "-"}</td>
+                              <td>
+                                {bookingEntry.email ? (
+                                  <a
+                                    href={`mailto:${bookingEntry.email}`}
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    {bookingEntry.email}
+                                  </a>
+                                ) : (
+                                  "-"
+                                )}
+                                {bookingEntry.phone && (
+                                  <p className="modal__meta">{bookingEntry.phone}</p>
+                                )}
+                              </td>
+                              <td>
+                                {bookingEntry.workshopTitle && (
+                                  <p className="modal__meta">
+                                    Workshop: {bookingEntry.workshopTitle}
+                                  </p>
+                                )}
+                                {isCustomerRequestedWorkshopBooking(bookingEntry) ? (
+                                  <>
+                                    <p className="modal__meta">
+                                      Requested date: {getWorkshopBookingDateLabel(bookingEntry)}
+                                    </p>
+                                    <p className="modal__meta">
+                                      Requested time: {getWorkshopBookingTimeLabel(bookingEntry)}
+                                    </p>
+                                  </>
+                                ) : (
+                                  <>
+                                    <p className="modal__meta">
+                                      Date: {getWorkshopBookingDateLabel(bookingEntry)}
+                                    </p>
+                                    {bookingEntry.sessionLabel && (
+                                      <p className="modal__meta">
+                                        Session: {bookingEntry.sessionLabel}
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                                {(bookingEntry.optionLabel || bookingEntry.frame) && (
+                                  <p className="modal__meta">
+                                    Option: {bookingEntry.optionLabel || bookingEntry.frame}
+                                  </p>
+                                )}
+                                {bookingEntry.notes && (
+                                  <p className="modal__meta">
+                                    Notes: {bookingEntry.notes}
+                                  </p>
+                                )}
+                              </td>
+                              <td>{submittedAt}</td>
+                              <td className="admin-table__actions">
+                                <button
+                                  className="icon-btn icon-btn--danger"
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleDeleteBooking(bookingEntry.id);
+                                  }}
+                                  aria-label="Delete booking"
+                                >
+                                  <IconTrash aria-hidden="true" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="admin-panel__notice">
+                    No workshop bookings scheduled for {selectedDateLabel}.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="admin-panel__notice">
+                Bookings will appear here once submitted.
+              </p>
+            )}
+            {statusMessage && (
+              <p className="admin-panel__status">{statusMessage}</p>
+            )}
+          </Reveal>
+        )}
+      </div>
+
+      <div
+        className={`modal admin-modal ${activeWorkshopBooking ? "is-active" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={activeWorkshopBooking ? "false" : "true"}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closeWorkshopBookingDetails();
+        }}
+      >
+        <div className="modal__content admin-modal__content">
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close"
+            onClick={closeWorkshopBookingDetails}
+          >
+            &times;
+          </button>
+          <h3 className="modal__title">
+            {selectedWorkshopBookingDetails?.customerName || "Workshop Booking"}
+          </h3>
+          {selectedWorkshopBookingDetails && (
+            <div className="admin-detail-grid">
+              <div className="admin-detail-card">
+                <h4>Customer</h4>
+                <p className="modal__meta">{selectedWorkshopBookingDetails.customerName}</p>
+                <p className="modal__meta">{selectedWorkshopBookingDetails.customerEmail}</p>
+                {selectedWorkshopBookingDetails.customerPhone && (
+                  <p className="modal__meta">{selectedWorkshopBookingDetails.customerPhone}</p>
+                )}
+                {selectedWorkshopBookingDetails.customerAddress && (
+                  <p className="modal__meta">
+                    Address: {selectedWorkshopBookingDetails.customerAddress}
+                  </p>
+                )}
+              </div>
+              <div className="admin-detail-card">
+                <h4>Booking</h4>
+                <p className="modal__meta">
+                  Workshop: {selectedWorkshopBookingDetails.workshopTitle}
+                </p>
+                <p className="modal__meta">
+                  Date: {selectedWorkshopBookingDetails.workshopDateLabel}
+                </p>
+                <p className="modal__meta">
+                  Time: {selectedWorkshopBookingDetails.workshopTimeLabel}
+                </p>
+                {selectedWorkshopBookingDetails.location && (
+                  <p className="modal__meta">
+                    Location: {selectedWorkshopBookingDetails.location}
+                  </p>
+                )}
+                <p className="modal__meta">
+                  Attendees: {selectedWorkshopBookingDetails.attendeeCount}
+                </p>
+                {selectedWorkshopBookingDetails.sessionCapacity && (
+                  <p className="modal__meta">
+                    Session capacity: {selectedWorkshopBookingDetails.sessionCapacity}
+                  </p>
+                )}
+              </div>
+              <div className="admin-detail-card">
+                <h4>Selections</h4>
+                {selectedWorkshopBookingDetails.attendeeSelections.length > 0 ? (
+                  selectedWorkshopBookingDetails.attendeeSelections.map((selection) => (
+                    <p
+                      className="modal__meta"
+                      key={`booking-selection-${selection.attendee}-${selection.optionValue || selection.optionLabel}`}
+                    >
+                      Attendee {selection.attendee}: {selection.optionLabel}
+                      {selection.estimatedPrice !== null
+                        ? ` (${moneyFormatter.format(selection.estimatedPrice)})`
+                        : ""}
+                    </p>
+                  ))
+                ) : (
+                  <p className="modal__meta">
+                    Option: {selectedWorkshopBookingDetails.optionLabel || "-"}
+                  </p>
+                )}
+                {selectedWorkshopBookingDetails.perAttendeePrice !== null && (
+                  <p className="modal__meta">
+                    Per attendee: {moneyFormatter.format(selectedWorkshopBookingDetails.perAttendeePrice)}
+                  </p>
+                )}
+                {selectedWorkshopBookingDetails.totalPrice !== null && (
+                  <p className="modal__meta">
+                    Total: {moneyFormatter.format(selectedWorkshopBookingDetails.totalPrice)}
+                  </p>
+                )}
+              </div>
+              <div className="admin-detail-card">
+                <h4>Order</h4>
+                {selectedWorkshopBookingDetails.orderLabel ? (
+                  <p className="modal__meta">
+                    Order: {selectedWorkshopBookingDetails.orderLabel}
+                  </p>
+                ) : (
+                  <p className="modal__meta">Order: Not linked</p>
+                )}
+                <p className="modal__meta">
+                  Submitted: {selectedWorkshopBookingDetails.submittedLabel}
+                </p>
+                {selectedWorkshopBookingDetails.notes && (
+                  <p className="modal__meta">
+                    Notes: {selectedWorkshopBookingDetails.notes}
+                  </p>
+                )}
+                <p className="modal__meta">
+                  Source: {isCustomerRequestedWorkshopBooking(selectedWorkshopBookingDetails.booking)
+                    ? "Customer requested slot"
+                    : "Scheduled workshop"}
+                </p>
+              </div>
+            </div>
           )}
-        </Reveal>
+          <div className="admin-modal__actions">
+            <button className="btn btn--secondary" type="button" onClick={closeWorkshopBookingDetails}>
+              Close
+            </button>
+          </div>
+        </div>
       </div>
 
       {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
@@ -9858,6 +10408,14 @@ export function AdminWorkshopsView() {
       </div>
     </div>
   );
+}
+
+export function AdminWorkshopsView() {
+  return <AdminWorkshopsPage view="workshops" />;
+}
+
+export function AdminWorkshopBookingsView() {
+  return <AdminWorkshopsPage view="bookings" />;
 }
 
 export function AdminWorkshopsCalendarView() {
@@ -15792,6 +16350,7 @@ export function AdminOrdersView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [openOrderActions, setOpenOrderActions] = useState(null);
   const [activeOrderDetailTab, setActiveOrderDetailTab] = useState(ORDER_DETAIL_TABS[0].id);
   const [paymentUpdating, setPaymentUpdating] = useState(false);
   const [deliveryMethod, setDeliveryMethod] = useState("company");
@@ -15856,6 +16415,47 @@ export function AdminOrdersView() {
     }
   }, [selectedOrderId]);
 
+  useEffect(() => {
+    if (!openOrderActions) return undefined;
+
+    const handleDocumentClick = (event) => {
+      const target = event.target;
+      if (
+        target &&
+        typeof target.closest === "function" &&
+        (target.closest(".admin-order-row-actions") || target.closest(".admin-order-row-actions__menu"))
+      ) {
+        return;
+      }
+      setOpenOrderActions(null);
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setOpenOrderActions(null);
+      }
+    };
+
+    const handleViewportChange = () => {
+      setOpenOrderActions(null);
+    };
+
+    document.addEventListener("click", handleDocumentClick);
+    document.addEventListener("keydown", handleEscape);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+      document.removeEventListener("keydown", handleEscape);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [openOrderActions]);
+
+  useEffect(() => {
+    setOpenOrderActions(null);
+  }, [ordersPage, searchTerm, selectedOrderId, statusFilter]);
+
   const needsTrackingLink = (status) => ["shipped"].includes(status);
 
   const normalizePaymentMethod = (order) =>
@@ -15887,10 +16487,28 @@ export function AdminOrdersView() {
   };
 
   const getAllowedOrderStatuses = (order) => {
-    if (!isEftOrder(order)) return ORDER_STATUSES.filter((status) => !["pending-payment-approval", "payment-rejected"].includes(status));
-    if (isEftApproved(order)) return ORDER_STATUSES.filter((status) => !["pending-payment-approval", "payment-rejected"].includes(status));
-    if (isEftRejected(order)) return ["payment-rejected", "cancelled"];
-    return ["pending-payment-approval", "cancelled"];
+    const filterStatusesForFulfilmentMethod = (statuses) => {
+      const filteredStatuses = isCollectionDeliveryMethod(order?.deliveryMethod)
+        ? statuses.filter(
+            (status) => !["order-ready-for-shipping", "out-for-delivery", "delivered", "shipped"].includes(status),
+          )
+        : statuses.filter((status) => status !== "ready-to-collect-at-farm");
+      const currentStatus = normalizeOrderStatus(order?.status);
+      return filteredStatuses.includes(currentStatus) ? filteredStatuses : [currentStatus, ...filteredStatuses];
+    };
+
+    if (!isEftOrder(order)) {
+      return filterStatusesForFulfilmentMethod(
+        ORDER_STATUSES.filter((status) => !["pending-payment-approval", "payment-rejected"].includes(status)),
+      );
+    }
+    if (isEftApproved(order)) {
+      return filterStatusesForFulfilmentMethod(
+        ORDER_STATUSES.filter((status) => !["pending-payment-approval", "payment-rejected"].includes(status)),
+      );
+    }
+    if (isEftRejected(order)) return filterStatusesForFulfilmentMethod(["payment-rejected", "cancelled"]);
+    return filterStatusesForFulfilmentMethod(["pending-payment-approval", "cancelled"]);
   };
 
   const normalizeDeliveryStatus = (order) => {
@@ -16006,6 +16624,67 @@ export function AdminOrdersView() {
     } finally {
       setResendOrderEmailSending(false);
     }
+  };
+
+  const handlePrintOrderInvoice = (order) => {
+    if (!order) return;
+    try {
+      printOrderInvoice(order);
+    } catch (error) {
+      setStatusMessage(error?.message || "Unable to open the invoice print view.");
+    }
+  };
+
+  const openOrderTrackingDialog = (order) => {
+    if (!order?.id) return;
+    setPendingStatusUpdate({
+      orderId: order.id,
+      status: normalizeOrderStatus(order.status),
+      existingLink: order.trackingLink || "",
+    });
+    setTrackingInput(order.trackingLink || "");
+  };
+
+  const toggleOrderActionsMenu = (orderId, triggerElement) => {
+    if (!triggerElement || typeof window === "undefined") return;
+
+    setOpenOrderActions((current) => {
+      if (current?.orderId === orderId) {
+        return null;
+      }
+
+      const rect = triggerElement.getBoundingClientRect();
+      const openAbove =
+        rect.bottom + ORDER_ROW_MENU_ESTIMATED_HEIGHT >
+        window.innerHeight - ORDER_ROW_MENU_VIEWPORT_PADDING;
+      const top = openAbove
+        ? Math.max(
+            ORDER_ROW_MENU_VIEWPORT_PADDING,
+            rect.top - ORDER_ROW_MENU_ESTIMATED_HEIGHT - 8,
+          )
+        : Math.min(
+            window.innerHeight - ORDER_ROW_MENU_VIEWPORT_PADDING,
+            rect.bottom + 8,
+          );
+      const maxLeft = Math.max(
+        ORDER_ROW_MENU_VIEWPORT_PADDING,
+        window.innerWidth - ORDER_ROW_MENU_WIDTH - ORDER_ROW_MENU_VIEWPORT_PADDING,
+      );
+      const left = Math.min(
+        Math.max(ORDER_ROW_MENU_VIEWPORT_PADDING, rect.right - ORDER_ROW_MENU_WIDTH),
+        maxLeft,
+      );
+
+      return {
+        orderId,
+        top,
+        left,
+      };
+    });
+  };
+
+  const closeOrderActionsMenu = () => {
+    setOpenOrderActions(null);
   };
 
   const handleMarkPaymentReceived = async (order) => {
@@ -16920,7 +17599,15 @@ export function AdminOrdersView() {
         acc[status] = (acc[status] || 0) + 1;
         return acc;
       },
-      { "order-placed": 0, "packing-order": 0, "order-ready-for-shipping": 0, shipped: 0, completed: 0, cancelled: 0 }
+      {
+        "order-placed": 0,
+        "packing-order": 0,
+        "ready-to-collect-at-farm": 0,
+        "order-ready-for-shipping": 0,
+        shipped: 0,
+        completed: 0,
+        cancelled: 0,
+      }
     );
     const paidCount = orders.filter((order) => isPaidOrderForKpi(order)).length;
     const failedPayments = orders.filter((order) => normalizePaymentStatusForKpi(order) === "failed").length;
@@ -16966,6 +17653,29 @@ export function AdminOrdersView() {
   const selectedStatusLocked = selectedOrder ? isEftBlocked(selectedOrder) : false;
   const selectedPayfast = selectedOrder?.payfast || {};
   const selectedShipping = selectedOrder?.shipping || {};
+  const activeOrderActionsOrder = openOrderActions
+    ? orders.find((order) => order.id === openOrderActions.orderId) || null
+    : null;
+  const activeOrderActionsPaymentMethod = activeOrderActionsOrder
+    ? normalizePaymentMethod(activeOrderActionsOrder)
+    : PAYMENT_METHODS.PAYFAST;
+  const activeOrderActionsPaymentStatus = activeOrderActionsOrder
+    ? normalizePaymentStatus(activeOrderActionsOrder)
+    : "unknown";
+  const activeOrderActionsApprovalStatus = activeOrderActionsOrder
+    ? normalizePaymentApprovalStatus(activeOrderActionsOrder)
+    : PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
+  const activeOrderActionsCanApproveEftPayment =
+    activeOrderActionsPaymentMethod === PAYMENT_METHODS.EFT &&
+    activeOrderActionsApprovalStatus === PAYMENT_APPROVAL_STATUSES.PENDING;
+  const activeOrderActionsCanMarkPaymentReceived =
+    activeOrderActionsPaymentMethod !== PAYMENT_METHODS.EFT &&
+    !["paid", "complete"].includes(activeOrderActionsPaymentStatus);
+  const activeOrderActionsLabel = activeOrderActionsOrder
+    ? Number.isFinite(activeOrderActionsOrder.orderNumber)
+      ? `Order #${activeOrderActionsOrder.orderNumber}`
+      : "Order"
+    : "Order";
   const deliveryPreview = useMemo(() => {
     if (!selectedOrder) return null;
     const previousShippingCostRaw =
@@ -17215,7 +17925,11 @@ export function AdminOrdersView() {
         </div>
         <div className="admin-kpi">
           <p className="admin-kpi__label">Ready / Completed</p>
-          <p className="admin-kpi__value">{(kpi.statusCounts["order-ready-for-shipping"] || 0) + (kpi.statusCounts.completed || 0)}</p>
+          <p className="admin-kpi__value">
+            {(kpi.statusCounts["ready-to-collect-at-farm"] || 0) +
+              (kpi.statusCounts["order-ready-for-shipping"] || 0) +
+              (kpi.statusCounts.completed || 0)}
+          </p>
         </div>
         <div className="admin-kpi">
           <p className="admin-kpi__label">Paid</p>
@@ -17309,6 +18023,7 @@ export function AdminOrdersView() {
                 const statusLocked = isEftBlocked(order);
                 const deliveryStatus = normalizeDeliveryStatus(order);
                 const deliveryLabel = deliveryStatus.replace(/-/g, " ");
+                const isActionsMenuOpen = openOrderActions?.orderId === order.id;
                 return (
                   <tr
                     key={order.id}
@@ -17387,6 +18102,24 @@ export function AdminOrdersView() {
                     <td className="admin-orders-table__delivery" data-label="Delivery">
                       <span className="modal__meta admin-orders-table__delivery-value">{deliveryLabel}</span>
                     </td>
+                    <td className="admin-orders-table__actions-cell" data-label="Actions">
+                      <div
+                        className="admin-order-row-actions"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <button
+                          className={`admin-order-row-actions__trigger ${isActionsMenuOpen ? "is-open" : ""}`}
+                          type="button"
+                          aria-label={`Open actions for ${orderLabel}`}
+                          aria-haspopup="menu"
+                          aria-expanded={isActionsMenuOpen ? "true" : "false"}
+                          onClick={(event) => toggleOrderActionsMenu(order.id, event.currentTarget)}
+                        >
+                          <span className="admin-order-row-actions__trigger-label">More</span>
+                          <IconMoreVertical className="admin-order-row-actions__icon" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -17409,6 +18142,98 @@ export function AdminOrdersView() {
           <p className="admin-panel__status">{statusMessage}</p>
         )}
       </div>
+      {typeof document !== "undefined" &&
+        openOrderActions &&
+        activeOrderActionsOrder &&
+        createPortal(
+          <div
+            className="admin-order-row-actions__menu"
+            role="menu"
+            aria-label={`${activeOrderActionsLabel} actions`}
+            style={{
+              position: "fixed",
+              top: `${openOrderActions.top}px`,
+              left: `${openOrderActions.left}px`,
+            }}
+          >
+            <button
+              className="admin-order-row-actions__item"
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeOrderActionsMenu();
+                setSelectedOrderId(activeOrderActionsOrder.id);
+              }}
+            >
+              Open order
+            </button>
+            <button
+              className="admin-order-row-actions__item"
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeOrderActionsMenu();
+                handlePrintOrderInvoice(activeOrderActionsOrder);
+              }}
+            >
+              Print invoice
+            </button>
+            <button
+              className="admin-order-row-actions__item"
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeOrderActionsMenu();
+                openOrderTrackingDialog(activeOrderActionsOrder);
+              }}
+            >
+              {activeOrderActionsOrder.trackingLink ? "Update tracking" : "Add tracking"}
+            </button>
+            {activeOrderActionsCanMarkPaymentReceived && (
+              <button
+                className="admin-order-row-actions__item"
+                type="button"
+                role="menuitem"
+                disabled={paymentUpdating}
+                onClick={() => {
+                  closeOrderActionsMenu();
+                  handleMarkPaymentReceived(activeOrderActionsOrder);
+                }}
+              >
+                {paymentUpdating ? "Updating..." : "Mark payment received"}
+              </button>
+            )}
+            {activeOrderActionsCanApproveEftPayment && (
+              <>
+                <button
+                  className="admin-order-row-actions__item"
+                  type="button"
+                  role="menuitem"
+                  disabled={eftReviewLoading}
+                  onClick={() => {
+                    closeOrderActionsMenu();
+                    handleReviewEftPayment(activeOrderActionsOrder, "approve");
+                  }}
+                >
+                  {eftReviewLoading ? "Working..." : "Approve EFT payment"}
+                </button>
+                <button
+                  className="admin-order-row-actions__item admin-order-row-actions__item--danger"
+                  type="button"
+                  role="menuitem"
+                  disabled={eftReviewLoading}
+                  onClick={() => {
+                    closeOrderActionsMenu();
+                    handleReviewEftPayment(activeOrderActionsOrder, "reject");
+                  }}
+                >
+                  {eftReviewLoading ? "Working..." : "Reject EFT payment"}
+                </button>
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
 
       <div
         className={`modal admin-modal admin-create-order-modal ${createOrderOpen ? "is-active" : ""}`}
@@ -17998,15 +18823,17 @@ export function AdminOrdersView() {
               <button
                 className="btn btn--secondary"
                 type="button"
-                onClick={() =>
-                  setPendingStatusUpdate({
-                    orderId: selectedOrder.id,
-                    status: normalizeOrderStatus(selectedOrder.status),
-                    existingLink: selectedOrder.trackingLink || "",
-                  })
-                }
+                onClick={() => openOrderTrackingDialog(selectedOrder)}
               >
                 {selectedOrder.trackingLink ? "Update Tracking" : "Add Tracking"}
+              </button>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={() => handlePrintOrderInvoice(selectedOrder)}
+              >
+                <IconPrinter className="btn__icon" aria-hidden="true" />
+                Print invoice
               </button>
               {selectedPaymentMethod === PAYMENT_METHODS.EFT ? (
                 <>

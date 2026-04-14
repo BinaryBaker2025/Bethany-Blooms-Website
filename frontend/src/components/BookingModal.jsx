@@ -54,6 +54,26 @@ const buildAttendeeSelections = (count, selections, optionValues, fallbackValue)
   return normalized;
 };
 
+const normalizeAttendeeSelectionValues = (selections) => {
+  if (!Array.isArray(selections)) return [];
+  return selections
+    .map((selection) => {
+      if (typeof selection === "string") return selection;
+      if (selection && typeof selection === "object") {
+        return (
+          selection.optionValue ||
+          selection.optionId ||
+          selection.value ||
+          selection.optionLabel ||
+          selection.label ||
+          ""
+        );
+      }
+      return "";
+    })
+    .filter((value) => typeof value === "string" && value.trim().length > 0);
+};
+
 const selectionsMatch = (left = [], right = []) =>
   left.length === right.length && left.every((value, index) => value === right[index]);
 
@@ -85,12 +105,11 @@ const workshopRequestDateFormatter = new Intl.DateTimeFormat("en-ZA", {
   dateStyle: "long",
 });
 
-const REQUIRED_FIELDS = ["fullName", "email", "phone", "address"];
+const REQUIRED_FIELDS = ["fullName", "email", "phone"];
 const REQUIRED_FIELD_LABELS = {
   fullName: "Full name",
   email: "Email",
   phone: "Phone",
-  address: "Address",
 };
 
 const parseDateInputValue = (value) => {
@@ -203,7 +222,7 @@ function BookingModal() {
           itemLabel: "Workshop",
           daySelectorLabel: "Workshop Day",
           noSessionsCta: "No Sessions Available",
-          optionLabel: "Workshop Option",
+          optionLabel: "Frame Selection",
         };
   const sessions = useMemo(
     () => (Array.isArray(workshop?.sessions) ? workshop.sessions : []),
@@ -359,10 +378,26 @@ function BookingModal() {
     }));
   }, [isCutFlower, workshop]);
 
-  const attendeeCountNumber = useMemo(
+  const requestedAttendeeCountNumber = useMemo(
     () => Math.max(1, Number.parseInt(formState.attendeeCount, 10) || 1),
     [formState.attendeeCount],
   );
+  const sessionSeatLimit = useMemo(() => {
+    if (isCutFlower || isWorkshopRequestMode) return null;
+    const capacityValue = Number(selectedSession?.capacity);
+    return Number.isFinite(capacityValue) && capacityValue > 0 ? capacityValue : null;
+  }, [isCutFlower, isWorkshopRequestMode, selectedSession?.capacity]);
+  const attendeeCountNumber = useMemo(() => {
+    if (sessionSeatLimit === null) return requestedAttendeeCountNumber;
+    return Math.min(requestedAttendeeCountNumber, sessionSeatLimit);
+  }, [requestedAttendeeCountNumber, sessionSeatLimit]);
+  const attendeeCountLimitMessage = useMemo(() => {
+    if (sessionSeatLimit === null) return "";
+    if (requestedAttendeeCountNumber > sessionSeatLimit) {
+      return `This session has ${sessionSeatLimit} seat${sessionSeatLimit === 1 ? "" : "s"} available, so your booking has been capped at ${sessionSeatLimit} attendee${sessionSeatLimit === 1 ? "" : "s"}.`;
+    }
+    return `This session has ${sessionSeatLimit} seat${sessionSeatLimit === 1 ? "" : "s"} available.`;
+  }, [requestedAttendeeCountNumber, sessionSeatLimit]);
   const defaultSelectionValue =
     selectionOptions[0]?.value ?? INITIAL_BOOKING_FORM.framePreference;
   const cutFlowerOptionGroups = useMemo(() => {
@@ -388,6 +423,7 @@ function BookingModal() {
       (option) => !option.minAttendees || option.minAttendees <= attendeeCountNumber,
     );
   }, [attendeeCountNumber, isCutFlower, selectionOptions, visibleCutFlowerOptions]);
+  const availableSelectionOptions = isCutFlower ? availableCutFlowerOptions : selectionOptions;
   const restrictedOptionsNote = useMemo(() => {
     if (!isCutFlower || restrictedCutFlowerOptions.length === 0) return "";
     const labels = restrictedCutFlowerOptions
@@ -408,13 +444,12 @@ function BookingModal() {
     return `Options requiring ${minText} are hidden${labelText}`;
   }, [isCutFlower, restrictedCutFlowerOptions]);
   const normalizedAttendeeSelections = useMemo(() => {
-    if (!isCutFlower) return [];
-    const optionValues = new Set(availableCutFlowerOptions.map((option) => option.value));
+    const optionValues = new Set(availableSelectionOptions.map((option) => option.value));
     if (optionValues.size === 0 && selectionOptions[0]) {
       optionValues.add(selectionOptions[0].value);
     }
     const fallbackValue =
-      availableCutFlowerOptions[0]?.value ?? selectionOptions[0]?.value ?? defaultSelectionValue;
+      availableSelectionOptions[0]?.value ?? selectionOptions[0]?.value ?? defaultSelectionValue;
     return buildAttendeeSelections(
       attendeeCountNumber,
       formState.attendeeSelections,
@@ -423,10 +458,9 @@ function BookingModal() {
     );
   }, [
     attendeeCountNumber,
-    availableCutFlowerOptions,
+    availableSelectionOptions,
     defaultSelectionValue,
     formState.attendeeSelections,
-    isCutFlower,
     selectionOptions,
   ]);
 
@@ -437,17 +471,24 @@ function BookingModal() {
   }, [isBookingOpen]);
 
   useEffect(() => {
-    if (!isCutFlower) return;
+    if (!isBookingOpen) return;
     setFormState((prev) => {
-      if (selectionsMatch(prev.attendeeSelections, normalizedAttendeeSelections)) {
+      if (
+        selectionsMatch(prev.attendeeSelections, normalizedAttendeeSelections) &&
+        (!sessionSeatLimit || requestedAttendeeCountNumber <= sessionSeatLimit)
+      ) {
         return prev;
       }
       return {
         ...prev,
+        attendeeCount:
+          sessionSeatLimit && requestedAttendeeCountNumber > sessionSeatLimit
+            ? String(sessionSeatLimit)
+            : prev.attendeeCount,
         attendeeSelections: normalizedAttendeeSelections,
       };
     });
-  }, [isCutFlower, normalizedAttendeeSelections]);
+  }, [isBookingOpen, normalizedAttendeeSelections, requestedAttendeeCountNumber, sessionSeatLimit]);
 
   useEffect(() => {
     if (!isBookingOpen) {
@@ -480,17 +521,13 @@ function BookingModal() {
       INITIAL_BOOKING_FORM.framePreference;
     const optionValues = new Set(selectionOptions.map((option) => option.value));
     const normalizedAttendeeCount = Math.max(1, Number.parseInt(attendeeCount, 10) || 1);
-    const initialAttendeeSelections = Array.isArray(bookingContext?.attendeeSelections)
-      ? bookingContext.attendeeSelections
-      : [];
-    const attendeeSelections = isCutFlower
-      ? buildAttendeeSelections(
-          normalizedAttendeeCount,
-          initialAttendeeSelections,
-          optionValues,
-          defaultSelectionValue,
-        )
-      : [];
+    const initialAttendeeSelections = normalizeAttendeeSelectionValues(bookingContext?.attendeeSelections);
+    const attendeeSelections = buildAttendeeSelections(
+      normalizedAttendeeCount,
+      initialAttendeeSelections,
+      optionValues,
+      defaultSelectionValue,
+    );
 
     const preferredSessionIds = [
       bookingContext?.sessionId,
@@ -574,6 +611,7 @@ function BookingModal() {
       nextSelections[index] = value;
       return {
         ...prev,
+        framePreference: index === 0 ? value : prev.framePreference,
         attendeeSelections: nextSelections,
       };
     });
@@ -582,54 +620,37 @@ function BookingModal() {
   const pricingSummary = useMemo(() => {
     const rawFallbackPrice = parseOptionalNumber(workshop?.unitPrice ?? workshop?.price);
     const fallbackPrice = rawFallbackPrice ?? 0;
-    if (isCutFlower) {
-      const optionLookup = new Map(selectionOptions.map((option) => [option.value, option]));
-      const attendeeItems = normalizedAttendeeSelections.map((value, index) => {
-        const option = optionLookup.get(value) ?? selectionOptions[0];
-        const price =
-          option?.price !== undefined && Number.isFinite(option.price)
-            ? option.price
-            : fallbackPrice;
-        const label = option?.label ?? option?.displayLabel ?? value ?? `Option ${index + 1}`;
-        const displayLabel = option?.displayLabel ?? label;
-        return {
-          index: index + 1,
-          value,
-          label,
-          displayLabel,
-          isExtra: Boolean(option?.isExtra),
-          minAttendees: option?.minAttendees ?? null,
-          price,
-        };
-      });
-      const total = attendeeItems.reduce(
-        (sum, item) => sum + (Number.isFinite(item.price) ? item.price : 0),
-        0,
-      );
+    const optionLookup = new Map(selectionOptions.map((option) => [option.value, option]));
+    const attendeeItems = normalizedAttendeeSelections.map((value, index) => {
+      const option = optionLookup.get(value) ?? selectionOptions[0];
+      const price =
+        option?.price !== undefined && Number.isFinite(option.price)
+          ? option.price
+          : fallbackPrice;
+      const label = option?.label ?? option?.displayLabel ?? value ?? `Option ${index + 1}`;
+      const displayLabel = option?.displayLabel ?? label;
       return {
-        perAttendeePrice: attendeeItems.length ? total / attendeeItems.length : 0,
-        attendeeCount: attendeeCountNumber,
-        attendeeItems,
-        total,
+        index: index + 1,
+        value,
+        label,
+        displayLabel,
+        isExtra: Boolean(option?.isExtra),
+        minAttendees: option?.minAttendees ?? null,
+        price,
       };
-    }
-    const selectedOption =
-      selectionOptions.find((option) => option.value === formState.framePreference) ?? selectionOptions[0];
-    const perAttendeePrice =
-      selectedOption?.price !== undefined && Number.isFinite(selectedOption.price)
-        ? selectedOption.price
-        : fallbackPrice;
-    const total = perAttendeePrice * attendeeCountNumber;
+    });
+    const total = attendeeItems.reduce(
+      (sum, item) => sum + (Number.isFinite(item.price) ? item.price : 0),
+      0,
+    );
     return {
-      perAttendeePrice,
+      perAttendeePrice: attendeeItems.length ? total / attendeeItems.length : 0,
       attendeeCount: attendeeCountNumber,
-      attendeeItems: [],
+      attendeeItems,
       total,
     };
   }, [
     attendeeCountNumber,
-    formState.framePreference,
-    isCutFlower,
     normalizedAttendeeSelections,
     selectionOptions,
     workshop,
@@ -683,11 +704,11 @@ function BookingModal() {
       fullName: formState.fullName.trim(),
       email: formState.email.trim(),
       phone: formState.phone.trim(),
-      address: isCutFlower ? "" : formState.address.trim(),
+      address: "",
       notes: formState.notes.trim(),
     };
 
-    const requiredFields = isCutFlower ? ["fullName", "email", "phone"] : REQUIRED_FIELDS;
+    const requiredFields = REQUIRED_FIELDS;
     const missing = requiredFields.filter((field) => !trimmed[field]);
     if (missing.length > 0) {
       const missingLabels = missing
@@ -707,22 +728,19 @@ function BookingModal() {
     const perAttendeePrice = pricingSummary.perAttendeePrice;
     const totalPrice = pricingSummary.total;
     const attendeeItems = pricingSummary.attendeeItems ?? [];
-
-    const selectedOption =
-      selectionOptions.find((option) => option.value === formState.framePreference) ?? selectionOptions[0];
+    const primaryAttendeeSelection = attendeeItems[0] ?? null;
     const selectionValue =
-      selectedOption?.value ?? selectionOptions[0]?.value ?? INITIAL_BOOKING_FORM.framePreference;
-    const selectionLabel = selectedOption?.label ?? selectionValue;
-    const summarySelectionLabel = isCutFlower
-      ? attendeeItems.length === 1
-        ? attendeeItems[0]?.label ?? selectionLabel
-        : "Multiple options"
-      : selectionLabel;
-    const summarySelectionValue = isCutFlower
-      ? attendeeItems.length === 1
-        ? attendeeItems[0]?.value ?? selectionValue
-        : "multiple"
-      : selectionValue;
+      primaryAttendeeSelection?.value ??
+      selectionOptions[0]?.value ??
+      INITIAL_BOOKING_FORM.framePreference;
+    const selectionLabel = primaryAttendeeSelection?.label ?? selectionValue;
+    const summarySelectionLabel =
+      attendeeItems.length <= 1
+        ? selectionLabel
+        : isCutFlower
+          ? "Multiple options"
+          : "Multiple frame selections";
+    const summarySelectionValue = selectionValue;
     const workshopSchedule = isWorkshopRequestMode
       ? {
           sessionSource: "customer-requested",
@@ -897,9 +915,15 @@ function BookingModal() {
         location: workshop.location ?? null,
         attendeeCount: attendeeCountNumber,
         framePreference: isCutFlower ? null : selectionValue,
-        optionId: selectionValue,
-        optionLabel: selectionLabel || null,
-        optionValue: selectionValue,
+        optionId: summarySelectionValue,
+        optionLabel: summarySelectionLabel || null,
+        optionValue: summarySelectionValue,
+        attendeeSelections: attendeeItems.map((item) => ({
+          attendee: item.index,
+          optionLabel: item.label,
+          optionValue: item.value,
+          estimatedPrice: Number.isFinite(item.price) ? item.price : null,
+        })),
         perAttendeePrice,
         notes: trimmed.notes,
         sessionId: workshopSchedule.sessionId,
@@ -942,9 +966,9 @@ function BookingModal() {
           sessionTimeRange: workshopSchedule.sessionTimeRange,
           requestedDurationHours: workshopSchedule.requestedDurationHours,
           attendeeCount: attendeeCountNumber,
-          optionLabel: selectionLabel || null,
-          optionId: selectionValue,
-          optionValue: selectionValue,
+          optionLabel: summarySelectionLabel || null,
+          optionId: summarySelectionValue,
+          optionValue: summarySelectionValue,
           framePreference: isCutFlower ? null : selectionValue,
           notes: trimmed.notes,
           totalPrice,
@@ -1240,22 +1264,6 @@ function BookingModal() {
             />
             {missingFields.includes("phone") && <p className="booking-field__error">Phone is required.</p>}
           </div>
-          {!isCutFlower && (
-            <div className={`booking-field${missingFields.includes("address") ? " booking-field--error" : ""}`}>
-              <label htmlFor="guest-address">Address</label>
-              <textarea
-                className="input textarea"
-                id="guest-address"
-                name="address"
-                placeholder="Delivery or correspondence address"
-                value={formState.address}
-                onChange={handleFieldChange("address")}
-                aria-invalid={missingFields.includes("address") ? "true" : "false"}
-                required
-              />
-              {missingFields.includes("address") && <p className="booking-field__error">Address is required.</p>}
-            </div>
-          )}
           <div>
             <label htmlFor="guest-attendees">Number of Attendees</label>
             <input
@@ -1270,89 +1278,73 @@ function BookingModal() {
               onChange={handleFieldChange("attendeeCount")}
               required
             />
+            {attendeeCountLimitMessage && <p className="modal__meta">{attendeeCountLimitMessage}</p>}
           </div>
-          {isCutFlower ? (
-            <div className="booking-grid__full booking-attendee-options">
-              <div className="booking-attendee-options__header">
-                <span className="booking-attendee-options__title">{bookingCopy.optionLabel}</span>
-                {hasExtraOptions && (
-                  <label className="booking-attendee-options__toggle">
-                    <input
-                      type="checkbox"
-                      checked={showExtraOptions}
-                      onChange={(event) => setShowExtraOptions(event.target.checked)}
-                    />
-                    <span>Show extra add-ons</span>
-                  </label>
-                )}
-              </div>
-              <p className="modal__meta">Choose the option for each person.</p>
-              {hasExtraOptions && !showExtraOptions && (
-                <p className="modal__meta booking-attendee-options__note">
-                  Extra add-ons are hidden unless you turn them on.
-                </p>
+          <div className="booking-grid__full booking-attendee-options">
+            <div className="booking-attendee-options__header">
+              <span className="booking-attendee-options__title">{bookingCopy.optionLabel}</span>
+              {hasExtraOptions && (
+                <label className="booking-attendee-options__toggle">
+                  <input
+                    type="checkbox"
+                    checked={showExtraOptions}
+                    onChange={(event) => setShowExtraOptions(event.target.checked)}
+                  />
+                  <span>Show extra add-ons</span>
+                </label>
               )}
-              {restrictedOptionsNote && (
-                <p className="modal__meta booking-attendee-options__note">
-                  {restrictedOptionsNote}
-                </p>
-              )}
-              {hasExtraSelections && (
-                <p className="form-feedback__message form-feedback__message--warning booking-attendee-options__note">
-                  Extra add-ons are estimates and may change on the day.
-                </p>
-              )}
-              <div className="booking-attendee-options__grid">
-                {normalizedAttendeeSelections.map((selection, index) => {
-                  const selectedOption =
-                    selectionOptions.find((option) => option.value === selection) ?? null;
-                  return (
-                    <div className="booking-attendee-options__row" key={`attendee-option-${index + 1}`}>
-                      <label htmlFor={`attendee-option-${index}`}>
-                        Attendee {index + 1}
-                      </label>
-                      <div className="booking-attendee-options__control">
-                        <select
-                          className="input"
-                          id={`attendee-option-${index}`}
-                          value={selection}
-                          onChange={handleAttendeeSelectionChange(index)}
-                        >
-                          {availableCutFlowerOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.displayLabel ?? option.label}
-                            </option>
-                          ))}
-                        </select>
-                        {selectedOption?.isExtra && (
-                          <span className="booking-attendee-options__hint">
-                            Extra add-on pricing is an estimate.
-                          </span>
-                        )}
-                      </div>
+            </div>
+            <p className="modal__meta">
+              {isCutFlower ? "Choose the option for each person." : "Choose the frame for each attendee."}
+            </p>
+            {hasExtraOptions && !showExtraOptions && (
+              <p className="modal__meta booking-attendee-options__note">
+                Extra add-ons are hidden unless you turn them on.
+              </p>
+            )}
+            {restrictedOptionsNote && (
+              <p className="modal__meta booking-attendee-options__note">
+                {restrictedOptionsNote}
+              </p>
+            )}
+            {hasExtraSelections && (
+              <p className="form-feedback__message form-feedback__message--warning booking-attendee-options__note">
+                Extra add-ons are estimates and may change on the day.
+              </p>
+            )}
+            <div className="booking-attendee-options__grid">
+              {normalizedAttendeeSelections.map((selection, index) => {
+                const selectedOption =
+                  selectionOptions.find((option) => option.value === selection) ?? null;
+                return (
+                  <div className="booking-attendee-options__row" key={`attendee-option-${index + 1}`}>
+                    <label htmlFor={`attendee-option-${index}`}>
+                      Attendee {index + 1}
+                    </label>
+                    <div className="booking-attendee-options__control">
+                      <select
+                        className="input"
+                        id={`attendee-option-${index}`}
+                        value={selection}
+                        onChange={handleAttendeeSelectionChange(index)}
+                      >
+                        {availableSelectionOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.displayLabel ?? option.label}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedOption?.isExtra && (
+                        <span className="booking-attendee-options__hint">
+                          Extra add-on pricing is an estimate.
+                        </span>
+                      )}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </div>
-          ) : (
-            <div>
-              <label htmlFor="guest-frame">{bookingCopy.optionLabel}</label>
-              <select
-                className="input"
-                id="guest-frame"
-                name="framePreference"
-                value={formState.framePreference}
-                onChange={handleFieldChange("framePreference")}
-              >
-                {selectionOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.displayLabel ?? option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          </div>
           <div className="booking-grid__full">
             <label htmlFor="guest-notes">Notes</label>
             <textarea
@@ -1380,9 +1372,11 @@ function BookingModal() {
                 ))}
               </>
             ) : (
-              <p className="modal__meta">
-                {pricingSummary.attendeeCount} attendee(s) - R{pricingSummary.perAttendeePrice.toFixed(2)} per person
-              </p>
+              pricingSummary.attendeeItems.map((item) => (
+                <p className="modal__meta booking-summary__line" key={`estimate-${item.index}`}>
+                  Attendee {item.index}: {item.label} (R{item.price.toFixed(2)})
+                </p>
+              ))
             )}
           </div>
           {submitError && (

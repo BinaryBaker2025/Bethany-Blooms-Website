@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { getFirebaseDb } from "../lib/firebase.js";
+import { formatOrderStatusLabel } from "../lib/orderStatus.js";
 import { formatShippingAddress } from "../lib/shipping.js";
 
 const toDate = (value) => {
@@ -37,6 +38,16 @@ const normalizeText = (value, fallback = "Not provided") => {
   return normalized || fallback;
 };
 
+const humanizeStatus = (value, fallback = "pending") => {
+  const normalized = (value || "").toString().trim();
+  const safeValue = normalized || fallback;
+  return safeValue
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+};
+
 const getOrderLabel = (order = null) => {
   if (!order) return "Order details";
   if (order.orderNumber !== undefined && order.orderNumber !== null && `${order.orderNumber}`.trim()) {
@@ -50,16 +61,6 @@ const getNormalizedPaymentMethod = (order = null) => {
   if (explicit) return explicit;
   if (order?.payfast) return "payfast";
   return "unknown";
-};
-
-const humanizeStatus = (value, fallback = "pending") => {
-  const normalized = (value || "").toString().trim();
-  const safeValue = normalized || fallback;
-  return safeValue
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (character) => character.toUpperCase());
 };
 
 const getStatusTone = (value, fallback = "low") => {
@@ -313,7 +314,7 @@ function AccountOrderDetailPage() {
                 Payment: {humanizeStatus(paymentStatus)}
               </span>
               <span className={`badge account-order-detail__status-pill badge--stock-${orderTone}`}>
-                Order: {humanizeStatus(statusLabel)}
+                Order: {formatOrderStatusLabel(statusLabel)}
               </span>
             </div>
           </div>

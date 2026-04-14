@@ -9453,8 +9453,13 @@ function validateOrderPayload(dataInput = {}) {
   const containsPhysicalProducts = items.some(
     (item) => item?.metadata?.type === "product" && !isGiftCardOrderItem(item),
   );
-  const requiresShipping = containsWorkshops || containsPhysicalProducts;
-  const giftCardOnly = containsGiftCards && !requiresShipping;
+  const workshopVenue = containsWorkshops && !containsPhysicalProducts
+    ? (items.find((item) => item?.metadata?.type === "workshop")?.metadata?.location || "")
+        .toString()
+        .trim() || "Bethany Blooms workshop studio"
+    : "";
+  const requiresShipping = containsPhysicalProducts;
+  const giftCardOnly = containsGiftCards && !containsWorkshops && !containsPhysicalProducts;
 
   const shippingAddressInput = data?.shippingAddress || data?.address || {};
   const shippingAddress = {
@@ -9484,6 +9489,9 @@ function validateOrderPayload(dataInput = {}) {
   }
   if (!customer.address && giftCardOnly) {
     customer.address = "Digital gift card delivery via email";
+  }
+  if (!customer.address && workshopVenue) {
+    customer.address = workshopVenue;
   }
   if (requiresShipping && !hasStructuredAddress) {
     throw new Error("Missing customer address details.");

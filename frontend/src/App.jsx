@@ -83,6 +83,9 @@ const AdminShippingView = lazy(() =>
 const AdminWorkshopsView = lazy(() =>
   loadAdminPageModule().then((module) => ({ default: module.AdminWorkshopsView })),
 );
+const AdminWorkshopBookingsView = lazy(() =>
+  loadAdminPageModule().then((module) => ({ default: module.AdminWorkshopBookingsView })),
+);
 const AdminWorkshopsCalendarView = lazy(() =>
   loadAdminPageModule().then((module) => ({ default: module.AdminWorkshopsCalendarView })),
 );
@@ -148,6 +151,7 @@ function App() {
                 <Route path="media" element={<AdminMediaLibraryView />} />
                 <Route path="products/categories" element={<AdminProductsView />} />
                 <Route path="workshops" element={<AdminWorkshopsView />} />
+                <Route path="workshops/bookings" element={<AdminWorkshopBookingsView />} />
                 <Route
                   path="calendar"
                   element={<AdminWorkshopsCalendarView />}
@@ -186,4 +190,3 @@ function App() {
 }
 
 export default App;
-

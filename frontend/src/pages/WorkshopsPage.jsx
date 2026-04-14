@@ -163,6 +163,22 @@ function resolveWorkshopDate(workshop = {}) {
   return null;
 }
 
+function buildWorkshopCardSummary(workshop = {}) {
+  const contentCandidates = [
+    workshop.description,
+    workshop.ctaNote,
+    workshop.whatToExpect,
+    workshop.bookingPricing,
+  ];
+  const firstFilled = contentCandidates
+    .find((value) => typeof value === "string" && value.trim().length > 0)
+    ?.replace(/\s+/g, " ")
+    .trim();
+  if (!firstFilled) return "Explore the workshop details, available dates, and booking options.";
+  if (firstFilled.length <= 150) return firstFilled;
+  return `${firstFilled.slice(0, 147).trimEnd()}...`;
+}
+
 function WorkshopsPage() {
   usePageMetadata({
     title: "Bethany Blooms Workshops | Pressed Flower Experiences in Vereeniging",
@@ -204,7 +220,7 @@ function WorkshopsPage() {
       return {
         ...workshop,
         title: workshop.title || workshop.name || "Bethany Blooms Workshop",
-        description: workshop.description || "Details coming soon.",
+        description: buildWorkshopCardSummary(workshop),
         scheduledFor: workshop.scheduledFor ?? null,
         formattedDate: displayDate,
         isByRequest,
@@ -303,7 +319,7 @@ function WorkshopsPage() {
               Explore the next available dates below, or request a private date when a workshop is marked by request.
             </p>
           </Reveal>
-          <div className="cards-grid">
+          <div className="cards-grid workshops-grid">
             {normalizedWorkshops.map((workshop, index) => (
               <Reveal as="article" className="card cut-flower-card" key={workshop.id} delay={index * 120}>
                 <div className="cut-flower-card__media">
@@ -347,6 +363,12 @@ function WorkshopsPage() {
                     )}
                   </div>
                   <div className="card__actions">
+                    <Link
+                      className="btn btn--secondary"
+                      to={`/workshops/${encodeURIComponent(workshop.id)}`}
+                    >
+                      View More
+                    </Link>
                     <button
                       className="btn btn--primary"
                       type="button"

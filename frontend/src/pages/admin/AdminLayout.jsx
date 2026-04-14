@@ -80,7 +80,10 @@ const NAV_SECTIONS = [
       {
         type: "group", id: "workshops", label: "Workshops", icon: "workshops",
         to: "/admin/workshops", end: true,
-        children: [{ to: "/admin/workshops", label: "Workshops & Bookings", end: true }],
+        children: [
+          { to: "/admin/workshops", label: "Workshops", end: true },
+          { to: "/admin/workshops/bookings", label: "Bookings" },
+        ],
       },
       {
         type: "group", id: "cut-flowers", label: "Cut Flowers", icon: "cutFlowers",
@@ -133,6 +136,7 @@ const PAGE_TITLE_MAP = [
   ["/admin/products", "Products"],
   ["/admin/shipping", "Shipping & Courier"],
   ["/admin/media", "Image Library"],
+  ["/admin/workshops/bookings", "Workshop Bookings"],
   ["/admin/workshops", "Workshops"],
   ["/admin/events", "Events"],
   ["/admin/pos", "Point of Sale"],

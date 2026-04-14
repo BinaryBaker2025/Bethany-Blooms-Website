@@ -13,13 +13,13 @@
     "registry:giftcards:backfill:apply": "node scripts/backfillGiftCardRegistry.js --apply"
   },
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "index.js",
   "dependencies": {
     "dotenv": "^16.6.1",
     "firebase-admin": "^13.6.0",
-    "firebase-functions": "^7.0.0",
+    "firebase-functions": "^7.2.3",
     "pdf-lib": "^1.17.1",
     "resend": "^6.8.0"
   },

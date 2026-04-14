@@ -262,15 +262,21 @@ function CartPage() {
   }, [customerProfile?.addresses]);
   const defaultSavedAddressId = (customerProfile?.defaultAddressId || "").toString().trim();
   const accountEmail = (user?.email || "").toString().trim();
+  const workshopOnlyCart = hasItems && cartHasWorkshops && !cartHasPhysicalProducts && !cartHasGiftCards;
   const giftCardOnlyCart = hasItems && cartHasGiftCards && !cartHasPhysicalProducts && !cartHasWorkshops;
-  const requiresShipping = !giftCardOnlyCart;
+  const requiresShipping = cartHasPhysicalProducts;
+  const workshopVenueLabel = useMemo(() => {
+    if (!workshopOnlyCart) return "";
+    const firstWorkshopLocation = items.find((item) => item?.metadata?.type === "workshop")?.metadata?.location;
+    return (firstWorkshopLocation || "Bethany Blooms workshop studio").toString().trim();
+  }, [items, workshopOnlyCart]);
   const effectiveCheckoutEmail = accountEmail || contactDetails.email.trim();
   const stepLabels = useMemo(
     () => ({
       ...BASE_STEP_LABELS,
-      shipping: requiresShipping ? "Shipping" : "Delivery",
+      shipping: requiresShipping ? "Shipping" : workshopOnlyCart ? "Workshop" : "Delivery",
     }),
-    [requiresShipping],
+    [requiresShipping, workshopOnlyCart],
   );
   const isContactComplete = Boolean(
     contactDetails.fullName.trim() &&
@@ -676,15 +682,19 @@ function CartPage() {
       : null;
     const formattedAddress = normalizedShippingAddress ? formatShippingAddress(normalizedShippingAddress) : "";
     const digitalAddressFallback = giftCardOnlyCart ? "Digital gift card delivery via email" : "";
+    const workshopAddressFallback = workshopOnlyCart ? workshopVenueLabel : "";
     const checkoutEmail = accountEmail || contactDetails.email || metadataCustomer?.email || "";
     const customer = {
       fullName: contactDetails.fullName || metadataCustomer?.fullName || "",
       email: checkoutEmail,
       phone: contactDetails.phone || metadataCustomer?.phone || "",
-      address: formattedAddress || metadataCustomer?.address || digitalAddressFallback,
+      address:
+        (requiresShipping ? formattedAddress || metadataCustomer?.address : "") ||
+        digitalAddressFallback ||
+        workshopAddressFallback,
     };
 
-    const requiredFields = ["fullName", "email", "phone", "address"];
+    const requiredFields = requiresShipping ? ["fullName", "email", "phone", "address"] : ["fullName", "email", "phone"];
     const missing = requiredFields.filter((field) => !customer[field]?.trim());
     if (missing.length) {
       setOrderError("Please complete your contact and shipping details before placing the order.");
@@ -1154,6 +1164,13 @@ function CartPage() {
                                   {item.metadata.optionLabel || item.metadata.framePreference}
                                 </p>
                               )}
+                              {Array.isArray(item.metadata.attendeeSelections) &&
+                                item.metadata.attendeeSelections.map((selection, index) => (
+                                  <p key={`cart-attendee-option-${item.id}-${selection?.attendee || index + 1}`}>
+                                    <strong>Attendee {selection?.attendee || index + 1}:</strong>{" "}
+                                    {selection?.optionLabel || selection?.optionValue || "Option"}
+                                  </p>
+                                ))}
                               {item.metadata.notes && (
                                 <p>
                                   <strong>Notes:</strong> {item.metadata.notes}
@@ -1431,13 +1448,26 @@ function CartPage() {
                             </>
                           ) : (
                             <>
-                              <p className="modal__meta">
-                                This order contains digital gift cards only. Delivery is by email and no shipping
-                                address is required.
-                              </p>
-                              <p className="modal__meta">
-                                Gift cards will be sent to the checkout email after successful PayFast payment.
-                              </p>
+                              {workshopOnlyCart ? (
+                                <>
+                                  <p className="modal__meta">
+                                    This booking takes place at our studio, so no delivery address is required.
+                                  </p>
+                                  <p className="modal__meta">
+                                    Venue: {workshopVenueLabel}
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="modal__meta">
+                                    This order contains digital gift cards only. Delivery is by email and no shipping
+                                    address is required.
+                                  </p>
+                                  <p className="modal__meta">
+                                    Gift cards will be sent to the checkout email after successful PayFast payment.
+                                  </p>
+                                </>
+                              )}
                             </>
                           )}
                         </div>
@@ -1546,18 +1576,22 @@ function CartPage() {
                               </p>
                             </div>
                             <div className="checkout-review__card">
-                              <h3>Shipping</h3>
+                              <h3>{stepLabels.shipping}</h3>
                               <p>
-                                {requiresShipping ?
-                                   formatShippingAddress(shippingAddress) || "Add a delivery address"
-                                  : "Digital delivery by email"}
+                                {requiresShipping
+                                  ? formatShippingAddress(shippingAddress) || "Add a delivery address"
+                                  : workshopOnlyCart
+                                    ? workshopVenueLabel
+                                    : "Digital delivery by email"}
                               </p>
                               <p className="modal__meta">
                                 {requiresShipping
                                   ? selectedCourier
                                     ? `${selectedCourier.name} - ${currency(selectedCourier.price)}`
                                     : "Select a courier option"
-                                  : "No courier required"}
+                                  : workshopOnlyCart
+                                    ? "No courier required for workshop bookings"
+                                    : "No courier required"}
                               </p>
                             </div>
                             <div className="checkout-review__card">
@@ -1611,7 +1645,9 @@ function CartPage() {
                       ? selectedCourier
                         ? currency(shippingCost)
                         : "Select a courier"
-                      : "Digital delivery"}
+                      : workshopOnlyCart
+                        ? "No courier required"
+                        : "Digital delivery"}
                   </span>
                 </div>
                 <div className="cart-page__total-row cart-page__total-row--muted">
@@ -1626,7 +1662,9 @@ function CartPage() {
               <p className="cart-page__summary-note">
                 {requiresShipping
                   ? "Shipping is calculated based on the selected courier and province."
-                  : "This order contains digital gift cards, so no shipping fee applies."}
+                  : workshopOnlyCart
+                    ? "Workshop bookings take place at the studio, so no shipping fee applies."
+                    : "This order contains digital gift cards, so no shipping fee applies."}
               </p>
               {orderError && <p className="admin-panel__error">{orderError}</p>}
               {orderSuccess && <p className="admin-save-indicator">{orderSuccess}</p>}

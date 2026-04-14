@@ -15,6 +15,7 @@ import {
   PAYMENT_METHODS,
   normalizePaymentMethod,
 } from "../lib/paymentMethods.js";
+import { formatOrderStatusLabel } from "../lib/orderStatus.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
 import logo from "../assets/BethanyBloomsLogo.png";
 
@@ -2486,7 +2487,7 @@ function AccountPage() {
                           </span>
                         </div>
                         <p className="modal__meta">{formatOrderDate(order.createdAt)}</p>
-                        <p className="modal__meta">Status: {(order.status || "pending").toString()}</p>
+                        <p className="modal__meta">Status: {formatOrderStatusLabel(order.status || "pending")}</p>
                         <p className="modal__meta">Total: R{Number(order.totalPrice || 0).toFixed(2)}</p>
                         <p className="account-order-card__cta">View full order details</p>
                       </Link>
@@ -2666,4 +2667,3 @@ function AccountPage() {
 }
 
 export default AccountPage;
-
