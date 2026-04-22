@@ -27,6 +27,7 @@ import {
   formatPosSaleStatusLabel,
   getPosSaleDateKey,
   getPosSaleNetTotal,
+  getNormalizedPosSaleItems,
   getPosSaleStatusBadgeClass,
   normalizePosSaleStatus,
   parsePosDateValue,
@@ -34,12 +35,38 @@ import {
 import { getStockStatus, getVariantStockStatus } from "../../lib/stockStatus.js";
 
 const POS_TABS = [
-  { id: "products", label: "Products" },
-  { id: "pos-products", label: "POS-only" },
-  { id: "workshops", label: "Workshops" },
-  { id: "classes", label: "Classes" },
-  { id: "bookings", label: "Bookings" },
-  { id: "events", label: "Events" },
+  {
+    id: "all-items",
+    label: "All items",
+    description: "Search across products, POS-only items, and services.",
+  },
+  {
+    id: "products",
+    label: "Products",
+    description: "Retail products and inventory items.",
+  },
+  {
+    id: "pos-products",
+    label: "POS-only",
+    description: "Studio-only add-ons, snacks, and extras.",
+  },
+  {
+    id: "services",
+    label: "Services",
+    description: "Workshops, classes, and events.",
+  },
+  {
+    id: "bookings",
+    label: "Bookings",
+    description: "Open workshop and cut-flower bookings.",
+  },
+];
+
+const SERVICE_FILTERS = [
+  { id: "all", label: "All services" },
+  { id: "workshop", label: "Workshops" },
+  { id: "class", label: "Classes" },
+  { id: "event", label: "Events" },
 ];
 
 const moneyFormatter = new Intl.NumberFormat("en-ZA", {
@@ -50,6 +77,7 @@ const moneyFormatter = new Intl.NumberFormat("en-ZA", {
 
 const INITIAL_POS_PRODUCT = {
   name: "",
+  category: "",
   price: "",
   quantity: "1",
   forceOutOfStock: false,
@@ -66,6 +94,12 @@ const POS_STEP_ORDER = 1;
 const POS_STEP_CUSTOMER = 2;
 const POS_STEP_PAYMENT = 3;
 const POS_STEP_CONFIRM = 4;
+const WORKSHOP_BOOKINGS_COLLECTION = "bookings";
+const WORKSHOP_BOOKING_EMAIL_AUDIT_COLLECTION = "workshopBookingEmailAudit";
+const CUT_FLOWER_BOOKINGS_COLLECTION = "cutFlowerBookings";
+const POS_PRODUCT_CUSTOM_CATEGORY_VALUE = "__custom__";
+const TOP_SELLERS_LOOKBACK_DAYS = 30;
+const TOP_SELLERS_LIMIT = 10;
 
 const parseNumber = (value, fallback = null) => {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -95,6 +129,19 @@ const formatDateKey = (date) => {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+
+const combineDateAndTime = (dateInput, timeInput) => {
+  if (!dateInput) return null;
+  const base = new Date(dateInput);
+  if (Number.isNaN(base.getTime())) return null;
+  if (timeInput) {
+    const [hours, minutes] = timeInput.split(":").map(Number);
+    if (Number.isFinite(hours)) base.setHours(hours);
+    if (Number.isFinite(minutes)) base.setMinutes(minutes);
+  }
+  base.setSeconds(0, 0);
+  return base;
 };
 
 const applyDateToDateTime = (dateValue, existingDate) => {
@@ -154,6 +201,198 @@ const formatTimeRange = (startTime, endTime) => {
   return `${startLabel} - ${endLabel}`;
 };
 
+const formatDateInput = (date) => date.toISOString().slice(0, 10);
+
+const formatTimeInput = (date) => date.toISOString().slice(11, 16);
+
+const resolveWorkshopSessionStart = (entry = {}) => {
+  const dateValue = typeof entry?.date === "string" ? entry.date.trim() : "";
+  const timeValue = typeof entry?.time === "string" ? entry.time.trim() : "";
+  const candidates = [entry?.start, entry?.startTime, entry?.startDate, entry?.datetime, entry?.dateTime];
+  for (const candidate of candidates) {
+    const parsed = parseDateValue(candidate);
+    if (parsed) return parsed;
+  }
+  if (dateValue) return combineDateAndTime(dateValue, timeValue);
+  return null;
+};
+
+const normalizeWorkshopMatchText = (value) =>
+  (value == null ? "" : value.toString()).trim().toLowerCase().replace(/\s+/g, " ");
+
+const isWorkshopEmailAuditEntry = (booking) =>
+  (booking?.recordSource || "").toString().trim().toLowerCase() === "email-audit";
+
+const getWorkshopBookingSourceCollection = (booking) =>
+  isWorkshopEmailAuditEntry(booking)
+    ? WORKSHOP_BOOKING_EMAIL_AUDIT_COLLECTION
+    : WORKSHOP_BOOKINGS_COLLECTION;
+
+const getWorkshopBookingMatchSignature = (booking) => {
+  const workshopIdentity = booking?.workshopId || booking?.workshopTitle || "";
+  const dateIdentity = booking?.sessionDate || booking?.sessionDateLabel || booking?.scheduledDateLabel || "";
+  const timeIdentity = booking?.sessionTimeRange || booking?.sessionLabel || booking?.sessionTime || "";
+  const optionIdentity =
+    booking?.optionValue || booking?.optionId || booking?.optionLabel || booking?.frame || booking?.framePreference || "";
+  const attendeeCount = Number.parseInt(booking?.attendeeCount, 10) || 1;
+  const emailIdentity = booking?.email || "";
+
+  return [
+    workshopIdentity,
+    emailIdentity,
+    dateIdentity,
+    timeIdentity,
+    attendeeCount,
+    optionIdentity,
+  ]
+    .map(normalizeWorkshopMatchText)
+    .join("|");
+};
+
+const getWorkshopBookingAttendeeCount = (booking, attendeeCountOverride = null) => {
+  const parsedOverride = Number.parseInt(attendeeCountOverride, 10);
+  if (Number.isFinite(parsedOverride) && parsedOverride > 0) return parsedOverride;
+  const parsedBookingCount = Number.parseInt(booking?.attendeeCount, 10);
+  return Number.isFinite(parsedBookingCount) && parsedBookingCount > 0 ? parsedBookingCount : 1;
+};
+
+const parseWorkshopOptionPriceFromText = (value = "") => {
+  const match = (value || "").toString().match(/R\s*([\d.,]+)/i);
+  if (!match) return null;
+  const parsed = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildWorkshopOptionMatchKeys = (value = "") => {
+  const normalized = normalizeWorkshopMatchText(
+    (value || "").toString().replace(/[\u2013\u2014]/g, "-"),
+  );
+  if (!normalized) return [];
+  const withoutPrice = normalized
+    .replace(/\(?\s*r\s*[\d.,]+\s*\)?/g, " ")
+    .replace(/\s*-\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Array.from(new Set([normalized, withoutPrice].filter(Boolean)));
+};
+
+const findMatchingWorkshopOption = (options = [], ...candidates) => {
+  const candidateKeys = candidates.flatMap((candidate) => buildWorkshopOptionMatchKeys(candidate));
+  if (candidateKeys.length === 0) return null;
+  return (
+    options.find((option) => {
+      const optionKeys = new Set([
+        ...buildWorkshopOptionMatchKeys(option?.id),
+        ...buildWorkshopOptionMatchKeys(option?.label),
+      ]);
+      return candidateKeys.some((key) => optionKeys.has(key));
+    }) || null
+  );
+};
+
+const getWorkshopBookingUnitPrice = ({ booking, option = null, workshop = null, attendeeCount = null }) => {
+  const optionPrice = parseNumber(option?.price, null);
+  if (Number.isFinite(optionPrice) && optionPrice > 0) return optionPrice;
+
+  const storedUnitPrice = parseNumber(booking?.price ?? booking?.estimatedPerAttendee, null);
+  if (Number.isFinite(storedUnitPrice) && storedUnitPrice > 0) return storedUnitPrice;
+
+  const parsedOptionPrice = parseWorkshopOptionPriceFromText(
+    booking?.optionLabel || booking?.frame || booking?.framePreference || "",
+  );
+  if (Number.isFinite(parsedOptionPrice) && parsedOptionPrice > 0) return parsedOptionPrice;
+
+  const explicitTotal = parseNumber(booking?.totalPrice ?? booking?.estimatedTotal, null);
+  const resolvedAttendeeCount = getWorkshopBookingAttendeeCount(booking, attendeeCount);
+  if (Number.isFinite(explicitTotal) && explicitTotal > 0 && resolvedAttendeeCount > 0) {
+    return explicitTotal / resolvedAttendeeCount;
+  }
+
+  const workshopPrice = parseNumber(workshop?.numericPrice ?? workshop?.price, null);
+  if (Number.isFinite(workshopPrice) && workshopPrice > 0) return workshopPrice;
+
+  return null;
+};
+
+const getWorkshopBookingTotalPrice = ({ booking, option = null, workshop = null, attendeeCount = null }) => {
+  const resolvedAttendeeCount = getWorkshopBookingAttendeeCount(booking, attendeeCount);
+  const unitPrice = getWorkshopBookingUnitPrice({
+    booking,
+    option,
+    workshop,
+    attendeeCount: resolvedAttendeeCount,
+  });
+  if (Number.isFinite(unitPrice) && unitPrice > 0) {
+    return unitPrice * resolvedAttendeeCount;
+  }
+  const explicitTotal = parseNumber(booking?.totalPrice ?? booking?.estimatedTotal, null);
+  return Number.isFinite(explicitTotal) && explicitTotal > 0 ? explicitTotal : null;
+};
+
+const normalizeWorkshopSessions = (workshop, sessionFormatter) => {
+  const now = Date.now();
+  const rawSessions = Array.isArray(workshop?.sessions) ? workshop.sessions.filter(Boolean) : [];
+  const normalizedSessions = rawSessions
+    .map((session, index) => {
+      const startDate = resolveWorkshopSessionStart(session);
+      if (!startDate) return null;
+      const sessionId = (session?.id || `session-${index}-${workshop?.id || "workshop"}`).toString().trim();
+      if (!sessionId) return null;
+      const formatted = sessionFormatter.format(startDate);
+      const customLabel = (session?.label || session?.name || "").toString().trim();
+      const timeValue = typeof session?.time === "string" ? session.time.trim() : "";
+      const endTimeValue = typeof session?.endTime === "string" ? session.endTime.trim() : "";
+      const timeRangeLabel =
+        formatTimeRange(timeValue || formatTimeInput(startDate), endTimeValue) || formatTimeValue(startDate);
+      const label =
+        customLabel && customLabel.toLowerCase() !== formatted.toLowerCase()
+          ? `${formatted} · ${customLabel}`
+          : formatted;
+      return {
+        id: sessionId,
+        label,
+        formatted,
+        date: (session?.date || "").toString().trim() || formatDateInput(startDate),
+        time: timeValue || formatTimeInput(startDate),
+        timeRangeLabel,
+        start: startDate.toISOString(),
+        startDate,
+        isPast: startDate.getTime() < now,
+      };
+    })
+    .filter(Boolean);
+
+  if (normalizedSessions.length === 0) {
+    const fallbackDate = parseDateValue(workshop?.scheduledFor);
+    if (fallbackDate) {
+      normalizedSessions.push({
+        id: `session-fallback-${workshop?.id || "workshop"}`,
+        label: sessionFormatter.format(fallbackDate),
+        formatted: sessionFormatter.format(fallbackDate),
+        date: formatDateInput(fallbackDate),
+        time: formatTimeInput(fallbackDate),
+        timeRangeLabel: formatTimeValue(fallbackDate),
+        start: fallbackDate.toISOString(),
+        startDate: fallbackDate,
+        isPast: fallbackDate.getTime() < now,
+      });
+    }
+  }
+
+  normalizedSessions.sort((left, right) => {
+    if (!left?.startDate) return 1;
+    if (!right?.startDate) return -1;
+    return left.startDate.getTime() - right.startDate.getTime();
+  });
+
+  const upcomingSessions = normalizedSessions.filter((session) => !session.isPast);
+  const availableSessions = upcomingSessions.length > 0 ? upcomingSessions : normalizedSessions;
+  return {
+    sessions: availableSessions,
+    headlineSession: availableSessions[0] || null,
+  };
+};
+
 const buildCartKey = ({ type, sourceId, variantId, sessionId }) =>
   [type, sourceId, variantId || "base", sessionId || "default"].join(":");
 
@@ -189,6 +428,9 @@ const normalizeGiftCardStatus = (value = "") =>
 const isGiftCardLinkedLineItem = (item = {}) =>
   Boolean(item?.metadata?.giftCardLinked && item?.metadata?.giftCardId);
 
+const isBookingCartLineItem = (item = {}) =>
+  item?.type === "workshop-booking" || item?.type === "cut-flower-booking";
+
 const normalizeCategoryValue = (value) =>
   value
     .toString()
@@ -196,6 +438,15 @@ const normalizeCategoryValue = (value) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+
+const resolvePosProductCategorySelection = (categoryValue, categoryChoices) => {
+  const normalizedCategory = (categoryValue || "").toString().trim().toLowerCase();
+  if (!normalizedCategory) return "";
+  const matchedCategory = (Array.isArray(categoryChoices) ? categoryChoices : []).find(
+    (category) => (category?.name || "").toString().trim().toLowerCase() === normalizedCategory,
+  );
+  return matchedCategory?.id || POS_PRODUCT_CUSTOM_CATEGORY_VALUE;
+};
 
 const coerceGiftCardOptionsList = (options) => {
   if (Array.isArray(options)) return options;
@@ -214,25 +465,44 @@ const buildCatalogItemSummary = (catalogItemRef = null) => {
 
 const normalizePaymentStatus = (value) => (value || "").toString().trim().toLowerCase();
 
-const isBookingCompleted = (booking, type) => {
-  const status = normalizePaymentStatus(booking?.status);
-  const paymentStatus = normalizePaymentStatus(
-    booking?.paymentStatus || booking?.payment_status,
-  );
-  const isPaid =
-    booking?.paid === true ||
-    paymentStatus === "paid" ||
-    paymentStatus === "complete" ||
-    paymentStatus === "completed";
+const resolveBookingDate = (booking, type) => {
   if (type === "cut-flower") {
-    return (
-      status === "fulfilled" ||
-      status === "completed" ||
-      status === "cancelled" ||
-      isPaid
+    return parseDateValue(
+      booking?.eventDate ||
+        booking?.date ||
+        booking?.requestedDate ||
+        booking?.scheduledFor,
     );
   }
-  return status === "fulfilled" || status === "completed" || isPaid;
+  return parseDateValue(
+    booking?.sessionDate ||
+      booking?.session_date ||
+      booking?.date ||
+      booking?.sessionDateLabel ||
+      booking?.scheduledDateLabel ||
+      booking?.sessionDayLabel ||
+      booking?.scheduledFor,
+  );
+};
+
+const hasBookingDatePassed = (booking, type) => {
+  const bookingDate = resolveBookingDate(booking, type);
+  if (!bookingDate) return false;
+  const bookingDay = new Date(bookingDate);
+  bookingDay.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return bookingDay.getTime() < today.getTime();
+};
+
+const isBookingCompleted = (booking, type) => {
+  const status = normalizePaymentStatus(
+    booking?.adminBookingStatus || booking?.bookingStatus || booking?.status,
+  );
+  if (["fulfilled", "completed", "complete", "cancelled"].includes(status)) {
+    return true;
+  }
+  return hasBookingDatePassed(booking, type);
 };
 
 function AdminPosPage() {
@@ -248,6 +518,7 @@ function AdminPosPage() {
     productCategories,
     workshops,
     bookings,
+    workshopBookingEmailAudit,
     events,
     cutFlowerBookings,
     cutFlowerClasses,
@@ -321,6 +592,9 @@ function AdminPosPage() {
   const [classOptionSelections, setClassOptionSelections] = useState({});
   const [eventSelections, setEventSelections] = useState({});
   const [activeCategoryId, setActiveCategoryId] = useState("all");
+  const [activePosCategoryId, setActivePosCategoryId] = useState("all");
+  const [activeServiceType, setActiveServiceType] = useState(SERVICE_FILTERS[0].id);
+  const [posProductCategorySelection, setPosProductCategorySelection] = useState("");
   const [bookingTab, setBookingTab] = useState("workshop");
   const [bookingDateFilter, setBookingDateFilter] = useState(() => formatDateKey(new Date()));
   const [bookingEdits, setBookingEdits] = useState({});
@@ -350,6 +624,13 @@ function AdminPosPage() {
   };
 
   const normalizedProducts = useMemo(() => {
+    const categoryNameById = new Map(
+      (Array.isArray(productCategories) ? productCategories : []).map((category) => [
+        (category?.id || "").toString().trim(),
+        (category?.name || "").toString().trim(),
+      ]),
+    );
+
     return (products || []).map((product) => {
       const priceNumber = parseNumber(product.price, null);
       const rawVariants = Array.isArray(product.variants) ? product.variants : [];
@@ -373,9 +654,21 @@ function AdminPosPage() {
         status: product.stock_status,
         isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
       });
+      const categoryId = (product.categoryId || "").toString().trim();
+      const categoryName = (
+        product.categoryName ||
+        categoryNameById.get(categoryId) ||
+        product.category ||
+        ""
+      )
+        .toString()
+        .trim();
       return {
         ...product,
         name: product.name || product.title || "Product",
+        categoryId,
+        categoryName,
+        categorySlug: categoryName ? normalizeCategoryValue(categoryName) : "",
         numericPrice: priceNumber,
         displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
         variants,
@@ -383,11 +676,14 @@ function AdminPosPage() {
         stockStatus,
       };
     });
-  }, [products]);
+  }, [productCategories, products]);
 
   const normalizedPosProducts = useMemo(() => {
     return (posProducts || []).map((product) => {
       const priceNumber = parseNumber(product.price, null);
+      const categoryName = (product.category || product.categoryName || "")
+        .toString()
+        .trim();
       const stockStatus = getStockStatus({
         quantity: product.stock_quantity ?? product.quantity,
         forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
@@ -397,6 +693,8 @@ function AdminPosPage() {
       return {
         ...product,
         name: product.name || "POS Item",
+        categoryName,
+        categorySlug: categoryName ? normalizeCategoryValue(categoryName) : "",
         numericPrice: priceNumber,
         displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
         stockStatus,
@@ -414,45 +712,47 @@ function AdminPosPage() {
   );
 
   const normalizedWorkshops = useMemo(() => {
-    return (workshops || []).map((workshop) => {
-      const priceNumber = parseNumber(workshop.price, null);
-      const options = Array.isArray(workshop.options)
-        ? workshop.options
-            .map((option, index) => normalizeWorkshopOption(option, index, workshop.id))
-            .filter(Boolean)
-        : [];
-      const optionPrices = options
-        .map((option) => parseNumber(option?.price, null))
-        .filter((price) => Number.isFinite(price) && price > 0);
-      const minOptionPrice = optionPrices.length > 0 ? Math.min(...optionPrices) : null;
-      const sessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
-      const normalizedSessions = sessions
-        .map((session, index) => {
-          const startDate = parseDateValue(session.start || session.startDate || session.date || workshop.scheduledFor);
-          const label = (session.label || session.name || "").toString().trim();
-          const formatted = startDate ? sessionFormatter.format(startDate) : "Session";
-          return {
-            id: session.id || `session-${index}-${workshop.id}`,
-            label: label || formatted,
-            date: session.date || (startDate ? startDate.toISOString().slice(0, 10) : ""),
-            start: startDate ? startDate.toISOString() : "",
-          };
-        })
-        .filter((session) => session.id);
-      return {
-        ...workshop,
-        title: workshop.title || workshop.name || "Workshop",
-        numericPrice: priceNumber,
-        displayPrice:
-          Number.isFinite(minOptionPrice) && minOptionPrice > 0
-            ? `From ${formatCurrency(minOptionPrice)}`
-            : Number.isFinite(priceNumber)
-              ? formatCurrency(priceNumber)
-              : "Price on request",
-        options,
-        sessions: normalizedSessions,
-      };
-    });
+    return (workshops || [])
+      .map((workshop) => {
+        const priceNumber = parseNumber(workshop.price, null);
+        const options = Array.isArray(workshop.options)
+          ? workshop.options
+              .map((option, index) => normalizeWorkshopOption(option, index, workshop.id))
+              .filter(Boolean)
+          : [];
+        const optionPrices = options
+          .map((option) => parseNumber(option?.price, null))
+          .filter((price) => Number.isFinite(price) && price > 0);
+        const minOptionPrice = optionPrices.length > 0 ? Math.min(...optionPrices) : null;
+        const { sessions: normalizedSessions, headlineSession } = normalizeWorkshopSessions(
+          workshop,
+          sessionFormatter,
+        );
+        return {
+          ...workshop,
+          title: workshop.title || workshop.name || "Workshop",
+          numericPrice: priceNumber,
+          displayPrice:
+            Number.isFinite(minOptionPrice) && minOptionPrice > 0
+              ? `From ${formatCurrency(minOptionPrice)}`
+              : Number.isFinite(priceNumber)
+                ? formatCurrency(priceNumber)
+                : "Price on request",
+          options,
+          sessions: normalizedSessions,
+          headlineSession,
+          isLive: (workshop?.status ?? "live") === "live",
+          isByRequest: normalizedSessions.length === 0,
+        };
+      })
+      .sort((left, right) => {
+        const leftTime = left.headlineSession?.startDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        const rightTime = right.headlineSession?.startDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        if (leftTime !== rightTime) return leftTime - rightTime;
+        return (left.title || "").localeCompare(right.title || "", undefined, {
+          sensitivity: "base",
+        });
+      });
   }, [sessionFormatter, workshops]);
 
   const bookingDateFormatter = useMemo(
@@ -471,40 +771,124 @@ function AdminPosPage() {
     return map;
   }, [normalizedWorkshops]);
 
+  const workshopIdByExactTitle = useMemo(() => {
+    const map = new Map();
+    normalizedWorkshops.forEach((workshop) => {
+      const title = (workshop?.title || "").toString().trim();
+      if (title) map.set(title, workshop.id);
+    });
+    return map;
+  }, [normalizedWorkshops]);
+
+  const workshopEmailAuditEntries = useMemo(
+    () =>
+      (Array.isArray(workshopBookingEmailAudit) ? workshopBookingEmailAudit : []).map((entry) => ({
+        ...entry,
+        recordSource: entry?.recordSource || "email-audit",
+        name: entry?.name || entry?.fullName || entry?.email || "Guest",
+      })),
+    [workshopBookingEmailAudit],
+  );
+
   const normalizedWorkshopBookings = useMemo(() => {
-    return (bookings || []).map((booking) => {
+    const resolveWorkshopIdForEntry = (booking) => {
+      const explicitWorkshopId = (booking?.workshopId || "").toString().trim();
+      if (explicitWorkshopId && workshopLookup.has(explicitWorkshopId)) {
+        return explicitWorkshopId;
+      }
+      const exactWorkshopTitle = (booking?.workshopTitle || booking?.title || "").toString().trim();
+      return exactWorkshopTitle ? workshopIdByExactTitle.get(exactWorkshopTitle) || "" : "";
+    };
+
+    const normalizeEntry = (booking) => {
+      const resolvedWorkshopId = resolveWorkshopIdForEntry(booking) || booking?.workshopId || "";
+      const workshop = workshopLookup.get(resolvedWorkshopId);
       const sessionDate = parseDateValue(
-        booking.sessionDate || booking.session_date || booking.date,
+        booking.sessionDate ||
+          booking.session_date ||
+          booking.date ||
+          booking.sessionDateLabel ||
+          booking.scheduledDateLabel ||
+          booking.sessionDayLabel,
       );
       const dateKey = formatDateKey(sessionDate);
-      const workshop = workshopLookup.get(booking.workshopId);
-      const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
-      const attendeeCount = Number.isFinite(attendeeCountValue) ? attendeeCountValue : 1;
-      const matchedOption =
-        workshop?.options?.find((option) => option.id === booking.optionValue) ||
-        workshop?.options?.find((option) => option.id === booking.optionId) ||
-        workshop?.options?.find((option) => option.label === booking.optionLabel) ||
-        workshop?.options?.find((option) => option.label === booking.frame) ||
-        null;
-      const priceNumber = parseNumber(
-        booking.price ?? matchedOption?.price ?? workshop?.numericPrice ?? workshop?.price,
-        null,
+      const attendeeCount = getWorkshopBookingAttendeeCount(booking);
+      const matchedOption = findMatchingWorkshopOption(
+        workshop?.options || [],
+        booking.optionValue,
+        booking.optionId,
+        booking.optionLabel,
+        booking.frame,
+        booking.framePreference,
       );
+      const priceNumber = getWorkshopBookingUnitPrice({
+        booking,
+        option: matchedOption,
+        workshop,
+        attendeeCount,
+      });
+      const totalPrice = getWorkshopBookingTotalPrice({
+        booking,
+        option: matchedOption,
+        workshop,
+        attendeeCount,
+      });
       return {
         ...booking,
+        workshopId: resolvedWorkshopId,
         bookingType: "workshop",
         sessionDate,
         dateKey,
-        displayDate: sessionDate ? bookingDateFormatter.format(sessionDate) : "Date to be confirmed",
-        workshopTitle: workshop?.title || "Workshop",
+        displayDate:
+          sessionDate
+            ? bookingDateFormatter.format(sessionDate)
+            : booking.sessionDateLabel || booking.scheduledDateLabel || "Date to be confirmed",
+        workshopTitle:
+          workshop?.title || booking.workshopTitle || booking.title || "Workshop",
         numericPrice: priceNumber,
+        totalPrice,
         attendeeCount,
+        sessionLabel: booking.sessionTimeRange || booking.sessionLabel || booking.sessionTime || "",
         optionId: matchedOption?.id || booking.optionValue || booking.optionId || "",
-        optionLabel: matchedOption?.label || booking.optionLabel || booking.frame || "",
+        optionLabel:
+          matchedOption?.label ||
+          booking.optionLabel ||
+          booking.frame ||
+          booking.framePreference ||
+          "",
         completed: isBookingCompleted(booking, "workshop"),
       };
+    };
+
+    const confirmedMatchCounts = new Map();
+    const mergedBookings = [];
+
+    (Array.isArray(bookings) ? bookings : []).forEach((booking) => {
+      const matchSignature = getWorkshopBookingMatchSignature(booking);
+      if (matchSignature) {
+        confirmedMatchCounts.set(matchSignature, (confirmedMatchCounts.get(matchSignature) || 0) + 1);
+      }
+      mergedBookings.push(normalizeEntry(booking));
     });
-  }, [bookings, bookingDateFormatter, workshopLookup]);
+
+    workshopEmailAuditEntries.forEach((booking) => {
+      const matchSignature = getWorkshopBookingMatchSignature(booking);
+      const matchedConfirmedCount = matchSignature ? confirmedMatchCounts.get(matchSignature) || 0 : 0;
+      if (matchedConfirmedCount > 0) {
+        confirmedMatchCounts.set(matchSignature, matchedConfirmedCount - 1);
+        return;
+      }
+      mergedBookings.push(normalizeEntry(booking));
+    });
+
+    return mergedBookings;
+  }, [
+    bookings,
+    bookingDateFormatter,
+    workshopEmailAuditEntries,
+    workshopIdByExactTitle,
+    workshopLookup,
+  ]);
 
   const normalizedCutFlowerBookings = useMemo(() => {
     return (cutFlowerBookings || []).map((booking) => {
@@ -576,46 +960,55 @@ function AdminPosPage() {
   }, [bookingDateFilter, normalizedCutFlowerBookings, searchTerm]);
 
   const normalizedClasses = useMemo(() => {
-    return (cutFlowerClasses || []).map((classDoc) => {
-      const priceNumber = parseNumber(classDoc.price, null);
-      const eventDate = parseDateValue(classDoc.eventDate);
-      const timeSlots = Array.isArray(classDoc.timeSlots) ? classDoc.timeSlots : [];
-      const normalizedSlots = timeSlots
-        .map((slot, index) => {
-          const label = slot.label?.trim() || formatTimeRange(slot.time, slot.endTime) || "Session";
-          return {
-            id: slot.id || `class-slot-${index}-${classDoc.id}`,
-            label,
-            time: slot.time || "",
-            endTime: slot.endTime || "",
-          };
-        })
-        .filter((slot) => slot.id);
-      const options = Array.isArray(classDoc.options)
-        ? classDoc.options
-            .map((option, index) => {
-              const label = (option.label || option.name || "").toString().trim();
-              if (!label) return null;
-              const price = parseNumber(option.price, null);
-              return {
-                id: (option.id || `class-option-${index}-${classDoc.id}`).toString(),
-                label,
-                price,
-              };
-            })
-            .filter(Boolean)
-        : [];
-      return {
-        ...classDoc,
-        title: classDoc.title || "Class",
-        numericPrice: priceNumber,
-        displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
-        eventDate,
-        displayDate: eventDate ? sessionFormatter.format(eventDate) : "Date to be confirmed",
-        slots: normalizedSlots,
-        options,
-      };
-    });
+    return (cutFlowerClasses || [])
+      .map((classDoc) => {
+        const priceNumber = parseNumber(classDoc.price, null);
+        const eventDate = parseDateValue(classDoc.eventDate);
+        const timeSlots = Array.isArray(classDoc.timeSlots) ? classDoc.timeSlots : [];
+        const normalizedSlots = timeSlots
+          .map((slot, index) => {
+            const label = slot.label?.trim() || formatTimeRange(slot.time, slot.endTime) || "Session";
+            return {
+              id: slot.id || `class-slot-${index}-${classDoc.id}`,
+              label,
+              time: slot.time || "",
+              endTime: slot.endTime || "",
+            };
+          })
+          .filter((slot) => slot.id);
+        const options = Array.isArray(classDoc.options)
+          ? classDoc.options
+              .map((option, index) => {
+                const label = (option.label || option.name || "").toString().trim();
+                if (!label) return null;
+                const price = parseNumber(option.price, null);
+                return {
+                  id: (option.id || `class-option-${index}-${classDoc.id}`).toString(),
+                  label,
+                  price,
+                };
+              })
+              .filter(Boolean)
+          : [];
+        return {
+          ...classDoc,
+          title: classDoc.title || "Class",
+          numericPrice: priceNumber,
+          displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
+          eventDate,
+          displayDate: eventDate ? sessionFormatter.format(eventDate) : "Date to be confirmed",
+          slots: normalizedSlots,
+          options,
+        };
+      })
+      .sort((left, right) => {
+        const leftTime = left.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        const rightTime = right.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        if (leftTime !== rightTime) return leftTime - rightTime;
+        return (left.title || "").localeCompare(right.title || "", undefined, {
+          sensitivity: "base",
+        });
+      });
   }, [cutFlowerClasses, sessionFormatter]);
 
   const cutFlowerOptions = useMemo(() => {
@@ -642,28 +1035,40 @@ function AdminPosPage() {
   );
 
   const normalizedEvents = useMemo(() => {
-    return (events || []).map((event) => {
-      const eventDate = parseDateValue(event.eventDate);
-      const timeSlots = Array.isArray(event.timeSlots) ? event.timeSlots : [];
-      const normalizedSlots = timeSlots
-        .map((slot, index) => {
-          const label = slot.label?.trim() || formatTimeRange(slot.time, slot.endTime) || "Session";
-          return {
-            id: slot.id || `event-slot-${index}-${event.id}`,
-            label,
-            time: slot.time || "",
-            endTime: slot.endTime || "",
-          };
-        })
-        .filter((slot) => slot.id);
-      return {
-        ...event,
-        title: event.title || "Event",
-        eventDate,
-        displayDate: eventDate ? sessionFormatter.format(eventDate) : "Date to be confirmed",
-        slots: normalizedSlots,
-      };
-    });
+    return (events || [])
+      .map((event) => {
+        const priceNumber = parseNumber(event.price, null);
+        const eventDate = parseDateValue(event.eventDate);
+        const timeSlots = Array.isArray(event.timeSlots) ? event.timeSlots : [];
+        const normalizedSlots = timeSlots
+          .map((slot, index) => {
+            const label = slot.label?.trim() || formatTimeRange(slot.time, slot.endTime) || "Session";
+            return {
+              id: slot.id || `event-slot-${index}-${event.id}`,
+              label,
+              time: slot.time || "",
+              endTime: slot.endTime || "",
+            };
+          })
+          .filter((slot) => slot.id);
+        return {
+          ...event,
+          title: event.title || "Event",
+          numericPrice: priceNumber,
+          displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
+          eventDate,
+          displayDate: eventDate ? sessionFormatter.format(eventDate) : "Date to be confirmed",
+          slots: normalizedSlots,
+        };
+      })
+      .sort((left, right) => {
+        const leftTime = left.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        const rightTime = right.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        if (leftTime !== rightTime) return leftTime - rightTime;
+        return (left.title || "").localeCompare(right.title || "", undefined, {
+          sensitivity: "base",
+        });
+      });
   }, [events, sessionFormatter]);
 
   const categoryOptions = useMemo(() => {
@@ -686,71 +1091,392 @@ function AdminPosPage() {
     return categoryOptions.find((category) => category.id === activeCategoryId) ?? null;
   }, [activeCategoryId, categoryOptions]);
 
+  const posCategoryOptions = useMemo(() => {
+    const seen = new Map();
+    normalizedPosProducts.forEach((product) => {
+      const name = (product.categoryName || "").toString().trim();
+      const slug = name ? normalizeCategoryValue(name) : "";
+      if (!name || !slug || seen.has(slug)) return;
+      seen.set(slug, {
+        id: slug,
+        name,
+      });
+    });
+    return Array.from(seen.values()).sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+    );
+  }, [normalizedPosProducts]);
+
+  const posProductCategoryChoices = useMemo(() => {
+    const seen = new Map();
+    [...categoryOptions, ...posCategoryOptions].forEach((category) => {
+      const name = (category?.name || "").toString().trim();
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) return;
+      seen.set(key, {
+        id: category?.id || normalizeCategoryValue(name) || key,
+        name,
+      });
+    });
+    return Array.from(seen.values()).sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+    );
+  }, [categoryOptions, posCategoryOptions]);
+
+  const activePosCategory = useMemo(() => {
+    if (activePosCategoryId === "all") return null;
+    return posCategoryOptions.find((category) => category.id === activePosCategoryId) ?? null;
+  }, [activePosCategoryId, posCategoryOptions]);
+
+  const searchTermNormalized = searchTerm.trim().toLowerCase();
+
+  const liveWorkshops = useMemo(
+    () => normalizedWorkshops.filter((workshop) => workshop.isLive),
+    [normalizedWorkshops],
+  );
+
+  const catalogSearchProducts = useMemo(() => {
+    if (!searchTermNormalized) return normalizedProducts;
+    return normalizedProducts.filter((product) =>
+      [
+        product.name,
+        product.categoryName,
+        ...(Array.isArray(product.variants) ? product.variants.map((variant) => variant.label) : []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(searchTermNormalized),
+    );
+  }, [normalizedProducts, searchTermNormalized]);
+
+  const catalogSearchPosProducts = useMemo(() => {
+    if (!searchTermNormalized) return normalizedPosProducts;
+    return normalizedPosProducts.filter((product) =>
+      [product.name, product.categoryName]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(searchTermNormalized),
+    );
+  }, [normalizedPosProducts, searchTermNormalized]);
+
   const filteredProducts = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    let filtered = normalizedProducts;
+    let filtered = catalogSearchProducts;
     if (activeCategory) {
       filtered = filtered.filter((product) => {
         const categoryId = product.categoryId || "";
-        const categoryValue = product.category || "";
-        const productSlug = normalizeCategoryValue(categoryValue);
         return (
           categoryId === activeCategory.id ||
-          productSlug === activeCategory.slug ||
-          categoryValue.toString().trim() === activeCategory.name
+          product.categorySlug === activeCategory.slug ||
+          (product.categoryName || "").toString().trim() === activeCategory.name
         );
       });
     }
-    if (!term) return filtered;
-    return filtered.filter((product) => product.name.toLowerCase().includes(term));
-  }, [activeCategory, normalizedProducts, searchTerm]);
+    return filtered;
+  }, [activeCategory, catalogSearchProducts]);
 
   const filteredPosProducts = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return normalizedPosProducts;
-    return normalizedPosProducts.filter((product) => product.name.toLowerCase().includes(term));
-  }, [normalizedPosProducts, searchTerm]);
+    let filtered = catalogSearchPosProducts;
+    if (activePosCategory) {
+      filtered = filtered.filter((product) => product.categorySlug === activePosCategory.id);
+    }
+    return filtered;
+  }, [activePosCategory, catalogSearchPosProducts]);
 
   const filteredWorkshops = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return normalizedWorkshops;
-    return normalizedWorkshops.filter((workshop) => workshop.title.toLowerCase().includes(term));
-  }, [normalizedWorkshops, searchTerm]);
+    if (!searchTermNormalized) return liveWorkshops;
+    return liveWorkshops.filter((workshop) =>
+      [
+        workshop.title,
+        workshop.location,
+        ...(Array.isArray(workshop.options) ? workshop.options.map((option) => option.label) : []),
+        ...(Array.isArray(workshop.sessions) ? workshop.sessions.map((session) => `${session.label} ${session.timeRangeLabel || ""}`) : []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(searchTermNormalized),
+    );
+  }, [liveWorkshops, searchTermNormalized]);
 
   const filteredClasses = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return normalizedClasses;
-    return normalizedClasses.filter((classDoc) => classDoc.title.toLowerCase().includes(term));
-  }, [normalizedClasses, searchTerm]);
+    if (!searchTermNormalized) return normalizedClasses;
+    return normalizedClasses.filter((classDoc) =>
+      [
+        classDoc.title,
+        classDoc.location,
+        classDoc.displayDate,
+        ...(Array.isArray(classDoc.options) ? classDoc.options.map((option) => option.label) : []),
+        ...(Array.isArray(classDoc.slots) ? classDoc.slots.map((slot) => slot.label) : []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(searchTermNormalized),
+    );
+  }, [normalizedClasses, searchTermNormalized]);
 
   const filteredEvents = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return normalizedEvents;
-    return normalizedEvents.filter((event) => event.title.toLowerCase().includes(term));
-  }, [normalizedEvents, searchTerm]);
+    if (!searchTermNormalized) return normalizedEvents;
+    return normalizedEvents.filter((event) =>
+      [event.title, event.location, event.displayDate, ...(Array.isArray(event.slots) ? event.slots.map((slot) => slot.label) : [])]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(searchTermNormalized),
+    );
+  }, [normalizedEvents, searchTermNormalized]);
+
+  const sellableCatalogEntries = useMemo(() => {
+    const productEntries = normalizedProducts.map((product) => ({
+      id: `product:${product.id}`,
+      sourceId: product.id,
+      type: "product",
+      department: "products",
+      serviceType: null,
+      title: product.name,
+      subtitle: product.categoryName || product.stockStatus?.label || "",
+      category: product.categoryName || "",
+      price: product.numericPrice,
+      priceLabel: product.displayPrice,
+      availability: product.stockStatus?.state || "",
+      searchText: [
+        product.name,
+        product.categoryName,
+        ...(Array.isArray(product.variants) ? product.variants.map((variant) => variant.label) : []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase(),
+      sortKey: `products:${(product.name || "").toLowerCase()}`,
+    }));
+
+    const posOnlyEntries = normalizedPosProducts.map((product) => ({
+      id: `pos-product:${product.id}`,
+      sourceId: product.id,
+      type: "pos-product",
+      department: "pos-products",
+      serviceType: null,
+      title: product.name,
+      subtitle: product.categoryName || product.stockStatus?.label || "",
+      category: product.categoryName || "",
+      price: product.numericPrice,
+      priceLabel: product.displayPrice,
+      availability: product.stockStatus?.state || "",
+      searchText: [product.name, product.categoryName].filter(Boolean).join(" ").toLowerCase(),
+      sortKey: `pos-products:${(product.name || "").toLowerCase()}`,
+    }));
+
+    const workshopEntries = liveWorkshops.map((workshop) => ({
+      id: `workshop:${workshop.id}`,
+      sourceId: workshop.id,
+      type: "workshop",
+      department: "services",
+      serviceType: "workshop",
+      title: workshop.title,
+      subtitle: workshop.headlineSession?.label || workshop.displayPrice,
+      category: "Workshop",
+      price: workshop.numericPrice,
+      priceLabel: workshop.displayPrice,
+      availability: workshop.isByRequest ? "by-request" : "scheduled",
+      searchText: [
+        workshop.title,
+        workshop.location,
+        ...(Array.isArray(workshop.options) ? workshop.options.map((option) => option.label) : []),
+        ...(Array.isArray(workshop.sessions) ? workshop.sessions.map((session) => `${session.label} ${session.timeRangeLabel || ""}`) : []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase(),
+      sortKey: `services:workshop:${workshop.headlineSession?.startDate?.getTime?.() ?? Number.POSITIVE_INFINITY}:${(workshop.title || "").toLowerCase()}`,
+    }));
+
+    const classEntries = normalizedClasses.map((classDoc) => ({
+      id: `class:${classDoc.id}`,
+      sourceId: classDoc.id,
+      type: "class",
+      department: "services",
+      serviceType: "class",
+      title: classDoc.title,
+      subtitle: classDoc.displayDate,
+      category: "Class",
+      price: classDoc.numericPrice,
+      priceLabel: classDoc.displayPrice,
+      availability: classDoc.eventDate ? "scheduled" : "date-to-be-confirmed",
+      searchText: [
+        classDoc.title,
+        classDoc.location,
+        classDoc.displayDate,
+        ...(Array.isArray(classDoc.options) ? classDoc.options.map((option) => option.label) : []),
+        ...(Array.isArray(classDoc.slots) ? classDoc.slots.map((slot) => slot.label) : []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase(),
+      sortKey: `services:class:${classDoc.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY}:${(classDoc.title || "").toLowerCase()}`,
+    }));
+
+    const eventEntries = normalizedEvents.map((event) => ({
+      id: `event:${event.id}`,
+      sourceId: event.id,
+      type: "event",
+      department: "services",
+      serviceType: "event",
+      title: event.title,
+      subtitle: event.displayDate,
+      category: "Event",
+      price: event.numericPrice,
+      priceLabel: event.displayPrice,
+      availability: event.eventDate ? "scheduled" : "date-to-be-confirmed",
+      searchText: [
+        event.title,
+        event.location,
+        event.displayDate,
+        ...(Array.isArray(event.slots) ? event.slots.map((slot) => slot.label) : []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase(),
+      sortKey: `services:event:${event.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY}:${(event.title || "").toLowerCase()}`,
+    }));
+
+    return [...productEntries, ...posOnlyEntries, ...workshopEntries, ...classEntries, ...eventEntries];
+  }, [liveWorkshops, normalizedClasses, normalizedEvents, normalizedPosProducts, normalizedProducts]);
+
+  const allItemsSections = useMemo(() => {
+    const previewMode = !searchTermNormalized;
+    return [
+      {
+        id: "products",
+        label: "Products",
+        description: "Retail flowers, gifts, and inventory items.",
+        departmentId: "products",
+        items: previewMode ? catalogSearchProducts.slice(0, 8) : catalogSearchProducts,
+      },
+      {
+        id: "pos-products",
+        label: "POS-only",
+        description: "Studio extras, drinks, packaging, and add-ons.",
+        departmentId: "pos-products",
+        items: previewMode ? catalogSearchPosProducts.slice(0, 8) : catalogSearchPosProducts,
+      },
+      {
+        id: "services",
+        label: "Services",
+        description: "Workshops, classes, and events.",
+        departmentId: "services",
+        groups: [
+          {
+            id: "workshop",
+            label: "Workshops",
+            items: previewMode ? filteredWorkshops.slice(0, 6) : filteredWorkshops,
+          },
+          {
+            id: "class",
+            label: "Classes",
+            items: previewMode ? filteredClasses.slice(0, 6) : filteredClasses,
+          },
+          {
+            id: "event",
+            label: "Events",
+            items: previewMode ? filteredEvents.slice(0, 6) : filteredEvents,
+          },
+        ],
+      },
+    ];
+  }, [
+    catalogSearchPosProducts,
+    catalogSearchProducts,
+    filteredClasses,
+    filteredEvents,
+    filteredWorkshops,
+    searchTermNormalized,
+  ]);
+
+  const serviceSections = useMemo(() => {
+    const sections = [
+      {
+        id: "workshop",
+        label: "Workshops",
+        description: "Upcoming studio workshops.",
+        items: filteredWorkshops,
+      },
+      {
+        id: "class",
+        label: "Classes",
+        description: "Cut flower classes and guided sessions.",
+        items: filteredClasses,
+      },
+      {
+        id: "event",
+        label: "Events",
+        description: "Special events and activations.",
+        items: filteredEvents,
+      },
+    ];
+    return sections.filter((section) => activeServiceType === "all" || activeServiceType === section.id);
+  }, [activeServiceType, filteredClasses, filteredEvents, filteredWorkshops]);
+
+  const departmentCounts = useMemo(
+    () => ({
+      "all-items": sellableCatalogEntries.length,
+      products: normalizedProducts.length,
+      "pos-products": normalizedPosProducts.length,
+      services: liveWorkshops.length + normalizedClasses.length + normalizedEvents.length,
+      bookings:
+        normalizedWorkshopBookings.filter((booking) => !booking.completed).length +
+        normalizedCutFlowerBookings.filter((booking) => !booking.completed).length,
+    }),
+    [
+      liveWorkshops.length,
+      normalizedClasses.length,
+      normalizedCutFlowerBookings,
+      normalizedEvents.length,
+      normalizedPosProducts.length,
+      normalizedProducts.length,
+      normalizedWorkshopBookings,
+      sellableCatalogEntries.length,
+    ],
+  );
 
   const activeCount = useMemo(() => {
+    if (activeTab === "all-items") {
+      if (!searchTermNormalized) return sellableCatalogEntries.length;
+      return (
+        catalogSearchProducts.length +
+        catalogSearchPosProducts.length +
+        filteredWorkshops.length +
+        filteredClasses.length +
+        filteredEvents.length
+      );
+    }
     if (activeTab === "products") return filteredProducts.length;
     if (activeTab === "pos-products") return filteredPosProducts.length;
-    if (activeTab === "workshops") return filteredWorkshops.length;
-    if (activeTab === "classes") return filteredClasses.length;
+    if (activeTab === "services") {
+      return serviceSections.reduce((sum, section) => sum + section.items.length, 0);
+    }
     if (activeTab === "bookings") {
       return bookingTab === "workshop"
         ? filteredWorkshopBookings.length
         : filteredCutFlowerBookings.length;
     }
-    if (activeTab === "events") return filteredEvents.length;
     return 0;
   }, [
     activeTab,
     bookingTab,
-    filteredClasses,
+    catalogSearchPosProducts.length,
+    catalogSearchProducts.length,
+    filteredClasses.length,
     filteredCutFlowerBookings.length,
-    filteredEvents,
-    filteredPosProducts,
-    filteredProducts,
-    filteredWorkshops,
+    filteredEvents.length,
+    filteredPosProducts.length,
+    filteredProducts.length,
     filteredWorkshopBookings.length,
+    filteredWorkshops.length,
+    searchTermNormalized,
+    sellableCatalogEntries.length,
+    serviceSections,
   ]);
 
   const pricing = useMemo(() => {
@@ -829,9 +1555,268 @@ function AdminPosPage() {
           netTotal: getPosSaleNetTotal(sale),
         };
       })
-      .filter((sale) => sale.dateKey === todayKey)
-      .slice(0, 12);
+      .filter((sale) => sale.dateKey === todayKey);
   }, [posSales]);
+
+  const topSellerEntries = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - (TOP_SELLERS_LOOKBACK_DAYS - 1));
+
+    const aggregates = new Map();
+
+    (Array.isArray(posSales) ? posSales : []).forEach((sale) => {
+      if (normalizePosSaleStatus(sale?.status) === "voided") return;
+      const saleDate = parsePosDateValue(sale?.createdAt || sale?.updatedAt);
+      if (!saleDate || saleDate.getTime() < cutoff.getTime()) return;
+
+      getNormalizedPosSaleItems(sale).forEach((item) => {
+        if (item.netQuantity <= 0) return;
+        if (!["product", "pos-product", "workshop", "class", "event"].includes(item.type)) {
+          return;
+        }
+
+        const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+        const variantIdentity =
+          (metadata.variantId || metadata.variantLabel || "").toString().trim() || "base";
+        const optionIdentity =
+          (metadata.optionId || metadata.optionLabel || "").toString().trim() || "base";
+        const sessionIdentity =
+          (metadata.sessionId ||
+            metadata.slotId ||
+            metadata.sessionLabel ||
+            metadata.sessionDate ||
+            "")
+            .toString()
+            .trim() || "default";
+
+        let aggregateKey = `${item.type}:${item.sourceId}`;
+        if (item.type === "product") {
+          aggregateKey = `${item.type}:${item.sourceId}:${variantIdentity}`;
+        } else if (item.type === "pos-product") {
+          aggregateKey = `${item.type}:${item.sourceId}`;
+        } else {
+          aggregateKey = `${item.type}:${item.sourceId}:${optionIdentity}:${sessionIdentity}`;
+        }
+
+        const existing = aggregates.get(aggregateKey) || {
+          id: aggregateKey,
+          type: item.type,
+          sourceId: item.sourceId,
+          soldQuantity: 0,
+          variantId: (metadata.variantId || "").toString().trim(),
+          variantLabel: (metadata.variantLabel || "").toString().trim(),
+          optionId: (metadata.optionId || "").toString().trim(),
+          optionLabel: (metadata.optionLabel || "").toString().trim(),
+          sessionId: (metadata.sessionId || metadata.slotId || "").toString().trim(),
+          sessionLabel: (metadata.sessionLabel || "").toString().trim(),
+          sessionDate: (metadata.sessionDate || "").toString().trim(),
+          itemName: item.name,
+          linePrice: item.price,
+        };
+        existing.soldQuantity += item.netQuantity;
+        aggregates.set(aggregateKey, existing);
+      });
+    });
+
+    return Array.from(aggregates.values())
+      .map((entry) => {
+        if (entry.type === "product") {
+          const product = normalizedProducts.find((item) => item.id === entry.sourceId) || null;
+          const variant =
+            product?.variants?.find(
+              (item) => item.id === entry.variantId || item.label === entry.variantLabel,
+            ) || null;
+          const priceValue = Number.isFinite(variant?.price)
+            ? variant.price
+            : Number.isFinite(product?.numericPrice)
+              ? product.numericPrice
+              : entry.linePrice;
+          return {
+            id: entry.id,
+            type: "product",
+            department: "products",
+            serviceType: null,
+            title: product?.name || entry.itemName || "Product",
+            subtitle: [variant?.label || entry.variantLabel, product?.categoryName].filter(Boolean).join(" · "),
+            priceLabel: Number.isFinite(priceValue)
+              ? formatCurrency(priceValue)
+              : product?.displayPrice || "Price on request",
+            soldQuantity: entry.soldQuantity,
+            isAvailable: product
+              ? product.variants.length > 0
+                ? (variant?.stockStatus?.state || "in") !== "out"
+                : (product.stockStatus?.state || "in") !== "out"
+              : true,
+            actionConfig: {
+              variantId: variant?.id || entry.variantId || null,
+            },
+          };
+        }
+
+        if (entry.type === "pos-product") {
+          const product = normalizedPosProducts.find((item) => item.id === entry.sourceId) || null;
+          const priceValue = Number.isFinite(product?.numericPrice)
+            ? product.numericPrice
+            : entry.linePrice;
+          return {
+            id: entry.id,
+            type: "pos-product",
+            department: "pos-products",
+            serviceType: null,
+            title: product?.name || entry.itemName || "POS item",
+            subtitle: product?.categoryName || "",
+            priceLabel: Number.isFinite(priceValue)
+              ? formatCurrency(priceValue)
+              : product?.displayPrice || "Price on request",
+            soldQuantity: entry.soldQuantity,
+            isAvailable: product ? (product.stockStatus?.state || "in") !== "out" : true,
+            actionConfig: {},
+          };
+        }
+
+        if (entry.type === "workshop") {
+          const workshop = liveWorkshops.find((item) => item.id === entry.sourceId) || null;
+          const option =
+            findMatchingWorkshopOption(
+              workshop?.options || [],
+              entry.optionId,
+              entry.optionLabel,
+            ) || null;
+          const session =
+            workshop?.sessions?.find(
+              (item) =>
+                item.id === entry.sessionId ||
+                item.label === entry.sessionLabel ||
+                item.date === entry.sessionDate,
+            ) ||
+            workshop?.headlineSession ||
+            null;
+          const priceValue = Number.isFinite(option?.price)
+            ? option.price
+            : Number.isFinite(workshop?.numericPrice)
+              ? workshop.numericPrice
+              : entry.linePrice;
+          return {
+            id: entry.id,
+            type: "workshop",
+            department: "services",
+            serviceType: "workshop",
+            title: workshop?.title || entry.itemName || "Workshop",
+            subtitle: [
+              session?.formatted || session?.label || entry.sessionLabel,
+              option?.label || entry.optionLabel,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            priceLabel: Number.isFinite(priceValue)
+              ? formatCurrency(priceValue)
+              : workshop?.displayPrice || "Price on request",
+            soldQuantity: entry.soldQuantity,
+            isAvailable: workshop?.isLive !== false,
+            actionConfig: {
+              sessionId: session?.id || entry.sessionId || null,
+              optionId: option?.id || entry.optionId || null,
+            },
+          };
+        }
+
+        if (entry.type === "class") {
+          const classDoc = normalizedClasses.find((item) => item.id === entry.sourceId) || null;
+          const option =
+            classDoc?.options?.find(
+              (item) => item.id === entry.optionId || item.label === entry.optionLabel,
+            ) || null;
+          const slot =
+            classDoc?.slots?.find(
+              (item) => item.id === entry.sessionId || item.label === entry.sessionLabel,
+            ) || null;
+          const priceValue = Number.isFinite(option?.price)
+            ? option.price
+            : Number.isFinite(classDoc?.numericPrice)
+              ? classDoc.numericPrice
+              : entry.linePrice;
+          return {
+            id: entry.id,
+            type: "class",
+            department: "services",
+            serviceType: "class",
+            title: classDoc?.title || entry.itemName || "Class",
+            subtitle: [classDoc?.displayDate || entry.sessionDate, slot?.label || entry.sessionLabel, option?.label || entry.optionLabel]
+              .filter(Boolean)
+              .join(" · "),
+            priceLabel: Number.isFinite(priceValue)
+              ? formatCurrency(priceValue)
+              : classDoc?.displayPrice || "Price on request",
+            soldQuantity: entry.soldQuantity,
+            isAvailable: true,
+            actionConfig: {
+              slotId: slot?.id || entry.sessionId || null,
+              optionId: option?.id || entry.optionId || null,
+            },
+          };
+        }
+
+        const event = normalizedEvents.find((item) => item.id === entry.sourceId) || null;
+        const slot =
+          event?.slots?.find(
+            (item) => item.id === entry.sessionId || item.label === entry.sessionLabel,
+          ) || null;
+        const priceValue = Number.isFinite(event?.numericPrice) ? event.numericPrice : entry.linePrice;
+        return {
+          id: entry.id,
+          type: "event",
+          department: "services",
+          serviceType: "event",
+          title: event?.title || entry.itemName || "Event",
+          subtitle: [event?.displayDate || entry.sessionDate, slot?.label || entry.sessionLabel]
+            .filter(Boolean)
+            .join(" · "),
+          priceLabel: Number.isFinite(priceValue)
+            ? formatCurrency(priceValue)
+            : event?.displayPrice || "Price on request",
+          soldQuantity: entry.soldQuantity,
+          isAvailable: true,
+          actionConfig: {
+            slotId: slot?.id || entry.sessionId || null,
+          },
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (right.soldQuantity !== left.soldQuantity) {
+          return right.soldQuantity - left.soldQuantity;
+        }
+        return left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+      });
+  }, [
+    formatCurrency,
+    liveWorkshops,
+    normalizedClasses,
+    normalizedEvents,
+    normalizedPosProducts,
+    normalizedProducts,
+    posSales,
+  ]);
+
+  const visibleTopSellerEntries = useMemo(() => {
+    if (activeTab === "bookings") return [];
+
+    let filtered = topSellerEntries;
+    if (activeTab === "products") {
+      filtered = filtered.filter((entry) => entry.department === "products");
+    } else if (activeTab === "pos-products") {
+      filtered = filtered.filter((entry) => entry.department === "pos-products");
+    } else if (activeTab === "services") {
+      filtered = filtered.filter(
+        (entry) =>
+          entry.department === "services" &&
+          (activeServiceType === "all" || entry.serviceType === activeServiceType),
+      );
+    }
+
+    return filtered.slice(0, TOP_SELLERS_LIMIT);
+  }, [activeServiceType, activeTab, topSellerEntries]);
 
   const activePosSettings = useMemo(
     () =>
@@ -1245,10 +2230,17 @@ function AdminPosPage() {
   };
 
   const handleAddToCart = (item) => {
+    let replacedExistingBooking = false;
     setCartItems((prev) => {
       const existingIndex = prev.findIndex((entry) => entry.key === item.key);
       if (existingIndex === -1) {
         return [...prev, item];
+      }
+      if (isBookingCartLineItem(item) || isBookingCartLineItem(prev[existingIndex])) {
+        replacedExistingBooking = true;
+        const next = [...prev];
+        next[existingIndex] = item;
+        return next;
       }
       const next = [...prev];
       next[existingIndex] = {
@@ -1258,10 +2250,253 @@ function AdminPosPage() {
       return next;
     });
     showToast(
-      `Added: ${item.name}`,
+      replacedExistingBooking ? `Updated booking: ${item.name}` : `Added: ${item.name}`,
       "success",
       { label: "View cart", onClick: () => setPosMobilePanel("cart") },
     );
+  };
+
+  const handleAddProductItem = (product, overrides = {}) => {
+    if (!product) return;
+    const requestedVariantId =
+      (overrides?.variantId || variantSelections[product.id] || product.variants[0]?.id || "")
+        .toString()
+        .trim();
+    const variant =
+      product.variants.find(
+        (entry) => entry.id === requestedVariantId || entry.label === overrides?.variantLabel,
+      ) || null;
+    if (product.variants.length > 0 && !variant) {
+      showToast("Select a variant before adding this product.", "error");
+      return;
+    }
+    const variantPrice = Number.isFinite(variant?.price) ? variant.price : product.numericPrice;
+    const canAdd =
+      product.variants.length > 0
+        ? Boolean(variant) && variant.stockStatus?.state !== "out"
+        : product.stockStatus?.state !== "out";
+    if (!canAdd) {
+      showToast("This item is currently out of stock.", "error");
+      return;
+    }
+    handleAddToCart({
+      key: buildCartKey({
+        type: "product",
+        sourceId: product.id,
+        variantId: variant?.id || "base",
+      }),
+      sourceId: product.id,
+      type: "product",
+      name: product.name,
+      price: Number.isFinite(variantPrice) ? variantPrice : 0,
+      quantity: 1,
+      metadata: {
+        type: "product",
+        productId: product.id,
+        variantId: variant?.id || null,
+        variantLabel: variant?.label || null,
+      },
+    });
+  };
+
+  const handleAddPosProductItem = (product) => {
+    if (!product) return;
+    if (product.stockStatus?.state === "out") {
+      showToast("This POS item is currently out of stock.", "error");
+      return;
+    }
+    handleAddToCart({
+      key: buildCartKey({ type: "pos-product", sourceId: product.id }),
+      sourceId: product.id,
+      type: "pos-product",
+      name: product.name,
+      price: Number.isFinite(product.numericPrice) ? product.numericPrice : 0,
+      quantity: 1,
+      metadata: { type: "pos-product" },
+    });
+  };
+
+  const handleAddWorkshopItem = (workshop, overrides = {}) => {
+    if (!workshop) return;
+    const selectedSessionId =
+      (overrides?.sessionId || workshopSelections[workshop.id] || workshop.sessions[0]?.id || "")
+        .toString()
+        .trim();
+    const selectedSession =
+      workshop.sessions.find((session) => session.id === selectedSessionId) ||
+      workshop.sessions.find((session) => session.label === overrides?.sessionLabel) ||
+      workshop.sessions[0] ||
+      null;
+    const selectedOptionId =
+      (overrides?.optionId || workshopOptionSelections[workshop.id] || workshop.options[0]?.id || "")
+        .toString()
+        .trim();
+    const selectedOption =
+      findMatchingWorkshopOption(
+        workshop.options || [],
+        selectedOptionId,
+        overrides?.optionLabel,
+      ) || null;
+    if (workshop.options.length > 0 && !selectedOption) {
+      showToast("Select the frame size before adding this workshop.", "error");
+      return;
+    }
+    const optionPrice = Number.isFinite(selectedOption?.price) ? selectedOption.price : null;
+    const price = Number.isFinite(optionPrice)
+      ? optionPrice
+      : Number.isFinite(workshop.numericPrice)
+        ? workshop.numericPrice
+        : 0;
+    handleAddToCart({
+      key: buildCartKey({
+        type: "workshop",
+        sourceId: workshop.id,
+        variantId: selectedOption?.id || "base",
+        sessionId: selectedSession?.id || "default",
+      }),
+      sourceId: workshop.id,
+      type: "workshop",
+      name: workshop.title,
+      price,
+      quantity: 1,
+      metadata: {
+        type: "workshop",
+        workshopId: workshop.id,
+        workshopTitle: workshop.title,
+        sessionId: selectedSession?.id || null,
+        sessionLabel: selectedSession?.label || null,
+        sessionDate: selectedSession?.date || "",
+        scheduledDateLabel: selectedSession?.formatted || null,
+        sessionTimeRange: selectedSession?.timeRangeLabel || null,
+        attendeeCount: 1,
+        optionId: selectedOption?.id || null,
+        optionLabel: selectedOption?.label || null,
+        optionPrice,
+        perAttendeePrice: optionPrice,
+        location: workshop.location || "",
+        framePreference: selectedOption?.id || null,
+      },
+    });
+  };
+
+  const handleAddClassItem = (classDoc, overrides = {}) => {
+    if (!classDoc) return;
+    const selectedSlotId =
+      (overrides?.slotId || classSelections[classDoc.id] || classDoc.slots[0]?.id || "")
+        .toString()
+        .trim();
+    const selectedSlot =
+      classDoc.slots.find((slot) => slot.id === selectedSlotId) ||
+      classDoc.slots.find((slot) => slot.label === overrides?.sessionLabel) ||
+      classDoc.slots[0] ||
+      null;
+    const selectedOptionId =
+      (overrides?.optionId || classOptionSelections[classDoc.id] || classDoc.options[0]?.id || "")
+        .toString()
+        .trim();
+    const selectedOption =
+      classDoc.options.find(
+        (option) => option.id === selectedOptionId || option.label === overrides?.optionLabel,
+      ) || null;
+    if (classDoc.options.length > 0 && !selectedOption) {
+      showToast("Select an option before adding this class.", "error");
+      return;
+    }
+    const optionPrice = Number.isFinite(selectedOption?.price) ? selectedOption.price : null;
+    const price = Number.isFinite(optionPrice)
+      ? optionPrice
+      : Number.isFinite(classDoc.numericPrice)
+        ? classDoc.numericPrice
+        : 0;
+    const sessionLabel = selectedSlot?.label
+      ? `${classDoc.displayDate} - ${selectedSlot.label}`
+      : classDoc.displayDate;
+    handleAddToCart({
+      key: buildCartKey({
+        type: "class",
+        sourceId: classDoc.id,
+        variantId: selectedOption?.id || "base",
+        sessionId: selectedSlot?.id || "default",
+      }),
+      sourceId: classDoc.id,
+      type: "class",
+      name: classDoc.title,
+      price,
+      quantity: 1,
+      metadata: {
+        type: "cut-flower",
+        classId: classDoc.id,
+        slotId: selectedSlot?.id || null,
+        sessionLabel,
+        sessionDate: classDoc.eventDate ? classDoc.eventDate.toISOString() : "",
+        location: classDoc.location || "",
+        optionId: selectedOption?.id || null,
+        optionLabel: selectedOption?.label || null,
+        optionPrice,
+      },
+    });
+  };
+
+  const handleAddEventItem = (event, overrides = {}) => {
+    if (!event) return;
+    const selectedSlotId =
+      (overrides?.slotId || eventSelections[event.id] || event.slots[0]?.id || "")
+        .toString()
+        .trim();
+    const selectedSlot =
+      event.slots.find((slot) => slot.id === selectedSlotId) ||
+      event.slots.find((slot) => slot.label === overrides?.sessionLabel) ||
+      event.slots[0] ||
+      null;
+    const sessionLabel = selectedSlot?.label ? `${event.displayDate} - ${selectedSlot.label}` : event.displayDate;
+    handleAddToCart({
+      key: buildCartKey({
+        type: "event",
+        sourceId: event.id,
+        sessionId: selectedSlot?.id || "default",
+      }),
+      sourceId: event.id,
+      type: "event",
+      name: event.title,
+      price: Number.isFinite(event.numericPrice) ? event.numericPrice : 0,
+      quantity: 1,
+      metadata: {
+        type: "event",
+        eventId: event.id,
+        slotId: selectedSlot?.id || null,
+        sessionLabel,
+        sessionDate: event.eventDate ? event.eventDate.toISOString() : "",
+        location: event.location || "",
+      },
+    });
+  };
+
+  const handleAddTopSellerItem = (entry) => {
+    if (!entry?.id) return;
+    if (entry.department === "products") {
+      const product = normalizedProducts.find((item) => item.id === entry.sourceId) || null;
+      handleAddProductItem(product, entry.actionConfig);
+      return;
+    }
+    if (entry.department === "pos-products") {
+      const product = normalizedPosProducts.find((item) => item.id === entry.sourceId) || null;
+      handleAddPosProductItem(product);
+      return;
+    }
+    if (entry.serviceType === "workshop") {
+      const workshop = liveWorkshops.find((item) => item.id === entry.sourceId) || null;
+      handleAddWorkshopItem(workshop, entry.actionConfig);
+      return;
+    }
+    if (entry.serviceType === "class") {
+      const classDoc = normalizedClasses.find((item) => item.id === entry.sourceId) || null;
+      handleAddClassItem(classDoc, entry.actionConfig);
+      return;
+    }
+    if (entry.serviceType === "event") {
+      const event = normalizedEvents.find((item) => item.id === entry.sourceId) || null;
+      handleAddEventItem(event, entry.actionConfig);
+    }
   };
 
   const handleRemoveCartItem = (key) => {
@@ -1276,7 +2511,11 @@ function AdminPosPage() {
   const handleCartQuantityChange = (key, value) => {
     const nextQuantity = Math.max(1, Number.parseInt(value, 10) || 1);
     setCartItems((prev) =>
-      prev.map((item) => (item.key === key ? { ...item, quantity: nextQuantity } : item)),
+      prev.map((item) => {
+        if (item.key !== key) return item;
+        if (isBookingCartLineItem(item)) return item;
+        return { ...item, quantity: nextQuantity };
+      }),
     );
   };
 
@@ -1284,6 +2523,7 @@ function AdminPosPage() {
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.key !== key) return item;
+        if (isBookingCartLineItem(item)) return item;
         const nextQuantity = Math.max(1, (Number(item.quantity) || 1) + delta);
         return { ...item, quantity: nextQuantity };
       }),
@@ -1311,13 +2551,14 @@ function AdminPosPage() {
         sessions.find((session) => session.date === booking.sessionDate) ||
         sessions[0] ||
         null;
-      const matchedOption =
-        options.find((option) => option.id === booking.optionValue) ||
-        options.find((option) => option.id === booking.optionId) ||
-        options.find((option) => option.label === booking.optionLabel) ||
-        options.find((option) => option.label === booking.frame) ||
-        options[0] ||
-        null;
+      const matchedOption = findMatchingWorkshopOption(
+        options,
+        booking.optionValue,
+        booking.optionId,
+        booking.optionLabel,
+        booking.frame,
+        booking.framePreference,
+      );
       return {
         date: booking.dateKey || "",
         attendeeCount: Math.max(1, Number.parseInt(attendeeCount, 10) || 1),
@@ -1407,34 +2648,61 @@ function AdminPosPage() {
     setBookingError(null);
     try {
       if (type === "workshop") {
+        const collectionName = getWorkshopBookingSourceCollection(booking);
         const workshop = workshopLookup.get(booking.workshopId);
         const selectedSession = workshop?.sessions?.find(
           (session) => session.id === editState.sessionId,
         );
         const selectedOption =
-          workshop?.options?.find((option) => option.id === editState.optionId) || null;
+          findMatchingWorkshopOption(
+            workshop?.options || [],
+            editState.optionId,
+            booking.optionValue,
+            booking.optionId,
+            booking.optionLabel,
+            booking.frame,
+            booking.framePreference,
+          ) || null;
         if (workshop?.options?.length > 0 && !selectedOption) {
-          setBookingError("Select a workshop option before saving.");
+          setBookingError("Select the frame size before saving this booking.");
           return;
         }
-        const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
-        const perAttendeePrice = parseNumber(
-          selectedOption?.price ?? workshop?.numericPrice ?? workshop?.price,
-          null,
-        );
-        await updateDoc(doc(db, "bookings", booking.id), {
+        const attendeeCount = getWorkshopBookingAttendeeCount(booking, editState.attendeeCount);
+        const perAttendeePrice = getWorkshopBookingUnitPrice({
+          booking,
+          option: selectedOption,
+          workshop,
+          attendeeCount,
+        });
+        const totalPrice = getWorkshopBookingTotalPrice({
+          booking,
+          option: selectedOption,
+          workshop,
+          attendeeCount,
+        });
+        await updateDoc(doc(db, collectionName, booking.id), {
           sessionDate: editState.date,
           sessionLabel: selectedSession?.label || booking.sessionLabel || null,
+          sessionDateLabel:
+            selectedSession?.formatted || booking.sessionDateLabel || booking.scheduledDateLabel || null,
+          scheduledDateLabel:
+            selectedSession?.formatted || booking.scheduledDateLabel || booking.sessionDateLabel || null,
+          sessionTimeRange:
+            selectedSession?.timeRangeLabel || booking.sessionTimeRange || booking.sessionLabel || null,
           sessionId: selectedSession?.id || booking.sessionId || null,
           attendeeCount,
           frame:
             selectedOption?.label || booking.optionLabel || booking.frame || "Workshop",
+          framePreference:
+            selectedOption?.id || booking.optionId || booking.optionValue || booking.framePreference || null,
           optionLabel: selectedOption?.label || booking.optionLabel || null,
           optionValue: selectedOption?.id || booking.optionValue || null,
+          totalPrice:
+            Number.isFinite(totalPrice) && totalPrice > 0 ? totalPrice : booking.totalPrice ?? null,
           price:
             Number.isFinite(perAttendeePrice) && perAttendeePrice > 0
               ? perAttendeePrice
-              : booking.price ?? null,
+              : booking.price ?? booking.totalPrice ?? null,
           updatedAt: serverTimestamp(),
         });
       } else {
@@ -1480,26 +2748,51 @@ function AdminPosPage() {
 
   const handleAddBookingToCart = (booking, type) => {
     const editState = getBookingEditState(booking, type);
-    const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
+    const attendeeCount = getWorkshopBookingAttendeeCount(booking, editState.attendeeCount);
     let priceValue = Number.isFinite(booking.numericPrice) ? booking.numericPrice : 0;
     let quantityValue = 1;
     let selectedWorkshopOption = null;
+    let perAttendeePrice = null;
+    let bookingLabelName = "";
     if (type === "workshop") {
       const workshop = workshopLookup.get(booking.workshopId);
       selectedWorkshopOption =
-        workshop?.options?.find((option) => option.id === editState.optionId) || null;
+        findMatchingWorkshopOption(
+          workshop?.options || [],
+          editState.optionId,
+          booking.optionValue,
+          booking.optionId,
+          booking.optionLabel,
+          booking.frame,
+          booking.framePreference,
+        ) || null;
       if (workshop?.options?.length > 0 && !selectedWorkshopOption) {
-        setBookingError("Select a workshop option before adding this booking to cart.");
+        setBookingError("Select the frame size before adding this booking to the cart.");
         return;
       }
-      const workshopPrice = parseNumber(
-        selectedWorkshopOption?.price ?? workshop?.numericPrice ?? workshop?.price,
-        null,
-      );
-      if (Number.isFinite(workshopPrice)) {
-        priceValue = workshopPrice;
-        quantityValue = attendeeCount;
+      perAttendeePrice = getWorkshopBookingUnitPrice({
+        booking,
+        option: selectedWorkshopOption,
+        workshop,
+        attendeeCount,
+      });
+      const bookingTotal = getWorkshopBookingTotalPrice({
+        booking,
+        option: selectedWorkshopOption,
+        workshop,
+        attendeeCount,
+      });
+      if (Number.isFinite(bookingTotal) && bookingTotal > 0) {
+        priceValue = bookingTotal;
+        quantityValue = 1;
+      } else if (Number.isFinite(perAttendeePrice) && perAttendeePrice > 0) {
+        priceValue = perAttendeePrice * attendeeCount;
+        quantityValue = 1;
       }
+      bookingLabelName =
+        (booking.name || booking.customerName || booking.email || booking.workshopTitle || "Guest")
+          .toString()
+          .trim() || "Guest";
     } else {
       const attendeeOptions = normalizeAttendeeOptions(
         attendeeCount,
@@ -1521,11 +2814,14 @@ function AdminPosPage() {
           quantityValue = attendeeCount;
         }
       }
+      bookingLabelName =
+        (booking.customerName || booking.email || booking.name || "Cut flower").toString().trim() ||
+        "Cut flower";
     }
     const label =
       type === "workshop"
-        ? `${booking.workshopTitle || "Workshop"} booking`
-        : `${booking.customerName || "Cut flower"} booking`;
+        ? `${bookingLabelName} booking`
+        : `${bookingLabelName} booking`;
     const selectedWorkshopSession =
       type === "workshop"
         ? workshopLookup
@@ -1536,6 +2832,20 @@ function AdminPosPage() {
       type === "workshop"
         ? selectedWorkshopSession?.label || booking.sessionLabel || booking.displayDate
         : booking.displayDate;
+    const sessionDateLabel =
+      type === "workshop"
+        ? selectedWorkshopSession?.formatted ||
+          booking.sessionDateLabel ||
+          booking.scheduledDateLabel ||
+          booking.displayDate
+        : booking.displayDate;
+    const sessionTimeRange =
+      type === "workshop"
+        ? selectedWorkshopSession?.timeRangeLabel ||
+          booking.sessionTimeRange ||
+          booking.sessionLabel ||
+          null
+        : null;
     handleAddToCart({
       key: buildCartKey({ type: `${type}-booking`, sourceId: booking.id }),
       sourceId: booking.id,
@@ -1547,10 +2857,37 @@ function AdminPosPage() {
         bookingId: booking.id,
         bookingType: type,
         attendeeCount,
+        bookingCollection:
+          type === "workshop"
+            ? getWorkshopBookingSourceCollection(booking)
+            : CUT_FLOWER_BOOKINGS_COLLECTION,
+        customerName:
+          type === "workshop"
+            ? booking.name || booking.customerName || ""
+            : booking.customerName || booking.name || "",
+        customerEmail: booking.email || "",
+        customerPhone: booking.phone || "",
+        workshopId: type === "workshop" ? booking.workshopId || null : null,
+        workshopTitle: type === "workshop" ? booking.workshopTitle || "Workshop" : null,
         sessionLabel,
+        sessionDate:
+          type === "workshop"
+            ? selectedWorkshopSession?.date || editState.date || booking.sessionDate || null
+            : booking.dateKey || null,
+        sessionId:
+          type === "workshop"
+            ? selectedWorkshopSession?.id || editState.sessionId || booking.sessionId || null
+            : null,
+        sessionDateLabel: type === "workshop" ? sessionDateLabel : null,
+        scheduledDateLabel: type === "workshop" ? sessionDateLabel : null,
+        sessionTimeRange,
         optionId:
           type === "workshop"
-            ? selectedWorkshopOption?.id || editState.optionId || booking.optionId || null
+            ? selectedWorkshopOption?.id ||
+              editState.optionId ||
+              booking.optionId ||
+              booking.optionValue ||
+              null
             : editState.optionId || null,
         optionLabel:
           type === "workshop"
@@ -1558,12 +2895,26 @@ function AdminPosPage() {
             : null,
         framePreference:
           type === "workshop"
-            ? selectedWorkshopOption?.id || editState.optionId || booking.optionId || null
+            ? selectedWorkshopOption?.id ||
+              editState.optionId ||
+              booking.optionId ||
+              booking.optionValue ||
+              null
             : null,
+        perAttendeePrice: type === "workshop" ? perAttendeePrice : null,
+        totalPrice: type === "workshop" ? priceValue : null,
         attendeeOptions: type === "cut-flower" ? editState.attendeeOptions || [] : null,
         originalStatus: booking.status || null,
+        originalBookingStatus:
+          type === "workshop"
+            ? booking.bookingStatus || booking.adminBookingStatus || null
+            : null,
+        originalAdminBookingStatus:
+          type === "workshop" ? booking.adminBookingStatus || null : null,
         originalPaid: booking.paid === true,
         originalPaymentStatus: booking.paymentStatus || booking.payment_status || null,
+        originalAdminPaymentStatus:
+          type === "workshop" ? booking.adminPaymentStatus || null : null,
         originalPaymentMethod: booking.paymentMethod || null,
       },
     });
@@ -1645,6 +2996,7 @@ function AdminPosPage() {
       return;
     }
     const name = posProductForm.name.trim();
+    const categoryName = (posProductForm.category || "").toString().trim();
     const priceNumber = parseNumber(posProductForm.price, null);
     if (!name) {
       setPosProductError("POS product name is required.");
@@ -1658,6 +3010,7 @@ function AdminPosPage() {
     const quantityValue = clampQuantity(posProductForm.quantity);
     const payload = {
       name,
+      category: categoryName || null,
       price: priceNumber,
       quantity: quantityValue === null ? 0 : quantityValue,
       forceOutOfStock: Boolean(posProductForm.forceOutOfStock),
@@ -1678,6 +3031,7 @@ function AdminPosPage() {
         });
       }
       setPosProductForm(INITIAL_POS_PRODUCT);
+      setPosProductCategorySelection("");
       setEditingPosProductId(null);
     } catch (error) {
       setPosProductError(error.message || "Unable to save POS product.");
@@ -1687,15 +3041,20 @@ function AdminPosPage() {
   };
 
   const handleEditPosProduct = (product) => {
+    const categoryValue = product.categoryName || product.category || "";
     setEditingPosProductId(product.id);
     setPosProductForm({
       name: product.name || "",
+      category: categoryValue,
       price: Number.isFinite(parseNumber(product.price)) ? String(product.price) : "",
       quantity:
         product.quantity === undefined || product.quantity === null ? "" : String(product.quantity),
       forceOutOfStock: Boolean(product.forceOutOfStock),
       status: product.status || "active",
     });
+    setPosProductCategorySelection(
+      resolvePosProductCategorySelection(categoryValue, posProductCategoryChoices),
+    );
   };
 
   const handleDeletePosProduct = async (productId) => {
@@ -1711,6 +3070,7 @@ function AdminPosPage() {
     setPosItemsOpen(false);
     setEditingPosProductId(null);
     setPosProductForm(INITIAL_POS_PRODUCT);
+    setPosProductCategorySelection("");
     setPosProductError(null);
   };
 
@@ -2031,6 +3391,27 @@ function AdminPosPage() {
         .map((item) => {
           const saleItem = saleItemByLineId.get(item.key);
           const bookingRef = linkedBookingRefsByLineId.get(item.key);
+          const attendeeCount = Math.max(
+            1,
+            Number.parseInt(item.metadata?.attendeeCount, 10) || Number.parseInt(item.quantity, 10) || 1,
+          );
+          const perAttendeePrice = parseNumber(
+            item.metadata?.perAttendeePrice ??
+              (Number.isFinite(Number(item.price)) && attendeeCount > 0
+                ? Number(item.price) / attendeeCount
+                : null),
+            null,
+          );
+          const totalPrice = parseNumber(
+            item.metadata?.totalPrice ??
+              (Number.isFinite(Number(item.price)) ? Number(item.price) * Math.max(1, Number(item.quantity) || 1) : null),
+            null,
+          );
+          const scheduledDateLabel =
+            (item.metadata?.scheduledDateLabel ||
+              item.metadata?.sessionDateLabel ||
+              item.metadata?.sessionLabel ||
+              "").toString().trim() || null;
           const notesValue = [
             `POS sale (${resolvedPaymentMethod})`,
             notes.trim() || null,
@@ -2039,20 +3420,38 @@ function AdminPosPage() {
             .join(" - ")
             .slice(0, 1000);
           const payload = {
-            name: trimmedCustomer.name,
+            name: trimmedCustomer.name || "Walk-in customer",
             email: trimmedCustomer.email,
+            phone: trimmedCustomer.phone,
             frame: item.metadata?.optionLabel || item.metadata?.framePreference || "POS",
-            sessionDate: item.metadata?.sessionDate || "TBC",
+            framePreference: item.metadata?.framePreference || item.metadata?.optionId || null,
+            sessionSource: item.metadata?.sessionSource || "admin-session",
+            scheduledDateLabel,
+            sessionDateLabel: scheduledDateLabel,
+            sessionDate: item.metadata?.sessionDate || null,
             sessionLabel: item.metadata?.sessionLabel || "TBC",
+            sessionTimeRange: item.metadata?.sessionTimeRange || item.metadata?.sessionLabel || null,
+            sessionId: item.metadata?.sessionId || null,
             workshopId: item.sourceId,
-            attendeeCount: Math.max(1, Number.parseInt(item.quantity, 10) || 1),
-            price: parseNumber(
-              item.metadata?.optionPrice ?? item.metadata?.perAttendeePrice ?? item.price,
-              null,
-            ),
+            workshopTitle: item.metadata?.workshopTitle || item.name || "Workshop",
+            attendeeCount,
+            attendeeSelections: Array.isArray(item.metadata?.attendeeSelections)
+              ? item.metadata.attendeeSelections
+              : null,
+            totalPrice,
+            price: perAttendeePrice,
+            bookingStatus: "confirmed",
+            adminBookingStatus: "confirmed",
+            paymentStatus: "paid",
+            adminPaymentStatus: "paid",
+            paymentMethod: resolvedPaymentMethod,
+            paid: true,
+            paidAt: serverTimestamp(),
+            status: "completed",
             posSaleId: saleRef.id,
             posSaleLineId: saleItem?.lineId || item.key,
             createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
           };
           if (notesValue) {
             payload.notes = notesValue;
@@ -2112,10 +3511,12 @@ function AdminPosPage() {
         .filter((item) => item.type === "workshop-booking" || item.type === "cut-flower-booking")
         .map((item) => {
           const isWorkshop = item.type === "workshop-booking";
-          const collectionName = isWorkshop ? "bookings" : "cutFlowerBookings";
+          const collectionName =
+            (item.metadata?.bookingCollection || "").toString().trim() ||
+            (isWorkshop ? WORKSHOP_BOOKINGS_COLLECTION : CUT_FLOWER_BOOKINGS_COLLECTION);
           const statusValue = isWorkshop ? "completed" : "fulfilled";
           const saleItem = saleItemByLineId.get(item.key);
-          return updateDoc(doc(db, collectionName, item.sourceId), {
+          const updatePayload = {
             paid: true,
             paymentStatus: "paid",
             paymentMethod: resolvedPaymentMethod,
@@ -2125,7 +3526,70 @@ function AdminPosPage() {
             posSaleId: saleRef.id,
             posSaleLineId: saleItem?.lineId || item.key,
             updatedAt: serverTimestamp(),
-          });
+          };
+          if (isWorkshop) {
+            const attendeeCount = Math.max(
+              1,
+              Number.parseInt(item.metadata?.attendeeCount, 10) || 1,
+            );
+            const perAttendeePrice = parseNumber(
+              item.metadata?.perAttendeePrice ??
+                (Number.isFinite(Number(item.price)) && attendeeCount > 0
+                  ? Number(item.price) / attendeeCount
+                  : null),
+              null,
+            );
+            const totalPrice = parseNumber(
+              item.metadata?.totalPrice ??
+                (Number.isFinite(Number(item.price))
+                  ? Number(item.price) * Math.max(1, Number(item.quantity) || 1)
+                  : null),
+              null,
+            );
+            const scheduledDateLabel =
+              (item.metadata?.scheduledDateLabel ||
+                item.metadata?.sessionDateLabel ||
+                item.metadata?.sessionLabel ||
+                "").toString().trim() || null;
+            updatePayload.bookingStatus = "confirmed";
+            updatePayload.adminBookingStatus = "confirmed";
+            updatePayload.adminPaymentStatus = "paid";
+            updatePayload.attendeeCount = attendeeCount;
+            if (item.metadata?.optionLabel) {
+              updatePayload.frame = item.metadata.optionLabel;
+              updatePayload.optionLabel = item.metadata.optionLabel;
+            }
+            if (item.metadata?.framePreference || item.metadata?.optionId) {
+              updatePayload.framePreference =
+                item.metadata.framePreference || item.metadata.optionId;
+            }
+            if (item.metadata?.optionId) {
+              updatePayload.optionValue = item.metadata.optionId;
+            }
+            if (item.metadata?.sessionDate) {
+              updatePayload.sessionDate = item.metadata.sessionDate;
+            }
+            if (item.metadata?.sessionId) {
+              updatePayload.sessionId = item.metadata.sessionId;
+            }
+            if (item.metadata?.sessionLabel) {
+              updatePayload.sessionLabel = item.metadata.sessionLabel;
+            }
+            if (item.metadata?.sessionTimeRange) {
+              updatePayload.sessionTimeRange = item.metadata.sessionTimeRange;
+            }
+            if (scheduledDateLabel) {
+              updatePayload.scheduledDateLabel = scheduledDateLabel;
+              updatePayload.sessionDateLabel = scheduledDateLabel;
+            }
+            if (Number.isFinite(totalPrice) && totalPrice > 0) {
+              updatePayload.totalPrice = totalPrice;
+            }
+            if (Number.isFinite(perAttendeePrice) && perAttendeePrice > 0) {
+              updatePayload.price = perAttendeePrice;
+            }
+          }
+          return updateDoc(doc(db, collectionName, item.sourceId), updatePayload);
         });
 
       await Promise.all([
@@ -2233,69 +3697,6 @@ function AdminPosPage() {
           </Link>
         </div>
       )}
-
-      <section className="pos-wizard__card pos-recent-sales pos-recent-sales--accordion">
-        <div className="pos-recent-sales__header">
-          <div>
-            <h3>Recent Sales (Today)</h3>
-            <p className="modal__meta">
-              Today&apos;s receipts can be voided here if an admin needs to correct a sale.
-            </p>
-          </div>
-          <button
-            className="btn btn--secondary btn--small"
-            type="button"
-            onClick={() => setRecentSalesOpen((prev) => !prev)}
-            disabled={checkoutStatus === "saving"}
-            aria-expanded={recentSalesOpen}
-          >
-            {recentSalesOpen ? "Hide" : "Show"} {recentSales.length}
-          </button>
-        </div>
-
-        {recentSalesOpen && (
-          <>
-            {recentSales.length === 0 ? (
-              <p className="empty-state">No sales recorded yet today.</p>
-            ) : (
-              <div className="pos-recent-sales__list">
-                {recentSales.map((sale) => (
-                  <article className="pos-recent-sales__item" key={sale.id || sale.receiptNumber}>
-                    <div className="pos-recent-sales__item-header">
-                      <div>
-                        <strong>{sale.receiptNumber || sale.id}</strong>
-                        <p className="modal__meta">
-                          {sale.createdAt
-                            ? sale.createdAt.toLocaleTimeString("en-ZA", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })
-                            : "Time unavailable"}
-                        </p>
-                      </div>
-                      <span className={`badge ${getPosSaleStatusBadgeClass(sale.status)}`}>
-                        {formatPosSaleStatusLabel(sale.status)}
-                      </span>
-                    </div>
-                    <div className="pos-recent-sales__meta">
-                      <span>{(sale.paymentMethod || "-").toString()}</span>
-                      <strong>{formatCurrency(getPosSaleNetTotal(sale))}</strong>
-                    </div>
-                    <button
-                      className="btn btn--secondary btn--small"
-                      type="button"
-                      onClick={() => setVoidSaleTarget(sale)}
-                      disabled={!functionsInstance || checkoutStatus === "saving"}
-                    >
-                      Void / Correct
-                    </button>
-                  </article>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </section>
 
       {checkoutStatus === "saving" ? (
         <section className="pos-wizard__card pos-wizard__loading">
@@ -2410,7 +3811,7 @@ function AdminPosPage() {
         <>
           {currentStep === POS_STEP_ORDER && (
             <>
-              {/* Mobile tab toggle — hidden on desktop/tablet via CSS */}
+              {/* Touch-tab toggle for tablet and phone POS use */}
               <div className="pos-panel-tab-bar" role="tablist" aria-label="POS view">
                 <button
                   className={`pos-panel-tab-bar__btn ${posMobilePanel === "browse" ? "is-active" : ""}`}
@@ -2438,13 +3839,17 @@ function AdminPosPage() {
             <section className="pos-wizard__build">
               <div data-mobile-panel="browse" className={posMobilePanel === "browse" ? "is-active" : ""}>
               <PosCatalogBrowser
-                tabs={POS_TABS}
+                departments={POS_TABS}
+                departmentCounts={departmentCounts}
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
                 searchTerm={searchTerm}
                 setSearchTerm={setSearchTerm}
                 activeCount={activeCount}
                 inventoryLoading={inventoryLoading}
+                serviceFilters={SERVICE_FILTERS}
+                activeServiceType={activeServiceType}
+                setActiveServiceType={setActiveServiceType}
                 bookingTab={bookingTab}
                 setBookingTab={setBookingTab}
                 bookingDateFilter={bookingDateFilter}
@@ -2453,6 +3858,10 @@ function AdminPosPage() {
                 categoryOptions={categoryOptions}
                 activeCategoryId={activeCategoryId}
                 setActiveCategoryId={setActiveCategoryId}
+                posCategoryOptions={posCategoryOptions}
+                activePosCategoryId={activePosCategoryId}
+                setActivePosCategoryId={setActivePosCategoryId}
+                allItemsSections={allItemsSections}
                 filteredProducts={filteredProducts}
                 variantSelections={variantSelections}
                 setVariantSelections={setVariantSelections}
@@ -2483,9 +3892,35 @@ function AdminPosPage() {
                 filteredEvents={filteredEvents}
                 eventSelections={eventSelections}
                 setEventSelections={setEventSelections}
+                serviceSections={serviceSections}
                 formatCurrency={formatCurrency}
-                handleAddToCart={handleAddToCart}
+                topSellerEntries={visibleTopSellerEntries}
+                topSellersLabel={`Top sellers · Last ${TOP_SELLERS_LOOKBACK_DAYS} days`}
+                onAddProduct={handleAddProductItem}
+                onAddPosProduct={handleAddPosProductItem}
+                onAddWorkshop={handleAddWorkshopItem}
+                onAddClass={handleAddClassItem}
+                onAddEvent={handleAddEventItem}
+                onAddTopSeller={handleAddTopSellerItem}
               />
+              {cartItems.length > 0 && (
+                <div className="pos-touch-cart-peek" aria-live="polite">
+                  <div className="pos-touch-cart-peek__summary">
+                    <span>Current order</span>
+                    <strong>
+                      {cartItems.length} {cartItems.length === 1 ? "line" : "lines"} ·{" "}
+                      {formatCurrency(pricing.cartSubtotal)}
+                    </strong>
+                  </div>
+                  <button
+                    className="btn btn--primary pos-touch-cart-peek__button"
+                    type="button"
+                    onClick={() => setPosMobilePanel("cart")}
+                  >
+                    Open cart
+                  </button>
+                </div>
+              )}
               </div>
 
               <div data-mobile-panel="cart" className={posMobilePanel === "cart" ? "is-active" : ""}>
@@ -2696,6 +4131,69 @@ function AdminPosPage() {
               </div>
             </section>
           )}
+
+          <section className="pos-wizard__card pos-recent-sales pos-recent-sales--accordion">
+            <div className="pos-recent-sales__header">
+              <div>
+                <h3>Recent Sales (Today)</h3>
+                <p className="modal__meta">
+                  Today&apos;s receipts can be voided here if an admin needs to correct a sale.
+                </p>
+              </div>
+              <button
+                className="btn btn--secondary btn--small"
+                type="button"
+                onClick={() => setRecentSalesOpen((prev) => !prev)}
+                disabled={checkoutStatus === "saving"}
+                aria-expanded={recentSalesOpen}
+              >
+                {recentSalesOpen ? "Hide" : "Show"} {recentSales.length}
+              </button>
+            </div>
+
+            {recentSalesOpen && (
+              <>
+                {recentSales.length === 0 ? (
+                  <p className="empty-state">No sales recorded yet today.</p>
+                ) : (
+                  <div className="pos-recent-sales__list">
+                    {recentSales.map((sale) => (
+                      <article className="pos-recent-sales__item" key={sale.id || sale.receiptNumber}>
+                        <div className="pos-recent-sales__item-header">
+                          <div>
+                            <strong>{sale.receiptNumber || sale.id}</strong>
+                            <p className="modal__meta">
+                              {sale.createdAt
+                                ? sale.createdAt.toLocaleTimeString("en-ZA", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })
+                                : "Time unavailable"}
+                            </p>
+                          </div>
+                          <span className={`badge ${getPosSaleStatusBadgeClass(sale.status)}`}>
+                            {formatPosSaleStatusLabel(sale.status)}
+                          </span>
+                        </div>
+                        <div className="pos-recent-sales__meta">
+                          <span>{(sale.paymentMethod || "-").toString()}</span>
+                          <strong>{formatCurrency(getPosSaleNetTotal(sale))}</strong>
+                        </div>
+                        <button
+                          className="btn btn--secondary btn--small"
+                          type="button"
+                          onClick={() => setVoidSaleTarget(sale)}
+                          disabled={!functionsInstance || checkoutStatus === "saving"}
+                        >
+                          Void / Correct
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
         </>
       )}
 
@@ -2719,7 +4217,7 @@ function AdminPosPage() {
             }
           }}
         >
-          <div className="modal__content">
+          <div className="modal__content pos-items-modal">
             <button className="modal__close" type="button" onClick={closePosItemsModal} aria-label="Close">
               &times;
             </button>
@@ -2741,6 +4239,63 @@ function AdminPosPage() {
                   }
                   required
                 />
+                <select
+                  className="input"
+                  value={posProductCategorySelection}
+                  onChange={(event) => {
+                    const selectedValue = event.target.value;
+                    setPosProductCategorySelection(selectedValue);
+                    if (!selectedValue) {
+                      setPosProductForm((prev) => ({
+                        ...prev,
+                        category: "",
+                      }));
+                      return;
+                    }
+                    if (selectedValue === POS_PRODUCT_CUSTOM_CATEGORY_VALUE) {
+                      setPosProductForm((prev) => {
+                        const hasExistingMatch = posProductCategoryChoices.some(
+                          (category) =>
+                            category.name.toLowerCase() ===
+                            (prev.category || "").toString().trim().toLowerCase(),
+                        );
+                        return {
+                          ...prev,
+                          category: hasExistingMatch ? "" : prev.category,
+                        };
+                      });
+                      return;
+                    }
+                    const selectedCategory = posProductCategoryChoices.find(
+                      (category) => category.id === selectedValue,
+                    );
+                    setPosProductForm((prev) => ({
+                      ...prev,
+                      category: selectedCategory?.name || "",
+                    }));
+                  }}
+                >
+                  <option value="">No category</option>
+                  {posProductCategoryChoices.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                  <option value={POS_PRODUCT_CUSTOM_CATEGORY_VALUE}>Type a new category</option>
+                </select>
+                {posProductCategorySelection === POS_PRODUCT_CUSTOM_CATEGORY_VALUE && (
+                  <input
+                    className="input"
+                    placeholder="New category name"
+                    value={posProductForm.category}
+                    onChange={(event) =>
+                      setPosProductForm((prev) => ({
+                        ...prev,
+                        category: event.target.value,
+                      }))
+                    }
+                  />
+                )}
                 <input
                   className="input"
                   placeholder="Price"
@@ -2793,6 +4348,7 @@ function AdminPosPage() {
                       onClick={() => {
                         setEditingPosProductId(null);
                         setPosProductForm(INITIAL_POS_PRODUCT);
+                        setPosProductCategorySelection("");
                       }}
                     >
                       Cancel
@@ -2810,6 +4366,9 @@ function AdminPosPage() {
                     <div className="admin-category-card" key={product.id}>
                       <div>
                         <strong>{product.name}</strong>
+                        <p className="modal__meta">
+                          Category: {product.categoryName || "No category"}
+                        </p>
                         <p className="modal__meta">{product.displayPrice}</p>
                       </div>
                       <div className="admin-panel__header-actions">
@@ -3167,10 +4726,21 @@ function AdminPosPage() {
           {activeTab === "workshops" && (
             <div className="pos-grid">
               {filteredWorkshops.map((workshop) => {
-                const selectedSessionId = workshopSelections[workshop.id] || workshop.sessions[0]?.id || "";
-                const selectedSession = workshop.sessions.find((session) => session.id === selectedSessionId) || null;
-                const selectedOptionId = workshopOptionSelections[workshop.id] || workshop.options[0]?.id || "";
-                const selectedOption = workshop.options.find((option) => option.id === selectedOptionId) || null;
+                const selectedSession =
+                  workshop.sessions.find(
+                    (session) => session.id === (workshopSelections[workshop.id] || ""),
+                  ) ||
+                  workshop.headlineSession ||
+                  workshop.sessions[0] ||
+                  null;
+                const selectedSessionId = selectedSession?.id || "";
+                const selectedOption =
+                  workshop.options.find(
+                    (option) => option.id === (workshopOptionSelections[workshop.id] || ""),
+                  ) ||
+                  workshop.options[0] ||
+                  null;
+                const selectedOptionId = selectedOption?.id || "";
                 const optionPrice = Number.isFinite(selectedOption?.price) ? selectedOption.price : null;
                 const price = Number.isFinite(optionPrice)
                   ? optionPrice
@@ -3180,12 +4750,17 @@ function AdminPosPage() {
                 const priceLabel = Number.isFinite(optionPrice)
                   ? formatCurrency(optionPrice)
                   : workshop.displayPrice;
-                const canAdd = workshop.options.length === 0 || Boolean(selectedOption);
+                const canAdd =
+                  (workshop.sessions.length === 0 || Boolean(selectedSession)) &&
+                  (workshop.options.length === 0 || Boolean(selectedOption));
                 return (
                   <article className="pos-item-card" key={workshop.id}>
                     <div>
                       <h4>{workshop.title}</h4>
                       <p className="modal__meta">{priceLabel}</p>
+                      <p className="modal__meta">
+                        {selectedSession?.label || (workshop.isByRequest ? "By request" : "Date to be confirmed")}
+                      </p>
                       {workshop.sessions.length > 0 && (
                         <label className="modal__meta pos-item-card__field">
                           Session
@@ -3237,16 +4812,16 @@ function AdminPosPage() {
                       className="btn btn--secondary"
                       type="button"
                       disabled={!canAdd}
-                      onClick={() => {
-                        const metadata = {
-                          type: "workshop",
-                          workshopId: workshop.id,
-                          sessionId: selectedSession?.id || null,
-                          sessionLabel: selectedSession?.label || null,
-                          sessionDate: selectedSession?.date || "",
-                          optionId: selectedOption?.id || null,
-                          optionLabel: selectedOption?.label || null,
-                          optionPrice,
+                          onClick={() => {
+                            const metadata = {
+                              type: "workshop",
+                              workshopId: workshop.id,
+                              sessionId: selectedSession?.id || null,
+                              sessionLabel: selectedSession?.label || null,
+                              sessionDate: selectedSession?.date || "",
+                              optionId: selectedOption?.id || null,
+                              optionLabel: selectedOption?.label || null,
+                              optionPrice,
                           framePreference: selectedOption?.id || null,
                         };
                         handleAddToCart({
@@ -4160,7 +5735,7 @@ function AdminPosPage() {
             }
           }}
         >
-          <div className="modal__content">
+          <div className="modal__content pos-items-modal">
             <button className="modal__close" type="button" onClick={closePosItemsModal} aria-label="Close">
               &times;
             </button>
@@ -4234,6 +5809,7 @@ function AdminPosPage() {
                       onClick={() => {
                         setEditingPosProductId(null);
                         setPosProductForm(INITIAL_POS_PRODUCT);
+                        setPosProductCategorySelection("");
                       }}
                     >
                       Cancel

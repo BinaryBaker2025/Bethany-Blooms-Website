@@ -71,6 +71,7 @@ export function AdminDataProvider({ children }) {
   const [productTags, setProductTags] = useState([]);
   const [workshops, setWorkshops] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const [workshopBookingEmailAudit, setWorkshopBookingEmailAudit] = useState([]);
   const [orders, setOrders] = useState([]);
   const [events, setEvents] = useState([]);
   const [cutFlowerBookings, setCutFlowerBookings] = useState([]);
@@ -81,6 +82,7 @@ export function AdminDataProvider({ children }) {
     productTags: false,
     workshops: false,
     bookings: false,
+    workshopBookingEmailAudit: false,
     orders: false,
     events: false,
     cutFlowerBookings: false,
@@ -112,6 +114,7 @@ export function AdminDataProvider({ children }) {
       setProductTags([]);
       setWorkshops([]);
       setBookings([]);
+      setWorkshopBookingEmailAudit([]);
       setOrders([]);
       setEvents([]);
       setCutFlowerBookings([]);
@@ -128,6 +131,7 @@ export function AdminDataProvider({ children }) {
       productTags: false,
       workshops: false,
       bookings: false,
+      workshopBookingEmailAudit: false,
       orders: false,
       events: false,
       cutFlowerBookings: false,
@@ -202,6 +206,18 @@ export function AdminDataProvider({ children }) {
       handleError,
     );
 
+    const workshopBookingEmailAuditUnsub = onSnapshot(
+      query(collection(db, "workshopBookingEmailAudit"), orderBy("updatedAt", "desc")),
+      (snapshot) => {
+        setWorkshopBookingEmailAudit(
+          snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })),
+        );
+        setInventoryError(null);
+        markReady("workshopBookingEmailAudit");
+      },
+      handleError,
+    );
+
     const ordersUnsub = onSnapshot(
       query(collection(db, "orders"), orderBy("createdAt", "desc")),
       (snapshot) => {
@@ -248,6 +264,7 @@ export function AdminDataProvider({ children }) {
       tagsUnsub();
       workshopsUnsub();
       bookingsUnsub();
+      workshopBookingEmailAuditUnsub();
       ordersUnsub();
       eventsUnsub();
       cutFlowerBookingsUnsub();
@@ -271,6 +288,7 @@ export function AdminDataProvider({ children }) {
       productTags,
       workshops,
       bookings,
+      workshopBookingEmailAudit,
       orders,
       events,
       cutFlowerBookings,
@@ -278,6 +296,7 @@ export function AdminDataProvider({ children }) {
     }),
     [
       bookings,
+      workshopBookingEmailAudit,
       db,
       inventoryEnabled,
       inventoryError,

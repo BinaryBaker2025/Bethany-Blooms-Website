@@ -16396,6 +16396,10 @@ export function AdminOrdersView() {
     });
   const [ordersPage, setOrdersPage] = useState(0);
   const [ordersPageSize, setOrdersPageSize] = useState(ORDER_PAGE_SIZE_OPTIONS[0]);
+  const [editingOrderId, setEditingOrderId] = useState(null);
+  const [editOrderForm, setEditOrderForm] = useState({ items: [], totalPrice: 0, originalTotalPrice: 0 });
+  const [editOrderSaving, setEditOrderSaving] = useState(false);
+  const [editingItemIndex, setEditingItemIndex] = useState(null);
 
   useEffect(() => {
     if (!statusMessage) return undefined;
@@ -17527,6 +17531,74 @@ export function AdminOrdersView() {
 
     setPendingStatusUpdate(null);
     setTrackingInput("");
+  };
+
+  const handleOpenEditOrder = (order) => {
+    setEditingOrderId(order.id);
+    setEditOrderForm({
+      items: (order.items || []).map((item) => ({ ...item })),
+      totalPrice: order.totalPrice || 0,
+      originalTotalPrice: order.totalPrice || 0,
+    });
+  };
+
+  const closeEditOrderModal = () => {
+    setEditingOrderId(null);
+    setEditingItemIndex(null);
+    setEditOrderForm({ items: [], totalPrice: 0, originalTotalPrice: 0 });
+  };
+
+  const handleEditOrderItemQuantity = (itemIndex, quantity) => {
+    const items = [...editOrderForm.items];
+    items[itemIndex].quantity = Math.max(1, quantity);
+    setEditOrderForm((prev) => ({
+      ...prev,
+      items,
+      totalPrice: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+    }));
+  };
+
+  const handleEditOrderItemPrice = (itemIndex, price) => {
+    const items = [...editOrderForm.items];
+    items[itemIndex].price = Math.max(0, price);
+    setEditOrderForm((prev) => ({
+      ...prev,
+      items,
+      totalPrice: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+    }));
+  };
+
+  const handleRemoveEditOrderItem = (itemIndex) => {
+    const items = editOrderForm.items.filter((_, i) => i !== itemIndex);
+    setEditOrderForm((prev) => ({
+      ...prev,
+      items,
+      totalPrice: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+    }));
+  };
+
+  const handleSaveOrderUpdate = async () => {
+    if (!db || !editingOrderId || editOrderForm.items.length === 0) return;
+    setEditOrderSaving(true);
+    try {
+      const order = orders.find((o) => o.id === editingOrderId);
+      if (!order) return;
+      const diff = editOrderForm.originalTotalPrice - editOrderForm.totalPrice;
+      const note = diff !== 0 ? `Admin adjusted order items and total by R${Math.abs(diff).toFixed(2)}` : "Admin adjusted order items";
+      await updateDoc(doc(db, "orders", editingOrderId), {
+        items: editOrderForm.items,
+        totalPrice: editOrderForm.totalPrice,
+        updatedAt: serverTimestamp(),
+        adminNotes: (order.adminNotes ? order.adminNotes + "\n" : "") + note,
+      });
+      setStatusMessage("Order updated successfully.");
+      closeEditOrderModal();
+    } catch (error) {
+      console.error("Error updating order:", error);
+      setStatusMessage("Failed to update order.");
+    } finally {
+      setEditOrderSaving(false);
+    }
   };
 
   const filteredOrders = useMemo(() => {
@@ -18877,6 +18949,13 @@ export function AdminOrdersView() {
               <button
                 className="btn btn--secondary"
                 type="button"
+                onClick={() => handleOpenEditOrder(selectedOrder)}
+              >
+                Edit Items
+              </button>
+              <button
+                className="btn btn--secondary"
+                type="button"
                 disabled={deliverySaving}
                 onClick={handleSaveDelivery}
               >
@@ -19547,6 +19626,131 @@ export function AdminOrdersView() {
               }}
             >
               Save Link
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Edit Order Modal */}
+      <div
+        className={`modal ${editingOrderId ? "is-active" : ""}`}
+        onClick={(e) => e.target === e.currentTarget && closeEditOrderModal()}
+        style={{ maxHeight: "90vh" }}
+      >
+        <div className="modal__content" style={{ maxWidth: "500px", maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <button className="modal__close" onClick={closeEditOrderModal}>&times;</button>
+          <h3 className="modal__title">Edit Order Items</h3>
+
+          {/* Scrollable Items List */}
+          <div style={{ flex: "1", overflowY: "auto", marginBottom: "1rem", paddingRight: "0.5rem" }}>
+            {editOrderForm.items.map((item, idx) => (
+              <div key={idx} style={{ marginBottom: "0.75rem", padding: "0.75rem", border: "1px solid #e0d4be", borderRadius: "4px", background: "#fafaf8" }}>
+                {editingItemIndex === idx ? (
+                  // Edit Mode
+                  <div>
+                    <div style={{ marginBottom: "0.75rem", fontSize: "0.9rem", fontWeight: "600" }}>
+                      {item.name}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                      <label style={{ display: "flex", flexDirection: "column", fontSize: "0.8rem", overflow: "hidden" }}>
+                        <span style={{ marginBottom: "0.25rem", fontWeight: "600" }}>Qty</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) => handleEditOrderItemQuantity(idx, parseInt(e.target.value) || 1)}
+                          style={{ padding: "0.5rem", border: "1px solid #d4c4b0", borderRadius: "4px", width: "100%", boxSizing: "border-box" }}
+                          autoFocus
+                        />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", fontSize: "0.8rem", overflow: "hidden" }}>
+                        <span style={{ marginBottom: "0.25rem", fontWeight: "600" }}>Price</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.price}
+                          onChange={(e) => handleEditOrderItemPrice(idx, parseFloat(e.target.value) || 0)}
+                          style={{ padding: "0.5rem", border: "1px solid #d4c4b0", borderRadius: "4px", width: "100%", boxSizing: "border-box" }}
+                        />
+                      </label>
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        style={{ padding: "0.35rem 0.75rem", fontSize: "0.75rem", flex: "1" }}
+                        onClick={() => setEditingItemIndex(null)}
+                      >
+                        Done
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        style={{ padding: "0.35rem 0.75rem", fontSize: "0.75rem", flex: "1" }}
+                        onClick={() => handleRemoveEditOrderItem(idx)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  // View Mode
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: "0.9rem", fontWeight: "600", marginBottom: "0.25rem" }}>{item.name}</div>
+                      <div style={{ fontSize: "0.8rem", color: "#666" }}>
+                        {item.quantity}x @ {formatPriceLabel(item.price)} = <strong>{formatPriceLabel(item.price * item.quantity)}</strong>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      style={{ padding: "0.4rem 0.6rem", fontSize: "1rem", minWidth: "auto" }}
+                      onClick={() => setEditingItemIndex(idx)}
+                      title="Edit item"
+                    >
+                      ✏️
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Totals Summary */}
+          <div style={{ background: "#f5ead7", padding: "0.75rem", borderRadius: "4px", marginBottom: "1rem", fontSize: "0.9rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+              <span>Original:</span>
+              <span>{formatPriceLabel(editOrderForm.originalTotalPrice)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "600" }}>
+              <span>New:</span>
+              <span style={{ color: editOrderForm.totalPrice < editOrderForm.originalTotalPrice ? "#22c55e" : editOrderForm.totalPrice > editOrderForm.originalTotalPrice ? "#dc2626" : "#556b2f" }}>
+                {formatPriceLabel(editOrderForm.totalPrice)}
+              </span>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div style={{ display: "flex", gap: "0.75rem" }}>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={closeEditOrderModal}
+              disabled={editOrderSaving}
+              style={{ flex: "1" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={handleSaveOrderUpdate}
+              disabled={editOrderSaving || editOrderForm.items.length === 0}
+              style={{ flex: "1" }}
+            >
+              {editOrderSaving ? "Saving..." : "Save"}
             </button>
           </div>
         </div>

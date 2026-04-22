@@ -33,6 +33,8 @@ const currency = (value) => `R${value.toFixed(2)}`;
 const CHECKOUT_REQUEST_TIMEOUT_MS = 20000;
 const CHECKOUT_MAX_ATTEMPTS = 2;
 const LOCAL_FUNCTIONS_URL_PATTERN = /^https?:\/\/(?:127\.0\.0\.1|localhost):5001\//i;
+const PREORDER_MIXED_CART_MESSAGE =
+  "Pre-order products need to be checked out separately from regular products. Please place one order for pre-order items and a separate order for regular products.";
 const STEP_ORDER = ["contact", "shipping", "payment", "review"];
 const BASE_STEP_LABELS = {
   contact: "Contact",
@@ -43,6 +45,35 @@ const BASE_STEP_LABELS = {
 
 const isGiftCardCartItem = (item) =>
   Boolean(item?.metadata?.giftCard?.isGiftCard || item?.metadata?.isGiftCard);
+
+const normalizeStockStatusValue = (value = "") =>
+  value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const isPreorderCartItem = (item, stockInfo = null) => {
+  if (!item || item?.metadata?.type !== "product" || isGiftCardCartItem(item)) return false;
+  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const stockValues = [
+    metadata.stockStatus,
+    metadata.stock_status,
+    metadata.stockState,
+    metadata.stock_state,
+    item.stockStatus,
+    item.stock_status,
+    item.stockState,
+    item.stock_state,
+    stockInfo?.status?.state,
+  ];
+  return Boolean(
+    metadata.preorderSendMonth ||
+      metadata.preorder_send_month ||
+      metadata.preorderSendMonthLabel ||
+      stockValues.some((value) => normalizeStockStatusValue(value) === "preorder"),
+  );
+};
 
 const normalizeGiftCardOptionQuantity = (value) => {
   const parsed = Number.parseInt(value, 10);
@@ -200,6 +231,20 @@ function CartPage() {
     () => items.some((item) => item?.metadata?.type === "product" && !isGiftCardCartItem(item)),
     [items],
   );
+  const preorderCartMix = items.reduce(
+    (summary, item) => {
+      if (item?.metadata?.type !== "product" || isGiftCardCartItem(item)) return summary;
+      if (isPreorderCartItem(item, resolveStock(item))) {
+        summary.preorderItems += 1;
+      } else {
+        summary.regularItems += 1;
+      }
+      return summary;
+    },
+    { preorderItems: 0, regularItems: 0 },
+  );
+  const hasMixedPreorderCart =
+    preorderCartMix.preorderItems > 0 && preorderCartMix.regularItems > 0;
   const cartRequiresFreshFlowerDeliveryContact = useMemo(
     () =>
       items.some((item) => {
@@ -236,8 +281,14 @@ function CartPage() {
         ),
       });
     }
+    if (hasMixedPreorderCart) {
+      notices.push({
+        key: "preorder-mix",
+        content: PREORDER_MIXED_CART_MESSAGE,
+      });
+    }
     return notices;
-  }, [cartTypeLabel, cartRequiresFreshFlowerDeliveryContact]);
+  }, [cartTypeLabel, cartRequiresFreshFlowerDeliveryContact, hasMixedPreorderCart]);
   const savedAddresses = useMemo(() => {
     if (!Array.isArray(customerProfile?.addresses)) return [];
     return customerProfile.addresses
@@ -330,6 +381,9 @@ function CartPage() {
   const activeIndex = STEP_ORDER.indexOf(activeStep);
   const nextStep = STEP_ORDER[activeIndex + 1];
   const primaryActionLabel = (() => {
+    if (hasMixedPreorderCart) {
+      return "Separate orders to continue";
+    }
     if (activeStep === "review") {
       if (placingOrder) {
         return paymentMethod === PAYMENT_METHODS.EFT
@@ -489,6 +543,9 @@ function CartPage() {
     if (!hasItems) {
       return { ok: false, message: "Add items to start checkout." };
     }
+    if (hasMixedPreorderCart) {
+      return { ok: false, message: PREORDER_MIXED_CART_MESSAGE };
+    }
     if (step === "contact" && !isContactComplete) {
       return { ok: false, message: "Please complete your contact details to continue." };
     }
@@ -508,6 +565,10 @@ function CartPage() {
   };
 
   const handlePrimaryAction = () => {
+    if (hasMixedPreorderCart) {
+      setOrderError(PREORDER_MIXED_CART_MESSAGE);
+      return;
+    }
     if (activeStep === "review") {
       handlePlaceOrder();
       return;
@@ -640,6 +701,10 @@ function CartPage() {
   const handlePlaceOrder = async () => {
     if (placingOrder) return;
     if (!hasItems) return;
+    if (hasMixedPreorderCart) {
+      setOrderError(PREORDER_MIXED_CART_MESSAGE);
+      return;
+    }
 
     const incompleteStep = (() => {
       if (!isContactComplete) {
@@ -937,6 +1002,9 @@ function CartPage() {
         </div>
         <div className="cart-page__grid">
           <div className="cart-page__panel cart-page__items">
+            {hasMixedPreorderCart && (
+              <p className="cart-page__notice">{PREORDER_MIXED_CART_MESSAGE}</p>
+            )}
             {cartHasGiftCards && (
               <p className="cart-page__notice">
                 Gift cards are digital and PayFast-only. EFT is disabled for this order.

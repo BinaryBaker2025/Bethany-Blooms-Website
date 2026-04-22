@@ -31,6 +31,12 @@ function PosCartPanel({
             const itemCanBeRemoved = !(item?.metadata?.giftCardLinked && item?.metadata?.giftCardId);
             const isBookingLine =
               item.type === "workshop-booking" || item.type === "cut-flower-booking";
+            const isWorkshopBookingLine = item.type === "workshop-booking";
+            const attendeeCount = Math.max(
+              1,
+              Number.parseInt(item.metadata?.attendeeCount, 10) || 1,
+            );
+            const perAttendeePrice = Number(item.metadata?.perAttendeePrice);
             return (
               <li
                 key={item.key}
@@ -40,9 +46,20 @@ function PosCartPanel({
                   <div className="pos-cart__info">
                     <p className="pos-cart__name">{item.name}</p>
                     <div className="pos-cart__meta">
+                      {isWorkshopBookingLine && item.metadata?.workshopTitle && (
+                        <span>Workshop: {item.metadata.workshopTitle}</span>
+                      )}
                       {item.metadata?.variantLabel && <span>Variant: {item.metadata.variantLabel}</span>}
                       {item.metadata?.optionLabel && <span>Option: {item.metadata.optionLabel}</span>}
                       {item.metadata?.sessionLabel && <span>Session: {item.metadata.sessionLabel}</span>}
+                      {isBookingLine && Number(item.metadata?.attendeeCount) > 0 && (
+                        <span>Attendees: {item.metadata.attendeeCount}</span>
+                      )}
+                      {isWorkshopBookingLine && Number.isFinite(perAttendeePrice) && perAttendeePrice > 0 && (
+                        <span>
+                          Rate: {formatCurrency(perAttendeePrice)} each
+                        </span>
+                      )}
                       {item.metadata?.giftCardCode && <span>Gift card: {item.metadata.giftCardCode}</span>}
                       {isBookingLine && <span>Booking will be marked paid on checkout</span>}
                     </div>
@@ -57,37 +74,46 @@ function PosCartPanel({
                   </div>
                 </div>
                 <div className="pos-cart__controls">
-                  <div className="pos-cart__field">
-                    <span className="pos-cart__label">Qty</span>
-                    <div className="pos-cart__stepper">
-                      <button
-                        className="pos-cart__stepper-btn"
-                        type="button"
-                        onClick={() => onAdjustQuantity(item.key, -1)}
-                        aria-label={`Decrease ${item.name} quantity`}
-                        disabled={disabled}
-                      >
-                        -
-                      </button>
-                      <input
-                        className="input pos-cart__input"
-                        type="number"
-                        min="1"
-                        value={item.quantity}
-                        onChange={(event) => onChangeQuantity(item.key, event.target.value)}
-                        disabled={disabled}
-                      />
-                      <button
-                        className="pos-cart__stepper-btn"
-                        type="button"
-                        onClick={() => onAdjustQuantity(item.key, 1)}
-                        aria-label={`Increase ${item.name} quantity`}
-                        disabled={disabled}
-                      >
-                        +
-                      </button>
+                  {isBookingLine ? (
+                    <div className="pos-cart__field">
+                      <span className="pos-cart__label">Booking</span>
+                      <div className="pos-cart__booking-summary">
+                        {attendeeCount} {attendeeCount === 1 ? "attendee" : "attendees"}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="pos-cart__field">
+                      <span className="pos-cart__label">Qty</span>
+                      <div className="pos-cart__stepper">
+                        <button
+                          className="pos-cart__stepper-btn"
+                          type="button"
+                          onClick={() => onAdjustQuantity(item.key, -1)}
+                          aria-label={`Decrease ${item.name} quantity`}
+                          disabled={disabled}
+                        >
+                          -
+                        </button>
+                        <input
+                          className="input pos-cart__input"
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(event) => onChangeQuantity(item.key, event.target.value)}
+                          disabled={disabled}
+                        />
+                        <button
+                          className="pos-cart__stepper-btn"
+                          type="button"
+                          onClick={() => onAdjustQuantity(item.key, 1)}
+                          aria-label={`Increase ${item.name} quantity`}
+                          disabled={disabled}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {itemCanBeRemoved && (
                     <button
                       className="icon-btn icon-btn--danger pos-cart__remove"

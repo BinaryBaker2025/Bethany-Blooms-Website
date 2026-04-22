@@ -49,6 +49,7 @@ const ICONS = {
   chevronDown:     <path d="m6 9 6 6 6-6"/>,
   menu:            <path d="M4 6h16M4 12h16M4 18h16"/>,
   close:           <path d="M18 6 6 18M6 6l12 12"/>,
+  sidebarToggle:   <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="m14 9 3 3-3 3"/></>,
 };
 
 // ── Nav structure — sections are always open, only child-groups are togglable ──
@@ -148,6 +149,8 @@ const PAGE_TITLE_MAP = [
   ["/admin/profile", "Profile"],
 ];
 
+const SIDEBAR_COLLAPSE_STORAGE_KEY = "bethanyblooms-admin-sidebar-collapsed";
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const toGroupStateKey = (sectionId, itemId) => `${sectionId}:${itemId}`;
 
@@ -175,6 +178,14 @@ function AdminLayout() {
   const [authError, setAuthError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
   const [expandedGroups, setExpandedGroups] = useState({});
   const location = useLocation();
   const navigate = useNavigate();
@@ -223,6 +234,15 @@ function AdminLayout() {
 
   useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, String(sidebarCollapsed));
+    } catch {
+      // Ignore local storage failures.
+    }
+  }, [sidebarCollapsed]);
+
   const handleSignIn = async (e) => {
     e.preventDefault();
     setAuthError(null);
@@ -241,6 +261,7 @@ function AdminLayout() {
   };
 
   const handleNavClick = () => setDrawerOpen(false);
+  const toggleSidebarCollapsed = () => setSidebarCollapsed((prev) => !prev);
   const toggleGroup = (sectionId, itemId) => {
     const key = toGroupStateKey(sectionId, itemId);
     setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -298,10 +319,13 @@ function AdminLayout() {
   // ── Admin shell ─────────────────────────────────────────────────────────────
   return (
     <AdminDataProvider>
-      <div className="adm-shell">
+      <div className={`adm-shell ${sidebarCollapsed ? "is-sidebar-collapsed" : ""}`}>
 
         {/* ── Sidebar ────────────────────────────────────────────────────────── */}
-        <aside className={`adm-sidebar ${drawerOpen ? "is-open" : ""}`} aria-label="Admin navigation">
+        <aside
+          className={`adm-sidebar ${drawerOpen ? "is-open" : ""} ${sidebarCollapsed ? "is-collapsed" : ""}`}
+          aria-label="Admin navigation"
+        >
 
           {/* Brand header */}
           <div className="adm-sidebar__brand">
@@ -310,10 +334,21 @@ function AdminLayout() {
               <span className="adm-sidebar__brand-name">Bethany Blooms</span>
               <span className="adm-sidebar__brand-role">{role ?? "Admin"}</span>
             </div>
-            <button className="adm-sidebar__close" type="button" aria-label="Close navigation"
-              onClick={() => setDrawerOpen(false)}>
-              <SvgIcon d={ICONS.close} size={16}/>
-            </button>
+            <div className="adm-sidebar__brand-actions">
+              <button
+                className={`adm-sidebar__collapse ${sidebarCollapsed ? "is-collapsed" : ""}`}
+                type="button"
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                onClick={toggleSidebarCollapsed}
+              >
+                <SvgIcon d={ICONS.sidebarToggle} size={16}/>
+              </button>
+              <button className="adm-sidebar__close" type="button" aria-label="Close navigation"
+                onClick={() => setDrawerOpen(false)}>
+                <SvgIcon d={ICONS.close} size={16}/>
+              </button>
+            </div>
           </div>
 
           {/* Navigation — sections always open; only child-groups toggle */}
@@ -329,9 +364,11 @@ function AdminLayout() {
                     return (
                       <NavLink key={item.id} to={item.to} end={item.end}
                         className={({ isActive }) => `adm-nav__item ${isActive ? "is-active" : ""}`}
-                        onClick={handleNavClick}>
+                        onClick={handleNavClick}
+                        aria-label={item.label}
+                        title={sidebarCollapsed ? item.label : undefined}>
                         <SvgIcon d={ICONS[item.icon]} size={17} className="adm-nav__icon"/>
-                        <span>{item.label}</span>
+                        <span className="adm-nav__label">{item.label}</span>
                       </NavLink>
                     );
                   }
@@ -352,9 +389,11 @@ function AdminLayout() {
                             className={({ isActive }) =>
                               `adm-nav__item adm-nav__item--group-link ${isActive || hasChildMatch ? "is-active" : ""}`
                             }
-                            onClick={handleNavClick}>
+                            onClick={handleNavClick}
+                            aria-label={item.label}
+                            title={sidebarCollapsed ? item.label : undefined}>
                             <SvgIcon d={ICONS[item.icon]} size={17} className="adm-nav__icon"/>
-                            <span>{item.label}</span>
+                            <span className="adm-nav__label">{item.label}</span>
                           </NavLink>
                           <button className={`adm-nav__toggle ${isOpen ? "is-open" : ""}`}
                             type="button" aria-expanded={isOpen} aria-controls={groupPanelId}
@@ -365,9 +404,13 @@ function AdminLayout() {
                         </div>
                       ) : (
                         <div className={`adm-nav__group-head ${isGroupActive ? "is-active" : ""}`}>
-                          <span className={`adm-nav__item adm-nav__item--group-link ${isGroupActive ? "is-active" : ""}`}>
+                          <span
+                            className={`adm-nav__item adm-nav__item--group-link ${isGroupActive ? "is-active" : ""}`}
+                            aria-label={item.label}
+                            title={sidebarCollapsed ? item.label : undefined}
+                          >
                             <SvgIcon d={ICONS[item.icon]} size={17} className="adm-nav__icon"/>
-                            <span>{item.label}</span>
+                            <span className="adm-nav__label">{item.label}</span>
                           </span>
                           <button className={`adm-nav__toggle ${isOpen ? "is-open" : ""}`}
                             type="button" aria-expanded={isOpen} aria-controls={groupPanelId}
@@ -382,7 +425,8 @@ function AdminLayout() {
                           {(item.children || []).map((child) => (
                             <NavLink key={child.to} to={child.to} end={child.end}
                               className={({ isActive }) => `adm-nav__child ${isActive ? "is-active" : ""}`}
-                              onClick={handleNavClick}>
+                              onClick={handleNavClick}
+                              title={sidebarCollapsed ? child.label : undefined}>
                               {child.label}
                             </NavLink>
                           ))}
@@ -396,9 +440,15 @@ function AdminLayout() {
           </nav>
 
           {/* Sign out */}
-          <button className="adm-sidebar__signout" type="button" onClick={handleSignOut}>
+          <button
+            className="adm-sidebar__signout"
+            type="button"
+            onClick={handleSignOut}
+            aria-label="Sign out"
+            title={sidebarCollapsed ? "Sign out" : undefined}
+          >
             <SvgIcon d={ICONS.signout} size={16}/>
-            Sign Out
+            <span className="adm-sidebar__signout-label">Sign Out</span>
           </button>
         </aside>
 

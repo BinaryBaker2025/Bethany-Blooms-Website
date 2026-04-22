@@ -352,6 +352,10 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
+    match /workshopBookingEmailAudit/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
     match /orders/{orderId} {
       allow create: if validOrder(request.resource.data);
       allow read: if isAdmin() || isOrderOwner();

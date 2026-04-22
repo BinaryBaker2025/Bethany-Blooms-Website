@@ -207,6 +207,23 @@ const ORDER_NOTIFICATION_STATUSES = Object.freeze({
   FAILED: "failed",
   SKIPPED: "skipped",
 });
+const WORKSHOP_BOOKINGS_COLLECTION = "bookings";
+const WORKSHOP_BOOKING_EMAIL_AUDIT_COLLECTION = "workshopBookingEmailAudit";
+const CUT_FLOWER_BOOKINGS_COLLECTION = "cutFlowerBookings";
+const BOOKING_AUTOCOMPLETE_TIMEZONE = "Africa/Johannesburg";
+const BOOKING_AUTOCOMPLETE_SOURCE = "booking-date-scheduler";
+const WORKSHOP_BOOKING_TERMINAL_STATUSES = new Set([
+  "completed",
+  "complete",
+  "fulfilled",
+  "cancelled",
+]);
+const CUT_FLOWER_BOOKING_TERMINAL_STATUSES = new Set([
+  "fulfilled",
+  "completed",
+  "complete",
+  "cancelled",
+]);
 const COMPANY_PHONE_LOCAL = "0744555590";
 const COMPANY_PHONE_E164 = "27744555590";
 const COMPANY_PHONE_TEL = `+${COMPANY_PHONE_E164}`;
@@ -6655,6 +6672,9 @@ function normalizeStockStatusValue(value = "") {
   return normalized;
 }
 
+const PREORDER_MIXED_ORDER_ERROR =
+  "Pre-order products need to be checked out separately from regular products. Please place one order for pre-order items and a separate order for regular products.";
+
 function getItemPreorderDetails(item = {}) {
   const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
   const monthRaw = (
@@ -6687,6 +6707,21 @@ function getItemPreorderDetails(item = {}) {
     isPreorder: Boolean(monthLabel || isStockPreorder),
     monthLabel,
   };
+}
+
+function isPreorderSeparationProduct(item = {}) {
+  return item?.metadata?.type === "product" && !isGiftCardOrderItem(item);
+}
+
+function validatePreorderOrderSeparation(items = []) {
+  const productItems = (Array.isArray(items) ? items : []).filter(isPreorderSeparationProduct);
+  if (productItems.length < 2) return;
+
+  const preorderCount = productItems.filter((item) => getItemPreorderDetails(item).isPreorder).length;
+  const regularCount = productItems.length - preorderCount;
+  if (preorderCount > 0 && regularCount > 0) {
+    throw new Error(PREORDER_MIXED_ORDER_ERROR);
+  }
 }
 
 function buildOrderItemsHtml(items = []) {
@@ -8907,6 +8942,436 @@ function buildWorkshopCustomerHtml(booking = {}) {
   return wrapEmail({ title: "Workshop booking received", subtitle: "Thank you for reserving a spot.", body });
 }
 
+function normalizeBookingAuditText(value = "", maxLength = 500) {
+  return (value == null ? "" : value.toString())
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function parseBookingAuditDateValue(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value?.toDate === "function") {
+    try {
+      const converted = value.toDate();
+      return Number.isNaN(converted.getTime()) ? null : converted;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object" && typeof value.seconds === "number") {
+    const converted = new Date(value.seconds * 1000);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+  if (typeof value === "string") {
+    const converted = new Date(value);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+  return null;
+}
+
+function formatTimeZoneDateKey(date = new Date(), timeZone = BOOKING_AUTOCOMPLETE_TIMEZONE) {
+  const parts = formatTimeZoneDateParts(date, timeZone);
+  if (
+    !Number.isFinite(parts.year) ||
+    !Number.isFinite(parts.month) ||
+    !Number.isFinite(parts.day) ||
+    parts.year <= 0 ||
+    parts.month < 1 ||
+    parts.month > 12 ||
+    parts.day < 1 ||
+    parts.day > 31
+  ) {
+    return "";
+  }
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function normalizeBookingLifecycleStatus(value = "") {
+  return (value || "").toString().trim().toLowerCase();
+}
+
+function getWorkshopBookingCompletionDate(record = {}) {
+  return parseBookingAuditDateValue(
+    record?.sessionDate ||
+      record?.sessionDateLabel ||
+      record?.scheduledDateLabel ||
+      record?.sessionDayLabel ||
+      record?.date ||
+      record?.scheduledFor ||
+      null,
+  );
+}
+
+function getCutFlowerBookingCompletionDate(record = {}) {
+  return parseBookingAuditDateValue(
+    record?.eventDate ||
+      record?.date ||
+      record?.requestedDate ||
+      record?.scheduledFor ||
+      null,
+  );
+}
+
+function getBookingCompletionDateKey(
+  record = {},
+  type = "workshop",
+  timeZone = BOOKING_AUTOCOMPLETE_TIMEZONE,
+) {
+  const parsedDate =
+    type === "cut-flower"
+      ? getCutFlowerBookingCompletionDate(record)
+      : getWorkshopBookingCompletionDate(record);
+  if (!parsedDate) return "";
+  return formatTimeZoneDateKey(parsedDate, timeZone);
+}
+
+function hasTerminalBookingStatus(record = {}, terminalStatuses = new Set()) {
+  const candidateStatuses = [
+    record?.status,
+    record?.bookingStatus,
+    record?.adminBookingStatus,
+  ];
+  return candidateStatuses.some((value) =>
+    terminalStatuses.has(normalizeBookingLifecycleStatus(value)),
+  );
+}
+
+async function applyBatchedUpdates(writes = []) {
+  const rows = Array.isArray(writes) ? writes : [];
+  if (rows.length === 0) return 0;
+  let committed = 0;
+  for (let index = 0; index < rows.length; index += 400) {
+    const batch = db.batch();
+    rows.slice(index, index + 400).forEach(({ ref, payload }) => {
+      batch.set(ref, payload, { merge: true });
+    });
+    await batch.commit();
+    committed += Math.min(400, rows.length - index);
+  }
+  return committed;
+}
+
+async function autoCompletePastBookingsInCollection({
+  collectionName = "",
+  bookingType = "workshop",
+  targetStatus = "completed",
+  terminalStatuses = new Set(),
+  timeZone = BOOKING_AUTOCOMPLETE_TIMEZONE,
+} = {}) {
+  const normalizedCollectionName = (collectionName || "").toString().trim();
+  if (!normalizedCollectionName) {
+    throw new Error("Collection name is required for booking auto-completion.");
+  }
+
+  const snapshot = await db.collection(normalizedCollectionName).get();
+  const todayDateKey = formatTimeZoneDateKey(new Date(), timeZone);
+  const writes = [];
+  let skippedMissingDate = 0;
+  let skippedFutureOrToday = 0;
+  let skippedTerminal = 0;
+
+  snapshot.docs.forEach((docSnapshot) => {
+    const data = docSnapshot.data() || {};
+    if (hasTerminalBookingStatus(data, terminalStatuses)) {
+      skippedTerminal += 1;
+      return;
+    }
+
+    const bookingDateKey = getBookingCompletionDateKey(data, bookingType, timeZone);
+    if (!bookingDateKey) {
+      skippedMissingDate += 1;
+      return;
+    }
+    if (bookingDateKey >= todayDateKey) {
+      skippedFutureOrToday += 1;
+      return;
+    }
+
+    const payload = {
+      status: targetStatus,
+      autoCompletedBy: BOOKING_AUTOCOMPLETE_SOURCE,
+      autoCompletedAt: FIELD_VALUE.serverTimestamp(),
+      updatedAt: FIELD_VALUE.serverTimestamp(),
+    };
+
+    if (!data.completedAt) {
+      payload.completedAt = FIELD_VALUE.serverTimestamp();
+    }
+    if (bookingType === "cut-flower" && !data.fulfilledAt) {
+      payload.fulfilledAt = FIELD_VALUE.serverTimestamp();
+    }
+
+    writes.push({
+      ref: docSnapshot.ref,
+      payload,
+    });
+  });
+
+  const updated = await applyBatchedUpdates(writes);
+  return {
+    collectionName: normalizedCollectionName,
+    bookingType,
+    scanned: snapshot.size,
+    updated,
+    skippedMissingDate,
+    skippedFutureOrToday,
+    skippedTerminal,
+  };
+}
+
+async function autoCompletePastBookings({
+  source = BOOKING_AUTOCOMPLETE_SOURCE,
+  timeZone = BOOKING_AUTOCOMPLETE_TIMEZONE,
+} = {}) {
+  const collections = await Promise.all([
+    autoCompletePastBookingsInCollection({
+      collectionName: WORKSHOP_BOOKINGS_COLLECTION,
+      bookingType: "workshop",
+      targetStatus: "completed",
+      terminalStatuses: WORKSHOP_BOOKING_TERMINAL_STATUSES,
+      timeZone,
+    }),
+    autoCompletePastBookingsInCollection({
+      collectionName: WORKSHOP_BOOKING_EMAIL_AUDIT_COLLECTION,
+      bookingType: "workshop",
+      targetStatus: "completed",
+      terminalStatuses: WORKSHOP_BOOKING_TERMINAL_STATUSES,
+      timeZone,
+    }),
+    autoCompletePastBookingsInCollection({
+      collectionName: CUT_FLOWER_BOOKINGS_COLLECTION,
+      bookingType: "cut-flower",
+      targetStatus: "fulfilled",
+      terminalStatuses: CUT_FLOWER_BOOKING_TERMINAL_STATUSES,
+      timeZone,
+    }),
+  ]);
+
+  const summary = collections.reduce(
+    (acc, entry) => {
+      acc.scanned += entry.scanned || 0;
+      acc.updated += entry.updated || 0;
+      acc.skippedMissingDate += entry.skippedMissingDate || 0;
+      acc.skippedFutureOrToday += entry.skippedFutureOrToday || 0;
+      acc.skippedTerminal += entry.skippedTerminal || 0;
+      return acc;
+    },
+    {
+      source,
+      timeZone,
+      scanned: 0,
+      updated: 0,
+      skippedMissingDate: 0,
+      skippedFutureOrToday: 0,
+      skippedTerminal: 0,
+      collections,
+      ranAt: new Date().toISOString(),
+    },
+  );
+
+  functions.logger.info("Past booking auto-complete run finished", summary);
+  return summary;
+}
+
+function toIsoDateIfParsable(value) {
+  const parsed = parseBookingAuditDateValue(value);
+  if (!parsed) return null;
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeWorkshopBookingPayload(payload = {}) {
+  const scheduledDateLabel = normalizeBookingAuditText(payload.scheduledDateLabel || "", 120);
+  const sessionDayLabel = normalizeBookingAuditText(payload.sessionDayLabel || "", 120);
+  const sessionDateLabel = normalizeBookingAuditText(
+    payload.sessionDateLabel || sessionDayLabel || scheduledDateLabel || "",
+    120,
+  );
+  const sessionLabel = normalizeBookingAuditText(payload.sessionLabel || "", 120);
+  const sessionTime = normalizeBookingAuditText(payload.sessionTime || "", 80);
+  const sessionTimeRange = normalizeBookingAuditText(
+    payload.sessionTimeRange || sessionLabel || sessionTime || "",
+    120,
+  );
+  const sessionDate = normalizeBookingAuditText(
+    payload.sessionDate || payload.session?.date || toIsoDateIfParsable(sessionDateLabel) || "",
+    40,
+  );
+  const sessionSourceRaw = normalizeBookingAuditText(payload.sessionSource || "", 60).toLowerCase();
+  const attendeeCountValue = Number.parseInt(payload.attendeeCount, 10);
+  const totalPriceValue = Number(payload.totalPrice);
+
+  return {
+    type: "workshop",
+    fullName:
+      normalizeBookingAuditText(payload.fullName || payload.customerName || payload.name || "Guest", 240) || "Guest",
+    name:
+      normalizeBookingAuditText(payload.fullName || payload.customerName || payload.name || "Guest", 240) || "Guest",
+    email: normalizeBookingAuditText(payload.email || payload.customerEmail || "", 320),
+    phone: normalizeBookingAuditText(payload.phone || payload.customerPhone || "", 80),
+    workshopId: normalizeBookingAuditText(payload.workshopId || payload.classId || "", 120) || null,
+    workshopTitle:
+      normalizeBookingAuditText(payload.workshopTitle || payload.occasion || "Workshop", 240) || "Workshop",
+    sessionSource:
+      sessionSourceRaw === "customer-requested"
+        ? "customer-requested"
+        : sessionSourceRaw === "admin-session"
+          ? "admin-session"
+          : "admin-session",
+    scheduledDateLabel: scheduledDateLabel || null,
+    sessionDayLabel: sessionDayLabel || null,
+    sessionDate: sessionDate || null,
+    sessionDateLabel: sessionDateLabel || null,
+    sessionLabel: sessionLabel || null,
+    sessionTime: sessionTime || null,
+    sessionTimeRange: sessionTimeRange || null,
+    attendeeCount: Number.isFinite(attendeeCountValue) && attendeeCountValue > 0 ? attendeeCountValue : 1,
+    optionLabel:
+      normalizeBookingAuditText(
+        payload.optionLabel || payload.framePreference || payload.frame || "Standard",
+        160,
+      ) || "Standard",
+    optionValue:
+      normalizeBookingAuditText(
+        payload.optionValue || payload.optionId || payload.framePreference || payload.frame || "",
+        160,
+      ) || null,
+    framePreference: normalizeBookingAuditText(payload.framePreference || payload.frame || "", 160) || null,
+    notes: normalizeBookingAuditText(payload.notes || "", 1000) || "",
+    totalPrice: Number.isFinite(totalPriceValue) ? totalPriceValue : null,
+  };
+}
+
+function normalizeWorkshopBookingFingerprintPart(value = "") {
+  return normalizeBookingAuditText(value, 240).toLowerCase();
+}
+
+function buildWorkshopBookingFingerprint(payload = {}) {
+  const normalized = normalizeWorkshopBookingPayload(payload);
+  const parts = [
+    normalized.type,
+    normalized.workshopId || normalized.workshopTitle || "",
+    normalized.email,
+    normalized.fullName,
+    normalized.sessionDate || normalized.sessionDateLabel || "",
+    normalized.sessionTimeRange || normalized.sessionLabel || normalized.sessionTime || "",
+    normalized.attendeeCount,
+    normalized.optionValue || normalized.optionLabel || "",
+    normalized.sessionSource,
+  ];
+
+  return crypto
+    .createHash("sha256")
+    .update(parts.map((part) => normalizeWorkshopBookingFingerprintPart(part)).join("|"))
+    .digest("hex");
+}
+
+function getEmailSendErrorMessage(result) {
+  if (!result?.error) return null;
+  if (typeof result.error === "string") return normalizeBookingAuditText(result.error, 500) || null;
+  if (typeof result.error?.message === "string") {
+    return normalizeBookingAuditText(result.error.message, 500) || null;
+  }
+  return normalizeBookingAuditText(JSON.stringify(result.error), 500) || null;
+}
+
+function buildWorkshopBookingAuditEmailInfo({
+  direction = "",
+  emailId = "",
+  to = [],
+  from = "",
+  subject = "",
+  createdAt = "",
+  lastEvent = "",
+  error = "",
+} = {}) {
+  const recipients = Array.isArray(to)
+    ? to.map((entry) => normalizeBookingAuditText(entry, 320)).filter(Boolean)
+    : [normalizeBookingAuditText(to, 320)].filter(Boolean);
+  const normalizedError = normalizeBookingAuditText(error, 500) || null;
+  const normalizedEmailId = normalizeBookingAuditText(emailId, 160) || null;
+
+  return {
+    direction: normalizeBookingAuditText(direction, 40) || null,
+    emailId: normalizedEmailId,
+    to: recipients,
+    from: normalizeBookingAuditText(from, 320) || null,
+    subject: normalizeBookingAuditText(subject, 240) || null,
+    createdAt: normalizeBookingAuditText(createdAt, 80) || null,
+    lastEvent: normalizeBookingAuditText(lastEvent, 60) || null,
+    error: normalizedError,
+    status: normalizedError ? "failed" : normalizedEmailId ? "sent" : "unknown",
+  };
+}
+
+function buildWorkshopBookingAuditEmailInfoFromSendResult({
+  direction = "",
+  sendResult = null,
+  to = [],
+  subject = "",
+} = {}) {
+  return buildWorkshopBookingAuditEmailInfo({
+    direction,
+    emailId: sendResult?.data?.id || "",
+    to,
+    subject,
+    createdAt: new Date().toISOString(),
+    error: getEmailSendErrorMessage(sendResult) || "",
+  });
+}
+
+function resolveWorkshopBookingAuditSendStatus(adminSendResult, customerSendResult) {
+  const adminError = getEmailSendErrorMessage(adminSendResult);
+  const customerError = getEmailSendErrorMessage(customerSendResult);
+  const adminSent = Boolean(adminSendResult?.data?.id && !adminError);
+  const customerSent = Boolean(customerSendResult?.data?.id && !customerError);
+  if (adminSent && customerSent) return "sent";
+  if (adminSent || customerSent) return "partial";
+  if (adminError || customerError) return "failed";
+  return "pending";
+}
+
+async function persistWorkshopBookingEmailAudit(payload = {}, { adminSendResult = null, customerSendResult = null } = {}) {
+  const normalized = normalizeWorkshopBookingPayload(payload);
+  const bookingFingerprint = buildWorkshopBookingFingerprint(normalized);
+  const fullName = normalized.fullName || "Guest";
+  const adminSubject = `New Workshop booking - ${fullName}`;
+  const customerSubject = "Bethany Blooms - Workshop booking received";
+
+  await db.collection(WORKSHOP_BOOKING_EMAIL_AUDIT_COLLECTION).add({
+    ...normalized,
+    recordSource: "email-audit",
+    auditSource: "sendBookingEmail",
+    bookingFingerprint,
+    emailOnly: true,
+    emailSendStatus: resolveWorkshopBookingAuditSendStatus(adminSendResult, customerSendResult),
+    emailMessages: {
+      admin: buildWorkshopBookingAuditEmailInfoFromSendResult({
+        direction: "admin",
+        sendResult: adminSendResult,
+        to: [getAdminEmail()],
+        subject: adminSubject,
+      }),
+      customer: buildWorkshopBookingAuditEmailInfoFromSendResult({
+        direction: "customer",
+        sendResult: customerSendResult,
+        to: [normalized.email],
+        subject: customerSubject,
+      }),
+    },
+    createdAt: FIELD_VALUE.serverTimestamp(),
+    updatedAt: FIELD_VALUE.serverTimestamp(),
+    firstEmailCreatedAt: FIELD_VALUE.serverTimestamp(),
+    latestEmailCreatedAt: FIELD_VALUE.serverTimestamp(),
+  });
+}
+
 function isAdminContext(auth) {
   return (auth?.token?.role || "").toString().toLowerCase() === "admin";
 }
@@ -8952,6 +9417,25 @@ async function assertAdminRequest(request) {
 
   throw new HttpsError("permission-denied", "Admin role required.");
 }
+
+exports.autoCompletePastBookings = onSchedule(
+  {
+    schedule: "15 0 * * *",
+    timeZone: BOOKING_AUTOCOMPLETE_TIMEZONE,
+  },
+  async () => autoCompletePastBookings({
+    source: BOOKING_AUTOCOMPLETE_SOURCE,
+    timeZone: BOOKING_AUTOCOMPLETE_TIMEZONE,
+  }),
+);
+
+exports.adminAutoCompletePastBookings = onCall(async (request) => {
+  await assertAdminRequest(request);
+  return autoCompletePastBookings({
+    source: "admin-callable",
+    timeZone: BOOKING_AUTOCOMPLETE_TIMEZONE,
+  });
+});
 
 async function getNextOrderNumber() {
   const counterRef = db.doc("config/orderCounter");
@@ -9447,6 +9931,7 @@ function validateOrderPayload(dataInput = {}) {
     throw new Error("Order items are required.");
   }
   validateWholeCrewGiftCardSelections(items);
+  validatePreorderOrderSeparation(items);
   const requiresFreshFlowerDeliveryContact = orderRequiresFreshFlowerDeliveryContact(items);
   const containsGiftCards = items.some((item) => isGiftCardOrderItem(item));
   const containsWorkshops = items.some((item) => item?.metadata?.type === "workshop");
@@ -10682,7 +11167,11 @@ exports.adminVoidPosSale = onCall(async (request) => {
       }
 
       if (item.type === "workshop-booking" || item.type === "cut-flower-booking") {
-        const collectionName = item.type === "workshop-booking" ? "bookings" : "cutFlowerBookings";
+        const linkedCollection = (item.metadata?.bookingCollection || item.metadata?.linkedBookingCollection || "")
+          .toString()
+          .trim();
+        const collectionName =
+          linkedCollection || (item.type === "workshop-booking" ? "bookings" : "cutFlowerBookings");
         const bookingId = item.sourceId || (item.metadata?.bookingId || "").toString().trim();
         if (bookingId) {
           const restorePayload = {
@@ -10707,6 +11196,32 @@ exports.adminVoidPosSale = onCall(async (request) => {
             restorePayload.status = originalStatus;
           } else {
             restorePayload.status = FIELD_VALUE.delete();
+          }
+          if (item.type === "workshop-booking") {
+            const originalBookingStatus = (item.metadata?.originalBookingStatus || "")
+              .toString()
+              .trim();
+            const originalAdminBookingStatus = (item.metadata?.originalAdminBookingStatus || "")
+              .toString()
+              .trim();
+            const originalAdminPaymentStatus = (item.metadata?.originalAdminPaymentStatus || "")
+              .toString()
+              .trim();
+            if (originalBookingStatus) {
+              restorePayload.bookingStatus = originalBookingStatus;
+            } else {
+              restorePayload.bookingStatus = FIELD_VALUE.delete();
+            }
+            if (originalAdminBookingStatus) {
+              restorePayload.adminBookingStatus = originalAdminBookingStatus;
+            } else {
+              restorePayload.adminBookingStatus = FIELD_VALUE.delete();
+            }
+            if (originalAdminPaymentStatus) {
+              restorePayload.adminPaymentStatus = originalAdminPaymentStatus;
+            } else {
+              restorePayload.adminPaymentStatus = FIELD_VALUE.delete();
+            }
           }
           transaction.set(db.collection(collectionName).doc(bookingId), restorePayload, { merge: true });
         }
@@ -17639,17 +18154,28 @@ exports.sendBookingEmail = onCall(async (request) => {
     subjectBase = "Workshop booking";
   }
 
-  await sendEmail({
+  const adminSendResult = await sendEmail({
     to: getAdminEmail(),
     subject: `New ${subjectBase} - ${fullName}`,
     html: adminHtml,
   });
 
-  await sendEmail({
+  const customerSendResult = await sendEmail({
     to: email,
     subject: `Bethany Blooms - ${subjectBase} received`,
     html: customerHtml,
   });
+
+  if (bookingType === "workshop") {
+    try {
+      await persistWorkshopBookingEmailAudit(payload, {
+        adminSendResult,
+        customerSendResult,
+      });
+    } catch (error) {
+      functions.logger.error("Unable to persist workshop booking email audit", error);
+    }
+  }
 
   return { ok: true };
 });

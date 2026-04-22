@@ -68,6 +68,18 @@ function getSlotRangeLabel(timeValue, startDate) {
   return null;
 }
 
+function resolveWorkshopSessionStart(entry = {}) {
+  const dateValue = typeof entry.date === "string" ? entry.date : "";
+  const timeValue = typeof entry.time === "string" ? entry.time : "";
+  const candidates = [entry.start, entry.startTime, entry.startDate, entry.datetime, entry.dateTime];
+  for (const candidate of candidates) {
+    const parsed = parseWorkshopDateValue(candidate);
+    if (parsed) return parsed;
+  }
+  if (dateValue) return combineDateAndTime(dateValue, timeValue);
+  return null;
+}
+
 function normalizeWorkshopForModal(workshop, sessionFormatter) {
   const now = Date.now();
   const rawSessions = Array.isArray(workshop.sessions) ? workshop.sessions.filter(Boolean) : [];
@@ -76,13 +88,7 @@ function normalizeWorkshopForModal(workshop, sessionFormatter) {
       const sessionId = entry.id || `session-${index}-${workshop.id}`;
       const dateValue = typeof entry.date === "string" ? entry.date : "";
       const timeValue = typeof entry.time === "string" ? entry.time : "";
-      const candidates = [entry.start, entry.startTime, entry.startDate, entry.datetime, entry.dateTime];
-      let startDate = null;
-      for (const candidate of candidates) {
-        const parsed = parseWorkshopDateValue(candidate);
-        if (parsed) { startDate = parsed; break; }
-      }
-      if (!startDate && dateValue) startDate = combineDateAndTime(dateValue, timeValue);
+      const startDate = resolveWorkshopSessionStart(entry);
       if (!startDate) return null;
       const capacityNumber = Number(entry.capacity);
       const customLabel = typeof entry.label === "string" ? entry.label.trim() : "";
@@ -148,19 +154,18 @@ function normalizeWorkshopForModal(workshop, sessionFormatter) {
 }
 
 function resolveWorkshopDate(workshop = {}) {
-  const explicitDate = parseWorkshopDateValue(workshop?.scheduledFor);
-  if (explicitDate) return explicitDate;
   const sessions = Array.isArray(workshop?.sessions) ? workshop.sessions : [];
-  for (const session of sessions) {
-    const directStart = parseWorkshopDateValue(session?.start || session?.startDate);
-    if (directStart) return directStart;
-    const dateValue = (session?.date || "").toString().trim();
-    const timeValue = (session?.time || "").toString().trim();
-    if (!dateValue) continue;
-    const parsed = parseWorkshopDateValue(`${dateValue}T${timeValue || "00:00"}`);
-    if (parsed) return parsed;
-  }
-  return null;
+  const candidateDates = sessions
+    .map((session) => resolveWorkshopSessionStart(session))
+    .filter((value) => value instanceof Date && !Number.isNaN(value.getTime()));
+  const explicitDate = parseWorkshopDateValue(workshop?.scheduledFor);
+  if (explicitDate) candidateDates.push(explicitDate);
+  if (candidateDates.length === 0) return null;
+
+  candidateDates.sort((left, right) => left.getTime() - right.getTime());
+
+  const now = Date.now();
+  return candidateDates.find((date) => date.getTime() >= now) ?? candidateDates[candidateDates.length - 1];
 }
 
 function buildWorkshopCardSummary(workshop = {}) {
