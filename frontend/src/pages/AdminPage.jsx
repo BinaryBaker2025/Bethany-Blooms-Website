@@ -13,7 +13,12 @@ import {
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
-import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import {
+  deleteObject,
+  getDownloadURL,
+  ref,
+  uploadBytes,
+} from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 import Reveal from "../components/Reveal.jsx";
 import { read, utils, writeFile } from "xlsx";
@@ -83,9 +88,19 @@ function ConfirmDialog({
 }) {
   if (!open) return null;
   return (
-    <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div
+      className="modal is-active admin-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+    >
       <div className="modal__content">
-        <button className="modal__close" type="button" onClick={onCancel} aria-label="Close">
+        <button
+          className="modal__close"
+          type="button"
+          onClick={onCancel}
+          aria-label="Close"
+        >
           x
         </button>
         <h3 className="modal__title" id="confirm-title">
@@ -93,10 +108,20 @@ function ConfirmDialog({
         </h3>
         <p>{message}</p>
         <div className="admin-form__actions" style={{ marginTop: "1.5rem" }}>
-          <button className="btn btn--secondary" type="button" onClick={onCancel} disabled={busy}>
+          <button
+            className="btn btn--secondary"
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+          >
             {cancelLabel}
           </button>
-          <button className="btn btn--primary" type="button" onClick={onConfirm} disabled={busy}>
+          <button
+            className="btn btn--primary"
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+          >
             {busy ? "Working..." : confirmLabel}
           </button>
         </div>
@@ -266,7 +291,14 @@ const INITIAL_CUT_FLOWER_BOOKING = {
   notes: "",
 };
 
-const CUT_FLOWER_STATUS_OPTIONS = ["new", "proposal-sent", "confirmed", "in-progress", "fulfilled", "cancelled"];
+const CUT_FLOWER_STATUS_OPTIONS = [
+  "new",
+  "proposal-sent",
+  "confirmed",
+  "in-progress",
+  "fulfilled",
+  "cancelled",
+];
 
 const INITIAL_CUT_FLOWER_CLASS_FORM = {
   title: "",
@@ -394,7 +426,9 @@ const parseShippingAddressFromString = (value = "") => {
 };
 
 const resolveOrderDeliveryAddressDraft = (order = {}) => {
-  const structured = normalizeShippingAddressDraft(order?.shippingAddress || {});
+  const structured = normalizeShippingAddressDraft(
+    order?.shippingAddress || {},
+  );
   const hasStructuredValue = Object.values(structured).some((value) => value);
   if (hasStructuredValue) return structured;
   return parseShippingAddressFromString(order?.customer?.address || "");
@@ -416,13 +450,17 @@ const resolveOrderSubtotalAmount = (order = {}) => {
   if (Number.isFinite(explicitSubtotal) && explicitSubtotal >= 0) {
     return explicitSubtotal;
   }
-  return (Array.isArray(order?.items) ? order.items : []).reduce((sum, item) => {
-    const price = Number(item?.price ?? 0);
-    const quantity = Number(item?.quantity ?? 1);
-    if (!Number.isFinite(price)) return sum;
-    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
-    return sum + price * safeQuantity;
-  }, 0);
+  return (Array.isArray(order?.items) ? order.items : []).reduce(
+    (sum, item) => {
+      const price = Number(item?.price ?? 0);
+      const quantity = Number(item?.quantity ?? 1);
+      if (!Number.isFinite(price)) return sum;
+      const safeQuantity =
+        Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+      return sum + price * safeQuantity;
+    },
+    0,
+  );
 };
 
 const IconPlus = ({ title = "Add", ...props }) => (
@@ -520,6 +558,46 @@ const IconImage = ({ title = "Image", ...props }) => (
     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
     <circle cx="8.5" cy="8.5" r="1.5" />
     <path d="M21 15l-4-4-4 5-3-3-5 6" />
+  </svg>
+);
+
+const IconEye = ({ title = "Show", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+    <circle cx="12" cy="12" r="2.6" />
+  </svg>
+);
+
+const IconEyeOff = ({ title = "Hide", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="M3 3l18 18" />
+    <path d="M10.7 5.2A10.6 10.6 0 0 1 12 5c6 0 9.5 7 9.5 7a17.6 17.6 0 0 1-2.2 3.1" />
+    <path d="M6.6 6.6C3.9 8.4 2.5 12 2.5 12s3.5 7 9.5 7c1.6 0 3-.4 4.2-1" />
+    <path d="M9.9 9.9A2.6 2.6 0 0 0 12 14.6c.8 0 1.5-.3 2-.9" />
   </svg>
 );
 
@@ -757,7 +835,9 @@ const parseMinAttendees = (option, label) => {
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
   if (!label) return null;
   const normalized = label.toLowerCase();
-  const match = normalized.match(/(\d+)\s*\+|(\d+)\s*(:or|and)\s*more|minimum\s*(\d+)/);
+  const match = normalized.match(
+    /(\d+)\s*\+|(\d+)\s*(:or|and)\s*more|minimum\s*(\d+)/,
+  );
   if (!match) return null;
   const parsed = Number(match[1] || match[2] || match[3]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -775,7 +855,12 @@ const formatOptionLabel = (label, price) => {
   return label;
 };
 
-const buildAttendeeSelections = (count, selections, optionValues, fallbackValue) => {
+const buildAttendeeSelections = (
+  count,
+  selections,
+  optionValues,
+  fallbackValue,
+) => {
   const normalized = [];
   for (let i = 0; i < count; i += 1) {
     const value = selections?.[i];
@@ -785,7 +870,8 @@ const buildAttendeeSelections = (count, selections, optionValues, fallbackValue)
 };
 
 const selectionsMatch = (left = [], right = []) =>
-  left.length === right.length && left.every((value, index) => value === right[index]);
+  left.length === right.length &&
+  left.every((value, index) => value === right[index]);
 
 const formatDateInput = (date) => {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
@@ -838,9 +924,13 @@ const formatTimeRange = (startTime, endTime) => {
 
 const formatRepeatLabel = (repeatDays) => {
   const days = Array.isArray(repeatDays) ? repeatDays : [];
-  const normalized = days.map((day) => Number(day)).filter((day) => Number.isFinite(day));
+  const normalized = days
+    .map((day) => Number(day))
+    .filter((day) => Number.isFinite(day));
   const labels = normalized
-    .map((day) => EVENT_REPEAT_WEEKDAYS.find((entry) => entry.value === day).label)
+    .map(
+      (day) => EVENT_REPEAT_WEEKDAYS.find((entry) => entry.value === day).label,
+    )
     .filter(Boolean);
   if (!labels.length) return "";
   return `Every ${labels.join(", ")}`;
@@ -870,7 +960,9 @@ const formatPriceLabel = (value) => {
 const normalizeSubscriptionPlanTierValue = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
   if (normalized === "biweekly") return "bi-weekly";
-  return SUBSCRIPTION_PLAN_TIERS.some((entry) => entry.value === normalized) ? normalized : "";
+  return SUBSCRIPTION_PLAN_TIERS.some((entry) => entry.value === normalized)
+    ? normalized
+    : "";
 };
 
 const normalizeSubscriptionPlanStemsValue = (value = "") => {
@@ -882,9 +974,13 @@ const normalizeSubscriptionPlanStemsValue = (value = "") => {
 const resolveSubscriptionPlanMonthlyAmount = (value = "") => {
   if (value === undefined || value === null || value === "") return null;
   const normalizedValue =
-    typeof value === "number" ?
-       value
-      : Number(String(value).replace(/[^0-9.,-]/g, "").replace(/,/g, "."));
+    typeof value === "number"
+      ? value
+      : Number(
+          String(value)
+            .replace(/[^0-9.,-]/g, "")
+            .replace(/,/g, "."),
+        );
   const numericAmount = Number(normalizedValue);
   if (!Number.isFinite(numericAmount) || numericAmount <= 0) return null;
   return Number(numericAmount.toFixed(2));
@@ -892,7 +988,9 @@ const resolveSubscriptionPlanMonthlyAmount = (value = "") => {
 
 const formatSubscriptionPlanTierLabel = (tier = "") => {
   const normalizedTier = normalizeSubscriptionPlanTierValue(tier);
-  const matched = SUBSCRIPTION_PLAN_TIERS.find((entry) => entry.value === normalizedTier);
+  const matched = SUBSCRIPTION_PLAN_TIERS.find(
+    (entry) => entry.value === normalizedTier,
+  );
   return matched?.label || "Monthly";
 };
 
@@ -959,22 +1057,29 @@ const SUBSCRIPTION_EXPECTED_DELIVERIES_BY_TIER = Object.freeze({
 
 const normalizeSubscriptionOpsStatus = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
-  return SUBSCRIPTION_STATUS_OPTIONS.includes(normalized) ? normalized : "active";
+  return SUBSCRIPTION_STATUS_OPTIONS.includes(normalized)
+    ? normalized
+    : "active";
 };
 
 const normalizeSubscriptionOpsInvoiceStatus = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
-  return SUBSCRIPTION_INVOICE_STATUS_OPTIONS.includes(normalized) ? normalized : "pending-payment";
+  return SUBSCRIPTION_INVOICE_STATUS_OPTIONS.includes(normalized)
+    ? normalized
+    : "pending-payment";
 };
 
 const normalizeSubscriptionInvoiceType = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
-  if (normalized === SUBSCRIPTION_INVOICE_TYPES.TOPUP) return SUBSCRIPTION_INVOICE_TYPES.TOPUP;
+  if (normalized === SUBSCRIPTION_INVOICE_TYPES.TOPUP)
+    return SUBSCRIPTION_INVOICE_TYPES.TOPUP;
   return SUBSCRIPTION_INVOICE_TYPES.CYCLE;
 };
 
 const formatSubscriptionInvoiceTypeLabel = (value = "") =>
-  normalizeSubscriptionInvoiceType(value) === SUBSCRIPTION_INVOICE_TYPES.TOPUP ? "Top-up" : "Cycle";
+  normalizeSubscriptionInvoiceType(value) === SUBSCRIPTION_INVOICE_TYPES.TOPUP
+    ? "Top-up"
+    : "Cycle";
 
 const normalizeSubscriptionChargeMode = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
@@ -990,23 +1095,39 @@ const normalizeSubscriptionOpsPaymentMethod = (value = "") =>
   normalizeOrderPaymentMethod(value || PAYMENT_METHODS.PAYFAST);
 
 const formatSubscriptionPaymentMethodLabel = (value = "") =>
-  normalizeSubscriptionOpsPaymentMethod(value) === PAYMENT_METHODS.EFT ? "EFT" : "PayFast";
+  normalizeSubscriptionOpsPaymentMethod(value) === PAYMENT_METHODS.EFT
+    ? "EFT"
+    : "PayFast";
 
-const normalizeSubscriptionOpsPaymentApprovalStatus = (value = "", paymentMethod = "") => {
+const normalizeSubscriptionOpsPaymentApprovalStatus = (
+  value = "",
+  paymentMethod = "",
+) => {
   const normalized = (value || "").toString().trim().toLowerCase();
-  if (normalized === PAYMENT_APPROVAL_STATUSES.PENDING) return PAYMENT_APPROVAL_STATUSES.PENDING;
-  if (normalized === PAYMENT_APPROVAL_STATUSES.APPROVED) return PAYMENT_APPROVAL_STATUSES.APPROVED;
-  if (normalized === PAYMENT_APPROVAL_STATUSES.REJECTED) return PAYMENT_APPROVAL_STATUSES.REJECTED;
-  return normalizeSubscriptionOpsPaymentMethod(paymentMethod) === PAYMENT_METHODS.EFT
+  if (normalized === PAYMENT_APPROVAL_STATUSES.PENDING)
+    return PAYMENT_APPROVAL_STATUSES.PENDING;
+  if (normalized === PAYMENT_APPROVAL_STATUSES.APPROVED)
+    return PAYMENT_APPROVAL_STATUSES.APPROVED;
+  if (normalized === PAYMENT_APPROVAL_STATUSES.REJECTED)
+    return PAYMENT_APPROVAL_STATUSES.REJECTED;
+  return normalizeSubscriptionOpsPaymentMethod(paymentMethod) ===
+    PAYMENT_METHODS.EFT
     ? PAYMENT_APPROVAL_STATUSES.PENDING
     : PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
 };
 
-const formatSubscriptionPaymentApprovalLabel = (value = "", paymentMethod = "") => {
-  const normalized = normalizeSubscriptionOpsPaymentApprovalStatus(value, paymentMethod);
+const formatSubscriptionPaymentApprovalLabel = (
+  value = "",
+  paymentMethod = "",
+) => {
+  const normalized = normalizeSubscriptionOpsPaymentApprovalStatus(
+    value,
+    paymentMethod,
+  );
   if (normalized === PAYMENT_APPROVAL_STATUSES.APPROVED) return "Approved";
   if (normalized === PAYMENT_APPROVAL_STATUSES.REJECTED) return "Rejected";
-  if (normalized === PAYMENT_APPROVAL_STATUSES.PENDING) return "Pending admin approval";
+  if (normalized === PAYMENT_APPROVAL_STATUSES.PENDING)
+    return "Pending admin approval";
   return "Not required";
 };
 
@@ -1016,7 +1137,12 @@ const normalizeCycleMonthValue = (value = "") => {
   if (!match) return "";
   const year = Number(match[1]);
   const month = Number(match[2]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    month < 1 ||
+    month > 12
+  ) {
     return "";
   }
   return `${year}-${String(month).padStart(2, "0")}`;
@@ -1034,7 +1160,9 @@ const getJohannesburgDateParts = (value = new Date()) => {
   const year = Number(parts.find((part) => part.type === "year")?.value || 0);
   const month = Number(parts.find((part) => part.type === "month")?.value || 0);
   const day = Number(parts.find((part) => part.type === "day")?.value || 0);
-  const monthKey = normalizeCycleMonthValue(`${year}-${String(month).padStart(2, "0")}`);
+  const monthKey = normalizeCycleMonthValue(
+    `${year}-${String(month).padStart(2, "0")}`,
+  );
   const dateKey = normalizeIsoDateValue(
     `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
   );
@@ -1053,7 +1181,12 @@ const getNextCycleMonthKey = (value = "") => {
   const [yearText, monthText] = normalized.split("-");
   const year = Number(yearText);
   const month = Number(monthText);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    month < 1 ||
+    month > 12
+  ) {
     return "";
   }
   const nextYear = month === 12 ? year + 1 : year;
@@ -1063,11 +1196,20 @@ const getNextCycleMonthKey = (value = "") => {
 
 const isInJohannesburgPrebillWindow = (value = new Date()) => {
   const nowParts = getJohannesburgDateParts(value);
-  if (!nowParts.monthKey || !Number.isFinite(nowParts.day) || nowParts.day < 1) {
+  if (
+    !nowParts.monthKey ||
+    !Number.isFinite(nowParts.day) ||
+    nowParts.day < 1
+  ) {
     return false;
   }
-  const daysInMonth = new Date(Date.UTC(nowParts.year, nowParts.month, 0)).getUTCDate();
-  const windowStartDay = Math.max(1, daysInMonth - (SUBSCRIPTION_PREBILL_LEAD_DAYS - 1));
+  const daysInMonth = new Date(
+    Date.UTC(nowParts.year, nowParts.month, 0),
+  ).getUTCDate();
+  const windowStartDay = Math.max(
+    1,
+    daysInMonth - (SUBSCRIPTION_PREBILL_LEAD_DAYS - 1),
+  );
   return nowParts.day >= windowStartDay;
 };
 
@@ -1102,12 +1244,16 @@ const formatCycleMonthLabel = (monthKey = "") => {
 
 const formatSubscriptionStatusLabel = (status = "") => {
   const normalized = normalizeSubscriptionOpsStatus(status);
-  return normalized.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  return normalized
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
 const formatSubscriptionInvoiceStatusLabel = (status = "") => {
   const normalized = normalizeSubscriptionOpsInvoiceStatus(status);
-  return normalized.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  return normalized
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
 const resolveSubscriptionInvoicePaidAmount = (invoice = {}) => {
@@ -1118,7 +1264,8 @@ const resolveSubscriptionInvoicePaidAmount = (invoice = {}) => {
     invoice?.amount,
   ];
   for (const candidate of amountCandidates) {
-    if (candidate === undefined || candidate === null || candidate === "") continue;
+    if (candidate === undefined || candidate === null || candidate === "")
+      continue;
     const parsed = Number(candidate);
     if (Number.isFinite(parsed) && parsed >= 0) {
       return Number(parsed.toFixed(2));
@@ -1155,7 +1302,9 @@ const resolveExpectedCycleDeliveries = (tier = "") => {
 
 const normalizeSubscriptionMondaySlotValue = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
-  return ["first", "second", "third", "fourth", "last"].includes(normalized) ? normalized : "";
+  return ["first", "second", "third", "fourth", "last"].includes(normalized)
+    ? normalized
+    : "";
 };
 
 const formatSubscriptionMondaySlotLabel = (slot = "") => {
@@ -1171,7 +1320,8 @@ const formatSubscriptionMondaySlotLabel = (slot = "") => {
 const normalizeSubscriptionMondaySlotsForTier = (tier = "", values = []) => {
   const normalizedTier = normalizeSubscriptionPlanTierValue(tier);
   if (!normalizedTier) return [];
-  if (normalizedTier === "weekly") return ["first", "second", "third", "fourth", "last"];
+  if (normalizedTier === "weekly")
+    return ["first", "second", "third", "fourth", "last"];
   const required = normalizedTier === "bi-weekly" ? 2 : 1;
   const seen = new Set();
   const slots = (Array.isArray(values) ? values : [])
@@ -1181,7 +1331,8 @@ const normalizeSubscriptionMondaySlotsForTier = (tier = "", values = []) => {
       seen.add(entry);
       return true;
     });
-  const defaults = normalizedTier === "bi-weekly" ? ["first", "third"] : ["first"];
+  const defaults =
+    normalizedTier === "bi-weekly" ? ["first", "third"] : ["first"];
   defaults.forEach((entry) => {
     if (slots.length >= required) return;
     if (!seen.has(entry)) {
@@ -1199,7 +1350,12 @@ const normalizeIsoDateValue = (value = "") => {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return "";
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  )
+    return "";
   if (month < 1 || month > 12 || day < 1 || day > 31) return "";
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 };
@@ -1208,7 +1364,16 @@ const buildUtcDateFromIsoDateValue = (value = "") => {
   const normalized = normalizeIsoDateValue(value);
   if (!normalized) return null;
   const [yearText, monthText, dayText] = normalized.split("-");
-  const date = new Date(Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText), 12, 0, 0));
+  const date = new Date(
+    Date.UTC(
+      Number(yearText),
+      Number(monthText) - 1,
+      Number(dayText),
+      12,
+      0,
+      0,
+    ),
+  );
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
@@ -1229,7 +1394,9 @@ const addDaysToIsoDateValue = (value = "", days = 0) => {
 };
 
 const getCurrentWeekMondayDateKey = (value = "") => {
-  const date = buildUtcDateFromIsoDateValue(value || getCurrentJohannesburgDateKey());
+  const date = buildUtcDateFromIsoDateValue(
+    value || getCurrentJohannesburgDateKey(),
+  );
   if (!date) return "";
   const weekday = date.getUTCDay();
   const offset = weekday === 0 ? -6 : 1 - weekday;
@@ -1239,7 +1406,9 @@ const getCurrentWeekMondayDateKey = (value = "") => {
 
 const getCycleMonthForIsoDateValue = (value = "") => {
   const normalizedDate = normalizeIsoDateValue(value);
-  return normalizedDate ? normalizeCycleMonthValue(normalizedDate.slice(0, 7)) : "";
+  return normalizedDate
+    ? normalizeCycleMonthValue(normalizedDate.slice(0, 7))
+    : "";
 };
 
 const getNextMondayDateKey = (value = "", { includeCurrent = false } = {}) => {
@@ -1254,10 +1423,15 @@ const getNextMondayDateKey = (value = "", { includeCurrent = false } = {}) => {
   return formatUtcDateAsIsoDateValue(date);
 };
 
-const getUpcomingMondayDateKeys = (count = 5, { fromDateKey = "", includeCurrent = false } = {}) => {
+const getUpcomingMondayDateKeys = (
+  count = 5,
+  { fromDateKey = "", includeCurrent = false } = {},
+) => {
   const total = Number(count);
   if (!Number.isFinite(total) || total <= 0) return [];
-  const startDateKey = normalizeIsoDateValue(fromDateKey || getCurrentJohannesburgDateKey());
+  const startDateKey = normalizeIsoDateValue(
+    fromDateKey || getCurrentJohannesburgDateKey(),
+  );
   const firstMonday = getNextMondayDateKey(startDateKey, { includeCurrent });
   if (!firstMonday) return [];
   const mondays = [firstMonday];
@@ -1290,18 +1464,22 @@ const resolveEarliestSubscriptionOpsCycleMonth = ({
     }
   };
 
-  (Array.isArray(subscriptions) ? subscriptions : []).forEach((subscription) => {
-    appendDateCycleMonth(subscription?.firstDeliveryDate);
-    appendCycleMonth(subscription?.currentCycleMonth || "");
-    appendDateCycleMonth(subscription?.createdAt);
-  });
+  (Array.isArray(subscriptions) ? subscriptions : []).forEach(
+    (subscription) => {
+      appendDateCycleMonth(subscription?.firstDeliveryDate);
+      appendCycleMonth(subscription?.currentCycleMonth || "");
+      appendDateCycleMonth(subscription?.createdAt);
+    },
+  );
 
-  (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach((invoice) => {
-    appendCycleMonth(invoice?.cycleMonth || "");
-    appendDateCycleMonth(invoice?.deliverySchedule?.firstDeliveryDate);
-    appendDateCycleMonth(invoice?.cycleStartDate);
-    appendDateCycleMonth(invoice?.createdAt);
-  });
+  (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach(
+    (invoice) => {
+      appendCycleMonth(invoice?.cycleMonth || "");
+      appendDateCycleMonth(invoice?.deliverySchedule?.firstDeliveryDate);
+      appendDateCycleMonth(invoice?.cycleStartDate);
+      appendDateCycleMonth(invoice?.createdAt);
+    },
+  );
 
   return cycleMonths.sort((left, right) => left.localeCompare(right))[0] || "";
 };
@@ -1319,7 +1497,16 @@ const formatSubscriptionDeliveryDateLabel = (value = "") => {
   const normalized = normalizeIsoDateValue(value);
   if (!normalized) return "";
   const [yearText, monthText, dayText] = normalized.split("-");
-  const date = new Date(Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText), 12, 0, 0));
+  const date = new Date(
+    Date.UTC(
+      Number(yearText),
+      Number(monthText) - 1,
+      Number(dayText),
+      12,
+      0,
+      0,
+    ),
+  );
   return date.toLocaleDateString("en-ZA", {
     day: "2-digit",
     month: "short",
@@ -1346,12 +1533,18 @@ const listSubscriptionMondaysForCycle = (cycleMonth = "") => {
   for (let day = 1; day <= daysInMonth; day += 1) {
     const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
     if (date.getUTCDay() !== 1) continue;
-    mondays.push(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+    mondays.push(
+      `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    );
   }
   return mondays;
 };
 
-const resolveSubscriptionCycleDeliveryDates = ({ tier = "", slots = [], cycleMonth = "" } = {}) => {
+const resolveSubscriptionCycleDeliveryDates = ({
+  tier = "",
+  slots = [],
+  cycleMonth = "",
+} = {}) => {
   const normalizedTier = normalizeSubscriptionPlanTierValue(tier);
   const mondays = listSubscriptionMondaysForCycle(cycleMonth);
   if (!normalizedTier || !mondays.length) return [];
@@ -1392,7 +1585,10 @@ const resolveCurrentCycleBillableDeliveryDates = ({
   const normalizedCurrentCycleMonth = normalizeCycleMonthValue(
     currentCycleMonth || getCurrentJohannesburgCycleMonth(),
   );
-  if (!normalizedCycleMonth || normalizedCycleMonth !== normalizedCurrentCycleMonth) {
+  if (
+    !normalizedCycleMonth ||
+    normalizedCycleMonth !== normalizedCurrentCycleMonth
+  ) {
     return normalizedDates;
   }
   const normalizedTodayDateKey = normalizeIsoDateValue(
@@ -1404,18 +1600,25 @@ const resolveCurrentCycleBillableDeliveryDates = ({
   );
 };
 
-const resolveNextUpcomingIncludedDeliveryDate = (row = {}, selectedCycleMonth = "") => {
-  const normalizedSelectedCycleMonth = normalizeCycleMonthValue(selectedCycleMonth);
+const resolveNextUpcomingIncludedDeliveryDate = (
+  row = {},
+  selectedCycleMonth = "",
+) => {
+  const normalizedSelectedCycleMonth =
+    normalizeCycleMonthValue(selectedCycleMonth);
   if (!normalizedSelectedCycleMonth) return "";
 
   const sourceDates =
-    Array.isArray(row?.includedDeliveryDates) && row.includedDeliveryDates.length > 0
+    Array.isArray(row?.includedDeliveryDates) &&
+    row.includedDeliveryDates.length > 0
       ? row.includedDeliveryDates
       : row?.cycleDeliveryDates;
   const normalizedDates = normalizeUniqueDeliveryDates(sourceDates);
   if (!normalizedDates.length) return "";
 
-  const currentCycleMonth = normalizeCycleMonthValue(getCurrentJohannesburgCycleMonth());
+  const currentCycleMonth = normalizeCycleMonthValue(
+    getCurrentJohannesburgCycleMonth(),
+  );
   if (!currentCycleMonth) {
     return normalizedDates[0] || "";
   }
@@ -1428,19 +1631,26 @@ const resolveNextUpcomingIncludedDeliveryDate = (row = {}, selectedCycleMonth = 
 
   const todayDateKey = normalizeIsoDateValue(getCurrentJohannesburgDateKey());
   if (!todayDateKey) return normalizedDates[0] || "";
-  return normalizedDates.find((dateKey) => compareIsoDateValues(dateKey, todayDateKey) >= 0) || "";
+  return (
+    normalizedDates.find(
+      (dateKey) => compareIsoDateValues(dateKey, todayDateKey) >= 0,
+    ) || ""
+  );
 };
 
 const resolveSubscriptionRosterDeliveryDates = (row = {}) => {
   const sourceDates =
-    Array.isArray(row?.includedDeliveryDates) && row.includedDeliveryDates.length > 0
+    Array.isArray(row?.includedDeliveryDates) &&
+    row.includedDeliveryDates.length > 0
       ? row.includedDeliveryDates
       : row?.cycleDeliveryDates;
   return normalizeUniqueDeliveryDates(sourceDates);
 };
 
 const collectSubscriptionRosterMondays = () => {
-  const currentMonday = getCurrentWeekMondayDateKey(getCurrentJohannesburgDateKey());
+  const currentMonday = getCurrentWeekMondayDateKey(
+    getCurrentJohannesburgDateKey(),
+  );
   if (!currentMonday) return [];
   return getUpcomingMondayDateKeys(6, {
     fromDateKey: currentMonday,
@@ -1453,8 +1663,12 @@ const resolveSubscriptionDisplayPlanName = (entry = {}) => {
   if (direct) return direct;
   const planName = (entry?.subscriptionPlan?.name || "").toString().trim();
   if (planName) return planName;
-  const productName = (entry?.subscriptionProduct?.productName || "").toString().trim();
-  const variantLabel = (entry?.subscriptionProduct?.variantLabel || "").toString().trim();
+  const productName = (entry?.subscriptionProduct?.productName || "")
+    .toString()
+    .trim();
+  const variantLabel = (entry?.subscriptionProduct?.variantLabel || "")
+    .toString()
+    .trim();
   if (productName && variantLabel) return `${productName} - ${variantLabel}`;
   if (productName) return productName;
   return "Subscription";
@@ -1463,7 +1677,7 @@ const resolveSubscriptionDisplayPlanName = (entry = {}) => {
 const csvEscape = (value) => {
   const text = value === undefined || value === null ? "" : String(value);
   if (/[",\n]/.test(text)) {
-    return `"${text.replace(/"/g, "\"\"")}"`;
+    return `"${text.replace(/"/g, '""')}"`;
   }
   return text;
 };
@@ -1471,7 +1685,9 @@ const csvEscape = (value) => {
 const downloadCsvFile = (rows = [], fileName = "export.csv") => {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (!Array.isArray(rows) || rows.length === 0) return;
-  const csv = rows.map((row) => row.map((cell) => csvEscape(cell)).join(",")).join("\n");
+  const csv = rows
+    .map((row) => row.map((cell) => csvEscape(cell)).join(","))
+    .join("\n");
   const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -1490,6 +1706,51 @@ const slugifyId = (value = "") =>
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
 
+const normalizeProductCategoryStatus = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (
+    normalized === "live" ||
+    normalized === "draft" ||
+    normalized === "archived"
+  ) {
+    return normalized;
+  }
+  return "live";
+};
+
+const normalizeCategoryMatchValue = (value = "") =>
+  value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+
+const getCategoryMatchValues = (category = {}) =>
+  new Set(
+    [category.id, category.slug, category.name]
+      .map((value) => normalizeCategoryMatchValue(value ?? ""))
+      .filter(Boolean),
+  );
+
+const getProductCategoryValues = (product = {}) => {
+  const values = [];
+  if (Array.isArray(product.category_ids)) values.push(...product.category_ids);
+  if (Array.isArray(product.categoryIds)) values.push(...product.categoryIds);
+  if (product.categoryId) values.push(product.categoryId);
+  if (product.categorySlug) values.push(product.categorySlug);
+  if (product.category) values.push(product.category);
+  if (product.categoryName) values.push(product.categoryName);
+  return values
+    .map((value) => normalizeCategoryMatchValue(value ?? ""))
+    .filter(Boolean);
+};
+
+const productBelongsToCategory = (product = {}, category = {}) => {
+  const targets = getCategoryMatchValues(category);
+  if (!targets.size) return false;
+  return getProductCategoryValues(product).some((value) => targets.has(value));
+};
+
 const normalizeCreateOrderCategoryToken = (value = "") =>
   value.toString().trim().toLowerCase();
 
@@ -1507,7 +1768,10 @@ const generateSku = (title = "", slug = "") => {
 };
 
 const stripSheetLinkLabel = (value = "") =>
-  value.toString().replace(/\s+link\s*$/i, "").trim();
+  value
+    .toString()
+    .replace(/\s+link\s*$/i, "")
+    .trim();
 
 const stripHtml = (value = "") =>
   value
@@ -1523,7 +1787,10 @@ const sanitizePlainText = (value = "") => {
     .replace(/<\s*br\s*\/>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<[^>]*>/g, "");
-  return withLineBreaks.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return withLineBreaks
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 };
 
 const parseSheetPriceValue = (value) => {
@@ -1531,7 +1798,9 @@ const parseSheetPriceValue = (value) => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return Math.round(value * 100) / 100;
   }
-  const cleaned = String(value).replace(/[^0-9.,-]/g, "").replace(/,/g, ".");
+  const cleaned = String(value)
+    .replace(/[^0-9.,-]/g, "")
+    .replace(/,/g, ".");
   if (!cleaned) return "";
   const parsed = Number(cleaned);
   if (Number.isFinite(parsed)) {
@@ -1559,7 +1828,7 @@ const getPrimarySession = (workshop) => {
   if (workshop.primarySessionId) {
     return (
       workshop.sessions.find(
-        (session) => session.id === workshop.primarySessionId
+        (session) => session.id === workshop.primarySessionId,
       ) || null
     );
   }
@@ -1575,11 +1844,15 @@ const getSessionLabel = (session) => {
 };
 
 const isCustomerRequestedWorkshopBooking = (booking) =>
-  (booking?.sessionSource || "").toString().trim().toLowerCase() === "customer-requested";
+  (booking?.sessionSource || "").toString().trim().toLowerCase() ===
+  "customer-requested";
 
 const getWorkshopBookingDateLabel = (booking) => {
   const explicitLabel =
-    booking?.sessionDateLabel || booking?.scheduledDateLabel || booking?.sessionDayLabel || "";
+    booking?.sessionDateLabel ||
+    booking?.scheduledDateLabel ||
+    booking?.sessionDayLabel ||
+    "";
   if (typeof explicitLabel === "string" && explicitLabel.trim()) {
     return explicitLabel.trim();
   }
@@ -1588,7 +1861,11 @@ const getWorkshopBookingDateLabel = (booking) => {
 };
 
 const getWorkshopBookingTimeLabel = (booking) => {
-  const explicitLabel = booking?.sessionTimeRange || booking?.sessionLabel || booking?.sessionTime || "";
+  const explicitLabel =
+    booking?.sessionTimeRange ||
+    booking?.sessionLabel ||
+    booking?.sessionTime ||
+    "";
   return typeof explicitLabel === "string" && explicitLabel.trim()
     ? explicitLabel.trim()
     : "Time to be confirmed";
@@ -1601,19 +1878,31 @@ const getWorkshopBookingIsoDate = (booking) => {
 
 const getWorkshopOrderItemForBooking = (order, booking) => {
   if (!order || !Array.isArray(order.items)) return null;
-  const workshopItems = order.items.filter((item) => item?.metadata?.type === "workshop");
+  const workshopItems = order.items.filter(
+    (item) => item?.metadata?.type === "workshop",
+  );
   if (workshopItems.length === 0) return null;
 
   const bookingDate = getWorkshopBookingIsoDate(booking);
   const matchesBooking = (item) => {
     const metadata = item?.metadata || {};
-    if (booking?.workshopId && metadata.workshopId && metadata.workshopId !== booking.workshopId) {
+    if (
+      booking?.workshopId &&
+      metadata.workshopId &&
+      metadata.workshopId !== booking.workshopId
+    ) {
       return false;
     }
-    if (booking?.sessionId && metadata.sessionId && metadata.sessionId !== booking.sessionId) {
+    if (
+      booking?.sessionId &&
+      metadata.sessionId &&
+      metadata.sessionId !== booking.sessionId
+    ) {
       return false;
     }
-    const itemDate = (metadata.sessionDate || metadata.session?.date || "").toString().trim();
+    const itemDate = (metadata.sessionDate || metadata.session?.date || "")
+      .toString()
+      .trim();
     if (bookingDate && itemDate && itemDate !== bookingDate) {
       return false;
     }
@@ -1629,7 +1918,9 @@ const getWorkshopOrderItemForBooking = (order, booking) => {
 
   return (
     workshopItems.find(matchesBooking) ||
-    workshopItems.find((item) => item?.metadata?.workshopId === booking?.workshopId) ||
+    workshopItems.find(
+      (item) => item?.metadata?.workshopId === booking?.workshopId,
+    ) ||
     workshopItems[0]
   );
 };
@@ -1651,8 +1942,18 @@ const normalizeWorkshopBookingAttendeeSelections = (selections) => {
       const attendeeValue = Number.parseInt(selection.attendee, 10);
       return {
         attendee: Number.isFinite(attendeeValue) ? attendeeValue : index + 1,
-        optionLabel: selection.optionLabel || selection.label || selection.optionValue || selection.value || "Option",
-        optionValue: selection.optionValue || selection.optionId || selection.value || selection.optionLabel || null,
+        optionLabel:
+          selection.optionLabel ||
+          selection.label ||
+          selection.optionValue ||
+          selection.value ||
+          "Option",
+        optionValue:
+          selection.optionValue ||
+          selection.optionId ||
+          selection.value ||
+          selection.optionLabel ||
+          null,
         estimatedPrice: Number.isFinite(Number(selection.estimatedPrice))
           ? Number(selection.estimatedPrice)
           : null,
@@ -1702,7 +2003,7 @@ export function AdminDashboardView() {
     const openOrders = orders.filter(
       (order) =>
         normalizeOrderStatus(order.status) !== "completed" &&
-        normalizeOrderStatus(order.status) !== "cancelled"
+        normalizeOrderStatus(order.status) !== "cancelled",
     ).length;
     const totalProducts = products.length;
 
@@ -1847,7 +2148,7 @@ export function AdminDashboardView() {
                     </span>
                   </p>
                   <p className="modal__meta">
-                    Capacity {entry.session.capacity || DEFAULT_SLOT_CAPACITY}  - {" "}
+                    Capacity {entry.session.capacity || DEFAULT_SLOT_CAPACITY} -{" "}
                     {entry.workshop.location || "Studio"}
                   </p>
                 </li>
@@ -1873,9 +2174,7 @@ export function AdminDashboardView() {
                     <p>
                       <strong>{order.customer.fullName || "Guest"}</strong>
                     </p>
-                    <p className="modal__meta">
-                      {order.customer.email || "-"}
-                    </p>
+                    <p className="modal__meta">{order.customer.email || "-"}</p>
                   </div>
                   <div>
                     <p className="modal__meta">
@@ -1913,7 +2212,8 @@ export function AdminProductsView() {
   const location = useLocation();
   const isSubscriptionsTab = location.pathname.includes("/admin/subscriptions");
   const isCategoriesTab =
-    !isSubscriptionsTab && location.pathname.includes("/admin/products/categories");
+    !isSubscriptionsTab &&
+    location.pathname.includes("/admin/products/categories");
   const activeTab = isSubscriptionsTab
     ? "subscriptions"
     : isCategoriesTab
@@ -1926,7 +2226,10 @@ export function AdminProductsView() {
         ? "Manage subscription plans separately from standard products."
         : "Build your storefront inventory directly from Firestore.";
   usePageMetadata({
-    title: activeTab === "subscriptions" ? "Admin - Subscriptions" : "Admin - Products",
+    title:
+      activeTab === "subscriptions"
+        ? "Admin - Subscriptions"
+        : "Admin - Products",
     description:
       activeTab === "subscriptions"
         ? "Manage subscription plan products shown to customers."
@@ -1960,6 +2263,8 @@ export function AdminProductsView() {
   const [tagSaving, setTagSaving] = useState(false);
   const [tagStatusMessage, setTagStatusMessage] = useState(null);
   const [pendingCategoryDelete, setPendingCategoryDelete] = useState(null);
+  const [pendingCategoryVisibilityChange, setPendingCategoryVisibilityChange] =
+    useState(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [productSaving, setProductSaving] = useState(false);
   const [productPage, setProductPage] = useState(0);
@@ -1987,16 +2292,28 @@ export function AdminProductsView() {
     () =>
       productCategories
         .map((category) => {
-          const name = (category.name || category.title || category.label || category.id || "")
+          const name = (
+            category.name ||
+            category.title ||
+            category.label ||
+            category.id ||
+            ""
+          )
             .toString()
             .trim();
           if (!name) return null;
           const slug = (category.slug || category.id || name).toString().trim();
           const id = (category.id || slug).toString().trim();
-          const description = (category.description || category.short_description || "")
+          const description = (
+            category.description ||
+            category.short_description ||
+            ""
+          )
             .toString()
             .trim();
-          const subHeading = (category.subHeading || category.subheading || "").toString().trim();
+          const subHeading = (category.subHeading || category.subheading || "")
+            .toString()
+            .trim();
           const productDescription = (
             category.productDescription ||
             category.collectionDescription ||
@@ -2007,7 +2324,26 @@ export function AdminProductsView() {
           const coverImage = (category.coverImage || category.cover_image || "")
             .toString()
             .trim();
-          return { id, name, slug, description, subHeading, productDescription, coverImage };
+          const status = normalizeProductCategoryStatus(category.status);
+          const hidden = Boolean(
+            category.hidden || category.isHidden || status !== "live",
+          );
+          const visibleStatus = hidden
+            ? status === "live"
+              ? "draft"
+              : status
+            : "live";
+          return {
+            id,
+            name,
+            slug,
+            description,
+            subHeading,
+            productDescription,
+            coverImage,
+            status: visibleStatus,
+            hidden,
+          };
         })
         .filter(Boolean),
     [productCategories],
@@ -2016,7 +2352,9 @@ export function AdminProductsView() {
     () =>
       productTags
         .map((tag) => {
-          const name = (tag.name || tag.title || tag.label || tag.id || "").toString().trim();
+          const name = (tag.name || tag.title || tag.label || tag.id || "")
+            .toString()
+            .trim();
           if (!name) return null;
           const slug = (tag.slug || tag.id || name).toString().trim();
           const id = (tag.id || slug).toString().trim();
@@ -2055,13 +2393,23 @@ export function AdminProductsView() {
     () =>
       products.filter((product) => {
         if (!product || typeof product !== "object") return false;
-        if (product.isSubscription === true || product.subscriptionEnabled === true) return true;
-        if (looksLikeSubscriptionCategory(product.productType || product.type || product.kind || "")) {
+        if (
+          product.isSubscription === true ||
+          product.subscriptionEnabled === true
+        )
+          return true;
+        if (
+          looksLikeSubscriptionCategory(
+            product.productType || product.type || product.kind || "",
+          )
+        ) {
           return true;
         }
         const rawCategoryValues = [];
-        if (Array.isArray(product.category_ids)) rawCategoryValues.push(...product.category_ids);
-        if (Array.isArray(product.categoryIds)) rawCategoryValues.push(...product.categoryIds);
+        if (Array.isArray(product.category_ids))
+          rawCategoryValues.push(...product.category_ids);
+        if (Array.isArray(product.categoryIds))
+          rawCategoryValues.push(...product.categoryIds);
         if (product.categoryId) rawCategoryValues.push(product.categoryId);
         if (product.categorySlug) rawCategoryValues.push(product.categorySlug);
         if (product.category) rawCategoryValues.push(product.category);
@@ -2074,9 +2422,9 @@ export function AdminProductsView() {
           const resolved = categoryLookup.get(normalized.toLowerCase()) || null;
           return Boolean(
             resolved &&
-              [resolved.id, resolved.slug, resolved.name].some((entry) =>
-                looksLikeSubscriptionCategory(entry),
-              ),
+            [resolved.id, resolved.slug, resolved.name].some((entry) =>
+              looksLikeSubscriptionCategory(entry),
+            ),
           );
         });
       }),
@@ -2086,29 +2434,36 @@ export function AdminProductsView() {
     activeTab === "subscriptions" ? subscriptionProducts : products;
   const categoryUsage = useMemo(() => {
     const usage = new Map();
-    products.forEach((product) => {
-      const categoryIds = Array.isArray(product.category_ids) ?
-         product.category_ids
-        : Array.isArray(product.categoryIds) ?
-         product.categoryIds
-        : product.categoryId ?
-         [product.categoryId]
-        : product.category ?
-         [product.category]
-        : [];
-      categoryIds.forEach((id) => {
-        const key = (id || "").toString().trim().toLowerCase();
-        const resolved = key ? categoryLookup.get(key) || null : null;
-        const resolvedId = resolved?.id || null;
-        if (!resolvedId) return;
-        usage.set(resolvedId, (usage.get(resolvedId) || 0) + 1);
-      });
+    categoryOptions.forEach((category) => {
+      const count = products.reduce((total, product) => {
+        return total + (productBelongsToCategory(product, category) ? 1 : 0);
+      }, 0);
+      usage.set(category.id, count);
     });
     return usage;
-  }, [products, categoryLookup]);
+  }, [products, categoryOptions]);
+  const categoryLiveUsage = useMemo(() => {
+    const usage = new Map();
+    categoryOptions.forEach((category) => {
+      const count = products.reduce((total, product) => {
+        const status = (product.status ?? "live")
+          .toString()
+          .trim()
+          .toLowerCase();
+        return (
+          total +
+          (status === "live" && productBelongsToCategory(product, category)
+            ? 1
+            : 0)
+        );
+      }, 0);
+      usage.set(category.id, count);
+    });
+    return usage;
+  }, [products, categoryOptions]);
   const featuredProductCount = useMemo(
     () => products.filter((product) => product.featured).length,
-    [products]
+    [products],
   );
   const currentStockStatus = getStockStatus({
     quantity: productForm.stockQuantity,
@@ -2122,11 +2477,16 @@ export function AdminProductsView() {
       .filter(Boolean);
   const syncProductGalleryPreviews = (
     galleryUrls = productForm.galleryImages,
-    filePreviewUrls = productGalleryPreviewUrlRef.current
+    filePreviewUrls = productGalleryPreviewUrlRef.current,
   ) => {
     const normalizedGalleryUrls = getProductGalleryUrls(galleryUrls);
-    const normalizedFilePreviews = Array.isArray(filePreviewUrls) ? filePreviewUrls.filter(Boolean) : [];
-    setProductGalleryPreviews([...normalizedGalleryUrls, ...normalizedFilePreviews]);
+    const normalizedFilePreviews = Array.isArray(filePreviewUrls)
+      ? filePreviewUrls.filter(Boolean)
+      : [];
+    setProductGalleryPreviews([
+      ...normalizedGalleryUrls,
+      ...normalizedFilePreviews,
+    ]);
   };
 
   useEffect(() => {
@@ -2160,11 +2520,14 @@ export function AdminProductsView() {
         productGalleryPreviewUrlRef.current = [];
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(managedProducts.length / ADMIN_PAGE_SIZE) - 1);
+    const maxPage = Math.max(
+      0,
+      Math.ceil(managedProducts.length / ADMIN_PAGE_SIZE) - 1,
+    );
     setProductPage((prev) => Math.min(prev, maxPage));
   }, [managedProducts.length]);
 
@@ -2203,7 +2566,9 @@ export function AdminProductsView() {
       productMainPreviewUrlRef.current = null;
     }
     if (Array.isArray(productGalleryPreviewUrlRef.current)) {
-      productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
+      productGalleryPreviewUrlRef.current.forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
       productGalleryPreviewUrlRef.current = [];
     }
     setProductMainImageFile(null);
@@ -2260,14 +2625,18 @@ export function AdminProductsView() {
   const handleGalleryImagesChange = (event) => {
     const files = Array.from(event.target.files ?? []);
     if (Array.isArray(productGalleryPreviewUrlRef.current)) {
-      productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
+      productGalleryPreviewUrlRef.current.forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
       productGalleryPreviewUrlRef.current = [];
     }
     setProductGalleryFiles([]);
 
     const existingUrls = getProductGalleryUrls();
     if (existingUrls.length + files.length > MAX_PRODUCT_IMAGES) {
-      setProductError(`Please select up to ${MAX_PRODUCT_IMAGES} images total.`);
+      setProductError(
+        `Please select up to ${MAX_PRODUCT_IMAGES} images total.`,
+      );
       event.target.value = "";
       syncProductGalleryPreviews(existingUrls, []);
       return;
@@ -2298,12 +2667,14 @@ export function AdminProductsView() {
   const handleRemoveGalleryImage = (index) => {
     if (!Number.isInteger(index) || index < 0) return;
     const galleryUrls = getProductGalleryUrls();
-    const localPreviewUrls = Array.isArray(productGalleryPreviewUrlRef.current) ?
-       productGalleryPreviewUrlRef.current.filter(Boolean)
+    const localPreviewUrls = Array.isArray(productGalleryPreviewUrlRef.current)
+      ? productGalleryPreviewUrlRef.current.filter(Boolean)
       : [];
 
     if (index < galleryUrls.length) {
-      const nextGalleryUrls = galleryUrls.filter((_, galleryIndex) => galleryIndex !== index);
+      const nextGalleryUrls = galleryUrls.filter(
+        (_, galleryIndex) => galleryIndex !== index,
+      );
       setProductForm((prev) => ({ ...prev, galleryImages: nextGalleryUrls }));
       syncProductGalleryPreviews(nextGalleryUrls, localPreviewUrls);
       return;
@@ -2315,9 +2686,13 @@ export function AdminProductsView() {
     if (removedPreview) {
       URL.revokeObjectURL(removedPreview);
     }
-    const nextLocalPreviewUrls = localPreviewUrls.filter((_, previewIndex) => previewIndex !== fileIndex);
+    const nextLocalPreviewUrls = localPreviewUrls.filter(
+      (_, previewIndex) => previewIndex !== fileIndex,
+    );
     productGalleryPreviewUrlRef.current = nextLocalPreviewUrls;
-    setProductGalleryFiles((prev) => prev.filter((_, galleryFileIndex) => galleryFileIndex !== fileIndex));
+    setProductGalleryFiles((prev) =>
+      prev.filter((_, galleryFileIndex) => galleryFileIndex !== fileIndex),
+    );
     syncProductGalleryPreviews(galleryUrls, nextLocalPreviewUrls);
     if (productGalleryImageInputRef.current) {
       productGalleryImageInputRef.current.value = "";
@@ -2417,9 +2792,13 @@ export function AdminProductsView() {
       const existingUrls = getProductGalleryUrls();
       setMediaLibrarySelection(existingUrls);
     } else if (mode === "category") {
-      setMediaLibrarySelection(categoryForm.coverImage ? [categoryForm.coverImage] : []);
+      setMediaLibrarySelection(
+        categoryForm.coverImage ? [categoryForm.coverImage] : [],
+      );
     } else {
-      setMediaLibrarySelection(productForm.mainImage ? [productForm.mainImage] : []);
+      setMediaLibrarySelection(
+        productForm.mainImage ? [productForm.mainImage] : [],
+      );
     }
     setMediaLibraryOpen(true);
   };
@@ -2470,10 +2849,13 @@ export function AdminProductsView() {
       new Set(
         (Array.isArray(mediaLibrarySelection) ? mediaLibrarySelection : [])
           .map((value) => (value || "").toString().trim())
-          .filter(Boolean)
-      )
+          .filter(Boolean),
+      ),
     );
-    const maxUrls = Math.max(0, MAX_PRODUCT_IMAGES - productGalleryFiles.length);
+    const maxUrls = Math.max(
+      0,
+      MAX_PRODUCT_IMAGES - productGalleryFiles.length,
+    );
     const limited = selectedUrls.slice(0, maxUrls);
     if (selectedUrls.length > maxUrls) {
       setProductError(`You can add up to ${MAX_PRODUCT_IMAGES} images total.`);
@@ -2492,8 +2874,15 @@ export function AdminProductsView() {
         return { ...prev, hasVariants: false, variants: [] };
       }
       const nextVariants =
-        prev.variants && prev.variants.length > 0 ? prev.variants : [createProductVariant()];
-      return { ...prev, hasVariants: true, variants: nextVariants, stockQuantity: "" };
+        prev.variants && prev.variants.length > 0
+          ? prev.variants
+          : [createProductVariant()];
+      return {
+        ...prev,
+        hasVariants: true,
+        variants: nextVariants,
+        stockQuantity: "",
+      };
     });
   };
 
@@ -2517,7 +2906,9 @@ export function AdminProductsView() {
   const handleRemoveProductVariant = (variantId) => {
     setProductForm((prev) => ({
       ...prev,
-      variants: (prev.variants || []).filter((variant) => variant.id !== variantId),
+      variants: (prev.variants || []).filter(
+        (variant) => variant.id !== variantId,
+      ),
     }));
   };
 
@@ -2560,7 +2951,9 @@ export function AdminProductsView() {
     });
     if (enabled) {
       if (Array.isArray(productGalleryPreviewUrlRef.current)) {
-        productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
+        productGalleryPreviewUrlRef.current.forEach((url) =>
+          URL.revokeObjectURL(url),
+        );
         productGalleryPreviewUrlRef.current = [];
       }
       setProductGalleryFiles([]);
@@ -2581,209 +2974,229 @@ export function AdminProductsView() {
 
   const handleEditProduct = (product) => {
     try {
-    const resolvedCategoryIds = Array.isArray(product.category_ids) ?
-       product.category_ids
-      : Array.isArray(product.categoryIds) ?
-       product.categoryIds
-      : product.categoryId ?
-       [product.categoryId]
-      : product.category ?
-       [product.category]
-      : [];
-    const normalizedCategoryIds = resolvedCategoryIds
-      .map((value) => resolveCategory(value)?.id || value)
-      .filter(Boolean)
-      .map((value) => value.toString());
-    const normalizedTagIds = Array.isArray(product.tag_ids) ?
-       product.tag_ids
-      : Array.isArray(product.tagIds) ?
-       product.tagIds
-      : [];
-    const existingGallery = Array.isArray(product.gallery_images) ?
-       product.gallery_images
-      : Array.isArray(product.galleryImages) ?
-       product.galleryImages
-      : Array.isArray(product.images) ?
-       product.images
-      : [];
-    const fallbackGallery = product.image ? [product.image] : [];
-    const galleryImages = (existingGallery.length ? existingGallery : fallbackGallery)
-      .filter(Boolean)
-      .slice(0, MAX_PRODUCT_IMAGES);
-    const mainImage =
-      product.main_image ||
-      product.mainImage ||
-      galleryImages[0] ||
-      product.image ||
-      "";
-    const priceValue =
-      product.price === undefined || product.price === null ? "" : String(product.price);
-    const salePriceValue =
-      product.sale_price === undefined || product.sale_price === null
-        ? product.salePrice === undefined || product.salePrice === null
-          ? ""
-          : String(product.salePrice)
-        : String(product.sale_price);
-    const stockStatusValue =
-      product.stock_status ||
-      product.stockStatus ||
-      (product.forceOutOfStock ? "out_of_stock" : "in_stock");
-    const stockQuantityValue =
-      product.stock_quantity === undefined || product.stock_quantity === null
-        ? product.stockQuantity === undefined || product.stockQuantity === null
-          ? product.quantity === undefined || product.quantity === null
-            ? ""
-            : String(product.quantity)
-          : String(product.stockQuantity)
-        : String(product.stock_quantity);
-    const hasVariants = Array.isArray(product.variants) && product.variants.length > 0;
-    const dimensionsSource =
-      product.dimensions && typeof product.dimensions === "object" ? product.dimensions : {};
-    setProductForm({
-      title: product.title || product.name || "",
-      sku: product.sku || "",
-      price: priceValue,
-      salePrice: salePriceValue,
-      slug: product.slug || slugifyId(product.title || product.name || ""),
-      stockStatus: stockStatusValue,
-      preorderSendMonth: getProductPreorderSendMonth(product),
-      stockQuantity: hasVariants ? "" : stockQuantityValue,
-      categoryIds: normalizedCategoryIds.slice(0, 1),
-      tagIds: normalizedTagIds.map((value) => value.toString()).slice(0, 1),
-      shortDescription: product.short_description || product.shortDescription || product.description || "",
-      longDescription: product.long_description || product.longDescription || "",
-      mainImage,
-      galleryImages,
-      videoEmbed: product.video_embed || product.videoEmbed || "",
-      sunlight: product.sunlight || "",
-      soilType: product.soil_type || product.soilType || "",
-      watering: product.watering || "",
-      climate: product.climate || "",
-      plantingDepth: product.planting_depth || product.plantingDepth || "",
-      plantingSpacing: product.planting_spacing || product.plantingSpacing || "",
-      bestPlantingTime: product.best_planting_time || product.bestPlantingTime || "",
-      bloomPeriod: product.bloom_period || product.bloomPeriod || "",
-      flowerColor: product.flower_color || product.flowerColor || "",
-      matureHeight: product.mature_height || product.matureHeight || "",
-      pestIssues: product.pest_issues || product.pestIssues || "",
-      diseaseInfo: product.disease_info || product.diseaseInfo || "",
-      propagation: product.propagation || "",
-      companions: product.companions || "",
-      metaTitle: product.meta_title || product.metaTitle || "",
-      metaDescription: product.meta_description || product.metaDescription || "",
-      metaKeywords: product.meta_keywords || product.metaKeywords || "",
-      shippingWeight: product.shipping_weight || product.shippingWeight || "",
-      dimensions: {
-        width: dimensionsSource.width || "",
-        height: dimensionsSource.height || "",
-        depth: dimensionsSource.depth || "",
-      },
-      countryOfOrigin: product.country_of_origin || product.countryOfOrigin || "",
-      deliveryInfo: product.delivery_info || product.deliveryInfo || "",
-      relatedProductIds: (
-        Array.isArray(product.related_product_ids) ?
-           product.related_product_ids
-          : Array.isArray(product.relatedProductIds) ?
-           product.relatedProductIds
-          : []
-      ).slice(0, 1),
-      upsellProductIds: (
-        Array.isArray(product.upsell_product_ids) ?
-           product.upsell_product_ids
-          : Array.isArray(product.upsellProductIds) ?
-           product.upsellProductIds
-          : []
-      ).slice(0, 1),
-      crossSellProductIds: (
-        Array.isArray(product.cross_sell_product_ids) ?
-           product.cross_sell_product_ids
-          : Array.isArray(product.crossSellProductIds) ?
-           product.crossSellProductIds
-          : []
-      ).slice(0, 1),
-      status: product.status || "draft",
-      hasVariants,
-      variants: Array.isArray(product.variants)
-        ? product.variants.filter(Boolean).map((variant) => ({
-            id:
-              variant.id ||
-              `product-variant-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-            label: (variant.label || variant.name || "").toString(),
-            price:
-              variant.price === undefined || variant.price === null
-                ? ""
-                : String(variant.price),
-            quantity:
-              variant.stock_quantity === undefined || variant.stock_quantity === null
-                ? variant.stockQuantity === undefined || variant.stockQuantity === null
-                  ? variant.quantity === undefined || variant.quantity === null
-                    ? ""
-                    : String(variant.quantity)
-                  : String(variant.stockQuantity)
-                : String(variant.stock_quantity),
-          }))
-        : [],
-      featured: Boolean(product.featured),
-      isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
-      giftCardExpiryDays: String(
-        normalizeGiftCardExpiryDays(
-          product.giftCardExpiryDays || product.gift_card_expiry_days || 365,
-          365,
-        ),
-      ),
-      giftCardTerms: (
-        product.giftCardTerms ||
-        product.gift_card_terms ||
-        INITIAL_PRODUCT_FORM.giftCardTerms
-      )
-        .toString()
-        .trim(),
-      giftCardOptions: (
-        Array.isArray(product.giftCardOptions)
-          ? product.giftCardOptions
-          : Array.isArray(product.gift_card_options)
-          ? product.gift_card_options
-          : []
+      const resolvedCategoryIds = Array.isArray(product.category_ids)
+        ? product.category_ids
+        : Array.isArray(product.categoryIds)
+          ? product.categoryIds
+          : product.categoryId
+            ? [product.categoryId]
+            : product.category
+              ? [product.category]
+              : [];
+      const normalizedCategoryIds = resolvedCategoryIds
+        .map((value) => resolveCategory(value)?.id || value)
+        .filter(Boolean)
+        .map((value) => value.toString());
+      const normalizedTagIds = Array.isArray(product.tag_ids)
+        ? product.tag_ids
+        : Array.isArray(product.tagIds)
+          ? product.tagIds
+          : [];
+      const existingGallery = Array.isArray(product.gallery_images)
+        ? product.gallery_images
+        : Array.isArray(product.galleryImages)
+          ? product.galleryImages
+          : Array.isArray(product.images)
+            ? product.images
+            : [];
+      const fallbackGallery = product.image ? [product.image] : [];
+      const galleryImages = (
+        existingGallery.length ? existingGallery : fallbackGallery
       )
         .filter(Boolean)
-        .map((option, index) => ({
-          id:
-            (option.id || "").toString().trim() ||
-            `gift-card-option-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`,
-          label: (option.label || option.name || "").toString().trim(),
-          amount:
-            option.amount === undefined || option.amount === null
-              ? option.price === undefined || option.price === null
-                ? ""
-                : String(option.price)
-              : String(option.amount),
-        }))
-        .filter((option) => option.label),
-    });
-    if (productMainPreviewUrlRef.current) {
-      URL.revokeObjectURL(productMainPreviewUrlRef.current);
-      productMainPreviewUrlRef.current = null;
-    }
-    if (Array.isArray(productGalleryPreviewUrlRef.current)) {
-      productGalleryPreviewUrlRef.current.forEach((url) => URL.revokeObjectURL(url));
-      productGalleryPreviewUrlRef.current = [];
-    }
-    setProductMainImageFile(null);
-    setProductMainImagePreview(mainImage);
-    setProductGalleryFiles([]);
-    syncProductGalleryPreviews(galleryImages, []);
-    if (productMainImageInputRef.current) {
-      productMainImageInputRef.current.value = "";
-    }
-    if (productGalleryImageInputRef.current) {
-      productGalleryImageInputRef.current.value = "";
-    }
-    setEditingProductId(product.id);
-    setProductError(null);
-    setProductModalOpen(true);
+        .slice(0, MAX_PRODUCT_IMAGES);
+      const mainImage =
+        product.main_image ||
+        product.mainImage ||
+        galleryImages[0] ||
+        product.image ||
+        "";
+      const priceValue =
+        product.price === undefined || product.price === null
+          ? ""
+          : String(product.price);
+      const salePriceValue =
+        product.sale_price === undefined || product.sale_price === null
+          ? product.salePrice === undefined || product.salePrice === null
+            ? ""
+            : String(product.salePrice)
+          : String(product.sale_price);
+      const stockStatusValue =
+        product.stock_status ||
+        product.stockStatus ||
+        (product.forceOutOfStock ? "out_of_stock" : "in_stock");
+      const stockQuantityValue =
+        product.stock_quantity === undefined || product.stock_quantity === null
+          ? product.stockQuantity === undefined ||
+            product.stockQuantity === null
+            ? product.quantity === undefined || product.quantity === null
+              ? ""
+              : String(product.quantity)
+            : String(product.stockQuantity)
+          : String(product.stock_quantity);
+      const hasVariants =
+        Array.isArray(product.variants) && product.variants.length > 0;
+      const dimensionsSource =
+        product.dimensions && typeof product.dimensions === "object"
+          ? product.dimensions
+          : {};
+      setProductForm({
+        title: product.title || product.name || "",
+        sku: product.sku || "",
+        price: priceValue,
+        salePrice: salePriceValue,
+        slug: product.slug || slugifyId(product.title || product.name || ""),
+        stockStatus: stockStatusValue,
+        preorderSendMonth: getProductPreorderSendMonth(product),
+        stockQuantity: hasVariants ? "" : stockQuantityValue,
+        categoryIds: normalizedCategoryIds.slice(0, 1),
+        tagIds: normalizedTagIds.map((value) => value.toString()).slice(0, 1),
+        shortDescription:
+          product.short_description ||
+          product.shortDescription ||
+          product.description ||
+          "",
+        longDescription:
+          product.long_description || product.longDescription || "",
+        mainImage,
+        galleryImages,
+        videoEmbed: product.video_embed || product.videoEmbed || "",
+        sunlight: product.sunlight || "",
+        soilType: product.soil_type || product.soilType || "",
+        watering: product.watering || "",
+        climate: product.climate || "",
+        plantingDepth: product.planting_depth || product.plantingDepth || "",
+        plantingSpacing:
+          product.planting_spacing || product.plantingSpacing || "",
+        bestPlantingTime:
+          product.best_planting_time || product.bestPlantingTime || "",
+        bloomPeriod: product.bloom_period || product.bloomPeriod || "",
+        flowerColor: product.flower_color || product.flowerColor || "",
+        matureHeight: product.mature_height || product.matureHeight || "",
+        pestIssues: product.pest_issues || product.pestIssues || "",
+        diseaseInfo: product.disease_info || product.diseaseInfo || "",
+        propagation: product.propagation || "",
+        companions: product.companions || "",
+        metaTitle: product.meta_title || product.metaTitle || "",
+        metaDescription:
+          product.meta_description || product.metaDescription || "",
+        metaKeywords: product.meta_keywords || product.metaKeywords || "",
+        shippingWeight: product.shipping_weight || product.shippingWeight || "",
+        dimensions: {
+          width: dimensionsSource.width || "",
+          height: dimensionsSource.height || "",
+          depth: dimensionsSource.depth || "",
+        },
+        countryOfOrigin:
+          product.country_of_origin || product.countryOfOrigin || "",
+        deliveryInfo: product.delivery_info || product.deliveryInfo || "",
+        relatedProductIds: (Array.isArray(product.related_product_ids)
+          ? product.related_product_ids
+          : Array.isArray(product.relatedProductIds)
+            ? product.relatedProductIds
+            : []
+        ).slice(0, 1),
+        upsellProductIds: (Array.isArray(product.upsell_product_ids)
+          ? product.upsell_product_ids
+          : Array.isArray(product.upsellProductIds)
+            ? product.upsellProductIds
+            : []
+        ).slice(0, 1),
+        crossSellProductIds: (Array.isArray(product.cross_sell_product_ids)
+          ? product.cross_sell_product_ids
+          : Array.isArray(product.crossSellProductIds)
+            ? product.crossSellProductIds
+            : []
+        ).slice(0, 1),
+        status: product.status || "draft",
+        hasVariants,
+        variants: Array.isArray(product.variants)
+          ? product.variants.filter(Boolean).map((variant) => ({
+              id:
+                variant.id ||
+                `product-variant-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+              label: (variant.label || variant.name || "").toString(),
+              price:
+                variant.price === undefined || variant.price === null
+                  ? ""
+                  : String(variant.price),
+              quantity:
+                variant.stock_quantity === undefined ||
+                variant.stock_quantity === null
+                  ? variant.stockQuantity === undefined ||
+                    variant.stockQuantity === null
+                    ? variant.quantity === undefined ||
+                      variant.quantity === null
+                      ? ""
+                      : String(variant.quantity)
+                    : String(variant.stockQuantity)
+                  : String(variant.stock_quantity),
+            }))
+          : [],
+        featured: Boolean(product.featured),
+        isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
+        giftCardExpiryDays: String(
+          normalizeGiftCardExpiryDays(
+            product.giftCardExpiryDays || product.gift_card_expiry_days || 365,
+            365,
+          ),
+        ),
+        giftCardTerms: (
+          product.giftCardTerms ||
+          product.gift_card_terms ||
+          INITIAL_PRODUCT_FORM.giftCardTerms
+        )
+          .toString()
+          .trim(),
+        giftCardOptions: (Array.isArray(product.giftCardOptions)
+          ? product.giftCardOptions
+          : Array.isArray(product.gift_card_options)
+            ? product.gift_card_options
+            : []
+        )
+          .filter(Boolean)
+          .map((option, index) => ({
+            id:
+              (option.id || "").toString().trim() ||
+              `gift-card-option-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`,
+            label: (option.label || option.name || "").toString().trim(),
+            amount:
+              option.amount === undefined || option.amount === null
+                ? option.price === undefined || option.price === null
+                  ? ""
+                  : String(option.price)
+                : String(option.amount),
+          }))
+          .filter((option) => option.label),
+      });
+      if (productMainPreviewUrlRef.current) {
+        URL.revokeObjectURL(productMainPreviewUrlRef.current);
+        productMainPreviewUrlRef.current = null;
+      }
+      if (Array.isArray(productGalleryPreviewUrlRef.current)) {
+        productGalleryPreviewUrlRef.current.forEach((url) =>
+          URL.revokeObjectURL(url),
+        );
+        productGalleryPreviewUrlRef.current = [];
+      }
+      setProductMainImageFile(null);
+      setProductMainImagePreview(mainImage);
+      setProductGalleryFiles([]);
+      syncProductGalleryPreviews(galleryImages, []);
+      if (productMainImageInputRef.current) {
+        productMainImageInputRef.current.value = "";
+      }
+      if (productGalleryImageInputRef.current) {
+        productGalleryImageInputRef.current.value = "";
+      }
+      setEditingProductId(product.id);
+      setProductError(null);
+      setProductModalOpen(true);
     } catch (error) {
       console.error("Unable to load product for editing", error);
-      setProductError("We could not load this product for editing. Please refresh and try again.");
+      setProductError(
+        "We could not load this product for editing. Please refresh and try again.",
+      );
       setStatusMessage("We could not load this product for editing.");
     }
   };
@@ -2814,7 +3227,9 @@ export function AdminProductsView() {
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = utils.sheet_to_json(sheet, { defval: "", raw: false });
       if (!rows.length) {
-        throw new Error("No product rows detected. Check that the sheet has a header row followed by products.");
+        throw new Error(
+          "No product rows detected. Check that the sheet has a header row followed by products.",
+        );
       }
       const usedIds = new Set();
       const categoryCache = new Map();
@@ -2830,14 +3245,19 @@ export function AdminProductsView() {
           .filter(Boolean),
       );
       const existingTagSlugs = new Set(
-        tagOptions.map((tag) => (tag.id || "").toString().toLowerCase()).filter(Boolean),
+        tagOptions
+          .map((tag) => (tag.id || "").toString().toLowerCase())
+          .filter(Boolean),
       );
       const existingTagNames = new Set(
-        tagOptions.map((tag) => (tag.name || "").toString().toLowerCase()).filter(Boolean),
+        tagOptions
+          .map((tag) => (tag.name || "").toString().toLowerCase())
+          .filter(Boolean),
       );
       const getCellValue = (row, keys) => {
         for (const key of keys) {
-          if (row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
+          if (row[key] !== undefined && row[key] !== null && row[key] !== "")
+            return row[key];
         }
         return "";
       };
@@ -2860,7 +3280,10 @@ export function AdminProductsView() {
         const slug = slugifyId(cleaned);
         if (slug) {
           const slugKey = slug.toLowerCase();
-          if (!existingCategorySlugs.has(slugKey) && !existingCategoryNames.has(cacheKey)) {
+          if (
+            !existingCategorySlugs.has(slugKey) &&
+            !existingCategoryNames.has(cacheKey)
+          ) {
             await setDoc(
               doc(collection(db, "productCategories"), slug),
               {
@@ -2898,7 +3321,10 @@ export function AdminProductsView() {
         const slug = slugifyId(cleaned);
         if (slug) {
           const slugKey = slug.toLowerCase();
-          if (!existingTagSlugs.has(slugKey) && !existingTagNames.has(cacheKey)) {
+          if (
+            !existingTagSlugs.has(slugKey) &&
+            !existingTagNames.has(cacheKey)
+          ) {
             await setDoc(
               doc(collection(db, "productTags"), slug),
               {
@@ -2922,18 +3348,34 @@ export function AdminProductsView() {
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
         const rawTitle =
-          getCellValue(row, ["Title", "Name", "Product Name", "title", "name"]) || row[0] || "";
+          getCellValue(row, [
+            "Title",
+            "Name",
+            "Product Name",
+            "title",
+            "name",
+          ]) ||
+          row[0] ||
+          "";
         const cleanedTitle = stripSheetLinkLabel(rawTitle);
         if (!cleanedTitle) continue;
         const lowerTitle = cleanedTitle.toLowerCase();
-        const rawPriceValue = parseSheetPriceValue(getCellValue(row, ["Price", "price"]) ?? "");
-        if ((lowerTitle === "notes" || lowerTitle === "notes:") && rawPriceValue === "") {
+        const rawPriceValue = parseSheetPriceValue(
+          getCellValue(row, ["Price", "price"]) ?? "",
+        );
+        if (
+          (lowerTitle === "notes" || lowerTitle === "notes:") &&
+          rawPriceValue === ""
+        ) {
           continue;
         }
-        const rawBarcode = (getCellValue(row, ["Barcode", "barcode"]) || "").toString().trim();
+        const rawBarcode = (getCellValue(row, ["Barcode", "barcode"]) || "")
+          .toString()
+          .trim();
         const barcodeId = slugifyId(rawBarcode);
-        const baseId =
-          barcodeId ? `sku-${barcodeId}` : slugifyId(cleanedTitle) || `imported-${index + 1}`;
+        const baseId = barcodeId
+          ? `sku-${barcodeId}`
+          : slugifyId(cleanedTitle) || `imported-${index + 1}`;
         let docId = baseId;
         if (usedIds.has(docId)) {
           let suffix = 2;
@@ -2945,48 +3387,81 @@ export function AdminProductsView() {
         usedIds.add(docId);
 
         const qtyRaw =
-          getCellValue(row, ["Stock Quantity", "Stock Qty", "QTY", "Qty", "qty"]) ?? 0;
+          getCellValue(row, [
+            "Stock Quantity",
+            "Stock Qty",
+            "QTY",
+            "Qty",
+            "qty",
+          ]) ?? 0;
         const qtyNumber = Number(qtyRaw);
-        const quantity = Number.isFinite(qtyNumber) ? Math.max(0, Math.floor(qtyNumber)) : null;
+        const quantity = Number.isFinite(qtyNumber)
+          ? Math.max(0, Math.floor(qtyNumber))
+          : null;
         const statusInput = (getCellValue(row, ["Status", "status"]) || "live")
           .toString()
           .trim()
           .toLowerCase();
-        const status = ["draft", "live", "archived"].includes(statusInput) ?
-           statusInput
+        const status = ["draft", "live", "archived"].includes(statusInput)
+          ? statusInput
           : "live";
         const shortDescription = sanitizePlainText(
-          getCellValue(row, ["Short Description", "Description", "short_description", "description"]) ||
-            cleanedTitle,
+          getCellValue(row, [
+            "Short Description",
+            "Description",
+            "short_description",
+            "description",
+          ]) || cleanedTitle,
         );
         const longDescription = sanitizePlainText(
-          getCellValue(row, ["Long Description", "long_description", "Long description"]) || "",
+          getCellValue(row, [
+            "Long Description",
+            "long_description",
+            "Long description",
+          ]) || "",
         );
-        const categoryInput = (getCellValue(row, ["Category", "category"]) || "").toString().trim();
+        const categoryInput = (
+          getCellValue(row, ["Category", "category"]) || ""
+        )
+          .toString()
+          .trim();
         const fallbackCategory = categoryOptions[0].name || "Product";
         const categoryLabel = categoryInput || fallbackCategory;
         const categoryRecord = await ensureCategory(categoryLabel);
         const categoryName = categoryRecord.name || categoryLabel;
-        const categoryId = categoryRecord.id || slugifyId(categoryName) || "product";
-        const categorySlug = categoryRecord.slug || slugifyId(categoryName) || categoryId;
-        const tagInput = (getCellValue(row, ["Tag", "tag"]) || "").toString().trim();
+        const categoryId =
+          categoryRecord.id || slugifyId(categoryName) || "product";
+        const categorySlug =
+          categoryRecord.slug || slugifyId(categoryName) || categoryId;
+        const tagInput = (getCellValue(row, ["Tag", "tag"]) || "")
+          .toString()
+          .trim();
         const tagRecord = tagInput ? await ensureTag(tagInput) : null;
         const tagId = tagRecord.id || (tagInput ? slugifyId(tagInput) : "");
         const priceValue = rawPriceValue;
         const normalizedPrice = priceValue === "" ? null : priceValue;
-        const salePriceValue = parseSheetPriceValue(getCellValue(row, ["Sale Price", "sale_price", "Sale"]) ?? "");
-        const normalizedSalePrice = salePriceValue === "" ? null : salePriceValue;
-        const stockStatusInput = (getCellValue(row, ["Stock Status", "stock_status"]) || "")
+        const salePriceValue = parseSheetPriceValue(
+          getCellValue(row, ["Sale Price", "sale_price", "Sale"]) ?? "",
+        );
+        const normalizedSalePrice =
+          salePriceValue === "" ? null : salePriceValue;
+        const stockStatusInput = (
+          getCellValue(row, ["Stock Status", "stock_status"]) || ""
+        )
           .toString()
           .trim()
           .toLowerCase();
-        const normalizedStockStatus = ["in_stock", "out_of_stock", "preorder"].includes(stockStatusInput) ?
-           stockStatusInput
-          : quantity === null ?
-           "in_stock"
-          : quantity <= 0 ?
-           "out_of_stock"
-          : "in_stock";
+        const normalizedStockStatus = [
+          "in_stock",
+          "out_of_stock",
+          "preorder",
+        ].includes(stockStatusInput)
+          ? stockStatusInput
+          : quantity === null
+            ? "in_stock"
+            : quantity <= 0
+              ? "out_of_stock"
+              : "in_stock";
         const preorderSendMonthInput = (
           getCellValue(row, [
             "Preorder Send Month",
@@ -2997,71 +3472,126 @@ export function AdminProductsView() {
         )
           .toString()
           .trim();
-        const preorderSendMonthValue = normalizePreorderSendMonth(preorderSendMonthInput);
-        const preorderSendMonth = normalizedStockStatus === "preorder" ? preorderSendMonthValue : "";
+        const preorderSendMonthValue = normalizePreorderSendMonth(
+          preorderSendMonthInput,
+        );
+        const preorderSendMonth =
+          normalizedStockStatus === "preorder" ? preorderSendMonthValue : "";
         const resolvedQuantity =
           quantity === null
             ? normalizedStockStatus === "out_of_stock"
               ? 0
               : null
             : quantity;
-        const slugInput = (getCellValue(row, ["Slug", "slug"]) || "").toString().trim();
-        const slugValue = slugInput || slugifyId(cleanedTitle) || docId;
-        const mainImageValue = (getCellValue(row, ["Main Image URL", "Main Image", "main_image"]) || "")
+        const slugInput = (getCellValue(row, ["Slug", "slug"]) || "")
           .toString()
           .trim();
-        const galleryInput = getCellValue(row, ["Gallery Images", "gallery_images"]) || "";
+        const slugValue = slugInput || slugifyId(cleanedTitle) || docId;
+        const mainImageValue = (
+          getCellValue(row, ["Main Image URL", "Main Image", "main_image"]) ||
+          ""
+        )
+          .toString()
+          .trim();
+        const galleryInput =
+          getCellValue(row, ["Gallery Images", "gallery_images"]) || "";
         const galleryImages = parseListValue(galleryInput)
           .map((value) => value.toString().trim())
           .filter(Boolean)
           .slice(0, MAX_PRODUCT_IMAGES);
-        const videoValue = (getCellValue(row, ["Video URL", "Video", "video_embed"]) || "")
+        const videoValue = (
+          getCellValue(row, ["Video URL", "Video", "video_embed"]) || ""
+        )
           .toString()
           .trim();
-        const sunlightValue = (getCellValue(row, ["Sunlight", "sunlight"]) || "").toString().trim();
-        const soilTypeValue = (getCellValue(row, ["Soil Type", "soil_type"]) || "").toString().trim();
-        const wateringValue = (getCellValue(row, ["Watering", "watering"]) || "").toString().trim();
-        const climateValue = (getCellValue(row, ["Climate", "climate"]) || "").toString().trim();
-        const plantingDepthValue = (getCellValue(row, ["Planting Depth", "planting_depth"]) || "")
+        const sunlightValue = (
+          getCellValue(row, ["Sunlight", "sunlight"]) || ""
+        )
           .toString()
           .trim();
-        const plantingSpacingValue = (getCellValue(row, ["Planting Spacing", "planting_spacing"]) || "")
+        const soilTypeValue = (
+          getCellValue(row, ["Soil Type", "soil_type"]) || ""
+        )
           .toString()
           .trim();
-        const bestPlantingTimeValue = (getCellValue(row, ["Best Planting Time", "best_planting_time"]) || "")
+        const wateringValue = (
+          getCellValue(row, ["Watering", "watering"]) || ""
+        )
           .toString()
           .trim();
-        const bloomPeriodValue = (getCellValue(row, ["Bloom Period", "bloom_period"]) || "")
+        const climateValue = (getCellValue(row, ["Climate", "climate"]) || "")
           .toString()
           .trim();
-        const flowerColorValue = (getCellValue(row, ["Flower Color", "flower_color"]) || "")
+        const plantingDepthValue = (
+          getCellValue(row, ["Planting Depth", "planting_depth"]) || ""
+        )
           .toString()
           .trim();
-        const matureHeightValue = (getCellValue(row, ["Mature Height", "mature_height"]) || "")
+        const plantingSpacingValue = (
+          getCellValue(row, ["Planting Spacing", "planting_spacing"]) || ""
+        )
           .toString()
           .trim();
-        const pestIssuesValue = (getCellValue(row, ["Pest Issues", "pest_issues"]) || "")
+        const bestPlantingTimeValue = (
+          getCellValue(row, ["Best Planting Time", "best_planting_time"]) || ""
+        )
           .toString()
           .trim();
-        const diseaseInfoValue = (getCellValue(row, ["Disease Info", "disease_info"]) || "")
+        const bloomPeriodValue = (
+          getCellValue(row, ["Bloom Period", "bloom_period"]) || ""
+        )
           .toString()
           .trim();
-        const propagationValue = (getCellValue(row, ["Propagation", "propagation"]) || "")
+        const flowerColorValue = (
+          getCellValue(row, ["Flower Color", "flower_color"]) || ""
+        )
           .toString()
           .trim();
-        const companionsValue = (getCellValue(row, ["Companions", "companions"]) || "")
+        const matureHeightValue = (
+          getCellValue(row, ["Mature Height", "mature_height"]) || ""
+        )
           .toString()
           .trim();
-        const featuredInput = (getCellValue(row, ["Featured", "featured"]) || "")
+        const pestIssuesValue = (
+          getCellValue(row, ["Pest Issues", "pest_issues"]) || ""
+        )
+          .toString()
+          .trim();
+        const diseaseInfoValue = (
+          getCellValue(row, ["Disease Info", "disease_info"]) || ""
+        )
+          .toString()
+          .trim();
+        const propagationValue = (
+          getCellValue(row, ["Propagation", "propagation"]) || ""
+        )
+          .toString()
+          .trim();
+        const companionsValue = (
+          getCellValue(row, ["Companions", "companions"]) || ""
+        )
+          .toString()
+          .trim();
+        const featuredInput = (
+          getCellValue(row, ["Featured", "featured"]) || ""
+        )
           .toString()
           .trim()
           .toLowerCase();
         const featured = ["yes", "true", "1"].includes(featuredInput);
 
-        const variantLabels = parseListValue(getCellValue(row, ["Variant Labels", "Variants"]) || "");
-        const variantPrices = parseListValue(getCellValue(row, ["Variant Prices", "Variant Price"]) || "");
+        const variantLabels = parseListValue(
+          getCellValue(row, ["Variant Labels", "Variants"]) || "",
+        );
+        const variantPrices = parseListValue(
+          getCellValue(row, ["Variant Prices", "Variant Price"]) || "",
+        );
         const variantQuantities = parseListValue(
-          getCellValue(row, ["Variant Quantities", "Variant Quantity", "Variant Qty"]) || "",
+          getCellValue(row, [
+            "Variant Quantities",
+            "Variant Quantity",
+            "Variant Qty",
+          ]) || "",
         );
         let variants = variantLabels
           .map((label, idx) => {
@@ -3071,7 +3601,8 @@ export function AdminProductsView() {
             const parsedPrice = parseSheetPriceValue(rawPrice);
             const rawQuantity = variantQuantities[idx] ?? "";
             const parsedQuantity = parseSheetQuantityValue(rawQuantity);
-            const variantQuantity = parsedQuantity === "" ? resolvedQuantity : parsedQuantity;
+            const variantQuantity =
+              parsedQuantity === "" ? resolvedQuantity : parsedQuantity;
             return {
               id: slugifyId(cleanedLabel) || `variant-${idx + 1}`,
               label: cleanedLabel,
@@ -3085,13 +3616,20 @@ export function AdminProductsView() {
         if (!variants.length) {
           const fallbackVariants = [];
           for (let i = 1; i <= 5; i += 1) {
-            const label = getCellValue(row, [`Variant ${i} Label`, `Variant ${i}`]);
+            const label = getCellValue(row, [
+              `Variant ${i} Label`,
+              `Variant ${i}`,
+            ]);
             const price = getCellValue(row, [`Variant ${i} Price`]);
-            const quantityValue = getCellValue(row, [`Variant ${i} Quantity`, `Variant ${i} Qty`]);
+            const quantityValue = getCellValue(row, [
+              `Variant ${i} Quantity`,
+              `Variant ${i} Qty`,
+            ]);
             if (!label) continue;
             const parsedPrice = parseSheetPriceValue(price);
             const parsedQuantity = parseSheetQuantityValue(quantityValue);
-            const variantQuantity = parsedQuantity === "" ? resolvedQuantity : parsedQuantity;
+            const variantQuantity =
+              parsedQuantity === "" ? resolvedQuantity : parsedQuantity;
             fallbackVariants.push({
               id: slugifyId(label) || `variant-${i}`,
               label: label.toString().trim(),
@@ -3105,12 +3643,17 @@ export function AdminProductsView() {
 
         const seoDescriptionSource = shortDescription || longDescription;
         const metaTitle = cleanedTitle;
-        const metaDescription = seoDescriptionSource ? seoDescriptionSource.slice(0, 160) : "";
-        const keywordTokens = `${cleanedTitle} ${tagRecord.name || ""}`.split(/\s+/).filter(Boolean);
+        const metaDescription = seoDescriptionSource
+          ? seoDescriptionSource.slice(0, 160)
+          : "";
+        const keywordTokens = `${cleanedTitle} ${tagRecord.name || ""}`
+          .split(/\s+/)
+          .filter(Boolean);
         const metaKeywords = Array.from(new Set(keywordTokens)).join(", ");
         const skuValue = generateSku(cleanedTitle, slugValue);
         const primaryImage = mainImageValue || galleryImages[0] || "";
-        const hasVariantInventory = Array.isArray(variants) && variants.length > 0;
+        const hasVariantInventory =
+          Array.isArray(variants) && variants.length > 0;
         const baseStockQuantity = hasVariantInventory ? null : resolvedQuantity;
 
         const docRef = doc(collection(db, "products"), docId);
@@ -3185,7 +3728,8 @@ export function AdminProductsView() {
     } catch (importError) {
       console.error(importError);
       setProductImportError(
-        importError.message || "We couldn't import products from the selected spreadsheet.",
+        importError.message ||
+          "We couldn't import products from the selected spreadsheet.",
       );
       setProductImportMessage(null);
     } finally {
@@ -3291,8 +3835,12 @@ export function AdminProductsView() {
       return;
     }
     const name = (categoryForm.name || "").toString().trim();
-    const description = sanitizePlainText((categoryForm.description || "").toString().trim());
-    const subHeading = sanitizePlainText((categoryForm.subHeading || "").toString().trim());
+    const description = sanitizePlainText(
+      (categoryForm.description || "").toString().trim(),
+    );
+    const subHeading = sanitizePlainText(
+      (categoryForm.subHeading || "").toString().trim(),
+    );
     const productDescription = sanitizePlainText(
       (categoryForm.productDescription || "").toString().trim(),
     );
@@ -3344,7 +3892,9 @@ export function AdminProductsView() {
         });
       }
       resetCategoryForm();
-      setCategoryStatusMessage(isEditing ? "Category updated" : "Category saved");
+      setCategoryStatusMessage(
+        isEditing ? "Category updated" : "Category saved",
+      );
     } catch (error) {
       setCategoryError(error.message || "Unable to save the category.");
     } finally {
@@ -3386,7 +3936,8 @@ export function AdminProductsView() {
           const slug = slugifyId(raw);
           const nameKey = raw.toLowerCase();
           const slugKey = slug.toLowerCase();
-          if (!slug || existingSlugs.has(slugKey) || existingNames.has(nameKey)) return;
+          if (!slug || existingSlugs.has(slugKey) || existingNames.has(nameKey))
+            return;
           existingSlugs.add(slugKey);
           existingNames.add(nameKey);
           toCreate.push({ name: raw, slug });
@@ -3422,6 +3973,80 @@ export function AdminProductsView() {
     }
   };
 
+  const handleRequestCategoryVisibilityChange = (category, nextStatus) => {
+    if (!category || !["live", "draft"].includes(nextStatus)) return;
+    const matchingProducts = products.filter((product) =>
+      productBelongsToCategory(product, category),
+    );
+    setPendingCategoryVisibilityChange({
+      category,
+      nextStatus,
+      productCount: matchingProducts.length,
+    });
+  };
+
+  const handleConfirmCategoryVisibilityChange = async () => {
+    const pending = pendingCategoryVisibilityChange;
+    if (!pending?.category) return;
+    if (!inventoryEnabled || !db) {
+      setCategoryError("You do not have permission to update categories.");
+      setPendingCategoryVisibilityChange(null);
+      return;
+    }
+
+    const { category, nextStatus } = pending;
+    const shouldHide = nextStatus === "draft";
+
+    try {
+      setCategorySaving(true);
+      setCategoryError(null);
+
+      const matchingProducts = products.filter((product) =>
+        productBelongsToCategory(product, category),
+      );
+
+      if (matchingProducts.length) {
+        for (let i = 0; i < matchingProducts.length; i += 450) {
+          const batch = writeBatch(db);
+          matchingProducts.slice(i, i + 450).forEach((product) => {
+            const productPayload = {
+              status: shouldHide ? "draft" : "live",
+              featured: false,
+              updatedAt: serverTimestamp(),
+            };
+            if (!shouldHide) {
+              delete productPayload.featured;
+            }
+            batch.update(doc(db, "products", product.id), productPayload);
+          });
+          await batch.commit();
+        }
+      }
+
+      await updateDoc(doc(db, "productCategories", category.id), {
+        status: shouldHide ? "draft" : "live",
+        hidden: shouldHide,
+        updatedAt: serverTimestamp(),
+      });
+
+      setCategoryStatusMessage(
+        shouldHide
+          ? `Category hidden and ${matchingProducts.length} product${
+              matchingProducts.length === 1 ? "" : "s"
+            } moved to draft.`
+          : `Category is visible again and ${matchingProducts.length} product${
+              matchingProducts.length === 1 ? "" : "s"
+            } moved to live.`,
+      );
+    } catch (error) {
+      setCategoryError(
+        error.message || "Unable to update category visibility.",
+      );
+    } finally {
+      setCategorySaving(false);
+      setPendingCategoryVisibilityChange(null);
+    }
+  };
 
   const handleConfirmDeleteCategory = async () => {
     if (!pendingCategoryDelete) return;
@@ -3434,7 +4059,11 @@ export function AdminProductsView() {
       setCategorySaving(true);
       setCategoryError(null);
       const normalizedTargetValues = new Set(
-        [pendingCategoryDelete.id, pendingCategoryDelete.slug, pendingCategoryDelete.name]
+        [
+          pendingCategoryDelete.id,
+          pendingCategoryDelete.slug,
+          pendingCategoryDelete.name,
+        ]
           .filter(Boolean)
           .map((value) => value.toString().trim().toLowerCase()),
       );
@@ -3446,7 +4075,10 @@ export function AdminProductsView() {
 
         if (Array.isArray(product.category_ids)) {
           const nextCategoryIds = product.category_ids.filter(
-            (value) => !normalizedTargetValues.has((value ?? "").toString().trim().toLowerCase()),
+            (value) =>
+              !normalizedTargetValues.has(
+                (value ?? "").toString().trim().toLowerCase(),
+              ),
           );
           if (nextCategoryIds.length !== product.category_ids.length) {
             payload.category_ids = nextCategoryIds;
@@ -3456,7 +4088,10 @@ export function AdminProductsView() {
 
         if (Array.isArray(product.categoryIds)) {
           const nextCategoryIds = product.categoryIds.filter(
-            (value) => !normalizedTargetValues.has((value ?? "").toString().trim().toLowerCase()),
+            (value) =>
+              !normalizedTargetValues.has(
+                (value ?? "").toString().trim().toLowerCase(),
+              ),
           );
           if (nextCategoryIds.length !== product.categoryIds.length) {
             payload.categoryIds = nextCategoryIds;
@@ -3466,7 +4101,9 @@ export function AdminProductsView() {
 
         if (
           product.categoryId &&
-          normalizedTargetValues.has(product.categoryId.toString().trim().toLowerCase())
+          normalizedTargetValues.has(
+            product.categoryId.toString().trim().toLowerCase(),
+          )
         ) {
           payload.categoryId = deleteField();
           changed = true;
@@ -3474,7 +4111,9 @@ export function AdminProductsView() {
 
         if (
           product.categorySlug &&
-          normalizedTargetValues.has(product.categorySlug.toString().trim().toLowerCase())
+          normalizedTargetValues.has(
+            product.categorySlug.toString().trim().toLowerCase(),
+          )
         ) {
           payload.categorySlug = deleteField();
           changed = true;
@@ -3482,7 +4121,9 @@ export function AdminProductsView() {
 
         if (
           product.category &&
-          normalizedTargetValues.has(product.category.toString().trim().toLowerCase())
+          normalizedTargetValues.has(
+            product.category.toString().trim().toLowerCase(),
+          )
         ) {
           payload.category = deleteField();
           changed = true;
@@ -3550,10 +4191,12 @@ export function AdminProductsView() {
   const handleToggleFeaturedProduct = async (product) => {
     if (!db || !inventoryEnabled || !product.id) return;
     const isFeatured = Boolean(product.featured);
-    const currentFeaturedCount = products.filter((entry) => entry.featured).length;
+    const currentFeaturedCount = products.filter(
+      (entry) => entry.featured,
+    ).length;
     if (!isFeatured && currentFeaturedCount >= MAX_FEATURED_PRODUCTS) {
       setProductError(
-        `Only ${MAX_FEATURED_PRODUCTS} products can be featured. Unfeature one to continue.`
+        `Only ${MAX_FEATURED_PRODUCTS} products can be featured. Unfeature one to continue.`,
       );
       return;
     }
@@ -3565,9 +4208,9 @@ export function AdminProductsView() {
         updatedAt: serverTimestamp(),
       });
       setStatusMessage(
-        !isFeatured ?
-           "Product featured on the home page."
-          : "Product removed from the featured list."
+        !isFeatured
+          ? "Product featured on the home page."
+          : "Product removed from the featured list.",
       );
     } catch (toggleError) {
       setProductError(toggleError.message);
@@ -3587,13 +4230,21 @@ export function AdminProductsView() {
     const slug = productForm.slug.trim();
     const sku = productForm.sku.trim();
     const isGiftCardProduct = Boolean(productForm.isGiftCard);
-    const shortDescriptionText = sanitizePlainText(productForm.shortDescription);
+    const shortDescriptionText = sanitizePlainText(
+      productForm.shortDescription,
+    );
     const longDescriptionText = sanitizePlainText(productForm.longDescription);
     const priceNumber = isGiftCardProduct ? 0 : Number(productForm.price);
-    const salePriceNumber =
-      isGiftCardProduct ? null : productForm.salePrice === "" ? null : Number(productForm.salePrice);
-    const stockQuantityInput =
-      isGiftCardProduct ? null : productForm.stockQuantity === "" ? null : Number(productForm.stockQuantity);
+    const salePriceNumber = isGiftCardProduct
+      ? null
+      : productForm.salePrice === ""
+        ? null
+        : Number(productForm.salePrice);
+    const stockQuantityInput = isGiftCardProduct
+      ? null
+      : productForm.stockQuantity === ""
+        ? null
+        : Number(productForm.stockQuantity);
     const derivedStatus = productForm.status || "draft";
 
     if (!title) {
@@ -3608,7 +4259,11 @@ export function AdminProductsView() {
       setProductError("Please enter a valid price.");
       return;
     }
-    if (!isGiftCardProduct && salePriceNumber !== null && !Number.isFinite(salePriceNumber)) {
+    if (
+      !isGiftCardProduct &&
+      salePriceNumber !== null &&
+      !Number.isFinite(salePriceNumber)
+    ) {
       setProductError("Please enter a valid sale price.");
       return;
     }
@@ -3622,27 +4277,36 @@ export function AdminProductsView() {
       return;
     }
 
-    const normalizedCategoryIds = Array.isArray(productForm.categoryIds) ?
-       productForm.categoryIds.filter(Boolean)
+    const normalizedCategoryIds = Array.isArray(productForm.categoryIds)
+      ? productForm.categoryIds.filter(Boolean)
       : [];
-    const normalizedTagIds = Array.isArray(productForm.tagIds) ?
-       productForm.tagIds.filter(Boolean)
+    const normalizedTagIds = Array.isArray(productForm.tagIds)
+      ? productForm.tagIds.filter(Boolean)
       : [];
     const tagLabels = normalizedTagIds
       .map((tagId) => tagOptions.find((tag) => tag.id === tagId).name)
       .filter(Boolean);
     const seoDescriptionSource = shortDescriptionText || longDescriptionText;
     const metaTitle = title;
-    const metaDescription = seoDescriptionSource ? seoDescriptionSource.slice(0, 160) : "";
-    const keywordTokens = `${title} ${tagLabels.join(" ")}`.split(/\s+/).filter(Boolean);
+    const metaDescription = seoDescriptionSource
+      ? seoDescriptionSource.slice(0, 160)
+      : "";
+    const keywordTokens = `${title} ${tagLabels.join(" ")}`
+      .split(/\s+/)
+      .filter(Boolean);
     const metaKeywords = Array.from(new Set(keywordTokens)).join(", ");
     const skuValue = sku || generateSku(title, slug);
-    const giftCardExpiryDays = normalizeGiftCardExpiryDays(productForm.giftCardExpiryDays, 365);
+    const giftCardExpiryDays = normalizeGiftCardExpiryDays(
+      productForm.giftCardExpiryDays,
+      365,
+    );
     const giftCardTerms = (productForm.giftCardTerms || "").toString().trim();
-    const effectiveGiftCardTerms = giftCardTerms || INITIAL_PRODUCT_FORM.giftCardTerms;
-    const sanitizedGiftCardOptions = (Array.isArray(productForm.giftCardOptions)
-      ? productForm.giftCardOptions
-      : []
+    const effectiveGiftCardTerms =
+      giftCardTerms || INITIAL_PRODUCT_FORM.giftCardTerms;
+    const sanitizedGiftCardOptions = (
+      Array.isArray(productForm.giftCardOptions)
+        ? productForm.giftCardOptions
+        : []
     )
       .map((option, index) => {
         const label = (option?.label || "").toString().trim();
@@ -3659,7 +4323,9 @@ export function AdminProductsView() {
       })
       .filter(Boolean);
 
-    const rawVariants = Array.isArray(productForm.variants) ? productForm.variants : [];
+    const rawVariants = Array.isArray(productForm.variants)
+      ? productForm.variants
+      : [];
     const invalidVariantQuantities = [];
     const sanitizedVariants = rawVariants
       .map((variant, index) => {
@@ -3669,12 +4335,19 @@ export function AdminProductsView() {
         const quantityInput = (variant.quantity ?? "").toString().trim();
         const quantityNumber = Number(quantityInput);
         const hasQuantity = quantityInput !== "";
-        if (productForm.hasVariants && (!hasQuantity || !Number.isFinite(quantityNumber) || quantityNumber < 0)) {
+        if (
+          productForm.hasVariants &&
+          (!hasQuantity ||
+            !Number.isFinite(quantityNumber) ||
+            quantityNumber < 0)
+        ) {
           invalidVariantQuantities.push(label || `Variant ${index + 1}`);
           return null;
         }
         const normalizedQuantity =
-          hasQuantity && Number.isFinite(quantityNumber) ? Math.max(0, Math.floor(quantityNumber)) : null;
+          hasQuantity && Number.isFinite(quantityNumber)
+            ? Math.max(0, Math.floor(quantityNumber))
+            : null;
         return {
           id: variant.id || slugifyId(label) || `variant-${index + 1}`,
           label,
@@ -3684,24 +4357,31 @@ export function AdminProductsView() {
         };
       })
       .filter(Boolean);
-    if (!isGiftCardProduct && productForm.hasVariants && invalidVariantQuantities.length > 0) {
+    if (
+      !isGiftCardProduct &&
+      productForm.hasVariants &&
+      invalidVariantQuantities.length > 0
+    ) {
       setProductError("Enter a valid stock quantity for every variant.");
       return;
     }
-    if (!isGiftCardProduct && productForm.hasVariants && sanitizedVariants.length === 0) {
+    if (
+      !isGiftCardProduct &&
+      productForm.hasVariants &&
+      sanitizedVariants.length === 0
+    ) {
       setProductError("Add at least one variant before saving.");
       return;
     }
     const normalizedVariants = isGiftCardProduct
       ? []
       : productForm.hasVariants
-      ? sanitizedVariants
-      : [];
+        ? sanitizedVariants
+        : [];
     const hasVariantInventory = normalizedVariants.length > 0;
-    const baseStockQuantity =
-      isGiftCardProduct
-        ? null
-        : hasVariantInventory
+    const baseStockQuantity = isGiftCardProduct
+      ? null
+      : hasVariantInventory
         ? null
         : stockQuantityInput === null
           ? productForm.stockStatus === "out_of_stock"
@@ -3712,7 +4392,7 @@ export function AdminProductsView() {
     try {
       setProductSaving(true);
       setStatusMessage(
-        editingProductId ? "Updating product..." : "Saving product..."
+        editingProductId ? "Updating product..." : "Saving product...",
       );
       let mainImageUrl = productForm.mainImage.trim();
       if (productMainImageFile) {
@@ -3723,8 +4403,8 @@ export function AdminProductsView() {
       let galleryUrls = isGiftCardProduct
         ? []
         : Array.isArray(productForm.galleryImages)
-        ? productForm.galleryImages.filter(Boolean)
-        : [];
+          ? productForm.galleryImages.filter(Boolean)
+          : [];
       if (!isGiftCardProduct && productGalleryFiles.length > 0) {
         for (const file of productGalleryFiles) {
           const uploaded = await uploadProductMedia(file);
@@ -3733,14 +4413,21 @@ export function AdminProductsView() {
       }
       const limitedGallery = galleryUrls.slice(0, MAX_PRODUCT_IMAGES);
       const primaryImage = mainImageUrl || limitedGallery[0] || "";
-      const finalGallery = isGiftCardProduct ? (primaryImage ? [primaryImage] : []) : limitedGallery;
-      const finalVideoEmbed = isGiftCardProduct ? "" : productForm.videoEmbed.trim();
+      const finalGallery = isGiftCardProduct
+        ? primaryImage
+          ? [primaryImage]
+          : []
+        : limitedGallery;
+      const finalVideoEmbed = isGiftCardProduct
+        ? ""
+        : productForm.videoEmbed.trim();
 
-      const primaryCategory = normalizedCategoryIds.length ?
-         resolveCategory(normalizedCategoryIds[0])
+      const primaryCategory = normalizedCategoryIds.length
+        ? resolveCategory(normalizedCategoryIds[0])
         : null;
       const primaryCategoryLabel = primaryCategory.name || "";
-      const primaryCategoryId = primaryCategory.id || normalizedCategoryIds[0] || "";
+      const primaryCategoryId =
+        primaryCategory.id || normalizedCategoryIds[0] || "";
       const primaryCategorySlug = primaryCategory.slug || "";
 
       const dimensionsPayload = {
@@ -3748,9 +4435,13 @@ export function AdminProductsView() {
         height: productForm.dimensions.height || "",
         depth: productForm.dimensions.depth || "",
       };
-      const preorderSendMonthValue = normalizePreorderSendMonth(productForm.preorderSendMonth);
+      const preorderSendMonthValue = normalizePreorderSendMonth(
+        productForm.preorderSendMonth,
+      );
       const preorderSendMonthPayload =
-        !isGiftCardProduct && productForm.stockStatus === "preorder" ? preorderSendMonthValue : "";
+        !isGiftCardProduct && productForm.stockStatus === "preorder"
+          ? preorderSendMonthValue
+          : "";
 
       const payload = {
         title,
@@ -3773,9 +4464,15 @@ export function AdminProductsView() {
         soil_type: isGiftCardProduct ? "" : productForm.soilType || "",
         watering: isGiftCardProduct ? "" : productForm.watering || "",
         climate: isGiftCardProduct ? "" : productForm.climate || "",
-        planting_depth: isGiftCardProduct ? "" : productForm.plantingDepth || "",
-        planting_spacing: isGiftCardProduct ? "" : productForm.plantingSpacing || "",
-        best_planting_time: isGiftCardProduct ? "" : productForm.bestPlantingTime || "",
+        planting_depth: isGiftCardProduct
+          ? ""
+          : productForm.plantingDepth || "",
+        planting_spacing: isGiftCardProduct
+          ? ""
+          : productForm.plantingSpacing || "",
+        best_planting_time: isGiftCardProduct
+          ? ""
+          : productForm.bestPlantingTime || "",
         bloom_period: isGiftCardProduct ? "" : productForm.bloomPeriod || "",
         flower_color: isGiftCardProduct ? "" : productForm.flowerColor || "",
         mature_height: isGiftCardProduct ? "" : productForm.matureHeight || "",
@@ -3790,18 +4487,18 @@ export function AdminProductsView() {
         dimensions: dimensionsPayload,
         country_of_origin: productForm.countryOfOrigin.trim(),
         delivery_info: productForm.deliveryInfo.trim(),
-        related_product_ids: Array.isArray(productForm.relatedProductIds) ?
-           isGiftCardProduct
+        related_product_ids: Array.isArray(productForm.relatedProductIds)
+          ? isGiftCardProduct
             ? []
             : productForm.relatedProductIds.filter(Boolean)
           : [],
-        upsell_product_ids: Array.isArray(productForm.upsellProductIds) ?
-           isGiftCardProduct
+        upsell_product_ids: Array.isArray(productForm.upsellProductIds)
+          ? isGiftCardProduct
             ? []
             : productForm.upsellProductIds.filter(Boolean)
           : [],
-        cross_sell_product_ids: Array.isArray(productForm.crossSellProductIds) ?
-           isGiftCardProduct
+        cross_sell_product_ids: Array.isArray(productForm.crossSellProductIds)
+          ? isGiftCardProduct
             ? []
             : productForm.crossSellProductIds.filter(Boolean)
           : [],
@@ -3814,7 +4511,9 @@ export function AdminProductsView() {
         categorySlug: primaryCategorySlug,
         status: derivedStatus,
         quantity: baseStockQuantity,
-        forceOutOfStock: isGiftCardProduct ? false : productForm.stockStatus === "out_of_stock",
+        forceOutOfStock: isGiftCardProduct
+          ? false
+          : productForm.stockStatus === "out_of_stock",
         variants: normalizedVariants,
         featured: Boolean(productForm.featured),
         isGiftCard: isGiftCardProduct,
@@ -3850,10 +4549,10 @@ export function AdminProductsView() {
     <div className="admin-panel admin-panel--full">
       <div className="admin-panel__header">
         <div>
-          <h2>{activeTab === "subscriptions" ? "Subscriptions" : "Products"}</h2>
-          <p className="admin-panel__note">
-            {headerNote}
-          </p>
+          <h2>
+            {activeTab === "subscriptions" ? "Subscriptions" : "Products"}
+          </h2>
+          <p className="admin-panel__note">{headerNote}</p>
         </div>
         {activeTab === "products" && (
           <div>
@@ -3891,9 +4590,17 @@ export function AdminProductsView() {
                 Add Product
               </button>
             </div>
-            {productImportError && <p className="admin-panel__error">{productImportError}</p>}
+            {productImportError && (
+              <p className="admin-panel__error">{productImportError}</p>
+            )}
             {productImportMessage && !productImportError && (
-              <p className={productImporting ? "admin-panel__notice" : "admin-panel__status"}>
+              <p
+                className={
+                  productImporting
+                    ? "admin-panel__notice"
+                    : "admin-panel__status"
+                }
+              >
                 {productImportMessage}
               </p>
             )}
@@ -3919,13 +4626,17 @@ export function AdminProductsView() {
           <NavLink
             to="/admin/products"
             end
-            className={({ isActive }) => `admin-tab${isActive ? " is-active" : ""}`}
+            className={({ isActive }) =>
+              `admin-tab${isActive ? " is-active" : ""}`
+            }
           >
             Products
           </NavLink>
           <NavLink
             to="/admin/products/categories"
-            className={({ isActive }) => `admin-tab${isActive ? " is-active" : ""}`}
+            className={({ isActive }) =>
+              `admin-tab${isActive ? " is-active" : ""}`
+            }
           >
             Categories
           </NavLink>
@@ -3939,7 +4650,10 @@ export function AdminProductsView() {
               className="btn btn--primary"
               type="button"
               disabled={!inventoryEnabled}
-              onClick={() => { resetCategoryForm(); setIsCategoryModalOpen(true); }}
+              onClick={() => {
+                resetCategoryForm();
+                setIsCategoryModalOpen(true);
+              }}
             >
               Add category
             </button>
@@ -3947,7 +4661,9 @@ export function AdminProductsView() {
               className="btn btn--secondary"
               type="button"
               onClick={handleSeedCategoriesFromProducts}
-              disabled={categorySaving || !inventoryEnabled || products.length === 0}
+              disabled={
+                categorySaving || !inventoryEnabled || products.length === 0
+              }
             >
               {categorySaving ? "Working..." : "Seed from existing products"}
             </button>
@@ -3962,16 +4678,54 @@ export function AdminProductsView() {
             {categoryOptions.length ? (
               categoryOptions.map((category) => {
                 const usageCount = categoryUsage.get(category.id) || 0;
+                const liveUsageCount = categoryLiveUsage.get(category.id) || 0;
+                const isHiddenCategory = Boolean(
+                  category.hidden || category.status !== "live",
+                );
                 return (
                   <div className="admin-category-card" key={category.id}>
                     <div>
-                      <strong>{category.name}</strong>
+                      <div className="admin-category-card__title-row">
+                        <strong>{category.name}</strong>
+                        <span
+                          className={`admin-status ${
+                            isHiddenCategory
+                              ? "admin-status--draft"
+                              : "admin-status--live"
+                          }`}
+                        >
+                          {isHiddenCategory ? "Hidden" : "Live"}
+                        </span>
+                      </div>
                       <p className="modal__meta">
                         {usageCount}
                         {usageCount === 1 ? " product" : " products"}
+                        {usageCount > 0 ? ` (${liveUsageCount} live)` : ""}
                       </p>
                     </div>
                     <div className="admin-category-card__actions">
+                      <button
+                        className="icon-btn"
+                        type="button"
+                        disabled={categorySaving || !inventoryEnabled}
+                        onClick={() =>
+                          handleRequestCategoryVisibilityChange(
+                            category,
+                            isHiddenCategory ? "live" : "draft",
+                          )
+                        }
+                        title={
+                          isHiddenCategory
+                            ? "Show category in storefront navigation"
+                            : "Hide category and draft its products"
+                        }
+                      >
+                        {isHiddenCategory ? (
+                          <IconEye aria-hidden="true" />
+                        ) : (
+                          <IconEyeOff aria-hidden="true" />
+                        )}
+                      </button>
                       <button
                         className="icon-btn"
                         type="button"
@@ -3999,7 +4753,9 @@ export function AdminProductsView() {
                 );
               })
             ) : (
-              <p className="admin-panel__notice">No categories yet. Click "Add category" to create one.</p>
+              <p className="admin-panel__notice">
+                No categories yet. Click "Add category" to create one.
+              </p>
             )}
           </div>
         </div>
@@ -4033,7 +4789,10 @@ export function AdminProductsView() {
                 placeholder="Category name"
                 value={categoryForm.name}
                 onChange={(event) =>
-                  setCategoryForm((prev) => ({ ...prev, name: event.target.value }))
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
                 }
                 required
               />
@@ -4043,7 +4802,10 @@ export function AdminProductsView() {
                 placeholder="Short category description"
                 value={categoryForm.description}
                 onChange={(event) =>
-                  setCategoryForm((prev) => ({ ...prev, description: event.target.value }))
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    description: event.target.value,
+                  }))
                 }
               />
               <input
@@ -4051,7 +4813,10 @@ export function AdminProductsView() {
                 placeholder="Collection sub heading"
                 value={categoryForm.subHeading}
                 onChange={(event) =>
-                  setCategoryForm((prev) => ({ ...prev, subHeading: event.target.value }))
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    subHeading: event.target.value,
+                  }))
                 }
               />
               <textarea
@@ -4060,7 +4825,10 @@ export function AdminProductsView() {
                 placeholder="Collection product description"
                 value={categoryForm.productDescription}
                 onChange={(event) =>
-                  setCategoryForm((prev) => ({ ...prev, productDescription: event.target.value }))
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    productDescription: event.target.value,
+                  }))
                 }
               />
               <label className="admin-form__field admin-form__full">
@@ -4093,7 +4861,8 @@ export function AdminProductsView() {
                 )}
               </label>
               <p className="modal__meta">
-                Categories appear in the Shop dropdown and power the category hero on the products page.
+                Categories appear in the Shop dropdown and power the category
+                hero on the products page.
               </p>
               <div className="admin-modal__actions admin-form__actions">
                 <button
@@ -4110,8 +4879,12 @@ export function AdminProductsView() {
                   disabled={categorySaving || !inventoryEnabled}
                 >
                   {categorySaving
-                    ? editingCategory ? "Updating..." : "Saving..."
-                    : editingCategory ? "Update Category" : "Save Category"}
+                    ? editingCategory
+                      ? "Updating..."
+                      : "Saving..."
+                    : editingCategory
+                      ? "Update Category"
+                      : "Save Category"}
                 </button>
               </div>
               {categoryError && (
@@ -4138,6 +4911,28 @@ export function AdminProductsView() {
         onConfirm={handleConfirmDeleteCategory}
       />
 
+      <ConfirmDialog
+        open={Boolean(pendingCategoryVisibilityChange)}
+        title={
+          pendingCategoryVisibilityChange?.nextStatus === "draft"
+            ? "Hide category"
+            : "Show category"
+        }
+        message={
+          pendingCategoryVisibilityChange?.nextStatus === "draft"
+            ? `${pendingCategoryVisibilityChange.category.name} will be hidden from the storefront category navigation, and ${pendingCategoryVisibilityChange.productCount} product(s) in this category will be moved to Draft.`
+            : `${pendingCategoryVisibilityChange?.category?.name || "This category"} will be visible in storefront category navigation again, and ${pendingCategoryVisibilityChange?.productCount || 0} product(s) in this category will be moved to Live.`
+        }
+        confirmLabel={
+          pendingCategoryVisibilityChange?.nextStatus === "draft"
+            ? "Hide and draft products"
+            : "Show and publish products"
+        }
+        busy={categorySaving}
+        onCancel={() => setPendingCategoryVisibilityChange(null)}
+        onConfirm={handleConfirmCategoryVisibilityChange}
+      />
+
       {(activeTab === "products" || activeTab === "subscriptions") && (
         <div className="admin-panel__content">
           <div className="admin-table__wrapper">
@@ -4146,12 +4941,13 @@ export function AdminProductsView() {
                 No categories yet. Add one to help customers browse products.
               </p>
             )}
-            {activeTab === "subscriptions" && !defaultSubscriptionCategoryId && (
-              <p className="admin-panel__notice">
-                Create a category named <strong>Subscriptions</strong>, then assign plans to that
-                category.
-              </p>
-            )}
+            {activeTab === "subscriptions" &&
+              !defaultSubscriptionCategoryId && (
+                <p className="admin-panel__notice">
+                  Create a category named <strong>Subscriptions</strong>, then
+                  assign plans to that category.
+                </p>
+              )}
             {managedProducts.length > 0 ? (
               <table className="admin-table">
                 <thead>
@@ -4172,25 +4968,35 @@ export function AdminProductsView() {
                     const updatedAt = product.updatedAt?.toDate?.()
                       ? bookingDateFormatter.format(product.updatedAt.toDate())
                       : "-";
-                    const isGiftCardProduct = Boolean(product.isGiftCard || product.is_gift_card);
+                    const isGiftCardProduct = Boolean(
+                      product.isGiftCard || product.is_gift_card,
+                    );
                     const stockStatus = getStockStatus({
                       quantity: product.stock_quantity ?? product.quantity,
-                      forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
+                      forceOutOfStock:
+                        product.forceOutOfStock ||
+                        product.stock_status === "out_of_stock",
                       status: product.stock_status,
                       isGiftCard: isGiftCardProduct,
                     });
                     const stockLabel =
-                      stockStatus.state === "preorder" ?
-                         "Preorder"
-                        : stockStatus.isForced ?
-                         "Out of stock (manual)"
-                        : stockStatus.label;
-                    const stockQuantityLabel = isGiftCardProduct ? "Unlimited" : stockStatus.quantity ?? "-";
-                    const preorderSendMonth = getProductPreorderSendMonth(product);
-                    const preorderSendMonthLabel = formatPreorderSendMonth(preorderSendMonth);
+                      stockStatus.state === "preorder"
+                        ? "Preorder"
+                        : stockStatus.isForced
+                          ? "Out of stock (manual)"
+                          : stockStatus.label;
+                    const stockQuantityLabel = isGiftCardProduct
+                      ? "Unlimited"
+                      : (stockStatus.quantity ?? "-");
+                    const preorderSendMonth =
+                      getProductPreorderSendMonth(product);
+                    const preorderSendMonthLabel =
+                      formatPreorderSendMonth(preorderSendMonth);
                     const imageCandidates = [
                       product.main_image,
-                      ...(Array.isArray(product.gallery_images) ? product.gallery_images : []),
+                      ...(Array.isArray(product.gallery_images)
+                        ? product.gallery_images
+                        : []),
                       product.image,
                       ...(Array.isArray(product.images) ? product.images : []),
                     ]
@@ -4205,7 +5011,8 @@ export function AdminProductsView() {
                     } else if (product.categoryId) {
                       rawCategoryValues.push(product.categoryId);
                     }
-                    if (product.category) rawCategoryValues.push(product.category);
+                    if (product.category)
+                      rawCategoryValues.push(product.category);
                     const categoryLabels = [];
                     rawCategoryValues
                       .map((value) => (value ?? "").toString().trim())
@@ -4213,19 +5020,26 @@ export function AdminProductsView() {
                       .forEach((value) => {
                         const resolved = resolveCategory(value);
                         const label = resolved?.name || value;
-                        if (!categoryLabels.includes(label)) categoryLabels.push(label);
+                        if (!categoryLabels.includes(label))
+                          categoryLabels.push(label);
                       });
                     const primaryCategory = categoryLabels[0] || "-";
-                    const extraCategoryCount = Math.max(0, categoryLabels.length - 1);
+                    const extraCategoryCount = Math.max(
+                      0,
+                      categoryLabels.length - 1,
+                    );
                     const descriptionText = stripHtml(
                       product.short_description ||
                         product.shortDescription ||
                         product.description ||
                         "",
                     );
-                    const salePriceValue = product.sale_price ?? product.salePrice ?? null;
+                    const salePriceValue =
+                      product.sale_price ?? product.salePrice ?? null;
                     const hasSalePrice =
-                      salePriceValue !== null && salePriceValue !== undefined && salePriceValue !== "";
+                      salePriceValue !== null &&
+                      salePriceValue !== undefined &&
+                      salePriceValue !== "";
                     return (
                       <tr key={product.id}>
                         <td>
@@ -4234,7 +5048,10 @@ export function AdminProductsView() {
                               <img
                                 src={image}
                                 alt={product.title || product.name}
-                                className="admin-table__thumb" loading="lazy" decoding="async"/>
+                                className="admin-table__thumb"
+                                loading="lazy"
+                                decoding="async"
+                              />
                             ) : (
                               <span className="admin-table__thumb admin-table__thumb--placeholder">
                                 <IconImage aria-hidden="true" />
@@ -4251,29 +5068,40 @@ export function AdminProductsView() {
                         <td>
                           <span>{primaryCategory}</span>
                           {extraCategoryCount > 0 && (
-                            <p className="modal__meta">+{extraCategoryCount} more</p>
+                            <p className="modal__meta">
+                              +{extraCategoryCount} more
+                            </p>
                           )}
                         </td>
                         <td>
                           {hasSalePrice ? (
                             <>
-                              <strong>{formatPriceLabel(salePriceValue)}</strong>
-                              <p className="modal__meta">Was {formatPriceLabel(product.price)}</p>
+                              <strong>
+                                {formatPriceLabel(salePriceValue)}
+                              </strong>
+                              <p className="modal__meta">
+                                Was {formatPriceLabel(product.price)}
+                              </p>
                             </>
                           ) : (
                             formatPriceLabel(product.price)
                           )}
                         </td>
                         <td>
-                          <span className={`admin-status admin-status--stock-${stockStatus.state}`}>
+                          <span
+                            className={`admin-status admin-status--stock-${stockStatus.state}`}
+                          >
                             {stockLabel}
                           </span>
                           <p className="modal__meta">
                             Qty: {stockQuantityLabel}
                           </p>
-                          {stockStatus.state === "preorder" && preorderSendMonthLabel && (
-                            <p className="modal__meta">Send month: {preorderSendMonthLabel}</p>
-                          )}
+                          {stockStatus.state === "preorder" &&
+                            preorderSendMonthLabel && (
+                              <p className="modal__meta">
+                                Send month: {preorderSendMonthLabel}
+                              </p>
+                            )}
                         </td>
                         <td>
                           <button
@@ -4283,14 +5111,20 @@ export function AdminProductsView() {
                             type="button"
                             aria-pressed={product.featured ? "true" : "false"}
                             onClick={() => handleToggleFeaturedProduct(product)}
-                            disabled={!inventoryEnabled || featuredUpdatingId === product.id}
+                            disabled={
+                              !inventoryEnabled ||
+                              featuredUpdatingId === product.id
+                            }
                             title={
-                              product.featured ?
-                                 "Remove from home page features"
+                              product.featured
+                                ? "Remove from home page features"
                                 : "Feature on home page"
                             }
                           >
-                            <IconStar filled={Boolean(product.featured)} aria-hidden="true" />
+                            <IconStar
+                              filled={Boolean(product.featured)}
+                              aria-hidden="true"
+                            />
                           </button>
                         </td>
                         <td>{updatedAt}</td>
@@ -4324,10 +5158,15 @@ export function AdminProductsView() {
             )}
             {activeTab === "products" && (
               <p className="modal__meta">
-                {featuredProductCount}/{MAX_FEATURED_PRODUCTS} products featured on the home page.
+                {featuredProductCount}/{MAX_FEATURED_PRODUCTS} products featured
+                on the home page.
               </p>
             )}
-            <AdminPagination page={productPage} total={managedProducts.length} onPageChange={setProductPage} />
+            <AdminPagination
+              page={productPage}
+              total={managedProducts.length}
+              onPageChange={setProductPage}
+            />
             {inventoryLoading && (
               <p className="modal__meta">Syncing latest products...</p>
             )}
@@ -4369,730 +5208,885 @@ export function AdminProductsView() {
                 : "Add Product"}
           </h3>
           <div className="admin-workshop-modal__body">
-          <form className="admin-form" onSubmit={handleCreateProduct}>
-            <div className="admin-form__section admin-form__full">
-              <div className="admin-form__section-header">
-                <h4>General</h4>
-                <span className={`badge badge--stock-${currentStockStatus.state || "in"}`}>
-                  {currentStockStatus.label}
-                </span>
-              </div>
-              <div className="admin-form__section-grid">
-                <label className="admin-form__field">
-                  Title *
-                  <input
-                    className="input"
-                    value={productForm.title}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, title: event.target.value }))
-                    }
-                    required
-                  />
-                </label>
-                <label className="admin-form__field admin-form__field--inline">
-                  Slug *
-                  <div className="admin-form__inline">
+            <form className="admin-form" onSubmit={handleCreateProduct}>
+              <div className="admin-form__section admin-form__full">
+                <div className="admin-form__section-header">
+                  <h4>General</h4>
+                  <span
+                    className={`badge badge--stock-${currentStockStatus.state || "in"}`}
+                  >
+                    {currentStockStatus.label}
+                  </span>
+                </div>
+                <div className="admin-form__section-grid">
+                  <label className="admin-form__field">
+                    Title *
                     <input
                       className="input"
-                      value={productForm.slug}
+                      value={productForm.title}
                       onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, slug: event.target.value }))
+                        setProductForm((prev) => ({
+                          ...prev,
+                          title: event.target.value,
+                        }))
                       }
                       required
                     />
-                    <button
-                      className="btn btn--secondary btn--small"
-                      type="button"
-                      onClick={() =>
-                        setProductForm((prev) => ({
-                          ...prev,
-                          slug: slugifyId(prev.title || prev.slug || ""),
-                        }))
-                      }
-                    >
-                      Use title
-                    </button>
-                  </div>
-                </label>
-                <label className="admin-form__field">
-                  Gift card product
-                  <select
-                    className="input"
-                    value={productForm.isGiftCard ? "yes" : "no"}
-                    onChange={(event) => handleToggleGiftCardProduct(event.target.value === "yes")}
-                  >
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
-                  </select>
-                </label>
-                {!productForm.isGiftCard && (
-                  <>
-                    <label className="admin-form__field">
-                      Price *
+                  </label>
+                  <label className="admin-form__field admin-form__field--inline">
+                    Slug *
+                    <div className="admin-form__inline">
                       <input
                         className="input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={productForm.price}
+                        value={productForm.slug}
                         onChange={(event) =>
-                          setProductForm((prev) => ({ ...prev, price: event.target.value }))
+                          setProductForm((prev) => ({
+                            ...prev,
+                            slug: event.target.value,
+                          }))
                         }
                         required
                       />
-                    </label>
-                    <label className="admin-form__field">
-                      Sale price
-                      <input
-                        className="input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={productForm.salePrice}
-                        onChange={(event) =>
-                          setProductForm((prev) => ({ ...prev, salePrice: event.target.value }))
+                      <button
+                        className="btn btn--secondary btn--small"
+                        type="button"
+                        onClick={() =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            slug: slugifyId(prev.title || prev.slug || ""),
+                          }))
                         }
-                      />
-                    </label>
-                  </>
-                )}
-                <label className="admin-form__field">
-                  Stock status
-                  <select
-                    className="input"
-                    value={productForm.stockStatus}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, stockStatus: event.target.value }))
-                    }
-                    disabled={productForm.isGiftCard}
-                  >
-                    <option value="in_stock">In stock</option>
-                    <option value="out_of_stock">Out of stock</option>
-                    <option value="preorder">Preorder</option>
-                  </select>
-                </label>
-                {!productForm.isGiftCard && (
-                  <label className="admin-form__field">
-                    Preorder send month
-                    <input
-                      className="input"
-                      type="month"
-                      value={productForm.preorderSendMonth}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({
-                          ...prev,
-                          preorderSendMonth: normalizePreorderSendMonth(event.target.value),
-                        }))
-                      }
-                      disabled={productForm.stockStatus !== "preorder"}
-                    />
-                  </label>
-                )}
-                {productForm.isGiftCard ? (
-                  <div className="admin-form__field">
-                    <span className="admin-panel__note">
-                      Stock quantity is unlimited for digital gift card products.
-                    </span>
-                  </div>
-                ) : productForm.hasVariants ? (
-                  <div className="admin-form__field">
-                    <span className="admin-panel__note">
-                      Base stock quantity is disabled for variant products and will be saved as null.
-                    </span>
-                  </div>
-                ) : (
-                  <label className="admin-form__field">
-                    Stock quantity
-                    <input
-                      className="input"
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={productForm.stockQuantity}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, stockQuantity: event.target.value }))
-                      }
-                    />
-                  </label>
-                )}
-                <label className="admin-form__field">
-                  Status
-                  <select
-                    className="input"
-                    value={productForm.status}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, status: event.target.value }))
-                    }
-                  >
-                    <option value="draft">Draft</option>
-                    <option value="live">Live</option>
-                    <option value="archived">Archived</option>
-                  </select>
-                </label>
-                <label className="admin-form__field">
-                  Featured on home page
-                  <select
-                    className="input"
-                    value={productForm.featured ? "yes" : "no"}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, featured: event.target.value === "yes" }))
-                    }
-                  >
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
-                  </select>
-                </label>
-                <div className="admin-form__field admin-form__full">
-                  <label>Categories</label>
-                  {categoryOptions.length ? (
-                    <>
-                      <select
-                        className="input"
-                        value={productForm.categoryIds[0] || ""}
-                        onChange={(event) => handleSingleSelectChange("categoryIds", event)}
                       >
-                        <option value="">Select a category</option>
-                        {categoryOptions.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </select>
-                    </>
-                  ) : (
-                    <p className="admin-panel__note">Create a category to organize products.</p>
-                  )}
-                </div>
-                <div className="admin-form__field admin-form__full">
-                  <label>Tags</label>
-                  {tagOptions.length ? (
-                    <select
-                      className="input"
-                      value={productForm.tagIds[0] || ""}
-                      onChange={(event) => handleSingleSelectChange("tagIds", event)}
-                    >
-                      <option value="">Select a tag (optional)</option>
-                      {tagOptions.map((tag) => (
-                        <option key={tag.id} value={tag.id}>
-                          {tag.name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <p className="admin-panel__note">No tags yet. Add one below.</p>
-                  )}
-                  <div className="admin-inline-form">
-                    <input
-                      className="input"
-                      placeholder="New tag"
-                      value={tagForm.name}
-                      onChange={(event) => setTagForm({ name: event.target.value })}
-                    />
-                    <button
-                      className="btn btn--secondary btn--small"
-                      type="button"
-                      onClick={handleCreateTag}
-                      disabled={tagSaving || !inventoryEnabled}
-                    >
-                      {tagSaving ? "Saving..." : "Add tag"}
-                    </button>
-                  </div>
-                  {tagError && <p className="admin-panel__error">{tagError}</p>}
-                  {tagStatusMessage && <p className="admin-panel__status">{tagStatusMessage}</p>}
-                </div>
-              </div>
-            </div>
-
-            <div className="admin-form__section admin-form__full">
-              <div className="admin-form__section-header">
-                <h4>Descriptions</h4>
-              </div>
-              <div className="admin-form__section-grid">
-                <label className="admin-form__field admin-form__full">
-                  Short description
-                  <textarea
-                    className="input textarea"
-                    rows="4"
-                    value={productForm.shortDescription}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, shortDescription: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field admin-form__full">
-                  Long description
-                  <textarea
-                    className="input textarea"
-                    rows="6"
-                    value={productForm.longDescription}
-                    onChange={(event) =>
-                      setProductForm((prev) => ({ ...prev, longDescription: event.target.value }))
-                    }
-                  />
-                </label>
-                <p className="admin-panel__note admin-form__full">
-                  Plain text only. Line breaks will be preserved on the product page. SEO metadata is generated from the
-                  title and short description.
-                </p>
-              </div>
-            </div>
-
-            <div className="admin-form__section admin-form__full">
-              <div className="admin-form__section-header">
-                <h4>Media</h4>
-              </div>
-              <div className="admin-form__section-grid">
-                <div className="admin-form__field admin-form__full">
-                  <label htmlFor="product-main-image">Main image</label>
-                  <input
-                    className="input input--file"
-                    id="product-main-image"
-                    type="file"
-                    accept="image/*"
-                    ref={productMainImageInputRef}
-                    onChange={handleMainImageChange}
-                  />
-                  <div className="admin-media-picker">
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      onClick={() => openMediaLibrary("main")}
-                    >
-                      Choose from library
-                    </button>
-                  </div>
-                  {productMainImagePreview && (
-                    <div className="admin-preview-grid">
-                      <div className="admin-preview-card">
-                        <img src={productMainImagePreview} alt="Main product preview" className="admin-preview" loading="lazy" decoding="async"/>
-                        <button
-                          className="icon-btn icon-btn--danger admin-preview-remove"
-                          type="button"
-                          onClick={handleRemoveMainImage}
-                          aria-label="Remove main image"
-                        >
-                          <IconTrash aria-hidden="true" />
-                        </button>
-                      </div>
+                        Use title
+                      </button>
                     </div>
-                  )}
-                </div>
-                {productForm.isGiftCard ? (
-                  <p className="admin-panel__note admin-form__full">
-                    Gift cards use a single main image only.
-                  </p>
-                ) : (
-                  <>
-                    <div className="admin-form__field admin-form__full">
-                      <label htmlFor="product-gallery-images">Gallery images</label>
-                      <input
-                        key={editingProductId ?? "new-product-gallery"}
-                        className="input input--file"
-                        id="product-gallery-images"
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        ref={productGalleryImageInputRef}
-                        onChange={handleGalleryImagesChange}
-                      />
-                      <div className="admin-media-picker">
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          onClick={() => openMediaLibrary("gallery")}
-                        >
-                          Choose from library
-                        </button>
-                      </div>
-                      <p className="admin-panel__note">
-                        Upload up to {MAX_PRODUCT_IMAGES} JPG or PNG files (max 3MB each).
-                      </p>
-                      {productGalleryPreviews.length > 0 && (
-                        <div className="admin-preview-grid">
-                          {productGalleryPreviews.map((preview, index) => (
-                            <div className="admin-preview-card" key={`${preview}-${index}`}>
-                              <img
-                                src={preview}
-                                alt={`Product gallery preview ${index + 1}`}
-                                className="admin-preview" loading="lazy" decoding="async"/>
-                              <button
-                                className="icon-btn icon-btn--danger admin-preview-remove"
-                                type="button"
-                                onClick={() => handleRemoveGalleryImage(index)}
-                                aria-label={`Remove gallery image ${index + 1}`}
-                              >
-                                <IconTrash aria-hidden="true" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <label className="admin-form__field admin-form__full">
-                      Video from YouTube
-                      <textarea
-                        className="input textarea"
-                        rows="3"
-                        value={productForm.videoEmbed}
-                        onChange={(event) =>
-                          setProductForm((prev) => ({ ...prev, videoEmbed: event.target.value }))
-                        }
-                        placeholder="https://www.youtube.com/watch?v=..."
-                      />
-                    </label>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {!productForm.isGiftCard && (
-              <div className="admin-form__section admin-form__full">
-                <div className="admin-form__section-header">
-                  <h4>Attributes</h4>
-                </div>
-                <div className="admin-form__section-grid">
+                  </label>
                   <label className="admin-form__field">
-                    Sunlight
+                    Gift card product
                     <select
                       className="input"
-                      value={productForm.sunlight}
+                      value={productForm.isGiftCard ? "yes" : "no"}
                       onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, sunlight: event.target.value }))
+                        handleToggleGiftCardProduct(
+                          event.target.value === "yes",
+                        )
                       }
-                    >
-                      <option value="">Select sunlight</option>
-                      <option value="full_sun">Full sun</option>
-                      <option value="partial_shade">Partial shade</option>
-                      <option value="shade">Shade</option>
-                    </select>
-                  </label>
-                  <label className="admin-form__field">
-                    Soil type
-                    <input
-                      className="input"
-                      value={productForm.soilType}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, soilType: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field">
-                    Watering
-                    <input
-                      className="input"
-                      value={productForm.watering}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, watering: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field">
-                    Climate
-                    <input
-                      className="input"
-                      value={productForm.climate}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, climate: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field">
-                    Planting depth
-                    <input
-                      className="input"
-                      value={productForm.plantingDepth}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, plantingDepth: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field">
-                    Planting spacing
-                    <input
-                      className="input"
-                      value={productForm.plantingSpacing}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, plantingSpacing: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field">
-                    Best planting time
-                    <input
-                      className="input"
-                      value={productForm.bestPlantingTime}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, bestPlantingTime: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field">
-                    Bloom period
-                    <input
-                      className="input"
-                      value={productForm.bloomPeriod}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, bloomPeriod: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field">
-                    Flower color
-                    <input
-                      className="input"
-                      value={productForm.flowerColor}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, flowerColor: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field">
-                    Mature height
-                    <input
-                      className="input"
-                      value={productForm.matureHeight}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, matureHeight: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field admin-form__full">
-                    Pest issues
-                    <textarea
-                      className="input textarea"
-                      rows="2"
-                      value={productForm.pestIssues}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, pestIssues: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field admin-form__full">
-                    Disease info
-                    <textarea
-                      className="input textarea"
-                      rows="2"
-                      value={productForm.diseaseInfo}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, diseaseInfo: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field admin-form__full">
-                    Propagation
-                    <textarea
-                      className="input textarea"
-                      rows="2"
-                      value={productForm.propagation}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, propagation: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="admin-form__field admin-form__full">
-                    Companions
-                    <textarea
-                      className="input textarea"
-                      rows="2"
-                      value={productForm.companions}
-                      onChange={(event) =>
-                        setProductForm((prev) => ({ ...prev, companions: event.target.value }))
-                      }
-                    />
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {!productForm.isGiftCard && (
-              <div className="admin-form__section admin-form__full">
-                <div className="admin-form__section-header">
-                  <h4>Variants</h4>
-                </div>
-                <div className="admin-form__section-grid">
-                  <label className="admin-form__field">
-                    Has variants
-                    <select
-                      className="input"
-                      value={productForm.hasVariants ? "yes" : "no"}
-                      onChange={(event) => handleToggleHasVariants(event.target.value === "yes")}
                     >
                       <option value="no">No</option>
                       <option value="yes">Yes</option>
                     </select>
                   </label>
-                  <p className="admin-panel__note admin-form__full">
-                    Add size, colour, shape, or other variants when enabled. Leave price blank to use the base price
-                    and set stock per variant.
-                  </p>
-                  {productForm.hasVariants ? (
+                  {!productForm.isGiftCard && (
                     <>
-                      {(productForm.variants || []).map((variant, index) => (
-                        <div className="admin-session-row" key={variant.id}>
-                          <div className="admin-session-field admin-session-field--label">
-                            <label
-                              className="admin-session-label"
-                              htmlFor={`product-variant-label-${variant.id}`}
-                            >
-                              Variant #{index + 1}
-                            </label>
-                            <input
-                              className="input"
-                              id={`product-variant-label-${variant.id}`}
-                              value={variant.label}
-                              onChange={(event) =>
-                                handleProductVariantChange(variant.id, "label", event.target.value)
-                              }
-                              placeholder="Small, Red, Round, etc."
-                            />
-                          </div>
-                          <div className="admin-session-field">
-                            <label
-                              className="admin-session-label"
-                              htmlFor={`product-variant-price-${variant.id}`}
-                            >
-                              Price (optional)
-                            </label>
-                            <input
-                              className="input"
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              id={`product-variant-price-${variant.id}`}
-                              value={variant.price}
-                              onChange={(event) =>
-                                handleProductVariantChange(variant.id, "price", event.target.value)
-                              }
-                              placeholder="0.00"
-                            />
-                          </div>
-                          <div className="admin-session-field">
-                            <label
-                              className="admin-session-label"
-                              htmlFor={`product-variant-quantity-${variant.id}`}
-                            >
-                              Quantity
-                            </label>
-                            <input
-                              className="input"
-                              type="number"
-                              min="0"
-                              step="1"
-                              id={`product-variant-quantity-${variant.id}`}
-                              value={variant.quantity ?? ""}
-                              onChange={(event) =>
-                                handleProductVariantChange(variant.id, "quantity", event.target.value)
-                              }
-                              placeholder="0"
-                            />
-                          </div>
+                      <label className="admin-form__field">
+                        Price *
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={productForm.price}
+                          onChange={(event) =>
+                            setProductForm((prev) => ({
+                              ...prev,
+                              price: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </label>
+                      <label className="admin-form__field">
+                        Sale price
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={productForm.salePrice}
+                          onChange={(event) =>
+                            setProductForm((prev) => ({
+                              ...prev,
+                              salePrice: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    </>
+                  )}
+                  <label className="admin-form__field">
+                    Stock status
+                    <select
+                      className="input"
+                      value={productForm.stockStatus}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({
+                          ...prev,
+                          stockStatus: event.target.value,
+                        }))
+                      }
+                      disabled={productForm.isGiftCard}
+                    >
+                      <option value="in_stock">In stock</option>
+                      <option value="out_of_stock">Out of stock</option>
+                      <option value="preorder">Preorder</option>
+                    </select>
+                  </label>
+                  {!productForm.isGiftCard && (
+                    <label className="admin-form__field">
+                      Preorder send month
+                      <input
+                        className="input"
+                        type="month"
+                        value={productForm.preorderSendMonth}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            preorderSendMonth: normalizePreorderSendMonth(
+                              event.target.value,
+                            ),
+                          }))
+                        }
+                        disabled={productForm.stockStatus !== "preorder"}
+                      />
+                    </label>
+                  )}
+                  {productForm.isGiftCard ? (
+                    <div className="admin-form__field">
+                      <span className="admin-panel__note">
+                        Stock quantity is unlimited for digital gift card
+                        products.
+                      </span>
+                    </div>
+                  ) : productForm.hasVariants ? (
+                    <div className="admin-form__field">
+                      <span className="admin-panel__note">
+                        Base stock quantity is disabled for variant products and
+                        will be saved as null.
+                      </span>
+                    </div>
+                  ) : (
+                    <label className="admin-form__field">
+                      Stock quantity
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={productForm.stockQuantity}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            stockQuantity: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  )}
+                  <label className="admin-form__field">
+                    Status
+                    <select
+                      className="input"
+                      value={productForm.status}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({
+                          ...prev,
+                          status: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="draft">Draft</option>
+                      <option value="live">Live</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </label>
+                  <label className="admin-form__field">
+                    Featured on home page
+                    <select
+                      className="input"
+                      value={productForm.featured ? "yes" : "no"}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({
+                          ...prev,
+                          featured: event.target.value === "yes",
+                        }))
+                      }
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </label>
+                  <div className="admin-form__field admin-form__full">
+                    <label>Categories</label>
+                    {categoryOptions.length ? (
+                      <>
+                        <select
+                          className="input"
+                          value={productForm.categoryIds[0] || ""}
+                          onChange={(event) =>
+                            handleSingleSelectChange("categoryIds", event)
+                          }
+                        >
+                          <option value="">Select a category</option>
+                          {categoryOptions.map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    ) : (
+                      <p className="admin-panel__note">
+                        Create a category to organize products.
+                      </p>
+                    )}
+                  </div>
+                  <div className="admin-form__field admin-form__full">
+                    <label>Tags</label>
+                    {tagOptions.length ? (
+                      <select
+                        className="input"
+                        value={productForm.tagIds[0] || ""}
+                        onChange={(event) =>
+                          handleSingleSelectChange("tagIds", event)
+                        }
+                      >
+                        <option value="">Select a tag (optional)</option>
+                        {tagOptions.map((tag) => (
+                          <option key={tag.id} value={tag.id}>
+                            {tag.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="admin-panel__note">
+                        No tags yet. Add one below.
+                      </p>
+                    )}
+                    <div className="admin-inline-form">
+                      <input
+                        className="input"
+                        placeholder="New tag"
+                        value={tagForm.name}
+                        onChange={(event) =>
+                          setTagForm({ name: event.target.value })
+                        }
+                      />
+                      <button
+                        className="btn btn--secondary btn--small"
+                        type="button"
+                        onClick={handleCreateTag}
+                        disabled={tagSaving || !inventoryEnabled}
+                      >
+                        {tagSaving ? "Saving..." : "Add tag"}
+                      </button>
+                    </div>
+                    {tagError && (
+                      <p className="admin-panel__error">{tagError}</p>
+                    )}
+                    {tagStatusMessage && (
+                      <p className="admin-panel__status">{tagStatusMessage}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="admin-form__section admin-form__full">
+                <div className="admin-form__section-header">
+                  <h4>Descriptions</h4>
+                </div>
+                <div className="admin-form__section-grid">
+                  <label className="admin-form__field admin-form__full">
+                    Short description
+                    <textarea
+                      className="input textarea"
+                      rows="4"
+                      value={productForm.shortDescription}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({
+                          ...prev,
+                          shortDescription: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Long description
+                    <textarea
+                      className="input textarea"
+                      rows="6"
+                      value={productForm.longDescription}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({
+                          ...prev,
+                          longDescription: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <p className="admin-panel__note admin-form__full">
+                    Plain text only. Line breaks will be preserved on the
+                    product page. SEO metadata is generated from the title and
+                    short description.
+                  </p>
+                </div>
+              </div>
+
+              <div className="admin-form__section admin-form__full">
+                <div className="admin-form__section-header">
+                  <h4>Media</h4>
+                </div>
+                <div className="admin-form__section-grid">
+                  <div className="admin-form__field admin-form__full">
+                    <label htmlFor="product-main-image">Main image</label>
+                    <input
+                      className="input input--file"
+                      id="product-main-image"
+                      type="file"
+                      accept="image/*"
+                      ref={productMainImageInputRef}
+                      onChange={handleMainImageChange}
+                    />
+                    <div className="admin-media-picker">
+                      <button
+                        className="btn btn--secondary"
+                        type="button"
+                        onClick={() => openMediaLibrary("main")}
+                      >
+                        Choose from library
+                      </button>
+                    </div>
+                    {productMainImagePreview && (
+                      <div className="admin-preview-grid">
+                        <div className="admin-preview-card">
+                          <img
+                            src={productMainImagePreview}
+                            alt="Main product preview"
+                            className="admin-preview"
+                            loading="lazy"
+                            decoding="async"
+                          />
                           <button
-                            className="icon-btn icon-btn--danger admin-session-remove"
+                            className="icon-btn icon-btn--danger admin-preview-remove"
                             type="button"
-                            onClick={() => handleRemoveProductVariant(variant.id)}
-                            aria-label={`Remove variant ${index + 1}`}
+                            onClick={handleRemoveMainImage}
+                            aria-label="Remove main image"
                           >
                             <IconTrash aria-hidden="true" />
                           </button>
                         </div>
-                      ))}
-                      <button className="btn btn--secondary" type="button" onClick={handleAddProductVariant}>
-                        Add variant
-                      </button>
-                    </>
+                      </div>
+                    )}
+                  </div>
+                  {productForm.isGiftCard ? (
+                    <p className="admin-panel__note admin-form__full">
+                      Gift cards use a single main image only.
+                    </p>
                   ) : (
-                    <p className="modal__meta admin-form__full">No variants added.</p>
+                    <>
+                      <div className="admin-form__field admin-form__full">
+                        <label htmlFor="product-gallery-images">
+                          Gallery images
+                        </label>
+                        <input
+                          key={editingProductId ?? "new-product-gallery"}
+                          className="input input--file"
+                          id="product-gallery-images"
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          ref={productGalleryImageInputRef}
+                          onChange={handleGalleryImagesChange}
+                        />
+                        <div className="admin-media-picker">
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            onClick={() => openMediaLibrary("gallery")}
+                          >
+                            Choose from library
+                          </button>
+                        </div>
+                        <p className="admin-panel__note">
+                          Upload up to {MAX_PRODUCT_IMAGES} JPG or PNG files
+                          (max 3MB each).
+                        </p>
+                        {productGalleryPreviews.length > 0 && (
+                          <div className="admin-preview-grid">
+                            {productGalleryPreviews.map((preview, index) => (
+                              <div
+                                className="admin-preview-card"
+                                key={`${preview}-${index}`}
+                              >
+                                <img
+                                  src={preview}
+                                  alt={`Product gallery preview ${index + 1}`}
+                                  className="admin-preview"
+                                  loading="lazy"
+                                  decoding="async"
+                                />
+                                <button
+                                  className="icon-btn icon-btn--danger admin-preview-remove"
+                                  type="button"
+                                  onClick={() =>
+                                    handleRemoveGalleryImage(index)
+                                  }
+                                  aria-label={`Remove gallery image ${index + 1}`}
+                                >
+                                  <IconTrash aria-hidden="true" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <label className="admin-form__field admin-form__full">
+                        Video from YouTube
+                        <textarea
+                          className="input textarea"
+                          rows="3"
+                          value={productForm.videoEmbed}
+                          onChange={(event) =>
+                            setProductForm((prev) => ({
+                              ...prev,
+                              videoEmbed: event.target.value,
+                            }))
+                          }
+                          placeholder="https://www.youtube.com/watch?v=..."
+                        />
+                      </label>
+                    </>
                   )}
                 </div>
               </div>
-            )}
 
-            {!productForm.isGiftCard && (
-              <div className="admin-form__section admin-form__full">
-                <div className="admin-form__section-header">
-                  <h4>Related products</h4>
+              {!productForm.isGiftCard && (
+                <div className="admin-form__section admin-form__full">
+                  <div className="admin-form__section-header">
+                    <h4>Attributes</h4>
+                  </div>
+                  <div className="admin-form__section-grid">
+                    <label className="admin-form__field">
+                      Sunlight
+                      <select
+                        className="input"
+                        value={productForm.sunlight}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            sunlight: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Select sunlight</option>
+                        <option value="full_sun">Full sun</option>
+                        <option value="partial_shade">Partial shade</option>
+                        <option value="shade">Shade</option>
+                      </select>
+                    </label>
+                    <label className="admin-form__field">
+                      Soil type
+                      <input
+                        className="input"
+                        value={productForm.soilType}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            soilType: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Watering
+                      <input
+                        className="input"
+                        value={productForm.watering}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            watering: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Climate
+                      <input
+                        className="input"
+                        value={productForm.climate}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            climate: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Planting depth
+                      <input
+                        className="input"
+                        value={productForm.plantingDepth}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            plantingDepth: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Planting spacing
+                      <input
+                        className="input"
+                        value={productForm.plantingSpacing}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            plantingSpacing: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Best planting time
+                      <input
+                        className="input"
+                        value={productForm.bestPlantingTime}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            bestPlantingTime: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Bloom period
+                      <input
+                        className="input"
+                        value={productForm.bloomPeriod}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            bloomPeriod: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Flower color
+                      <input
+                        className="input"
+                        value={productForm.flowerColor}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            flowerColor: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field">
+                      Mature height
+                      <input
+                        className="input"
+                        value={productForm.matureHeight}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            matureHeight: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field admin-form__full">
+                      Pest issues
+                      <textarea
+                        className="input textarea"
+                        rows="2"
+                        value={productForm.pestIssues}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            pestIssues: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field admin-form__full">
+                      Disease info
+                      <textarea
+                        className="input textarea"
+                        rows="2"
+                        value={productForm.diseaseInfo}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            diseaseInfo: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field admin-form__full">
+                      Propagation
+                      <textarea
+                        className="input textarea"
+                        rows="2"
+                        value={productForm.propagation}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            propagation: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="admin-form__field admin-form__full">
+                      Companions
+                      <textarea
+                        className="input textarea"
+                        rows="2"
+                        value={productForm.companions}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            companions: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
                 </div>
-                <div className="admin-form__section-grid">
-                  <div className="admin-form__field admin-form__full">
-                    <label>Related products</label>
-                    <select
-                      className="input"
-                      value={productForm.relatedProductIds[0] || ""}
-                      onChange={(event) => handleSingleSelectChange("relatedProductIds", event)}
-                    >
-                      <option value="">Select a related product</option>
-                      {products
-                        .filter((product) => product.id !== editingProductId)
-                        .map((product) => (
-                          <option key={`related-${product.id}`} value={product.id}>
-                            {product.title || product.name || "Product"}
-                          </option>
-                        ))}
-                    </select>
+              )}
+
+              {!productForm.isGiftCard && (
+                <div className="admin-form__section admin-form__full">
+                  <div className="admin-form__section-header">
+                    <h4>Variants</h4>
                   </div>
-                  <div className="admin-form__field admin-form__full">
-                    <label>Upsell products</label>
-                    <select
-                      className="input"
-                      value={productForm.upsellProductIds[0] || ""}
-                      onChange={(event) => handleSingleSelectChange("upsellProductIds", event)}
-                    >
-                      <option value="">Select an upsell product</option>
-                      {products
-                        .filter((product) => product.id !== editingProductId)
-                        .map((product) => (
-                          <option key={`upsell-${product.id}`} value={product.id}>
-                            {product.title || product.name || "Product"}
-                          </option>
+                  <div className="admin-form__section-grid">
+                    <label className="admin-form__field">
+                      Has variants
+                      <select
+                        className="input"
+                        value={productForm.hasVariants ? "yes" : "no"}
+                        onChange={(event) =>
+                          handleToggleHasVariants(event.target.value === "yes")
+                        }
+                      >
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
+                      </select>
+                    </label>
+                    <p className="admin-panel__note admin-form__full">
+                      Add size, colour, shape, or other variants when enabled.
+                      Leave price blank to use the base price and set stock per
+                      variant.
+                    </p>
+                    {productForm.hasVariants ? (
+                      <>
+                        {(productForm.variants || []).map((variant, index) => (
+                          <div className="admin-session-row" key={variant.id}>
+                            <div className="admin-session-field admin-session-field--label">
+                              <label
+                                className="admin-session-label"
+                                htmlFor={`product-variant-label-${variant.id}`}
+                              >
+                                Variant #{index + 1}
+                              </label>
+                              <input
+                                className="input"
+                                id={`product-variant-label-${variant.id}`}
+                                value={variant.label}
+                                onChange={(event) =>
+                                  handleProductVariantChange(
+                                    variant.id,
+                                    "label",
+                                    event.target.value,
+                                  )
+                                }
+                                placeholder="Small, Red, Round, etc."
+                              />
+                            </div>
+                            <div className="admin-session-field">
+                              <label
+                                className="admin-session-label"
+                                htmlFor={`product-variant-price-${variant.id}`}
+                              >
+                                Price (optional)
+                              </label>
+                              <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                id={`product-variant-price-${variant.id}`}
+                                value={variant.price}
+                                onChange={(event) =>
+                                  handleProductVariantChange(
+                                    variant.id,
+                                    "price",
+                                    event.target.value,
+                                  )
+                                }
+                                placeholder="0.00"
+                              />
+                            </div>
+                            <div className="admin-session-field">
+                              <label
+                                className="admin-session-label"
+                                htmlFor={`product-variant-quantity-${variant.id}`}
+                              >
+                                Quantity
+                              </label>
+                              <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                step="1"
+                                id={`product-variant-quantity-${variant.id}`}
+                                value={variant.quantity ?? ""}
+                                onChange={(event) =>
+                                  handleProductVariantChange(
+                                    variant.id,
+                                    "quantity",
+                                    event.target.value,
+                                  )
+                                }
+                                placeholder="0"
+                              />
+                            </div>
+                            <button
+                              className="icon-btn icon-btn--danger admin-session-remove"
+                              type="button"
+                              onClick={() =>
+                                handleRemoveProductVariant(variant.id)
+                              }
+                              aria-label={`Remove variant ${index + 1}`}
+                            >
+                              <IconTrash aria-hidden="true" />
+                            </button>
+                          </div>
                         ))}
-                    </select>
-                  </div>
-                  <div className="admin-form__field admin-form__full">
-                    <label>Cross-sell products</label>
-                    <select
-                      className="input"
-                      value={productForm.crossSellProductIds[0] || ""}
-                      onChange={(event) => handleSingleSelectChange("crossSellProductIds", event)}
-                    >
-                      <option value="">Select a cross-sell product</option>
-                      {products
-                        .filter((product) => product.id !== editingProductId)
-                        .map((product) => (
-                          <option key={`cross-${product.id}`} value={product.id}>
-                            {product.title || product.name || "Product"}
-                          </option>
-                        ))}
-                    </select>
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          onClick={handleAddProductVariant}
+                        >
+                          Add variant
+                        </button>
+                      </>
+                    ) : (
+                      <p className="modal__meta admin-form__full">
+                        No variants added.
+                      </p>
+                    )}
                   </div>
                 </div>
+              )}
+
+              {!productForm.isGiftCard && (
+                <div className="admin-form__section admin-form__full">
+                  <div className="admin-form__section-header">
+                    <h4>Related products</h4>
+                  </div>
+                  <div className="admin-form__section-grid">
+                    <div className="admin-form__field admin-form__full">
+                      <label>Related products</label>
+                      <select
+                        className="input"
+                        value={productForm.relatedProductIds[0] || ""}
+                        onChange={(event) =>
+                          handleSingleSelectChange("relatedProductIds", event)
+                        }
+                      >
+                        <option value="">Select a related product</option>
+                        {products
+                          .filter((product) => product.id !== editingProductId)
+                          .map((product) => (
+                            <option
+                              key={`related-${product.id}`}
+                              value={product.id}
+                            >
+                              {product.title || product.name || "Product"}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                    <div className="admin-form__field admin-form__full">
+                      <label>Upsell products</label>
+                      <select
+                        className="input"
+                        value={productForm.upsellProductIds[0] || ""}
+                        onChange={(event) =>
+                          handleSingleSelectChange("upsellProductIds", event)
+                        }
+                      >
+                        <option value="">Select an upsell product</option>
+                        {products
+                          .filter((product) => product.id !== editingProductId)
+                          .map((product) => (
+                            <option
+                              key={`upsell-${product.id}`}
+                              value={product.id}
+                            >
+                              {product.title || product.name || "Product"}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                    <div className="admin-form__field admin-form__full">
+                      <label>Cross-sell products</label>
+                      <select
+                        className="input"
+                        value={productForm.crossSellProductIds[0] || ""}
+                        onChange={(event) =>
+                          handleSingleSelectChange("crossSellProductIds", event)
+                        }
+                      >
+                        <option value="">Select a cross-sell product</option>
+                        {products
+                          .filter((product) => product.id !== editingProductId)
+                          .map((product) => (
+                            <option
+                              key={`cross-${product.id}`}
+                              value={product.id}
+                            >
+                              {product.title || product.name || "Product"}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="admin-modal__actions admin-form__actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={closeProductModal}
+                  disabled={productSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  type="submit"
+                  disabled={productSaving || !inventoryEnabled}
+                >
+                  {productSaving
+                    ? "Saving..."
+                    : editingProductId
+                      ? "Update Product"
+                      : "Save Product"}
+                </button>
               </div>
-            )}
-
-            <div className="admin-modal__actions admin-form__actions">
-              <button
-                className="btn btn--secondary"
-                type="button"
-                onClick={closeProductModal}
-                disabled={productSaving}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn--primary"
-                type="submit"
-                disabled={productSaving || !inventoryEnabled}
-              >
-                {productSaving ?
-                   "Saving..."
-                  : editingProductId ?
-                   "Update Product"
-                  : "Save Product"}
-              </button>
-            </div>
-            {productError && (
-              <p className="admin-panel__error">{productError}</p>
-            )}
-          </form>
+              {productError && (
+                <p className="admin-panel__error">{productError}</p>
+              )}
+            </form>
           </div>
         </div>
       </div>
@@ -5108,73 +6102,101 @@ export function AdminProductsView() {
           }}
         >
           <div className="modal__content admin-modal__content admin-media-modal">
-            <button className="modal__close" type="button" onClick={closeMediaLibrary} aria-label="Close">
+            <button
+              className="modal__close"
+              type="button"
+              onClick={closeMediaLibrary}
+              aria-label="Close"
+            >
               &times;
             </button>
             <h3 className="modal__title" id="media-library-title">
-              {mediaLibraryMode === "main" ?
-                 "Select main image"
-                : mediaLibraryMode === "category" ?
-                 "Select category cover"
-                : "Select gallery images"}
+              {mediaLibraryMode === "main"
+                ? "Select main image"
+                : mediaLibraryMode === "category"
+                  ? "Select category cover"
+                  : "Select gallery images"}
             </h3>
             <p className="modal__meta">
-              {mediaLibraryMode === "main" ?
-                 "Tap an image to use it as the main product image."
-                : mediaLibraryMode === "category" ?
-                 "Tap an image to use it as the category cover."
-                : `Select up to ${MAX_PRODUCT_IMAGES} images for the gallery.`}
+              {mediaLibraryMode === "main"
+                ? "Tap an image to use it as the main product image."
+                : mediaLibraryMode === "category"
+                  ? "Tap an image to use it as the category cover."
+                  : `Select up to ${MAX_PRODUCT_IMAGES} images for the gallery.`}
             </p>
             {mediaItemsError && (
-              <p className="admin-panel__error">Unable to load the image library.</p>
+              <p className="admin-panel__error">
+                Unable to load the image library.
+              </p>
             )}
             {mediaStatus === "loading" && (
               <p className="admin-panel__notice">Loading images...</p>
             )}
             {mediaItems.length > 0 ? (
-              <div className="admin-media__grid admin-media__grid--compact">
-                {mediaItems.map((item) => {
-                  const imageUrl = (item.url || "").toString().trim();
-                  const label = (item.name || item.filename || item.id || "Image").toString();
-                  const isSelected =
-                    mediaLibraryMode === "main" ?
-                       imageUrl && productForm.mainImage === imageUrl
-                      : imageUrl && mediaLibrarySelection.includes(imageUrl);
-                  return (
-                    <button
-                      key={item.id}
-                      className={`admin-media__card admin-media__card--select${isSelected ? " is-selected" : ""}`}
-                      type="button"
-                      onClick={() => handleMediaLibrarySelect(imageUrl)}
-                      title={label}
-                    >
-                      {imageUrl ? (
-                        <img
-                          className="admin-media__thumb"
-                          src={imageUrl}
-                          alt={label}
-                          loading="lazy" decoding="async"/>
-                      ) : (
-                        <div className="admin-media__thumb admin-media__thumb--empty">
-                          <IconImage aria-hidden="true" />
+              <div className="admin-media-modal__scroll">
+                <div className="admin-media__grid admin-media__grid--compact">
+                  {mediaItems.map((item) => {
+                    const imageUrl = (item.url || "").toString().trim();
+                    const label = (
+                      item.name ||
+                      item.filename ||
+                      item.id ||
+                      "Image"
+                    ).toString();
+                    const isSelected =
+                      mediaLibraryMode === "main"
+                        ? imageUrl && productForm.mainImage === imageUrl
+                        : imageUrl && mediaLibrarySelection.includes(imageUrl);
+                    return (
+                      <button
+                        key={item.id}
+                        className={`admin-media__card admin-media__card--select${isSelected ? " is-selected" : ""}`}
+                        type="button"
+                        onClick={() => handleMediaLibrarySelect(imageUrl)}
+                        title={label}
+                      >
+                        {imageUrl ? (
+                          <img
+                            className="admin-media__thumb"
+                            src={imageUrl}
+                            alt={label}
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <div className="admin-media__thumb admin-media__thumb--empty">
+                            <IconImage aria-hidden="true" />
+                          </div>
+                        )}
+                        <div className="admin-media__body">
+                          <strong className="admin-media__filename">
+                            {label}
+                          </strong>
                         </div>
-                      )}
-                      <div className="admin-media__body">
-                        <strong className="admin-media__filename">{label}</strong>
-                      </div>
-                    </button>
-                  );
-                })}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
-              <p className="admin-panel__notice">No images in the library yet.</p>
+              <p className="admin-panel__notice">
+                No images in the library yet.
+              </p>
             )}
             {mediaLibraryMode === "gallery" && (
               <div className="admin-form__actions">
-                <button className="btn btn--secondary" type="button" onClick={closeMediaLibrary}>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={closeMediaLibrary}
+                >
                   Cancel
                 </button>
-                <button className="btn btn--primary" type="button" onClick={applyMediaLibrarySelection}>
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={applyMediaLibrarySelection}
+                >
                   Use selection
                 </button>
               </div>
@@ -5200,13 +6222,8 @@ export function AdminSubscriptionsView() {
     }
   }, []);
 
-  const {
-    db,
-    user,
-    productCategories,
-    inventoryEnabled,
-    inventoryError,
-  } = useAdminData();
+  const { db, user, productCategories, inventoryEnabled, inventoryError } =
+    useAdminData();
   const {
     items: subscriptionPlans,
     status: plansStatus,
@@ -5260,7 +6277,13 @@ export function AdminSubscriptionsView() {
   }, [statusMessage]);
 
   useEffect(() => {
-    if (isPlanModalOpen || editingPlanId || planForm.categoryId || !categoryOptions.length) return;
+    if (
+      isPlanModalOpen ||
+      editingPlanId ||
+      planForm.categoryId ||
+      !categoryOptions.length
+    )
+      return;
     setPlanForm((prev) => ({
       ...prev,
       categoryId: categoryOptions[0].id,
@@ -5290,8 +6313,10 @@ export function AdminSubscriptionsView() {
 
   const handleEditPlan = (plan) => {
     if (!plan) return;
-    const normalizedTier = normalizeSubscriptionPlanTierValue(plan.tier) || "weekly";
-    const normalizedStems = normalizeSubscriptionPlanStemsValue(plan.stems) || 16;
+    const normalizedTier =
+      normalizeSubscriptionPlanTierValue(plan.tier) || "weekly";
+    const normalizedStems =
+      normalizeSubscriptionPlanStemsValue(plan.stems) || 16;
     const normalizedStatus = ["live", "draft", "archived"].includes(
       (plan?.status || "").toString().trim().toLowerCase(),
     )
@@ -5304,8 +6329,8 @@ export function AdminSubscriptionsView() {
       tier: normalizedTier,
       stems: String(normalizedStems),
       monthlyAmount:
-        plan?.monthlyAmount === undefined || plan?.monthlyAmount === null ?
-           ""
+        plan?.monthlyAmount === undefined || plan?.monthlyAmount === null
+          ? ""
           : String(plan.monthlyAmount),
       status: normalizedStatus,
       image: (plan?.image || "").toString().trim(),
@@ -5323,14 +6348,20 @@ export function AdminSubscriptionsView() {
     }
 
     const name = (planForm.name || "").toString().trim();
-    const description = sanitizePlainText((planForm.description || "").toString().trim());
+    const description = sanitizePlainText(
+      (planForm.description || "").toString().trim(),
+    );
     const categoryId = (planForm.categoryId || "").toString().trim();
     const tier = normalizeSubscriptionPlanTierValue(planForm.tier);
     const stems = normalizeSubscriptionPlanStemsValue(planForm.stems);
-    const monthlyAmount = resolveSubscriptionPlanMonthlyAmount(planForm.monthlyAmount);
+    const monthlyAmount = resolveSubscriptionPlanMonthlyAmount(
+      planForm.monthlyAmount,
+    );
     const image = (planForm.image || "").toString().trim();
     const statusValue = (planForm.status || "").toString().trim().toLowerCase();
-    const status = ["live", "draft", "archived"].includes(statusValue) ? statusValue : "draft";
+    const status = ["live", "draft", "archived"].includes(statusValue)
+      ? statusValue
+      : "draft";
     const category = categoryLookup.get(categoryId) || null;
 
     if (!name) {
@@ -5416,7 +6447,7 @@ export function AdminSubscriptionsView() {
 
     if (
       !window.confirm(
-        "This will recalculate and fix pricing for all subscriptions with incorrect monthly amounts. Continue?"
+        "This will recalculate and fix pricing for all subscriptions with incorrect monthly amounts. Continue?",
       )
     ) {
       return;
@@ -5425,13 +6456,17 @@ export function AdminSubscriptionsView() {
     try {
       setFixPricingInProgress(true);
       setPlanError(null);
-      const callable = httpsCallable(functionsInstance, "fixSubscriptionPricingIssue");
+      const callable = httpsCallable(
+        functionsInstance,
+        "fixSubscriptionPricingIssue",
+      );
       const result = await callable({});
       setFixPricingResult(result.data);
       setStatusMessage(result.data?.summary || "Pricing fix completed.");
     } catch (error) {
       setPlanError(
-        error.message || "Unable to fix subscription pricing. Check the server logs for details."
+        error.message ||
+          "Unable to fix subscription pricing. Check the server logs for details.",
       );
     } finally {
       setFixPricingInProgress(false);
@@ -5444,7 +6479,8 @@ export function AdminSubscriptionsView() {
         <div>
           <h2>Subscriptions</h2>
           <p className="admin-panel__note">
-            Create standalone subscription plans and set per-delivery pricing manually.
+            Create standalone subscription plans and set per-delivery pricing
+            manually.
           </p>
         </div>
         <div className="admin-panel__header-actions">
@@ -5455,7 +6491,9 @@ export function AdminSubscriptionsView() {
             disabled={!inventoryEnabled || fixPricingInProgress}
             title="Fix pricing for subscriptions created when the system was broken"
           >
-            {fixPricingInProgress ? "Fixing pricing..." : "Fix Subscription Pricing"}
+            {fixPricingInProgress
+              ? "Fixing pricing..."
+              : "Fix Subscription Pricing"}
           </button>
           <button
             className="btn btn--primary"
@@ -5474,22 +6512,46 @@ export function AdminSubscriptionsView() {
           {plansStatus === "loading" && (
             <p className="modal__meta">Syncing latest subscription plans...</p>
           )}
-          {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
-          {plansError && <p className="admin-panel__error">{plansError.message || "Unable to load plans."}</p>}
-          {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+          {inventoryError && (
+            <p className="admin-panel__error">{inventoryError}</p>
+          )}
+          {plansError && (
+            <p className="admin-panel__error">
+              {plansError.message || "Unable to load plans."}
+            </p>
+          )}
+          {statusMessage && (
+            <p className="admin-panel__status">{statusMessage}</p>
+          )}
           {planError && <p className="admin-panel__error">{planError}</p>}
-          
+
           {fixPricingResult && (
-            <div className="admin-panel__status" style={{ marginBottom: "1.5rem", padding: "1rem", backgroundColor: "#f0f8f0", borderRadius: "4px" }}>
+            <div
+              className="admin-panel__status"
+              style={{
+                marginBottom: "1.5rem",
+                padding: "1rem",
+                backgroundColor: "#f0f8f0",
+                borderRadius: "4px",
+              }}
+            >
               <strong>Pricing Fix Report:</strong>
               <ul style={{ margin: "0.5rem 0 0 1.5rem" }}>
-                <li>Subscriptions fixed: {fixPricingResult.affectedSubscriptionsCount}</li>
-                <li>Invoices updated: {fixPricingResult.affectedInvoicesCount}</li>
-                <li>Total adjustment: R{(fixPricingResult.totalAdjustmentAmount / 100).toFixed(2)}</li>
+                <li>
+                  Subscriptions fixed:{" "}
+                  {fixPricingResult.affectedSubscriptionsCount}
+                </li>
+                <li>
+                  Invoices updated: {fixPricingResult.affectedInvoicesCount}
+                </li>
+                <li>
+                  Total adjustment: R
+                  {(fixPricingResult.totalAdjustmentAmount / 100).toFixed(2)}
+                </li>
               </ul>
             </div>
           )}
-          
+
           {subscriptionPlans.length > 0 ? (
             <table className="admin-table">
               <thead>
@@ -5511,15 +6573,29 @@ export function AdminSubscriptionsView() {
                   const updatedAt = plan.updatedAt?.toDate?.()
                     ? bookingDateFormatter.format(plan.updatedAt.toDate())
                     : "-";
-                  const categoryName =
-                    (plan?.categoryName || categoryLookup.get((plan?.categoryId || "").toString().trim())?.name || "-")
-                      .toString()
-                      .trim();
+                  const categoryName = (
+                    plan?.categoryName ||
+                    categoryLookup.get(
+                      (plan?.categoryId || "").toString().trim(),
+                    )?.name ||
+                    "-"
+                  )
+                    .toString()
+                    .trim();
                   const tierLabel = formatSubscriptionPlanTierLabel(plan?.tier);
-                  const stemsValue = normalizeSubscriptionPlanStemsValue(plan?.stems);
-                  const monthlyAmount = resolveSubscriptionPlanMonthlyAmount(plan?.monthlyAmount);
-                  const status = (plan?.status || "draft").toString().trim().toLowerCase();
-                  const statusLabel = status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : "Draft";
+                  const stemsValue = normalizeSubscriptionPlanStemsValue(
+                    plan?.stems,
+                  );
+                  const monthlyAmount = resolveSubscriptionPlanMonthlyAmount(
+                    plan?.monthlyAmount,
+                  );
+                  const status = (plan?.status || "draft")
+                    .toString()
+                    .trim()
+                    .toLowerCase();
+                  const statusLabel = status
+                    ? `${status.charAt(0).toUpperCase()}${status.slice(1)}`
+                    : "Draft";
                   return (
                     <tr
                       key={plan.id}
@@ -5543,7 +6619,9 @@ export function AdminSubscriptionsView() {
                           )}
                           <div>
                             <strong>{plan.name || "Subscription plan"}</strong>
-                            {plan.description && <p className="modal__meta">{plan.description}</p>}
+                            {plan.description && (
+                              <p className="modal__meta">{plan.description}</p>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -5561,7 +6639,10 @@ export function AdminSubscriptionsView() {
                         <button
                           className="icon-btn"
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); handleEditPlan(plan); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditPlan(plan);
+                          }}
                           disabled={!inventoryEnabled}
                           title="Edit plan"
                         >
@@ -5570,7 +6651,10 @@ export function AdminSubscriptionsView() {
                         <button
                           className="icon-btn icon-btn--danger"
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); setPendingDeletePlan(plan); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingDeletePlan(plan);
+                          }}
                           disabled={!inventoryEnabled}
                           title="Delete plan"
                         >
@@ -5600,156 +6684,198 @@ export function AdminSubscriptionsView() {
         }}
       >
         <div className="modal__content admin-modal__content">
-          <button className="modal__close" type="button" aria-label="Close" onClick={closePlanModal}>
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close"
+            onClick={closePlanModal}
+          >
             &times;
           </button>
-          <h3 className="modal__title">{editingPlanId ? "Edit Subscription Plan" : "Add Subscription Plan"}</h3>
+          <h3 className="modal__title">
+            {editingPlanId ? "Edit Subscription Plan" : "Add Subscription Plan"}
+          </h3>
           <div className="admin-workshop-modal__body">
-          <form className="admin-form" onSubmit={handleSavePlan}>
-            <div className="admin-form__section admin-form__full">
-              <div className="admin-form__section-header">
-                <h4>Plan details</h4>
-                <span className="badge">
-                  {resolvedMonthlyAmount ? formatPriceLabel(resolvedMonthlyAmount) : "Set per-delivery price"}
-                </span>
+            <form className="admin-form" onSubmit={handleSavePlan}>
+              <div className="admin-form__section admin-form__full">
+                <div className="admin-form__section-header">
+                  <h4>Plan details</h4>
+                  <span className="badge">
+                    {resolvedMonthlyAmount
+                      ? formatPriceLabel(resolvedMonthlyAmount)
+                      : "Set per-delivery price"}
+                  </span>
+                </div>
+                <div className="admin-form__section-grid">
+                  <label className="admin-form__field admin-form__full">
+                    Plan name *
+                    <input
+                      className="input"
+                      value={planForm.name}
+                      onChange={(event) =>
+                        setPlanForm((prev) => ({
+                          ...prev,
+                          name: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Description
+                    <textarea
+                      className="input textarea"
+                      rows="4"
+                      value={planForm.description}
+                      onChange={(event) =>
+                        setPlanForm((prev) => ({
+                          ...prev,
+                          description: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Category *
+                    <select
+                      className="input"
+                      value={planForm.categoryId}
+                      onChange={(event) =>
+                        setPlanForm((prev) => ({
+                          ...prev,
+                          categoryId: event.target.value,
+                        }))
+                      }
+                      required
+                    >
+                      <option value="">Select category</option>
+                      {categoryOptions.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="admin-form__field">
+                    Tier *
+                    <select
+                      className="input"
+                      value={planForm.tier}
+                      onChange={(event) =>
+                        setPlanForm((prev) => ({
+                          ...prev,
+                          tier: event.target.value,
+                        }))
+                      }
+                      required
+                    >
+                      {SUBSCRIPTION_PLAN_TIERS.map((tierOption) => (
+                        <option key={tierOption.value} value={tierOption.value}>
+                          {tierOption.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="admin-form__field">
+                    Stems per delivery *
+                    <select
+                      className="input"
+                      value={planForm.stems}
+                      onChange={(event) =>
+                        setPlanForm((prev) => ({
+                          ...prev,
+                          stems: event.target.value,
+                        }))
+                      }
+                      required
+                    >
+                      {SUBSCRIPTION_PLAN_STEM_OPTIONS.map((stemsOption) => (
+                        <option key={stemsOption} value={stemsOption}>
+                          {stemsOption}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="admin-form__field">
+                    Per-delivery price (ZAR) *
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={planForm.monthlyAmount}
+                      onChange={(event) =>
+                        setPlanForm((prev) => ({
+                          ...prev,
+                          monthlyAmount: event.target.value,
+                        }))
+                      }
+                      placeholder="0.00"
+                      required
+                    />
+                  </label>
+                  <label className="admin-form__field">
+                    Status
+                    <select
+                      className="input"
+                      value={planForm.status}
+                      onChange={(event) =>
+                        setPlanForm((prev) => ({
+                          ...prev,
+                          status: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="live">Live</option>
+                      <option value="draft">Draft</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </label>
+                  <label className="admin-form__field admin-form__full">
+                    Image URL (optional)
+                    <input
+                      className="input"
+                      value={planForm.image}
+                      onChange={(event) =>
+                        setPlanForm((prev) => ({
+                          ...prev,
+                          image: event.target.value,
+                        }))
+                      }
+                      placeholder="https://..."
+                    />
+                  </label>
+                  <p className="admin-panel__note admin-form__full">
+                    Per-delivery pricing is set manually by admin and can be
+                    changed any time.
+                  </p>
+                </div>
               </div>
-              <div className="admin-form__section-grid">
-                <label className="admin-form__field admin-form__full">
-                  Plan name *
-                  <input
-                    className="input"
-                    value={planForm.name}
-                    onChange={(event) =>
-                      setPlanForm((prev) => ({ ...prev, name: event.target.value }))
-                    }
-                    required
-                  />
-                </label>
-                <label className="admin-form__field admin-form__full">
-                  Description
-                  <textarea
-                    className="input textarea"
-                    rows="4"
-                    value={planForm.description}
-                    onChange={(event) =>
-                      setPlanForm((prev) => ({ ...prev, description: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Category *
-                  <select
-                    className="input"
-                    value={planForm.categoryId}
-                    onChange={(event) =>
-                      setPlanForm((prev) => ({ ...prev, categoryId: event.target.value }))
-                    }
-                    required
-                  >
-                    <option value="">Select category</option>
-                    {categoryOptions.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="admin-form__field">
-                  Tier *
-                  <select
-                    className="input"
-                    value={planForm.tier}
-                    onChange={(event) =>
-                      setPlanForm((prev) => ({ ...prev, tier: event.target.value }))
-                    }
-                    required
-                  >
-                    {SUBSCRIPTION_PLAN_TIERS.map((tierOption) => (
-                      <option key={tierOption.value} value={tierOption.value}>
-                        {tierOption.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="admin-form__field">
-                  Stems per delivery *
-                  <select
-                    className="input"
-                    value={planForm.stems}
-                    onChange={(event) =>
-                      setPlanForm((prev) => ({ ...prev, stems: event.target.value }))
-                    }
-                    required
-                  >
-                    {SUBSCRIPTION_PLAN_STEM_OPTIONS.map((stemsOption) => (
-                      <option key={stemsOption} value={stemsOption}>
-                        {stemsOption}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="admin-form__field">
-                  Per-delivery price (ZAR) *
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={planForm.monthlyAmount}
-                    onChange={(event) =>
-                      setPlanForm((prev) => ({ ...prev, monthlyAmount: event.target.value }))
-                    }
-                    placeholder="0.00"
-                    required
-                  />
-                </label>
-                <label className="admin-form__field">
-                  Status
-                  <select
-                    className="input"
-                    value={planForm.status}
-                    onChange={(event) =>
-                      setPlanForm((prev) => ({ ...prev, status: event.target.value }))
-                    }
-                  >
-                    <option value="live">Live</option>
-                    <option value="draft">Draft</option>
-                    <option value="archived">Archived</option>
-                  </select>
-                </label>
-                <label className="admin-form__field admin-form__full">
-                  Image URL (optional)
-                  <input
-                    className="input"
-                    value={planForm.image}
-                    onChange={(event) =>
-                      setPlanForm((prev) => ({ ...prev, image: event.target.value }))
-                    }
-                    placeholder="https://..."
-                  />
-                </label>
-                <p className="admin-panel__note admin-form__full">
-                  Per-delivery pricing is set manually by admin and can be changed any time.
-                </p>
-              </div>
-            </div>
 
-            <div className="admin-modal__actions admin-form__actions">
-              <button
-                className="btn btn--secondary"
-                type="button"
-                onClick={closePlanModal}
-                disabled={planSaving}
-              >
-                Cancel
-              </button>
-              <button className="btn btn--primary" type="submit" disabled={planSaving || !inventoryEnabled}>
-                {planSaving ? "Saving..." : editingPlanId ? "Update Plan" : "Save Plan"}
-              </button>
-            </div>
-            {planError && <p className="admin-panel__error">{planError}</p>}
-          </form>
+              <div className="admin-modal__actions admin-form__actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={closePlanModal}
+                  disabled={planSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  type="submit"
+                  disabled={planSaving || !inventoryEnabled}
+                >
+                  {planSaving
+                    ? "Saving..."
+                    : editingPlanId
+                      ? "Update Plan"
+                      : "Save Plan"}
+                </button>
+              </div>
+              {planError && <p className="admin-panel__error">{planError}</p>}
+            </form>
           </div>
         </div>
       </div>
@@ -5774,7 +6900,8 @@ export function AdminSubscriptionsView() {
 export function AdminSubscriptionOpsView() {
   usePageMetadata({
     title: "Admin - Subscription Ops",
-    description: "Track customer subscriptions, payment status, and delivery-ready roster.",
+    description:
+      "Track customer subscriptions, payment status, and delivery-ready roster.",
   });
 
   const { inventoryEnabled } = useAdminData();
@@ -5815,7 +6942,8 @@ export function AdminSubscriptionOpsView() {
     getDefaultSubscriptionOpsCycleMonth(),
   );
   const [searchTerm, setSearchTerm] = useState("");
-  const [subscriptionStatusFilter, setSubscriptionStatusFilter] = useState("all");
+  const [subscriptionStatusFilter, setSubscriptionStatusFilter] =
+    useState("all");
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState("all");
   const [deliveryReadinessFilter, setDeliveryReadinessFilter] = useState("all");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("all");
@@ -5860,26 +6988,32 @@ export function AdminSubscriptionOpsView() {
     [subscriptionInvoices, subscriptions],
   );
 
-  const maxSelectableCycleMonth = useMemo(
-    () => {
-      const upcomingMondays = getUpcomingMondayDateKeys(5, { includeCurrent: false });
-      const lastUpcomingMonday = upcomingMondays[upcomingMondays.length - 1] || "";
-      return (
-        getCycleMonthForIsoDateValue(lastUpcomingMonday) ||
-        getNextCycleMonthKey(getCurrentJohannesburgCycleMonth()) ||
-        ""
-      );
-    },
-    [],
-  );
+  const maxSelectableCycleMonth = useMemo(() => {
+    const upcomingMondays = getUpcomingMondayDateKeys(5, {
+      includeCurrent: false,
+    });
+    const lastUpcomingMonday =
+      upcomingMondays[upcomingMondays.length - 1] || "";
+    return (
+      getCycleMonthForIsoDateValue(lastUpcomingMonday) ||
+      getNextCycleMonthKey(getCurrentJohannesburgCycleMonth()) ||
+      ""
+    );
+  }, []);
 
   useEffect(() => {
     if (!selectedCycleMonth) return;
-    if (minSelectableCycleMonth && selectedCycleMonth < minSelectableCycleMonth) {
+    if (
+      minSelectableCycleMonth &&
+      selectedCycleMonth < minSelectableCycleMonth
+    ) {
       setSelectedCycleMonth(minSelectableCycleMonth);
       return;
     }
-    if (maxSelectableCycleMonth && selectedCycleMonth > maxSelectableCycleMonth) {
+    if (
+      maxSelectableCycleMonth &&
+      selectedCycleMonth > maxSelectableCycleMonth
+    ) {
       setSelectedCycleMonth(maxSelectableCycleMonth);
     }
   }, [maxSelectableCycleMonth, minSelectableCycleMonth, selectedCycleMonth]);
@@ -5887,32 +7021,47 @@ export function AdminSubscriptionOpsView() {
   const liveSubscriptionPlans = useMemo(
     () =>
       (Array.isArray(subscriptionPlans) ? subscriptionPlans : [])
-        .filter((plan) => ((plan?.status || "").toString().trim().toLowerCase() || "draft") === "live")
+        .filter(
+          (plan) =>
+            ((plan?.status || "").toString().trim().toLowerCase() ||
+              "draft") === "live",
+        )
         .sort((left, right) => {
           const leftName = (left?.name || "").toString().toLowerCase();
           const rightName = (right?.name || "").toString().toLowerCase();
           if (leftName !== rightName) return leftName.localeCompare(rightName);
-          return (left?.id || "").toString().localeCompare((right?.id || "").toString());
+          return (left?.id || "")
+            .toString()
+            .localeCompare((right?.id || "").toString());
         }),
     [subscriptionPlans],
   );
 
   const cycleInvoicesBySubscription = useMemo(() => {
     const map = new Map();
-    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach((invoice) => {
-      const subscriptionId = (invoice?.subscriptionId || "").toString().trim();
-      if (!subscriptionId) return;
-      const invoiceCycle = normalizeCycleMonthValue(invoice?.cycleMonth || "");
-      if (!invoiceCycle || invoiceCycle !== selectedCycleMonth) return;
-      const existingRows = map.get(subscriptionId) || [];
-      map.set(subscriptionId, [...existingRows, invoice]);
-    });
+    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach(
+      (invoice) => {
+        const subscriptionId = (invoice?.subscriptionId || "")
+          .toString()
+          .trim();
+        if (!subscriptionId) return;
+        const invoiceCycle = normalizeCycleMonthValue(
+          invoice?.cycleMonth || "",
+        );
+        if (!invoiceCycle || invoiceCycle !== selectedCycleMonth) return;
+        const existingRows = map.get(subscriptionId) || [];
+        map.set(subscriptionId, [...existingRows, invoice]);
+      },
+    );
     map.forEach((rows, subscriptionId) => {
       map.set(
         subscriptionId,
         [...rows].sort((left, right) => {
-          const leftTime = parseDateValue(left?.updatedAt || left?.createdAt)?.getTime() || 0;
-          const rightTime = parseDateValue(right?.updatedAt || right?.createdAt)?.getTime() || 0;
+          const leftTime =
+            parseDateValue(left?.updatedAt || left?.createdAt)?.getTime() || 0;
+          const rightTime =
+            parseDateValue(right?.updatedAt || right?.createdAt)?.getTime() ||
+            0;
           return rightTime - leftTime;
         }),
       );
@@ -5925,14 +7074,19 @@ export function AdminSubscriptionOpsView() {
     cycleInvoicesBySubscription.forEach((rows, subscriptionId) => {
       const list = Array.isArray(rows) ? rows : [];
       const explicitCycle = list.find(
-        (invoice) => normalizeSubscriptionInvoiceType(invoice?.invoiceType || "") === SUBSCRIPTION_INVOICE_TYPES.CYCLE,
+        (invoice) =>
+          normalizeSubscriptionInvoiceType(invoice?.invoiceType || "") ===
+          SUBSCRIPTION_INVOICE_TYPES.CYCLE,
       );
       if (explicitCycle) {
         map.set(subscriptionId, explicitCycle);
         return;
       }
       const legacyDefault = list.find((invoice) => {
-        const type = (invoice?.invoiceType || "").toString().trim().toLowerCase();
+        const type = (invoice?.invoiceType || "")
+          .toString()
+          .trim()
+          .toLowerCase();
         return !type || type === "cycle";
       });
       if (legacyDefault) {
@@ -5944,32 +7098,44 @@ export function AdminSubscriptionOpsView() {
 
   const latestPaidInvoiceBySubscription = useMemo(() => {
     const map = new Map();
-    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach((invoice) => {
-      const subscriptionId = (invoice?.subscriptionId || "").toString().trim();
-      if (!subscriptionId) return;
-      if (normalizeSubscriptionOpsInvoiceStatus(invoice?.status || "") !== "paid") return;
-      const existing = map.get(subscriptionId);
-      const existingTime = resolveInvoiceTimestamp(existing)?.getTime() || 0;
-      const candidateTime = resolveInvoiceTimestamp(invoice)?.getTime() || 0;
-      if (!existing || candidateTime > existingTime) {
-        map.set(subscriptionId, invoice);
-      }
-    });
+    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach(
+      (invoice) => {
+        const subscriptionId = (invoice?.subscriptionId || "")
+          .toString()
+          .trim();
+        if (!subscriptionId) return;
+        if (
+          normalizeSubscriptionOpsInvoiceStatus(invoice?.status || "") !==
+          "paid"
+        )
+          return;
+        const existing = map.get(subscriptionId);
+        const existingTime = resolveInvoiceTimestamp(existing)?.getTime() || 0;
+        const candidateTime = resolveInvoiceTimestamp(invoice)?.getTime() || 0;
+        if (!existing || candidateTime > existingTime) {
+          map.set(subscriptionId, invoice);
+        }
+      },
+    );
     return map;
   }, [subscriptionInvoices]);
 
   const latestInvoiceBySubscription = useMemo(() => {
     const map = new Map();
-    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach((invoice) => {
-      const subscriptionId = (invoice?.subscriptionId || "").toString().trim();
-      if (!subscriptionId) return;
-      const existing = map.get(subscriptionId);
-      const existingTime = resolveInvoiceTimestamp(existing)?.getTime() || 0;
-      const candidateTime = resolveInvoiceTimestamp(invoice)?.getTime() || 0;
-      if (!existing || candidateTime > existingTime) {
-        map.set(subscriptionId, invoice);
-      }
-    });
+    (Array.isArray(subscriptionInvoices) ? subscriptionInvoices : []).forEach(
+      (invoice) => {
+        const subscriptionId = (invoice?.subscriptionId || "")
+          .toString()
+          .trim();
+        if (!subscriptionId) return;
+        const existing = map.get(subscriptionId);
+        const existingTime = resolveInvoiceTimestamp(existing)?.getTime() || 0;
+        const candidateTime = resolveInvoiceTimestamp(invoice)?.getTime() || 0;
+        if (!existing || candidateTime > existingTime) {
+          map.set(subscriptionId, invoice);
+        }
+      },
+    );
     return map;
   }, [subscriptionInvoices]);
 
@@ -5981,31 +7147,40 @@ export function AdminSubscriptionOpsView() {
         const subscriptionId = (subscription?.id || "").toString().trim();
         if (!subscriptionId) return null;
 
-        const cycleInvoices = cycleInvoicesBySubscription.get(subscriptionId) || [];
+        const cycleInvoices =
+          cycleInvoicesBySubscription.get(subscriptionId) || [];
         const invoice = baseInvoiceBySubscription.get(subscriptionId) || null;
         const topupInvoices = cycleInvoices.filter(
           (entry) =>
-            normalizeSubscriptionInvoiceType(entry?.invoiceType || "") === SUBSCRIPTION_INVOICE_TYPES.TOPUP,
+            normalizeSubscriptionInvoiceType(entry?.invoiceType || "") ===
+            SUBSCRIPTION_INVOICE_TYPES.TOPUP,
         );
-        const subscriptionStatus = normalizeSubscriptionOpsStatus(subscription?.status);
+        const subscriptionStatus = normalizeSubscriptionOpsStatus(
+          subscription?.status,
+        );
         const invoiceStatus = invoice
           ? normalizeSubscriptionOpsInvoiceStatus(invoice?.status)
           : "missing";
         const cyclePaymentStatusLabel = invoice
           ? formatSubscriptionInvoiceStatusLabel(invoiceStatus)
           : "Missing invoice";
-        const invoiceType = invoice ? normalizeSubscriptionInvoiceType(invoice?.invoiceType || "") : "missing";
+        const invoiceType = invoice
+          ? normalizeSubscriptionInvoiceType(invoice?.invoiceType || "")
+          : "missing";
         const paymentMethod = normalizeSubscriptionOpsPaymentMethod(
-          invoice?.paymentMethod || subscription?.paymentMethod || PAYMENT_METHODS.PAYFAST,
+          invoice?.paymentMethod ||
+            subscription?.paymentMethod ||
+            PAYMENT_METHODS.PAYFAST,
         );
-        const paymentApprovalStatus = normalizeSubscriptionOpsPaymentApprovalStatus(
-          invoice?.paymentApprovalStatus ||
-            invoice?.paymentApproval?.decision ||
-            subscription?.paymentApprovalStatus ||
-            subscription?.paymentApproval?.decision ||
-            "",
-          paymentMethod,
-        );
+        const paymentApprovalStatus =
+          normalizeSubscriptionOpsPaymentApprovalStatus(
+            invoice?.paymentApprovalStatus ||
+              invoice?.paymentApproval?.decision ||
+              subscription?.paymentApprovalStatus ||
+              subscription?.paymentApproval?.decision ||
+              "",
+            paymentMethod,
+          );
         const tier = normalizeSubscriptionPlanTierValue(
           subscription?.tier || subscription?.subscriptionPlan?.tier,
         );
@@ -6013,15 +7188,25 @@ export function AdminSubscriptionOpsView() {
           subscription?.stems || subscription?.subscriptionPlan?.stems,
         );
         const planName = resolveSubscriptionDisplayPlanName(subscription);
-        const customerName = (subscription?.customer?.fullName || "").toString().trim();
-        const customerEmail = (subscription?.customer?.email || "").toString().trim();
-        const customerPhone = (subscription?.customer?.phone || "").toString().trim();
+        const customerName = (subscription?.customer?.fullName || "")
+          .toString()
+          .trim();
+        const customerEmail = (subscription?.customer?.email || "")
+          .toString()
+          .trim();
+        const customerPhone = (subscription?.customer?.phone || "")
+          .toString()
+          .trim();
         const address = subscription?.address || {};
         const city = (address?.city || "").toString().trim();
         const province = (address?.province || "").toString().trim();
         const addressLabel = formatShippingAddress(address);
-        const invoiceAmount = Number(invoice?.amount || invoice?.cycleAmount || 0);
-        const invoiceBaseAmount = Number(invoice?.baseAmount || invoice?.amount || invoice?.cycleAmount || 0);
+        const invoiceAmount = Number(
+          invoice?.amount || invoice?.cycleAmount || 0,
+        );
+        const invoiceBaseAmount = Number(
+          invoice?.baseAmount || invoice?.amount || invoice?.cycleAmount || 0,
+        );
         const invoiceAdjustmentsTotal = Number(invoice?.adjustmentsTotal || 0);
         const cyclePaidAmount =
           invoice && invoiceStatus === "paid"
@@ -6031,7 +7216,8 @@ export function AdminSubscriptionOpsView() {
           invoice && invoiceStatus === "paid"
             ? resolveSubscriptionInvoicePaidDate(invoice)
             : null;
-        const latestInvoice = latestInvoiceBySubscription.get(subscriptionId) || null;
+        const latestInvoice =
+          latestInvoiceBySubscription.get(subscriptionId) || null;
         const latestInvoiceStatus = latestInvoice
           ? normalizeSubscriptionOpsInvoiceStatus(latestInvoice?.status || "")
           : "missing";
@@ -6042,68 +7228,104 @@ export function AdminSubscriptionOpsView() {
           ? Number(latestInvoice?.amount || latestInvoice?.cycleAmount || 0)
           : null;
         const latestInvoiceBaseAmount = latestInvoice
-          ? Number(latestInvoice?.baseAmount || latestInvoice?.amount || latestInvoice?.cycleAmount || 0)
+          ? Number(
+              latestInvoice?.baseAmount ||
+                latestInvoice?.amount ||
+                latestInvoice?.cycleAmount ||
+                0,
+            )
           : null;
         const latestInvoiceAdjustmentsTotal = latestInvoice
           ? Number(latestInvoice?.adjustmentsTotal || 0)
           : null;
-        const latestInvoiceNumber =
-          Number.isFinite(Number(latestInvoice?.invoiceNumber))
-            ? Number(latestInvoice.invoiceNumber)
-            : null;
-        const latestInvoiceId = (latestInvoice?.id || latestInvoice?.invoiceId || "").toString().trim();
-        const latestInvoiceCycleMonth = normalizeCycleMonthValue(latestInvoice?.cycleMonth || "");
-        const latestInvoicePaymentMethod = normalizeSubscriptionOpsPaymentMethod(
-          latestInvoice?.paymentMethod || subscription?.paymentMethod || PAYMENT_METHODS.PAYFAST,
+        const latestInvoiceNumber = Number.isFinite(
+          Number(latestInvoice?.invoiceNumber),
+        )
+          ? Number(latestInvoice.invoiceNumber)
+          : null;
+        const latestInvoiceId = (
+          latestInvoice?.id ||
+          latestInvoice?.invoiceId ||
+          ""
+        )
+          .toString()
+          .trim();
+        const latestInvoiceCycleMonth = normalizeCycleMonthValue(
+          latestInvoice?.cycleMonth || "",
         );
-        const latestInvoicePaymentApprovalStatus = normalizeSubscriptionOpsPaymentApprovalStatus(
-          latestInvoice?.paymentApprovalStatus ||
-            latestInvoice?.paymentApproval?.decision ||
-            subscription?.paymentApprovalStatus ||
-            subscription?.paymentApproval?.decision ||
-            "",
-          latestInvoicePaymentMethod,
-        );
-        const latestPaidInvoice = latestPaidInvoiceBySubscription.get(subscriptionId) || null;
+        const latestInvoicePaymentMethod =
+          normalizeSubscriptionOpsPaymentMethod(
+            latestInvoice?.paymentMethod ||
+              subscription?.paymentMethod ||
+              PAYMENT_METHODS.PAYFAST,
+          );
+        const latestInvoicePaymentApprovalStatus =
+          normalizeSubscriptionOpsPaymentApprovalStatus(
+            latestInvoice?.paymentApprovalStatus ||
+              latestInvoice?.paymentApproval?.decision ||
+              subscription?.paymentApprovalStatus ||
+              subscription?.paymentApproval?.decision ||
+              "",
+            latestInvoicePaymentMethod,
+          );
+        const latestPaidInvoice =
+          latestPaidInvoiceBySubscription.get(subscriptionId) || null;
         const lastPaidAmount = latestPaidInvoice
           ? resolveSubscriptionInvoicePaidAmount(latestPaidInvoice)
           : null;
-        const subscriptionLastPaymentAt = parseDateValue(subscription?.lastPaymentAt);
+        const subscriptionLastPaymentAt = parseDateValue(
+          subscription?.lastPaymentAt,
+        );
         const lastPaidAt =
-          resolveSubscriptionInvoicePaidDate(latestPaidInvoice) || subscriptionLastPaymentAt;
-        const invoiceNumber =
-          Number.isFinite(Number(invoice?.invoiceNumber))
-            ? Number(invoice.invoiceNumber)
-            : null;
-        const invoiceId = (invoice?.id || invoice?.invoiceId || "").toString().trim();
+          resolveSubscriptionInvoicePaidDate(latestPaidInvoice) ||
+          subscriptionLastPaymentAt;
+        const invoiceNumber = Number.isFinite(Number(invoice?.invoiceNumber))
+          ? Number(invoice.invoiceNumber)
+          : null;
+        const invoiceId = (invoice?.id || invoice?.invoiceId || "")
+          .toString()
+          .trim();
         const topupPendingAmount = topupInvoices.reduce((sum, topupInvoice) => {
-          const topupStatus = normalizeSubscriptionOpsInvoiceStatus(topupInvoice?.status || "");
+          const topupStatus = normalizeSubscriptionOpsInvoiceStatus(
+            topupInvoice?.status || "",
+          );
           if (topupStatus !== "pending-payment") return sum;
           return sum + Number(topupInvoice?.amount || 0);
         }, 0);
         const topupCount = topupInvoices.length;
-        const recurringCharges = Array.isArray(subscription?.billingCharges?.recurring)
+        const recurringCharges = Array.isArray(
+          subscription?.billingCharges?.recurring,
+        )
           ? subscription.billingCharges.recurring.filter(
-              (entry) => ((entry?.status || "").toString().trim().toLowerCase() || "active") === "active",
+              (entry) =>
+                ((entry?.status || "").toString().trim().toLowerCase() ||
+                  "active") === "active",
             )
           : [];
         const subscriptionPlanId = (
           subscription?.subscriptionPlan?.planId ||
           subscription?.subscriptionProduct?.productId ||
           ""
-        ).toString().trim();
+        )
+          .toString()
+          .trim();
         const lastPaymentAt = subscriptionLastPaymentAt;
         const paidAt = cyclePaidAt;
-        const readyToSend = subscriptionStatus === "active" && invoiceStatus === "paid";
+        const readyToSend =
+          subscriptionStatus === "active" && invoiceStatus === "paid";
         const mondaySlots = normalizeSubscriptionMondaySlotsForTier(
           tier,
-          invoice?.deliverySchedule?.slots || subscription?.deliveryPreference?.slots || [],
+          invoice?.deliverySchedule?.slots ||
+            subscription?.deliveryPreference?.slots ||
+            [],
         );
         const hasInvoiceCycleDeliveryDates =
           Array.isArray(invoice?.deliverySchedule?.cycleDeliveryDates) &&
           invoice.deliverySchedule.cycleDeliveryDates.length > 0;
         const cycleDeliveryDatesRaw = hasInvoiceCycleDeliveryDates
-          ? normalizeUniqueDeliveryDates(invoice.deliverySchedule.cycleDeliveryDates)
+          ? normalizeUniqueDeliveryDates(
+              invoice.deliverySchedule.cycleDeliveryDates,
+            )
           : resolveSubscriptionCycleDeliveryDates({
               tier,
               slots: mondaySlots,
@@ -6122,7 +7344,9 @@ export function AdminSubscriptionOpsView() {
           Array.isArray(invoice?.deliverySchedule?.includedDeliveryDates) &&
           invoice.deliverySchedule.includedDeliveryDates.length > 0;
         const includedDeliveryDatesRaw = hasInvoiceIncludedDeliveryDates
-          ? normalizeUniqueDeliveryDates(invoice.deliverySchedule.includedDeliveryDates)
+          ? normalizeUniqueDeliveryDates(
+              invoice.deliverySchedule.includedDeliveryDates,
+            )
           : cycleDeliveryDates;
         const includedDeliveryDates =
           !invoice && !hasInvoiceIncludedDeliveryDates
@@ -6137,7 +7361,8 @@ export function AdminSubscriptionOpsView() {
           .map((slot) => formatSubscriptionMondaySlotLabel(slot))
           .filter(Boolean)
           .join(", ");
-        const cycleDeliveryLabel = formatSubscriptionDeliveryDateList(cycleDeliveryDates) || "None";
+        const cycleDeliveryLabel =
+          formatSubscriptionDeliveryDateList(cycleDeliveryDates) || "None";
         const includedDeliveryLabel =
           formatSubscriptionDeliveryDateList(includedDeliveryDates) || "None";
         const isCurrentCycleSelection =
@@ -6145,7 +7370,9 @@ export function AdminSubscriptionOpsView() {
           normalizeCycleMonthValue(currentJohannesburgCycleMonth);
         const expectedDeliveries =
           includedDeliveryDates.length ||
-          (!invoice && isCurrentCycleSelection ? 0 : resolveExpectedCycleDeliveries(tier));
+          (!invoice && isCurrentCycleSelection
+            ? 0
+            : resolveExpectedCycleDeliveries(tier));
 
         const searchText = [
           subscriptionId,
@@ -6265,7 +7492,8 @@ export function AdminSubscriptionOpsView() {
 
   const manageRow = useMemo(
     () =>
-      allRows.find((row) => row.subscriptionId === manageSubscriptionId) || null,
+      allRows.find((row) => row.subscriptionId === manageSubscriptionId) ||
+      null,
     [allRows, manageSubscriptionId],
   );
 
@@ -6290,14 +7518,24 @@ export function AdminSubscriptionOpsView() {
   const visibleRows = useMemo(() => {
     const normalizedSearch = searchTerm.toString().trim().toLowerCase();
     return allRows.filter((row) => {
-      if (normalizedSearch && !row.searchText.includes(normalizedSearch)) return false;
-      if (subscriptionStatusFilter !== "all" && row.subscriptionStatus !== subscriptionStatusFilter) {
+      if (normalizedSearch && !row.searchText.includes(normalizedSearch))
+        return false;
+      if (
+        subscriptionStatusFilter !== "all" &&
+        row.subscriptionStatus !== subscriptionStatusFilter
+      ) {
         return false;
       }
-      if (invoiceStatusFilter !== "all" && row.invoiceStatus !== invoiceStatusFilter) {
+      if (
+        invoiceStatusFilter !== "all" &&
+        row.invoiceStatus !== invoiceStatusFilter
+      ) {
         return false;
       }
-      if (paymentMethodFilter !== "all" && row.paymentMethod !== paymentMethodFilter) {
+      if (
+        paymentMethodFilter !== "all" &&
+        row.paymentMethod !== paymentMethodFilter
+      ) {
         return false;
       }
       if (deliveryReadinessFilter === "ready" && !row.readyToSend) {
@@ -6312,7 +7550,8 @@ export function AdminSubscriptionOpsView() {
       }
       if (tierFilter !== "all" && row.tier !== tierFilter) return false;
       if (cityFilter !== "all" && row.city !== cityFilter) return false;
-      if (provinceFilter !== "all" && row.province !== provinceFilter) return false;
+      if (provinceFilter !== "all" && row.province !== provinceFilter)
+        return false;
       return true;
     });
   }, [
@@ -6356,17 +7595,27 @@ export function AdminSubscriptionOpsView() {
       }
       return;
     }
-    if (mondayRosterOptions.some((option) => option.value === selectedDeliveryMonday)) {
+    if (
+      mondayRosterOptions.some(
+        (option) => option.value === selectedDeliveryMonday,
+      )
+    ) {
       return;
     }
     setSelectedDeliveryMonday(mondayRosterOptions[0]?.value || "");
   }, [mondayRosterOptions, selectedDeliveryMonday]);
 
   const metrics = useMemo(() => {
-    const activeCount = allRows.filter((row) => row.subscriptionStatus === "active").length;
-    const paidThisCycle = allRows.filter((row) => row.invoiceStatus === "paid").length;
+    const activeCount = allRows.filter(
+      (row) => row.subscriptionStatus === "active",
+    ).length;
+    const paidThisCycle = allRows.filter(
+      (row) => row.invoiceStatus === "paid",
+    ).length;
     const pendingOrUnpaid = allRows.filter(
-      (row) => row.invoiceStatus === "pending-payment" || row.invoiceStatus === "missing",
+      (row) =>
+        row.invoiceStatus === "pending-payment" ||
+        row.invoiceStatus === "missing",
     ).length;
     const readyToSend = allRows.filter((row) => row.readyToSend).length;
     return [
@@ -6383,14 +7632,22 @@ export function AdminSubscriptionOpsView() {
       subscriptionStatus:
         draft?.subscriptionStatus || row.subscriptionStatus || "active",
       invoiceStatus:
-        draft?.invoiceStatus || (row.invoiceStatus === "missing" ? "pending-payment" : row.invoiceStatus),
-      paymentMethod: draft?.paymentMethod || row.paymentMethod || PAYMENT_METHODS.PAYFAST,
+        draft?.invoiceStatus ||
+        (row.invoiceStatus === "missing"
+          ? "pending-payment"
+          : row.invoiceStatus),
+      paymentMethod:
+        draft?.paymentMethod || row.paymentMethod || PAYMENT_METHODS.PAYFAST,
       applyToPendingInvoice: draft?.applyToPendingInvoice !== false,
       planId: (draft?.planId || row.subscriptionPlanId || "").toString(),
       chargeAmount: (draft?.chargeAmount || "").toString(),
       chargeLabel: (draft?.chargeLabel || "").toString(),
-      chargeMode: normalizeSubscriptionChargeMode(draft?.chargeMode || "one-time"),
-      chargeBasis: normalizeSubscriptionChargeBasis(draft?.chargeBasis || "flat"),
+      chargeMode: normalizeSubscriptionChargeMode(
+        draft?.chargeMode || "one-time",
+      ),
+      chargeBasis: normalizeSubscriptionChargeBasis(
+        draft?.chargeBasis || "flat",
+      ),
       reason: draft?.reason || "",
     };
   };
@@ -6419,14 +7676,19 @@ export function AdminSubscriptionOpsView() {
     event.preventDefault();
     const currentIndex = Math.max(
       0,
-      SUBSCRIPTION_OPS_MANAGE_TABS.findIndex((tab) => tab.id === activeManageTab),
+      SUBSCRIPTION_OPS_MANAGE_TABS.findIndex(
+        (tab) => tab.id === activeManageTab,
+      ),
     );
     if (key === "Home") {
       setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_TABS[0].id);
       return;
     }
     if (key === "End") {
-      setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_TABS[SUBSCRIPTION_OPS_MANAGE_TABS.length - 1].id);
+      setActiveManageTab(
+        SUBSCRIPTION_OPS_MANAGE_TABS[SUBSCRIPTION_OPS_MANAGE_TABS.length - 1]
+          .id,
+      );
       return;
     }
     const direction = key === "ArrowLeft" ? -1 : 1;
@@ -6437,12 +7699,14 @@ export function AdminSubscriptionOpsView() {
   };
 
   const getCsvScopeLabel = (scopeValue = "ready") =>
-    SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS.find((entry) => entry.value === scopeValue)?.label ||
-    SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS[0].label;
+    SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS.find(
+      (entry) => entry.value === scopeValue,
+    )?.label || SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS[0].label;
 
   const getPdfScopeLabel = (scopeValue = "all-cycle") =>
-    SUBSCRIPTION_OPS_PDF_SCOPE_EXPORT_LABELS.find((entry) => entry.value === scopeValue)?.label ||
-    SUBSCRIPTION_OPS_PDF_SCOPE_EXPORT_LABELS[0].label;
+    SUBSCRIPTION_OPS_PDF_SCOPE_EXPORT_LABELS.find(
+      (entry) => entry.value === scopeValue,
+    )?.label || SUBSCRIPTION_OPS_PDF_SCOPE_EXPORT_LABELS[0].label;
 
   const resolveCsvSourceRows = () => {
     if (csvExportScope === "filtered") return visibleRows;
@@ -6455,9 +7719,14 @@ export function AdminSubscriptionOpsView() {
     return allRows;
   };
 
-  const buildSubscriptionOpsPdfRows = (rows = [], { selectedMonday = "" } = {}) =>
+  const buildSubscriptionOpsPdfRows = (
+    rows = [],
+    { selectedMonday = "" } = {},
+  ) =>
     rows.map((row) => {
-      const nextUpcomingDate = selectedMonday || resolveNextUpcomingIncludedDeliveryDate(row, selectedCycleMonth);
+      const nextUpcomingDate =
+        selectedMonday ||
+        resolveNextUpcomingIncludedDeliveryDate(row, selectedCycleMonth);
       const nextUpcomingLabel = nextUpcomingDate
         ? formatSubscriptionDeliveryDateLabel(nextUpcomingDate)
         : "No upcoming date in selected cycle";
@@ -6476,7 +7745,9 @@ export function AdminSubscriptionOpsView() {
           `${row.city || "-"} | ${row.province || "-"}`,
         ].join("\n"),
         nextDelivery: [
-          selectedMonday ? `Delivery: ${nextUpcomingLabel}` : `Next: ${nextUpcomingLabel}`,
+          selectedMonday
+            ? `Delivery: ${nextUpcomingLabel}`
+            : `Next: ${nextUpcomingLabel}`,
           `Monday slots: ${row.mondaySlotLabel || "-"}`,
         ].join("\n"),
         plan: [
@@ -6486,7 +7757,9 @@ export function AdminSubscriptionOpsView() {
           `Expected deliveries: ${row.expectedDeliveries || 0}`,
         ].join("\n"),
         cycleInvoice: [
-          row.invoiceNumber ? `Invoice: INV-${row.invoiceNumber}` : `Missing for ${selectedCycleLabel}`,
+          row.invoiceNumber
+            ? `Invoice: INV-${row.invoiceNumber}`
+            : `Missing for ${selectedCycleLabel}`,
           `Status: ${row.cyclePaymentStatusLabel || invoiceStatusLabel}`,
           `Total: ${row.invoice ? formatPriceLabel(row.invoiceAmount) : "-"}`,
         ].join("\n"),
@@ -6550,10 +7823,15 @@ export function AdminSubscriptionOpsView() {
       row.cycleDeliveryLabel || "",
       row.includedDeliveryLabel || "",
       formatSubscriptionStatusLabel(row.subscriptionStatus),
-      row.invoiceStatus === "missing" ? "Missing" : formatSubscriptionInvoiceStatusLabel(row.invoiceStatus),
+      row.invoiceStatus === "missing"
+        ? "Missing"
+        : formatSubscriptionInvoiceStatusLabel(row.invoiceStatus),
       row.invoice ? formatSubscriptionInvoiceTypeLabel(row.invoiceType) : "",
       formatSubscriptionPaymentMethodLabel(row.paymentMethod),
-      formatSubscriptionPaymentApprovalLabel(row.paymentApprovalStatus, row.paymentMethod),
+      formatSubscriptionPaymentApprovalLabel(
+        row.paymentApprovalStatus,
+        row.paymentMethod,
+      ),
       row.cyclePaymentStatusLabel || "Missing invoice",
       row.invoiceStatus === "paid" ? "Yes" : "No",
       row.readyToSend ? "Yes" : "No",
@@ -6563,7 +7841,12 @@ export function AdminSubscriptionOpsView() {
       row.invoice ? Number(row.invoiceAdjustmentsTotal || 0).toFixed(2) : "",
       Number(row.topupPendingAmount || 0).toFixed(2),
       row.topupCount || 0,
-      Array.isArray(row.recurringCharges) ? row.recurringCharges.map((entry) => entry?.label || "").filter(Boolean).join(" | ") : "",
+      Array.isArray(row.recurringCharges)
+        ? row.recurringCharges
+            .map((entry) => entry?.label || "")
+            .filter(Boolean)
+            .join(" | ")
+        : "",
       row.readyToSend ? "Yes" : "No",
       row.addressLabel || "",
       row.city || "",
@@ -6587,7 +7870,10 @@ export function AdminSubscriptionOpsView() {
     }
     setErrorMessage(null);
     const rows = buildExportRows(visibleRows);
-    downloadCsvFile(rows, `subscription-ops-filtered-${selectedCycleMonth}.csv`);
+    downloadCsvFile(
+      rows,
+      `subscription-ops-filtered-${selectedCycleMonth}.csv`,
+    );
     return true;
   };
 
@@ -6598,7 +7884,10 @@ export function AdminSubscriptionOpsView() {
     }
     setErrorMessage(null);
     const rows = buildExportRows(readyToSendRows);
-    downloadCsvFile(rows, `subscription-ops-ready-to-send-${selectedCycleMonth}.csv`);
+    downloadCsvFile(
+      rows,
+      `subscription-ops-ready-to-send-${selectedCycleMonth}.csv`,
+    );
     return true;
   };
 
@@ -6607,18 +7896,27 @@ export function AdminSubscriptionOpsView() {
       setErrorMessage("Cloud Functions are not available.");
       return;
     }
-    if (!window.confirm("This will find all pending invoices with R 0.00, repair the amounts and resend corrected emails with an apology to affected customers. Continue?")) {
+    if (
+      !window.confirm(
+        "This will find all pending invoices with R 0.00, repair the amounts and resend corrected emails with an apology to affected customers. Continue?",
+      )
+    ) {
       return;
     }
     setCorrectionResendBusy(true);
     setCorrectionResendResult(null);
     setErrorMessage(null);
     try {
-      const callable = httpsCallable(functionsInstance, "adminResendCorrectedSubscriptionInvoices");
+      const callable = httpsCallable(
+        functionsInstance,
+        "adminResendCorrectedSubscriptionInvoices",
+      );
       const result = await callable({});
       const data = result?.data || {};
       setCorrectionResendResult(data);
-      setStatusMessage(`Done: ${data.emailsSent ?? 0} corrected email(s) sent, ${data.repaired ?? 0} invoice(s) repaired.`);
+      setStatusMessage(
+        `Done: ${data.emailsSent ?? 0} corrected email(s) sent, ${data.repaired ?? 0} invoice(s) repaired.`,
+      );
     } catch (err) {
       setErrorMessage(err?.message || "Failed to resend corrected invoices.");
     } finally {
@@ -6640,7 +7938,9 @@ export function AdminSubscriptionOpsView() {
       return false;
     }
     if (!mondayRosterRows.length) {
-      setErrorMessage("No ready-to-send customers are scheduled for that Monday.");
+      setErrorMessage(
+        "No ready-to-send customers are scheduled for that Monday.",
+      );
       return false;
     }
     setErrorMessage(null);
@@ -6672,7 +7972,8 @@ export function AdminSubscriptionOpsView() {
       };
       if (selectedMonday) {
         payload.contextLabel = "Delivery date";
-        payload.contextValue = formatSubscriptionDeliveryDateLabel(selectedMonday);
+        payload.contextValue =
+          formatSubscriptionDeliveryDateLabel(selectedMonday);
       }
       if (action === "print") {
         await printSubscriptionOpsRosterPdf(payload);
@@ -6694,7 +7995,9 @@ export function AdminSubscriptionOpsView() {
         return false;
       }
       if (pdfExportScope === "ready-filtered") {
-        setErrorMessage("No delivery-ready rows match the current filters for PDF export.");
+        setErrorMessage(
+          "No delivery-ready rows match the current filters for PDF export.",
+        );
         return false;
       }
       setErrorMessage("No subscription rows found for this cycle.");
@@ -6717,7 +8020,9 @@ export function AdminSubscriptionOpsView() {
         return false;
       }
       if (pdfExportScope === "ready-filtered") {
-        setErrorMessage("No delivery-ready rows match the current filters for PDF print.");
+        setErrorMessage(
+          "No delivery-ready rows match the current filters for PDF print.",
+        );
         return false;
       }
       setErrorMessage("No subscription rows found for this cycle.");
@@ -6740,7 +8045,9 @@ export function AdminSubscriptionOpsView() {
       return false;
     }
     if (!mondayRosterRows.length) {
-      setErrorMessage("No ready-to-send customers are scheduled for that Monday.");
+      setErrorMessage(
+        "No ready-to-send customers are scheduled for that Monday.",
+      );
       return false;
     }
 
@@ -6762,7 +8069,9 @@ export function AdminSubscriptionOpsView() {
       return false;
     }
     if (!mondayRosterRows.length) {
-      setErrorMessage("No ready-to-send customers are scheduled for that Monday.");
+      setErrorMessage(
+        "No ready-to-send customers are scheduled for that Monday.",
+      );
       return false;
     }
 
@@ -6773,7 +8082,8 @@ export function AdminSubscriptionOpsView() {
       scopeLabel: "Ready to send",
       scopeKey: `monday-${normalizedMonday}`,
       selectedMonday: normalizedMonday,
-      errorMessageText: "Unable to open the Monday delivery roster for printing.",
+      errorMessageText:
+        "Unable to open the Monday delivery roster for printing.",
     });
   };
 
@@ -6786,26 +8096,33 @@ export function AdminSubscriptionOpsView() {
 
   const closeExportDialog = () => setExportDialogOpen(false);
 
-  const selectedExportScopeOptions = exportDialogFormat === "csv"
-    ? SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS
-    : SUBSCRIPTION_OPS_PDF_SCOPE_OPTIONS;
+  const selectedExportScopeOptions =
+    exportDialogFormat === "csv"
+      ? SUBSCRIPTION_OPS_CSV_SCOPE_OPTIONS
+      : SUBSCRIPTION_OPS_PDF_SCOPE_OPTIONS;
 
-  const selectedExportScope = exportDialogFormat === "csv" ? csvExportScope : pdfExportScope;
+  const selectedExportScope =
+    exportDialogFormat === "csv" ? csvExportScope : pdfExportScope;
 
-  const selectedExportRows = exportRosterMode === "monday"
-    ? mondayRosterRows
-    : exportDialogFormat === "csv"
-      ? resolveCsvSourceRows()
-      : resolvePdfSourceRows();
+  const selectedExportRows =
+    exportRosterMode === "monday"
+      ? mondayRosterRows
+      : exportDialogFormat === "csv"
+        ? resolveCsvSourceRows()
+        : resolvePdfSourceRows();
 
-  const selectedDeliveryMondayLabel = formatSubscriptionDeliveryDateLabel(selectedDeliveryMonday) || "Not selected";
+  const selectedDeliveryMondayLabel =
+    formatSubscriptionDeliveryDateLabel(selectedDeliveryMonday) ||
+    "Not selected";
 
-  const selectedExportScopeLabel = exportDialogFormat === "csv"
-    ? getCsvScopeLabel(selectedExportScope)
-    : getPdfScopeLabel(selectedExportScope);
+  const selectedExportScopeLabel =
+    exportDialogFormat === "csv"
+      ? getCsvScopeLabel(selectedExportScope)
+      : getPdfScopeLabel(selectedExportScope);
 
   const exportDialogActionDisabled =
-    exportRosterMode === "monday" && !normalizeIsoDateValue(selectedDeliveryMonday);
+    exportRosterMode === "monday" &&
+    !normalizeIsoDateValue(selectedDeliveryMonday);
 
   const handleExportDialogScopeChange = (nextScope) => {
     setErrorMessage(null);
@@ -6817,13 +8134,14 @@ export function AdminSubscriptionOpsView() {
   };
 
   const handleConfirmExportDialog = async () => {
-    const wasSuccessful = exportRosterMode === "monday"
-      ? exportDialogFormat === "csv"
-        ? handleExportMondayCsv()
-        : await handleExportMondayPdf()
-      : exportDialogFormat === "csv"
-        ? handleExportCsv()
-        : await handleExportPdf();
+    const wasSuccessful =
+      exportRosterMode === "monday"
+        ? exportDialogFormat === "csv"
+          ? handleExportMondayCsv()
+          : await handleExportMondayPdf()
+        : exportDialogFormat === "csv"
+          ? handleExportCsv()
+          : await handleExportPdf();
     if (wasSuccessful) {
       setExportDialogOpen(false);
     }
@@ -6831,19 +8149,27 @@ export function AdminSubscriptionOpsView() {
 
   const handlePrintExportDialog = async () => {
     if (exportDialogFormat !== "pdf") return;
-    const wasSuccessful = exportRosterMode === "monday"
-      ? await handlePrintMondayPdf()
-      : await handlePrintPdf();
+    const wasSuccessful =
+      exportRosterMode === "monday"
+        ? await handlePrintMondayPdf()
+        : await handlePrintPdf();
     if (wasSuccessful) {
       setExportDialogOpen(false);
     }
   };
 
-  const executeSubscriptionStatusOverride = async ({ row, nextStatus, reason }) => {
+  const executeSubscriptionStatusOverride = async ({
+    row,
+    nextStatus,
+    reason,
+  }) => {
     if (!functionsInstance) {
       throw new Error("Cloud Functions are not available.");
     }
-    const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionStatus");
+    const callable = httpsCallable(
+      functionsInstance,
+      "adminUpdateSubscriptionStatus",
+    );
     const result = await callable({
       subscriptionId: row.subscriptionId,
       status: nextStatus,
@@ -6861,7 +8187,10 @@ export function AdminSubscriptionOpsView() {
     if (!functionsInstance) {
       throw new Error("Cloud Functions are not available.");
     }
-    const callable = httpsCallable(functionsInstance, "adminUpsertSubscriptionInvoiceStatus");
+    const callable = httpsCallable(
+      functionsInstance,
+      "adminUpsertSubscriptionInvoiceStatus",
+    );
     const result = await callable({
       subscriptionId: row.subscriptionId,
       cycleMonth: selectedCycleMonth,
@@ -6881,7 +8210,10 @@ export function AdminSubscriptionOpsView() {
     if (!functionsInstance) {
       throw new Error("Cloud Functions are not available.");
     }
-    const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionPaymentMethod");
+    const callable = httpsCallable(
+      functionsInstance,
+      "adminUpdateSubscriptionPaymentMethod",
+    );
     const result = await callable({
       subscriptionId: row.subscriptionId,
       paymentMethod,
@@ -6891,15 +8223,14 @@ export function AdminSubscriptionOpsView() {
     return result?.data || {};
   };
 
-  const executeSubscriptionPlanAssignment = async ({
-    row,
-    planId,
-    reason,
-  }) => {
+  const executeSubscriptionPlanAssignment = async ({ row, planId, reason }) => {
     if (!functionsInstance) {
       throw new Error("Cloud Functions are not available.");
     }
-    const callable = httpsCallable(functionsInstance, "adminUpdateSubscriptionPlanAssignment");
+    const callable = httpsCallable(
+      functionsInstance,
+      "adminUpdateSubscriptionPlanAssignment",
+    );
     const result = await callable({
       subscriptionId: row.subscriptionId,
       planId,
@@ -6922,7 +8253,10 @@ export function AdminSubscriptionOpsView() {
     if (!functionsInstance) {
       throw new Error("Cloud Functions are not available.");
     }
-    const callable = httpsCallable(functionsInstance, "adminAddSubscriptionInvoiceCharge");
+    const callable = httpsCallable(
+      functionsInstance,
+      "adminAddSubscriptionInvoiceCharge",
+    );
     const result = await callable({
       subscriptionId: row.subscriptionId,
       cycleMonth: selectedCycleMonth,
@@ -6945,7 +8279,10 @@ export function AdminSubscriptionOpsView() {
     if (!functionsInstance) {
       throw new Error("Cloud Functions are not available.");
     }
-    const callable = httpsCallable(functionsInstance, "adminRemoveSubscriptionRecurringCharge");
+    const callable = httpsCallable(
+      functionsInstance,
+      "adminRemoveSubscriptionRecurringCharge",
+    );
     const result = await callable({
       subscriptionId: row.subscriptionId,
       chargeId,
@@ -6960,7 +8297,10 @@ export function AdminSubscriptionOpsView() {
     if (!functionsInstance) {
       throw new Error("Cloud Functions are not available.");
     }
-    const callable = httpsCallable(functionsInstance, "adminSendSubscriptionInvoiceEmailNow");
+    const callable = httpsCallable(
+      functionsInstance,
+      "adminSendSubscriptionInvoiceEmailNow",
+    );
     const result = await callable({
       subscriptionId: row.subscriptionId,
       cycleMonth: selectedCycleMonth,
@@ -6970,7 +8310,9 @@ export function AdminSubscriptionOpsView() {
   };
 
   const resolveActionResultCycleMonth = (value = {}) => {
-    const normalizedDirectCycle = normalizeCycleMonthValue(value?.cycleMonth || "");
+    const normalizedDirectCycle = normalizeCycleMonthValue(
+      value?.cycleMonth || "",
+    );
     if (normalizedDirectCycle) return normalizedDirectCycle;
     const normalizedEffectiveCycle = normalizeCycleMonthValue(
       value?.effectiveCycleMonth || "",
@@ -7045,7 +8387,9 @@ export function AdminSubscriptionOpsView() {
           reason,
         });
         const selectedPlan = liveSubscriptionPlans.find(
-          (plan) => (plan?.id || "").toString().trim() === (nextPlanId || "").toString().trim(),
+          (plan) =>
+            (plan?.id || "").toString().trim() ===
+            (nextPlanId || "").toString().trim(),
         );
         nextStatusMessage = `${row.customerName || "Subscription"} switched to ${selectedPlan?.name || "selected plan"}.`;
       } else if (actionType === "invoice-charge-add") {
@@ -7075,7 +8419,9 @@ export function AdminSubscriptionOpsView() {
         const resolvedPaymentMethod = normalizeSubscriptionOpsPaymentMethod(
           actionResult?.paymentMethod || row.paymentMethod,
         );
-        const invoiceLabel = (actionResult?.invoiceId || row.invoiceId || "").toString().slice(0, 8);
+        const invoiceLabel = (actionResult?.invoiceId || row.invoiceId || "")
+          .toString()
+          .slice(0, 8);
         const sentLabel =
           resolvedPaymentMethod === PAYMENT_METHODS.EFT
             ? `Invoice email sent for ${row.customerName || "subscription"}`
@@ -7104,7 +8450,9 @@ export function AdminSubscriptionOpsView() {
         setStatusMessage(nextStatusMessage);
       }
     } catch (error) {
-      setErrorMessage(error?.message || "Unable to update subscription operations state.");
+      setErrorMessage(
+        error?.message || "Unable to update subscription operations state.",
+      );
     } finally {
       setBusySubscriptionId("");
       setConfirmState(null);
@@ -7134,11 +8482,15 @@ export function AdminSubscriptionOpsView() {
     const reason = (draft.reason || "").toString().trim();
     const nextStatus = normalizeSubscriptionOpsStatus(draft.subscriptionStatus);
     if (!reason) {
-      setErrorMessage("A reason is required before applying subscription status changes.");
+      setErrorMessage(
+        "A reason is required before applying subscription status changes.",
+      );
       return;
     }
     if (nextStatus === row.subscriptionStatus) {
-      setErrorMessage("Choose a different subscription status before applying.");
+      setErrorMessage(
+        "Choose a different subscription status before applying.",
+      );
       return;
     }
     requestActionConfirmation({
@@ -7157,13 +8509,19 @@ export function AdminSubscriptionOpsView() {
   const handleApplyInvoiceStatus = (row) => {
     const draft = getDraft(row.subscriptionId, row);
     const reason = (draft.reason || "").toString().trim();
-    const nextStatus = normalizeSubscriptionOpsInvoiceStatus(draft.invoiceStatus);
+    const nextStatus = normalizeSubscriptionOpsInvoiceStatus(
+      draft.invoiceStatus,
+    );
     if (!reason) {
-      setErrorMessage("A reason is required before applying invoice status changes.");
+      setErrorMessage(
+        "A reason is required before applying invoice status changes.",
+      );
       return;
     }
     if (row.isMissingInvoice) {
-      setErrorMessage("Create a cycle invoice first before overriding invoice status.");
+      setErrorMessage(
+        "Create a cycle invoice first before overriding invoice status.",
+      );
       return;
     }
     if (nextStatus === row.invoiceStatus) {
@@ -7186,7 +8544,9 @@ export function AdminSubscriptionOpsView() {
   const handleApplyPaymentMethod = (row) => {
     const draft = getDraft(row.subscriptionId, row);
     const reason = (draft.reason || "").toString().trim();
-    const nextPaymentMethod = normalizeSubscriptionOpsPaymentMethod(draft.paymentMethod);
+    const nextPaymentMethod = normalizeSubscriptionOpsPaymentMethod(
+      draft.paymentMethod,
+    );
     if (!reason) {
       setErrorMessage("A reason is required before switching payment method.");
       return;
@@ -7263,7 +8623,8 @@ export function AdminSubscriptionOpsView() {
     const draft = getDraft(row.subscriptionId, row);
     const reason = (draft.reason || "").toString().trim();
     const chargeAmount = Number(draft.chargeAmount);
-    const chargeLabel = (draft.chargeLabel || "").toString().trim() || "Admin charge";
+    const chargeLabel =
+      (draft.chargeLabel || "").toString().trim() || "Admin charge";
     const chargeMode = normalizeSubscriptionChargeMode(draft.chargeMode);
     const chargeBasis = normalizeSubscriptionChargeBasis(draft.chargeBasis);
     if (!reason) {
@@ -7293,7 +8654,9 @@ export function AdminSubscriptionOpsView() {
     const reason = (draft.reason || "").toString().trim();
     const chargeId = (charge?.chargeId || "").toString().trim();
     if (!reason) {
-      setErrorMessage("A reason is required before removing recurring charges.");
+      setErrorMessage(
+        "A reason is required before removing recurring charges.",
+      );
       return;
     }
     if (!chargeId) {
@@ -7315,10 +8678,14 @@ export function AdminSubscriptionOpsView() {
     const draft = getDraft(row.subscriptionId, row);
     const reason = (draft.reason || "").toString().trim();
     if (!reason) {
-      setErrorMessage("A reason is required before resending a pay link or invoice email.");
+      setErrorMessage(
+        "A reason is required before resending a pay link or invoice email.",
+      );
       return;
     }
-    const paymentMethod = normalizeSubscriptionOpsPaymentMethod(row.paymentMethod);
+    const paymentMethod = normalizeSubscriptionOpsPaymentMethod(
+      row.paymentMethod,
+    );
     const isEft = paymentMethod === PAYMENT_METHODS.EFT;
     const actionLabel = isEft
       ? row.isMissingInvoice
@@ -7355,7 +8722,8 @@ export function AdminSubscriptionOpsView() {
         <div className="admin-subscription-ops__hero-copy">
           <h2>Subscription Ops</h2>
           <p className="admin-panel__note">
-            Track paid subscriptions and export delivery rosters for {selectedCycleLabel}.
+            Track paid subscriptions and export delivery rosters for{" "}
+            {selectedCycleLabel}.
           </p>
         </div>
         <div className="admin-panel__header-actions admin-subscription-ops__hero-actions">
@@ -7376,22 +8744,41 @@ export function AdminSubscriptionOpsView() {
             <IconDownload className="btn__icon" aria-hidden="true" />
             Export
           </button>
-          <Link className="btn btn--secondary admin-subscription-ops__hero-btn" to="/admin/subscriptions">
+          <Link
+            className="btn btn--secondary admin-subscription-ops__hero-btn"
+            to="/admin/subscriptions"
+          >
             <IconSliders className="btn__icon" aria-hidden="true" />
             Plans
           </Link>
         </div>
         {correctionResendResult && (
-          <div className="admin-panel__note" style={{ marginTop: "8px", color: "var(--color-accent)" }}>
-            Repaired: {correctionResendResult.repaired} | Emails sent: {correctionResendResult.emailsSent} | Failed: {correctionResendResult.emailsFailed} | Skipped: {correctionResendResult.skipped}
+          <div
+            className="admin-panel__note"
+            style={{ marginTop: "8px", color: "var(--color-accent)" }}
+          >
+            Repaired: {correctionResendResult.repaired} | Emails sent:{" "}
+            {correctionResendResult.emailsSent} | Failed:{" "}
+            {correctionResendResult.emailsFailed} | Skipped:{" "}
+            {correctionResendResult.skipped}
           </div>
         )}
       </Reveal>
 
       {exportDialogOpen ? (
-        <div className="modal is-active admin-modal admin-subscription-ops-export" role="dialog" aria-modal="true" aria-labelledby="subscription-ops-export-title">
+        <div
+          className="modal is-active admin-modal admin-subscription-ops-export"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="subscription-ops-export-title"
+        >
           <div className="modal__content admin-modal__content admin-subscription-ops-export__content">
-            <button className="modal__close" type="button" onClick={closeExportDialog} aria-label="Close export options">
+            <button
+              className="modal__close"
+              type="button"
+              onClick={closeExportDialog}
+              aria-label="Close export options"
+            >
               x
             </button>
             <div className="admin-subscription-ops-export__header">
@@ -7442,9 +8829,12 @@ export function AdminSubscriptionOpsView() {
                     value={selectedDeliveryMonday}
                     onChange={(event) => {
                       setErrorMessage(null);
-                      const nextMonday = normalizeIsoDateValue(event.target.value);
+                      const nextMonday = normalizeIsoDateValue(
+                        event.target.value,
+                      );
                       setSelectedDeliveryMonday(nextMonday);
-                      const nextCycleMonth = getCycleMonthForIsoDateValue(nextMonday);
+                      const nextCycleMonth =
+                        getCycleMonthForIsoDateValue(nextMonday);
                       if (nextCycleMonth) {
                         setSelectedCycleMonth(nextCycleMonth);
                       }
@@ -7462,35 +8852,45 @@ export function AdminSubscriptionOpsView() {
                   </select>
                 </label>
               ) : (
-              <label className="admin-form__field">
-                Scope
-                <select
-                  className="input"
-                  value={selectedExportScope}
-                  onChange={(event) => handleExportDialogScopeChange(event.target.value)}
-                >
-                  {selectedExportScopeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <label className="admin-form__field">
+                  Scope
+                  <select
+                    className="input"
+                    value={selectedExportScope}
+                    onChange={(event) =>
+                      handleExportDialogScopeChange(event.target.value)
+                    }
+                  >
+                    {selectedExportScopeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
             </div>
             <div className="admin-subscription-ops-export__summary">
               <div className="admin-subscription-ops-export__summary-item">
-                <span className="admin-subscription-ops-export__summary-label">Cycle</span>
+                <span className="admin-subscription-ops-export__summary-label">
+                  Cycle
+                </span>
                 <strong>{selectedCycleLabel}</strong>
               </div>
               <div className="admin-subscription-ops-export__summary-item">
                 <span className="admin-subscription-ops-export__summary-label">
                   {exportRosterMode === "monday" ? "Delivery" : "Scope"}
                 </span>
-                <strong>{exportRosterMode === "monday" ? selectedDeliveryMondayLabel : selectedExportScopeLabel}</strong>
+                <strong>
+                  {exportRosterMode === "monday"
+                    ? selectedDeliveryMondayLabel
+                    : selectedExportScopeLabel}
+                </strong>
               </div>
               <div className="admin-subscription-ops-export__summary-item">
-                <span className="admin-subscription-ops-export__summary-label">Rows</span>
+                <span className="admin-subscription-ops-export__summary-label">
+                  Rows
+                </span>
                 <strong>{selectedExportRows.length}</strong>
               </div>
             </div>
@@ -7501,9 +8901,15 @@ export function AdminSubscriptionOpsView() {
                   ? "PDF works best for printing or handing a delivery roster to staff."
                   : "CSV works best if you need to sort, edit, or share the roster in a spreadsheet."}
             </p>
-            {errorMessage ? <p className="admin-panel__error">{errorMessage}</p> : null}
+            {errorMessage ? (
+              <p className="admin-panel__error">{errorMessage}</p>
+            ) : null}
             <div className="admin-form__actions admin-subscription-ops-export__actions">
-              <button className="btn btn--secondary" type="button" onClick={closeExportDialog}>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={closeExportDialog}
+              >
                 Cancel
               </button>
               {exportDialogFormat === "pdf" ? (
@@ -7557,8 +8963,16 @@ export function AdminSubscriptionOpsView() {
             onChange={(event) => {
               const nextMonth = normalizeCycleMonthValue(event.target.value);
               if (!nextMonth) return;
-              if (minSelectableCycleMonth && nextMonth < minSelectableCycleMonth) return;
-              if (maxSelectableCycleMonth && nextMonth > maxSelectableCycleMonth) return;
+              if (
+                minSelectableCycleMonth &&
+                nextMonth < minSelectableCycleMonth
+              )
+                return;
+              if (
+                maxSelectableCycleMonth &&
+                nextMonth > maxSelectableCycleMonth
+              )
+                return;
               setSelectedCycleMonth(nextMonth);
             }}
           />
@@ -7577,7 +8991,9 @@ export function AdminSubscriptionOpsView() {
           <select
             className="input"
             value={subscriptionStatusFilter}
-            onChange={(event) => setSubscriptionStatusFilter(event.target.value)}
+            onChange={(event) =>
+              setSubscriptionStatusFilter(event.target.value)
+            }
           >
             <option value="all">All</option>
             {SUBSCRIPTION_STATUS_OPTIONS.map((status) => (
@@ -7677,20 +9093,34 @@ export function AdminSubscriptionOpsView() {
         </label>
       </div>
 
-      {subscriptionsStatus === "loading" && <p className="modal__meta">Loading subscriptions...</p>}
-      {invoicesStatus === "loading" && <p className="modal__meta">Loading cycle invoices...</p>}
-      {plansStatus === "loading" && <p className="modal__meta">Loading subscription plans...</p>}
+      {subscriptionsStatus === "loading" && (
+        <p className="modal__meta">Loading subscriptions...</p>
+      )}
+      {invoicesStatus === "loading" && (
+        <p className="modal__meta">Loading cycle invoices...</p>
+      )}
+      {plansStatus === "loading" && (
+        <p className="modal__meta">Loading subscription plans...</p>
+      )}
       {!inventoryEnabled && (
-        <p className="admin-panel__error">Admin access is required for subscription operations.</p>
+        <p className="admin-panel__error">
+          Admin access is required for subscription operations.
+        </p>
       )}
       {subscriptionsError && (
-        <p className="admin-panel__error">{subscriptionsError.message || "Unable to load subscriptions."}</p>
+        <p className="admin-panel__error">
+          {subscriptionsError.message || "Unable to load subscriptions."}
+        </p>
       )}
       {invoicesError && (
-        <p className="admin-panel__error">{invoicesError.message || "Unable to load subscription invoices."}</p>
+        <p className="admin-panel__error">
+          {invoicesError.message || "Unable to load subscription invoices."}
+        </p>
       )}
       {plansError && (
-        <p className="admin-panel__error">{plansError.message || "Unable to load subscription plans."}</p>
+        <p className="admin-panel__error">
+          {plansError.message || "Unable to load subscription plans."}
+        </p>
       )}
       {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
       {errorMessage && <p className="admin-panel__error">{errorMessage}</p>}
@@ -7730,74 +9160,134 @@ export function AdminSubscriptionOpsView() {
                     >
                       <td data-label="Customer">
                         <strong>{row.customerName || "Customer"}</strong>
-                        <p className="modal__meta">{row.customerEmail || "No email"}</p>
-                        <p className="modal__meta">{row.customerPhone || "No phone"}</p>
+                        <p className="modal__meta">
+                          {row.customerEmail || "No email"}
+                        </p>
+                        <p className="modal__meta">
+                          {row.customerPhone || "No phone"}
+                        </p>
                       </td>
                       <td data-label="Delivery">
                         <p className="modal__meta">
                           {row.city || "-"} | {row.province || "-"}
                         </p>
                         <p className="modal__meta">
-                          Mondays: {row.includedDeliveryLabel || row.cycleDeliveryLabel || "None"}
+                          Mondays:{" "}
+                          {row.includedDeliveryLabel ||
+                            row.cycleDeliveryLabel ||
+                            "None"}
                         </p>
                       </td>
                       <td data-label="Plan">
                         <strong>{row.planName}</strong>
                         <p className="modal__meta">
-                          {formatSubscriptionPlanTierLabel(row.tier)} | {row.expectedDeliveries} deliveries
+                          {formatSubscriptionPlanTierLabel(row.tier)} |{" "}
+                          {row.expectedDeliveries} deliveries
                         </p>
-                        <p className="modal__meta">Recurring charges: {row.recurringCharges.length || 0}</p>
+                        <p className="modal__meta">
+                          Recurring charges: {row.recurringCharges.length || 0}
+                        </p>
                       </td>
                       <td data-label="Cycle invoice">
                         <p className="modal__meta">
-                          Invoice: {row.invoiceNumber ? `INV-${row.invoiceNumber}` : `Missing for ${selectedCycleLabel}`}
+                          Invoice:{" "}
+                          {row.invoiceNumber
+                            ? `INV-${row.invoiceNumber}`
+                            : `Missing for ${selectedCycleLabel}`}
                         </p>
                         <p className="modal__meta">
-                          Payment status: {row.cyclePaymentStatusLabel || invoiceStatusLabel}
+                          Payment status:{" "}
+                          {row.cyclePaymentStatusLabel || invoiceStatusLabel}
                         </p>
                         <p className="modal__meta">
-                          Total: {row.invoice ? formatPriceLabel(row.invoiceAmount) : "-"}
+                          Total:{" "}
+                          {row.invoice
+                            ? formatPriceLabel(row.invoiceAmount)
+                            : "-"}
                         </p>
                         <p className="modal__meta">
-                          Paid amount: {row.cyclePaidAmount !== null ? formatPriceLabel(row.cyclePaidAmount) : "-"}
+                          Paid amount:{" "}
+                          {row.cyclePaidAmount !== null
+                            ? formatPriceLabel(row.cyclePaidAmount)
+                            : "-"}
                         </p>
                         <p className="modal__meta">
-                          Paid at: {row.cyclePaidAt ? bookingDateFormatter.format(row.cyclePaidAt) : "-"}
+                          Paid at:{" "}
+                          {row.cyclePaidAt
+                            ? bookingDateFormatter.format(row.cyclePaidAt)
+                            : "-"}
                         </p>
                         <p className="modal__meta">
-                          Last paid amount: {row.lastPaidAmount !== null ? formatPriceLabel(row.lastPaidAmount) : "-"}
+                          Last paid amount:{" "}
+                          {row.lastPaidAmount !== null
+                            ? formatPriceLabel(row.lastPaidAmount)
+                            : "-"}
                         </p>
                         <p className="modal__meta">
-                          Last payment at: {row.lastPaidAt ? bookingDateFormatter.format(row.lastPaidAt) : "-"}
+                          Last payment at:{" "}
+                          {row.lastPaidAt
+                            ? bookingDateFormatter.format(row.lastPaidAt)
+                            : "-"}
                         </p>
                         {row.isMissingInvoice && row.latestInvoiceId && (
                           <>
                             <p className="modal__meta">
-                              Latest invoice: {row.latestInvoiceNumber ? `INV-${row.latestInvoiceNumber}` : row.latestInvoiceId}
-                              {row.latestInvoiceCycleMonth ? ` (${formatCycleMonthLabel(row.latestInvoiceCycleMonth)})` : ""}
+                              Latest invoice:{" "}
+                              {row.latestInvoiceNumber
+                                ? `INV-${row.latestInvoiceNumber}`
+                                : row.latestInvoiceId}
+                              {row.latestInvoiceCycleMonth
+                                ? ` (${formatCycleMonthLabel(row.latestInvoiceCycleMonth)})`
+                                : ""}
                             </p>
-                            <p className="modal__meta">Latest status: {row.latestInvoiceStatusLabel}</p>
                             <p className="modal__meta">
-                              Latest total: {row.latestInvoiceAmount !== null ? formatPriceLabel(row.latestInvoiceAmount) : "-"}
+                              Latest status: {row.latestInvoiceStatusLabel}
+                            </p>
+                            <p className="modal__meta">
+                              Latest total:{" "}
+                              {row.latestInvoiceAmount !== null
+                                ? formatPriceLabel(row.latestInvoiceAmount)
+                                : "-"}
                             </p>
                           </>
                         )}
                         {row.topupPendingAmount > 0 && (
                           <p className="modal__meta">
-                            Pending top-up: {formatPriceLabel(row.topupPendingAmount)}
+                            Pending top-up:{" "}
+                            {formatPriceLabel(row.topupPendingAmount)}
                           </p>
                         )}
                       </td>
                       <td data-label="Status">
-                        <span className={`badge badge--stock-${row.readyToSend ? "in" : "out"}`} style={{ marginBottom: "0.45rem" }}>
+                        <span
+                          className={`badge badge--stock-${row.readyToSend ? "in" : "out"}`}
+                          style={{ marginBottom: "0.45rem" }}
+                        >
                           {row.readyToSend ? "Ready to send" : "Not ready"}
                         </span>
-                        <span className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`} style={{ marginBottom: "0.45rem" }}>
-                          Paid for {selectedCycleLabel}: {row.invoiceStatus === "paid" ? "Yes" : "No"}
+                        <span
+                          className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`}
+                          style={{ marginBottom: "0.45rem" }}
+                        >
+                          Paid for {selectedCycleLabel}:{" "}
+                          {row.invoiceStatus === "paid" ? "Yes" : "No"}
                         </span>
-                        <p className="modal__meta">Subscription: {formatSubscriptionStatusLabel(row.subscriptionStatus)}</p>
-                        <p className="modal__meta">Payment status: {row.cyclePaymentStatusLabel || invoiceStatusLabel}</p>
-                        <p className="modal__meta">Method: {formatSubscriptionPaymentMethodLabel(row.paymentMethod)}</p>
+                        <p className="modal__meta">
+                          Subscription:{" "}
+                          {formatSubscriptionStatusLabel(
+                            row.subscriptionStatus,
+                          )}
+                        </p>
+                        <p className="modal__meta">
+                          Payment status:{" "}
+                          {row.cyclePaymentStatusLabel || invoiceStatusLabel}
+                        </p>
+                        <p className="modal__meta">
+                          Method:{" "}
+                          {formatSubscriptionPaymentMethodLabel(
+                            row.paymentMethod,
+                          )}
+                        </p>
                       </td>
                     </tr>
                   );
@@ -7805,7 +9295,10 @@ export function AdminSubscriptionOpsView() {
               </tbody>
             </table>
 
-            <div className="admin-subscription-ops__cards" aria-label="Subscription roster cards">
+            <div
+              className="admin-subscription-ops__cards"
+              aria-label="Subscription roster cards"
+            >
               {visibleRows.map((row) => {
                 return (
                   <button
@@ -7817,15 +9310,23 @@ export function AdminSubscriptionOpsView() {
                   >
                     <div className="admin-subscription-ops__card-header">
                       <div className="admin-subscription-ops__card-title">
-                        <span className="admin-subscription-ops__card-eyebrow">Customer</span>
+                        <span className="admin-subscription-ops__card-eyebrow">
+                          Customer
+                        </span>
                         <strong>{row.customerName || "Customer"}</strong>
-                        <p className="modal__meta">{row.customerPhone || "No phone"}</p>
+                        <p className="modal__meta">
+                          {row.customerPhone || "No phone"}
+                        </p>
                       </div>
                       <div className="admin-subscription-ops__card-badges">
-                        <span className={`badge badge--stock-${row.readyToSend ? "in" : "out"}`}>
+                        <span
+                          className={`badge badge--stock-${row.readyToSend ? "in" : "out"}`}
+                        >
                           {row.readyToSend ? "Ready" : "Not ready"}
                         </span>
-                        <span className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`}>
+                        <span
+                          className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`}
+                        >
                           {row.invoiceStatus === "paid" ? "Paid" : "Unpaid"}
                         </span>
                       </div>
@@ -7833,17 +9334,27 @@ export function AdminSubscriptionOpsView() {
 
                     <div className="admin-subscription-ops__card-summary">
                       <div className="admin-subscription-ops__card-summary-item">
-                        <span className="admin-subscription-ops__card-summary-label">Plan</span>
+                        <span className="admin-subscription-ops__card-summary-label">
+                          Plan
+                        </span>
                         <strong>{row.planName}</strong>
                         <p className="modal__meta">
-                          {formatSubscriptionPlanTierLabel(row.tier)} | {row.expectedDeliveries} deliveries
+                          {formatSubscriptionPlanTierLabel(row.tier)} |{" "}
+                          {row.expectedDeliveries} deliveries
                         </p>
                       </div>
                       <div className="admin-subscription-ops__card-summary-item">
-                        <span className="admin-subscription-ops__card-summary-label">Status</span>
-                        <strong>{formatSubscriptionStatusLabel(row.subscriptionStatus)}</strong>
+                        <span className="admin-subscription-ops__card-summary-label">
+                          Status
+                        </span>
+                        <strong>
+                          {formatSubscriptionStatusLabel(
+                            row.subscriptionStatus,
+                          )}
+                        </strong>
                         <p className="modal__meta">
-                          Paid for {selectedCycleLabel}: {row.invoiceStatus === "paid" ? "Yes" : "No"}
+                          Paid for {selectedCycleLabel}:{" "}
+                          {row.invoiceStatus === "paid" ? "Yes" : "No"}
                         </p>
                       </div>
                     </div>
@@ -7852,7 +9363,10 @@ export function AdminSubscriptionOpsView() {
                       <span className="admin-subscription-ops__card-footer-text">
                         Tap to manage subscription
                       </span>
-                      <IconChevronRight className="btn__icon" aria-hidden="true" />
+                      <IconChevronRight
+                        className="btn__icon"
+                        aria-hidden="true"
+                      />
                     </div>
                   </button>
                 );
@@ -7866,628 +9380,856 @@ export function AdminSubscriptionOpsView() {
         )}
       </div>
 
-      {manageRow && (() => {
-        const draft = getDraft(manageRow.subscriptionId, manageRow);
-        const rowBusy = busySubscriptionId === manageRow.subscriptionId;
-        const invoiceStatusLabel = manageRow.isMissingInvoice
-          ? "Missing"
-          : formatSubscriptionInvoiceStatusLabel(manageRow.invoiceStatus);
-        return (
-          <div
-            className="modal is-active admin-modal admin-subscription-ops-manage"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="subscription-ops-manage-title"
-          >
-            <div className="modal__content admin-subscription-ops-manage__content">
-              <button
-                className="modal__close"
-                type="button"
-                onClick={() => {
-                  if (rowBusy) return;
-                  setManageSubscriptionId("");
-                  setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB);
-                }}
-                aria-label="Close"
-              >
-                x
-              </button>
-              <div className="admin-subscription-ops-manage__inner">
-                <header className="admin-subscription-ops-manage__header">
-                  <h3 className="modal__title" id="subscription-ops-manage-title">
-                    Manage {manageRow.customerName || "subscription"}
-                  </h3>
-                  <p className="modal__meta admin-subscription-ops-manage__meta">
-                    {selectedCycleLabel} - {manageRow.subscriptionId}
-                  </p>
-                  <div className="admin-subscription-ops-manage__badges">
-                    <span className={`badge badge--stock-${manageRow.readyToSend ? "in" : "out"}`}>
-                      {manageRow.readyToSend ? "Ready to send" : "Not ready"}
-                    </span>
-                    <span className={`badge badge--stock-${manageRow.invoiceStatus === "paid" ? "in" : "out"}`}>
-                      Paid for {selectedCycleLabel}: {manageRow.invoiceStatus === "paid" ? "Yes" : "No"}
-                    </span>
-                    <span className="badge badge--stock-in">
-                      {formatSubscriptionPaymentMethodLabel(manageRow.paymentMethod)}
-                    </span>
-                  </div>
-                </header>
-
-                <div
-                  className="admin-subscription-ops-manage__tabs"
-                  role="tablist"
-                  aria-label="Subscription management sections"
-                  onKeyDown={handleManageTabKeyDown}
+      {manageRow &&
+        (() => {
+          const draft = getDraft(manageRow.subscriptionId, manageRow);
+          const rowBusy = busySubscriptionId === manageRow.subscriptionId;
+          const invoiceStatusLabel = manageRow.isMissingInvoice
+            ? "Missing"
+            : formatSubscriptionInvoiceStatusLabel(manageRow.invoiceStatus);
+          return (
+            <div
+              className="modal is-active admin-modal admin-subscription-ops-manage"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="subscription-ops-manage-title"
+            >
+              <div className="modal__content admin-subscription-ops-manage__content">
+                <button
+                  className="modal__close"
+                  type="button"
+                  onClick={() => {
+                    if (rowBusy) return;
+                    setManageSubscriptionId("");
+                    setActiveManageTab(SUBSCRIPTION_OPS_MANAGE_DEFAULT_TAB);
+                  }}
+                  aria-label="Close"
                 >
-                  {SUBSCRIPTION_OPS_MANAGE_TABS.map((tab) => (
-                    <button
-                      key={tab.id}
-                      id={`admin-subscription-ops-manage-tab-${tab.id}`}
-                      className={`admin-subscription-ops-manage__tab ${activeManageTab === tab.id ? "is-active" : ""}`}
-                      type="button"
-                      role="tab"
-                      aria-selected={activeManageTab === tab.id ? "true" : "false"}
-                      aria-controls={`admin-subscription-ops-manage-panel-${tab.id}`}
-                      onClick={() => setActiveManageTab(tab.id)}
+                  x
+                </button>
+                <div className="admin-subscription-ops-manage__inner">
+                  <header className="admin-subscription-ops-manage__header">
+                    <h3
+                      className="modal__title"
+                      id="subscription-ops-manage-title"
                     >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="admin-subscription-ops-manage__layout">
-                {activeManageTab === "overview" && (
-                <section
-                  className="admin-subscription-ops-manage__summary"
-                  id="admin-subscription-ops-manage-panel-overview"
-                  role="tabpanel"
-                  aria-labelledby="admin-subscription-ops-manage-tab-overview"
-                >
-                  <article className="admin-subscription-ops-manage__card">
-                    <h4>Customer</h4>
-                    <dl className="admin-subscription-ops-manage__card-body">
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Name</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
-                          {manageRow.customerName || "Customer"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Email</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.customerEmail || "No email"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Phone</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.customerPhone || "No phone"}
-                        </dd>
-                      </div>
-                    </dl>
-                  </article>
-
-                  <article className="admin-subscription-ops-manage__card">
-                    <h4>Delivery</h4>
-                    <dl className="admin-subscription-ops-manage__card-body">
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Address</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.addressLabel || "No delivery address"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Area</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.city || "-"} | {manageRow.province || "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Mondays this cycle</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.cycleDeliveryLabel || "None"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Included in invoice</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.includedDeliveryLabel || "None"}
-                        </dd>
-                      </div>
-                    </dl>
-                  </article>
-
-                  <article className="admin-subscription-ops-manage__card">
-                    <h4>Plan</h4>
-                    <dl className="admin-subscription-ops-manage__card-body">
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Plan</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
-                          {manageRow.planName}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Tier & deliveries</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {formatSubscriptionPlanTierLabel(manageRow.tier)} | {manageRow.expectedDeliveries} deliveries
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Monday slots</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.mondaySlotLabel || "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Recurring charges</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.recurringCharges.length || 0}
-                        </dd>
-                      </div>
-                    </dl>
-                  </article>
-
-                  <article className="admin-subscription-ops-manage__card admin-subscription-ops-manage__card--cycle-invoice">
-                    <h4>Cycle invoice</h4>
-                    <dl className="admin-subscription-ops-manage__card-body">
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Invoice</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.invoiceNumber ? `INV-${manageRow.invoiceNumber}` : `Missing for ${selectedCycleLabel}`}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Status</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {invoiceStatusLabel}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Payment status</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.cyclePaymentStatusLabel || invoiceStatusLabel}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Payment method</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {formatSubscriptionPaymentMethodLabel(manageRow.paymentMethod)}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Type</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.invoice ? formatSubscriptionInvoiceTypeLabel(manageRow.invoiceType) : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Amount</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
-                          {manageRow.invoice ? formatPriceLabel(manageRow.invoiceAmount) : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Paid amount (cycle)</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
-                          {manageRow.cyclePaidAmount !== null ? formatPriceLabel(manageRow.cyclePaidAmount) : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Paid at (cycle)</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.cyclePaidAt ? bookingDateFormatter.format(manageRow.cyclePaidAt) : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Last paid amount</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
-                          {manageRow.lastPaidAmount !== null ? formatPriceLabel(manageRow.lastPaidAmount) : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Last payment at</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.lastPaidAt ? bookingDateFormatter.format(manageRow.lastPaidAt) : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Base / Adjustments</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.invoice
-                            ? `${formatPriceLabel(manageRow.invoiceBaseAmount)} | ${formatPriceLabel(manageRow.invoiceAdjustmentsTotal)}`
-                            : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Top-ups</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.topupCount} | Pending {formatPriceLabel(manageRow.topupPendingAmount)}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Approval</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.invoice
-                            ? formatSubscriptionPaymentApprovalLabel(
-                                manageRow.paymentApprovalStatus,
-                                manageRow.paymentMethod,
-                              )
-                            : manageRow.latestInvoiceId
-                              ? formatSubscriptionPaymentApprovalLabel(
-                                  manageRow.latestInvoicePaymentApprovalStatus,
-                                  manageRow.latestInvoicePaymentMethod,
-                                )
-                              : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Latest invoice</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.latestInvoiceNumber
-                            ? `INV-${manageRow.latestInvoiceNumber}`
-                            : manageRow.latestInvoiceId || "-"}
-                          {manageRow.latestInvoiceCycleMonth
-                            ? ` (${formatCycleMonthLabel(manageRow.latestInvoiceCycleMonth)})`
-                            : ""}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Latest status</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.latestInvoiceId ? manageRow.latestInvoiceStatusLabel : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Latest amount</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value is-strong">
-                          {manageRow.latestInvoiceAmount !== null
-                            ? formatPriceLabel(manageRow.latestInvoiceAmount)
-                            : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Latest base / adjustments</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.latestInvoiceAmount !== null
-                            ? `${formatPriceLabel(manageRow.latestInvoiceBaseAmount)} | ${formatPriceLabel(manageRow.latestInvoiceAdjustmentsTotal)}`
-                            : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Latest payment method</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.latestInvoiceId
-                            ? formatSubscriptionPaymentMethodLabel(manageRow.latestInvoicePaymentMethod)
-                            : "-"}
-                        </dd>
-                      </div>
-                      <div className="admin-subscription-ops-manage__kv-row">
-                        <dt className="admin-subscription-ops-manage__kv-label">Latest approval</dt>
-                        <dd className="admin-subscription-ops-manage__kv-value">
-                          {manageRow.latestInvoiceId
-                            ? formatSubscriptionPaymentApprovalLabel(
-                                manageRow.latestInvoicePaymentApprovalStatus,
-                                manageRow.latestInvoicePaymentMethod,
-                              )
-                            : "-"}
-                        </dd>
-                      </div>
-                    </dl>
-                  </article>
-                </section>
-                )}
-
-                {activeManageTab !== "overview" && (
-                <section
-                  className="admin-subscription-ops-manage__actions"
-                  id={`admin-subscription-ops-manage-panel-${activeManageTab}`}
-                  role="tabpanel"
-                  aria-labelledby={`admin-subscription-ops-manage-tab-${activeManageTab}`}
-                >
-                  <div className="admin-subscription-ops__actions">
-                    {activeManageTab === "billing" && (
-                      <>
-                        <div className="admin-subscription-ops-manage__section-intro">
-                          <p className="admin-subscription-ops-manage__section-title">Billing controls</p>
-                          <p className="modal__meta admin-subscription-ops-manage__section-note">
-                            Manage status, invoice state, and payment method for this cycle.
-                          </p>
-                        </div>
-                        <label className="admin-form__field">
-                          Subscription status
-                          <select
-                            className="input"
-                            value={draft.subscriptionStatus}
-                            disabled={rowBusy}
-                            onChange={(event) =>
-                              setDraftValue(manageRow.subscriptionId, "subscriptionStatus", event.target.value)
-                            }
-                          >
-                            {SUBSCRIPTION_STATUS_OPTIONS.map((status) => (
-                              <option key={status} value={status}>
-                                {formatSubscriptionStatusLabel(status)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="admin-form__field">
-                          Invoice status
-                          <select
-                            className="input"
-                            value={draft.invoiceStatus}
-                            disabled={rowBusy || manageRow.isMissingInvoice}
-                            onChange={(event) =>
-                              setDraftValue(manageRow.subscriptionId, "invoiceStatus", event.target.value)
-                            }
-                          >
-                            {SUBSCRIPTION_INVOICE_STATUS_OPTIONS.map((status) => (
-                              <option key={status} value={status}>
-                                {formatSubscriptionInvoiceStatusLabel(status)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="admin-form__field">
-                          Payment method
-                          <select
-                            className="input"
-                            value={draft.paymentMethod}
-                            disabled={rowBusy}
-                            onChange={(event) =>
-                              setDraftValue(manageRow.subscriptionId, "paymentMethod", event.target.value)
-                            }
-                          >
-                            {SUBSCRIPTION_PAYMENT_METHOD_OPTIONS.map((method) => (
-                              <option key={method} value={method}>
-                                {formatSubscriptionPaymentMethodLabel(method)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="admin-users-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={draft.applyToPendingInvoice !== false}
-                            disabled={rowBusy}
-                            onChange={(event) =>
-                              setDraftValue(
-                                manageRow.subscriptionId,
-                                "applyToPendingInvoice",
-                                event.target.checked,
-                              )
-                            }
-                          />
-                          Apply to pending invoice when available
-                        </label>
-                        <label className="admin-form__field">
-                          Reason (required)
-                          <textarea
-                            className="input textarea"
-                            rows="3"
-                            value={draft.reason}
-                            disabled={rowBusy}
-                            onChange={(event) =>
-                              setDraftValue(manageRow.subscriptionId, "reason", event.target.value)
-                            }
-                          />
-                        </label>
-                        {errorMessage && (
-                          <p className="admin-panel__error" role="alert">{errorMessage}</p>
+                      Manage {manageRow.customerName || "subscription"}
+                    </h3>
+                    <p className="modal__meta admin-subscription-ops-manage__meta">
+                      {selectedCycleLabel} - {manageRow.subscriptionId}
+                    </p>
+                    <div className="admin-subscription-ops-manage__badges">
+                      <span
+                        className={`badge badge--stock-${manageRow.readyToSend ? "in" : "out"}`}
+                      >
+                        {manageRow.readyToSend ? "Ready to send" : "Not ready"}
+                      </span>
+                      <span
+                        className={`badge badge--stock-${manageRow.invoiceStatus === "paid" ? "in" : "out"}`}
+                      >
+                        Paid for {selectedCycleLabel}:{" "}
+                        {manageRow.invoiceStatus === "paid" ? "Yes" : "No"}
+                      </span>
+                      <span className="badge badge--stock-in">
+                        {formatSubscriptionPaymentMethodLabel(
+                          manageRow.paymentMethod,
                         )}
-                        <div className="admin-subscription-ops-manage__action-grid">
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            disabled={rowBusy || !inventoryEnabled}
-                            onClick={() => handleApplySubscriptionStatus(manageRow)}
-                          >
-                            {rowBusy ? "Working..." : "Update subscription status"}
-                          </button>
-                          {manageRow.isMissingInvoice ? (
-                            <button
-                              className="btn btn--secondary"
-                              type="button"
-                              disabled={rowBusy || !inventoryEnabled}
-                              onClick={() => handleCreateMissingInvoice(manageRow)}
-                            >
-                              {rowBusy ? "Working..." : "Create cycle invoice"}
-                            </button>
-                          ) : (
-                            <button
-                              className="btn btn--secondary"
-                              type="button"
-                              disabled={rowBusy || !inventoryEnabled}
-                              onClick={() => handleApplyInvoiceStatus(manageRow)}
-                            >
-                              {rowBusy ? "Working..." : "Update invoice status"}
-                            </button>
-                          )}
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            disabled={rowBusy || !inventoryEnabled}
-                            onClick={() => handleApplyPaymentMethod(manageRow)}
-                          >
-                            {rowBusy ? "Working..." : "Update payment method"}
-                          </button>
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            disabled={rowBusy || !inventoryEnabled}
-                            onClick={() => handleResendSubscriptionInvoiceEmail(manageRow)}
-                          >
-                            {rowBusy
-                              ? "Working..."
-                              : normalizeSubscriptionOpsPaymentMethod(manageRow.paymentMethod) === PAYMENT_METHODS.EFT
-                                ? manageRow.isMissingInvoice
-                                  ? "Send invoice email"
-                                  : "Resend invoice email"
-                                : manageRow.isMissingInvoice
-                                  ? "Send pay link"
-                                  : "Resend pay link"}
-                          </button>
-                        </div>
-                      </>
+                      </span>
+                    </div>
+                  </header>
+
+                  <div
+                    className="admin-subscription-ops-manage__tabs"
+                    role="tablist"
+                    aria-label="Subscription management sections"
+                    onKeyDown={handleManageTabKeyDown}
+                  >
+                    {SUBSCRIPTION_OPS_MANAGE_TABS.map((tab) => (
+                      <button
+                        key={tab.id}
+                        id={`admin-subscription-ops-manage-tab-${tab.id}`}
+                        className={`admin-subscription-ops-manage__tab ${activeManageTab === tab.id ? "is-active" : ""}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={
+                          activeManageTab === tab.id ? "true" : "false"
+                        }
+                        aria-controls={`admin-subscription-ops-manage-panel-${tab.id}`}
+                        onClick={() => setActiveManageTab(tab.id)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="admin-subscription-ops-manage__layout">
+                    {activeManageTab === "overview" && (
+                      <section
+                        className="admin-subscription-ops-manage__summary"
+                        id="admin-subscription-ops-manage-panel-overview"
+                        role="tabpanel"
+                        aria-labelledby="admin-subscription-ops-manage-tab-overview"
+                      >
+                        <article className="admin-subscription-ops-manage__card">
+                          <h4>Customer</h4>
+                          <dl className="admin-subscription-ops-manage__card-body">
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Name
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                                {manageRow.customerName || "Customer"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Email
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.customerEmail || "No email"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Phone
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.customerPhone || "No phone"}
+                              </dd>
+                            </div>
+                          </dl>
+                        </article>
+
+                        <article className="admin-subscription-ops-manage__card">
+                          <h4>Delivery</h4>
+                          <dl className="admin-subscription-ops-manage__card-body">
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Address
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.addressLabel ||
+                                  "No delivery address"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Area
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.city || "-"} |{" "}
+                                {manageRow.province || "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Mondays this cycle
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.cycleDeliveryLabel || "None"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Included in invoice
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.includedDeliveryLabel || "None"}
+                              </dd>
+                            </div>
+                          </dl>
+                        </article>
+
+                        <article className="admin-subscription-ops-manage__card">
+                          <h4>Plan</h4>
+                          <dl className="admin-subscription-ops-manage__card-body">
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Plan
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                                {manageRow.planName}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Tier & deliveries
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {formatSubscriptionPlanTierLabel(
+                                  manageRow.tier,
+                                )}{" "}
+                                | {manageRow.expectedDeliveries} deliveries
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Monday slots
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.mondaySlotLabel || "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Recurring charges
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.recurringCharges.length || 0}
+                              </dd>
+                            </div>
+                          </dl>
+                        </article>
+
+                        <article className="admin-subscription-ops-manage__card admin-subscription-ops-manage__card--cycle-invoice">
+                          <h4>Cycle invoice</h4>
+                          <dl className="admin-subscription-ops-manage__card-body">
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Invoice
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.invoiceNumber
+                                  ? `INV-${manageRow.invoiceNumber}`
+                                  : `Missing for ${selectedCycleLabel}`}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Status
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {invoiceStatusLabel}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Payment status
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.cyclePaymentStatusLabel ||
+                                  invoiceStatusLabel}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Payment method
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {formatSubscriptionPaymentMethodLabel(
+                                  manageRow.paymentMethod,
+                                )}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Type
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.invoice
+                                  ? formatSubscriptionInvoiceTypeLabel(
+                                      manageRow.invoiceType,
+                                    )
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Amount
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                                {manageRow.invoice
+                                  ? formatPriceLabel(manageRow.invoiceAmount)
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Paid amount (cycle)
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                                {manageRow.cyclePaidAmount !== null
+                                  ? formatPriceLabel(manageRow.cyclePaidAmount)
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Paid at (cycle)
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.cyclePaidAt
+                                  ? bookingDateFormatter.format(
+                                      manageRow.cyclePaidAt,
+                                    )
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Last paid amount
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                                {manageRow.lastPaidAmount !== null
+                                  ? formatPriceLabel(manageRow.lastPaidAmount)
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Last payment at
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.lastPaidAt
+                                  ? bookingDateFormatter.format(
+                                      manageRow.lastPaidAt,
+                                    )
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Base / Adjustments
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.invoice
+                                  ? `${formatPriceLabel(manageRow.invoiceBaseAmount)} | ${formatPriceLabel(manageRow.invoiceAdjustmentsTotal)}`
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Top-ups
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.topupCount} | Pending{" "}
+                                {formatPriceLabel(manageRow.topupPendingAmount)}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Approval
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.invoice
+                                  ? formatSubscriptionPaymentApprovalLabel(
+                                      manageRow.paymentApprovalStatus,
+                                      manageRow.paymentMethod,
+                                    )
+                                  : manageRow.latestInvoiceId
+                                    ? formatSubscriptionPaymentApprovalLabel(
+                                        manageRow.latestInvoicePaymentApprovalStatus,
+                                        manageRow.latestInvoicePaymentMethod,
+                                      )
+                                    : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Latest invoice
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.latestInvoiceNumber
+                                  ? `INV-${manageRow.latestInvoiceNumber}`
+                                  : manageRow.latestInvoiceId || "-"}
+                                {manageRow.latestInvoiceCycleMonth
+                                  ? ` (${formatCycleMonthLabel(manageRow.latestInvoiceCycleMonth)})`
+                                  : ""}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Latest status
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.latestInvoiceId
+                                  ? manageRow.latestInvoiceStatusLabel
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Latest amount
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value is-strong">
+                                {manageRow.latestInvoiceAmount !== null
+                                  ? formatPriceLabel(
+                                      manageRow.latestInvoiceAmount,
+                                    )
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Latest base / adjustments
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.latestInvoiceAmount !== null
+                                  ? `${formatPriceLabel(manageRow.latestInvoiceBaseAmount)} | ${formatPriceLabel(manageRow.latestInvoiceAdjustmentsTotal)}`
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Latest payment method
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.latestInvoiceId
+                                  ? formatSubscriptionPaymentMethodLabel(
+                                      manageRow.latestInvoicePaymentMethod,
+                                    )
+                                  : "-"}
+                              </dd>
+                            </div>
+                            <div className="admin-subscription-ops-manage__kv-row">
+                              <dt className="admin-subscription-ops-manage__kv-label">
+                                Latest approval
+                              </dt>
+                              <dd className="admin-subscription-ops-manage__kv-value">
+                                {manageRow.latestInvoiceId
+                                  ? formatSubscriptionPaymentApprovalLabel(
+                                      manageRow.latestInvoicePaymentApprovalStatus,
+                                      manageRow.latestInvoicePaymentMethod,
+                                    )
+                                  : "-"}
+                              </dd>
+                            </div>
+                          </dl>
+                        </article>
+                      </section>
                     )}
 
-                    {activeManageTab === "plan-charges" && (
-                      <>
-                        <div className="admin-subscription-ops-manage__section-intro">
-                          <p className="admin-subscription-ops-manage__section-title">Plan and charge controls</p>
-                          <p className="modal__meta admin-subscription-ops-manage__section-note">
-                            Use this section for plan reassignment and invoice surcharges.
-                          </p>
-                        </div>
-                        <label className="admin-form__field">
-                          Reassign plan
-                          <select
-                            className="input"
-                            value={draft.planId}
-                            disabled={rowBusy}
-                            onChange={(event) =>
-                              setDraftValue(manageRow.subscriptionId, "planId", event.target.value)
-                            }
-                          >
-                            <option value="">Select plan</option>
-                            {liveSubscriptionPlans.map((plan) => (
-                              <option key={plan.id} value={plan.id}>
-                                {plan.name || "Plan"} ({formatSubscriptionPlanTierLabel(plan.tier)})
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <div className="admin-subscription-ops__charge-grid">
-                          <label className="admin-form__field">
-                            Charge amount
-                            <input
-                              className="input"
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={draft.chargeAmount}
-                              disabled={rowBusy}
-                              onChange={(event) =>
-                                setDraftValue(manageRow.subscriptionId, "chargeAmount", event.target.value)
-                              }
-                            />
-                          </label>
-                          <label className="admin-form__field">
-                            Charge label
-                            <input
-                              className="input"
-                              value={draft.chargeLabel}
-                              disabled={rowBusy}
-                              onChange={(event) =>
-                                setDraftValue(manageRow.subscriptionId, "chargeLabel", event.target.value)
-                              }
-                              placeholder="Extra delivery labour"
-                            />
-                          </label>
-                          <label className="admin-form__field">
-                            Charge mode
-                            <select
-                              className="input"
-                              value={draft.chargeMode}
-                              disabled={rowBusy}
-                              onChange={(event) =>
-                                setDraftValue(manageRow.subscriptionId, "chargeMode", event.target.value)
-                              }
-                            >
-                              {SUBSCRIPTION_CHARGE_MODES.map((entry) => (
-                                <option key={entry.value} value={entry.value}>
-                                  {entry.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="admin-form__field">
-                            Charge basis
-                            <select
-                              className="input"
-                              value={draft.chargeBasis}
-                              disabled={rowBusy}
-                              onChange={(event) =>
-                                setDraftValue(manageRow.subscriptionId, "chargeBasis", event.target.value)
-                              }
-                            >
-                              {SUBSCRIPTION_CHARGE_BASES.map((entry) => (
-                                <option key={entry.value} value={entry.value}>
-                                  {entry.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-
-                        {manageRow.recurringCharges.length > 0 && (
-                          <div className="admin-subscription-ops__recurring-list">
-                            <p className="modal__meta"><strong>Recurring charges</strong></p>
-                            {manageRow.recurringCharges.map((charge) => (
-                              <div
-                                key={charge.chargeId || `${manageRow.subscriptionId}-${charge.label}`}
-                                className="admin-subscription-ops__recurring-item"
-                              >
-                                <span>
-                                  {(charge.label || "Recurring charge").toString()} - {formatPriceLabel(charge.amount)} ({(charge.basis || "flat").toString()})
-                                </span>
+                    {activeManageTab !== "overview" && (
+                      <section
+                        className="admin-subscription-ops-manage__actions"
+                        id={`admin-subscription-ops-manage-panel-${activeManageTab}`}
+                        role="tabpanel"
+                        aria-labelledby={`admin-subscription-ops-manage-tab-${activeManageTab}`}
+                      >
+                        <div className="admin-subscription-ops__actions">
+                          {activeManageTab === "billing" && (
+                            <>
+                              <div className="admin-subscription-ops-manage__section-intro">
+                                <p className="admin-subscription-ops-manage__section-title">
+                                  Billing controls
+                                </p>
+                                <p className="modal__meta admin-subscription-ops-manage__section-note">
+                                  Manage status, invoice state, and payment
+                                  method for this cycle.
+                                </p>
+                              </div>
+                              <label className="admin-form__field">
+                                Subscription status
+                                <select
+                                  className="input"
+                                  value={draft.subscriptionStatus}
+                                  disabled={rowBusy}
+                                  onChange={(event) =>
+                                    setDraftValue(
+                                      manageRow.subscriptionId,
+                                      "subscriptionStatus",
+                                      event.target.value,
+                                    )
+                                  }
+                                >
+                                  {SUBSCRIPTION_STATUS_OPTIONS.map((status) => (
+                                    <option key={status} value={status}>
+                                      {formatSubscriptionStatusLabel(status)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="admin-form__field">
+                                Invoice status
+                                <select
+                                  className="input"
+                                  value={draft.invoiceStatus}
+                                  disabled={
+                                    rowBusy || manageRow.isMissingInvoice
+                                  }
+                                  onChange={(event) =>
+                                    setDraftValue(
+                                      manageRow.subscriptionId,
+                                      "invoiceStatus",
+                                      event.target.value,
+                                    )
+                                  }
+                                >
+                                  {SUBSCRIPTION_INVOICE_STATUS_OPTIONS.map(
+                                    (status) => (
+                                      <option key={status} value={status}>
+                                        {formatSubscriptionInvoiceStatusLabel(
+                                          status,
+                                        )}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
+                              </label>
+                              <label className="admin-form__field">
+                                Payment method
+                                <select
+                                  className="input"
+                                  value={draft.paymentMethod}
+                                  disabled={rowBusy}
+                                  onChange={(event) =>
+                                    setDraftValue(
+                                      manageRow.subscriptionId,
+                                      "paymentMethod",
+                                      event.target.value,
+                                    )
+                                  }
+                                >
+                                  {SUBSCRIPTION_PAYMENT_METHOD_OPTIONS.map(
+                                    (method) => (
+                                      <option key={method} value={method}>
+                                        {formatSubscriptionPaymentMethodLabel(
+                                          method,
+                                        )}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
+                              </label>
+                              <label className="admin-users-checkbox">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    draft.applyToPendingInvoice !== false
+                                  }
+                                  disabled={rowBusy}
+                                  onChange={(event) =>
+                                    setDraftValue(
+                                      manageRow.subscriptionId,
+                                      "applyToPendingInvoice",
+                                      event.target.checked,
+                                    )
+                                  }
+                                />
+                                Apply to pending invoice when available
+                              </label>
+                              <label className="admin-form__field">
+                                Reason (required)
+                                <textarea
+                                  className="input textarea"
+                                  rows="3"
+                                  value={draft.reason}
+                                  disabled={rowBusy}
+                                  onChange={(event) =>
+                                    setDraftValue(
+                                      manageRow.subscriptionId,
+                                      "reason",
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              </label>
+                              {errorMessage && (
+                                <p className="admin-panel__error" role="alert">
+                                  {errorMessage}
+                                </p>
+                              )}
+                              <div className="admin-subscription-ops-manage__action-grid">
                                 <button
                                   className="btn btn--secondary"
                                   type="button"
                                   disabled={rowBusy || !inventoryEnabled}
-                                  onClick={() => handleRemoveRecurringCharge(manageRow, charge)}
+                                  onClick={() =>
+                                    handleApplySubscriptionStatus(manageRow)
+                                  }
                                 >
-                                  Remove
+                                  {rowBusy
+                                    ? "Working..."
+                                    : "Update subscription status"}
+                                </button>
+                                {manageRow.isMissingInvoice ? (
+                                  <button
+                                    className="btn btn--secondary"
+                                    type="button"
+                                    disabled={rowBusy || !inventoryEnabled}
+                                    onClick={() =>
+                                      handleCreateMissingInvoice(manageRow)
+                                    }
+                                  >
+                                    {rowBusy
+                                      ? "Working..."
+                                      : "Create cycle invoice"}
+                                  </button>
+                                ) : (
+                                  <button
+                                    className="btn btn--secondary"
+                                    type="button"
+                                    disabled={rowBusy || !inventoryEnabled}
+                                    onClick={() =>
+                                      handleApplyInvoiceStatus(manageRow)
+                                    }
+                                  >
+                                    {rowBusy
+                                      ? "Working..."
+                                      : "Update invoice status"}
+                                  </button>
+                                )}
+                                <button
+                                  className="btn btn--secondary"
+                                  type="button"
+                                  disabled={rowBusy || !inventoryEnabled}
+                                  onClick={() =>
+                                    handleApplyPaymentMethod(manageRow)
+                                  }
+                                >
+                                  {rowBusy
+                                    ? "Working..."
+                                    : "Update payment method"}
+                                </button>
+                                <button
+                                  className="btn btn--secondary"
+                                  type="button"
+                                  disabled={rowBusy || !inventoryEnabled}
+                                  onClick={() =>
+                                    handleResendSubscriptionInvoiceEmail(
+                                      manageRow,
+                                    )
+                                  }
+                                >
+                                  {rowBusy
+                                    ? "Working..."
+                                    : normalizeSubscriptionOpsPaymentMethod(
+                                          manageRow.paymentMethod,
+                                        ) === PAYMENT_METHODS.EFT
+                                      ? manageRow.isMissingInvoice
+                                        ? "Send invoice email"
+                                        : "Resend invoice email"
+                                      : manageRow.isMissingInvoice
+                                        ? "Send pay link"
+                                        : "Resend pay link"}
                                 </button>
                               </div>
-                            ))}
-                          </div>
-                        )}
+                            </>
+                          )}
 
-                        <label className="admin-form__field">
-                          Reason (required)
-                          <textarea
-                            className="input textarea"
-                            rows="3"
-                            value={draft.reason}
-                            disabled={rowBusy}
-                            onChange={(event) =>
-                              setDraftValue(manageRow.subscriptionId, "reason", event.target.value)
-                            }
-                          />
-                        </label>
-                        {errorMessage && (
-                          <p className="admin-panel__error" role="alert">{errorMessage}</p>
-                        )}
-                        <div className="admin-subscription-ops-manage__action-grid">
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            disabled={rowBusy || !inventoryEnabled || !draft.planId}
-                            onClick={() => handleApplyPlanAssignment(manageRow)}
-                          >
-                            {rowBusy ? "Working..." : "Apply plan reassignment"}
-                          </button>
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            disabled={rowBusy || !inventoryEnabled}
-                            onClick={() => handleApplyInvoiceCharge(manageRow)}
-                          >
-                            {rowBusy ? "Working..." : "Add invoice charge"}
-                          </button>
+                          {activeManageTab === "plan-charges" && (
+                            <>
+                              <div className="admin-subscription-ops-manage__section-intro">
+                                <p className="admin-subscription-ops-manage__section-title">
+                                  Plan and charge controls
+                                </p>
+                                <p className="modal__meta admin-subscription-ops-manage__section-note">
+                                  Use this section for plan reassignment and
+                                  invoice surcharges.
+                                </p>
+                              </div>
+                              <label className="admin-form__field">
+                                Reassign plan
+                                <select
+                                  className="input"
+                                  value={draft.planId}
+                                  disabled={rowBusy}
+                                  onChange={(event) =>
+                                    setDraftValue(
+                                      manageRow.subscriptionId,
+                                      "planId",
+                                      event.target.value,
+                                    )
+                                  }
+                                >
+                                  <option value="">Select plan</option>
+                                  {liveSubscriptionPlans.map((plan) => (
+                                    <option key={plan.id} value={plan.id}>
+                                      {plan.name || "Plan"} (
+                                      {formatSubscriptionPlanTierLabel(
+                                        plan.tier,
+                                      )}
+                                      )
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <div className="admin-subscription-ops__charge-grid">
+                                <label className="admin-form__field">
+                                  Charge amount
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={draft.chargeAmount}
+                                    disabled={rowBusy}
+                                    onChange={(event) =>
+                                      setDraftValue(
+                                        manageRow.subscriptionId,
+                                        "chargeAmount",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label className="admin-form__field">
+                                  Charge label
+                                  <input
+                                    className="input"
+                                    value={draft.chargeLabel}
+                                    disabled={rowBusy}
+                                    onChange={(event) =>
+                                      setDraftValue(
+                                        manageRow.subscriptionId,
+                                        "chargeLabel",
+                                        event.target.value,
+                                      )
+                                    }
+                                    placeholder="Extra delivery labour"
+                                  />
+                                </label>
+                                <label className="admin-form__field">
+                                  Charge mode
+                                  <select
+                                    className="input"
+                                    value={draft.chargeMode}
+                                    disabled={rowBusy}
+                                    onChange={(event) =>
+                                      setDraftValue(
+                                        manageRow.subscriptionId,
+                                        "chargeMode",
+                                        event.target.value,
+                                      )
+                                    }
+                                  >
+                                    {SUBSCRIPTION_CHARGE_MODES.map((entry) => (
+                                      <option
+                                        key={entry.value}
+                                        value={entry.value}
+                                      >
+                                        {entry.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="admin-form__field">
+                                  Charge basis
+                                  <select
+                                    className="input"
+                                    value={draft.chargeBasis}
+                                    disabled={rowBusy}
+                                    onChange={(event) =>
+                                      setDraftValue(
+                                        manageRow.subscriptionId,
+                                        "chargeBasis",
+                                        event.target.value,
+                                      )
+                                    }
+                                  >
+                                    {SUBSCRIPTION_CHARGE_BASES.map((entry) => (
+                                      <option
+                                        key={entry.value}
+                                        value={entry.value}
+                                      >
+                                        {entry.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+
+                              {manageRow.recurringCharges.length > 0 && (
+                                <div className="admin-subscription-ops__recurring-list">
+                                  <p className="modal__meta">
+                                    <strong>Recurring charges</strong>
+                                  </p>
+                                  {manageRow.recurringCharges.map((charge) => (
+                                    <div
+                                      key={
+                                        charge.chargeId ||
+                                        `${manageRow.subscriptionId}-${charge.label}`
+                                      }
+                                      className="admin-subscription-ops__recurring-item"
+                                    >
+                                      <span>
+                                        {(
+                                          charge.label || "Recurring charge"
+                                        ).toString()}{" "}
+                                        - {formatPriceLabel(charge.amount)} (
+                                        {(charge.basis || "flat").toString()})
+                                      </span>
+                                      <button
+                                        className="btn btn--secondary"
+                                        type="button"
+                                        disabled={rowBusy || !inventoryEnabled}
+                                        onClick={() =>
+                                          handleRemoveRecurringCharge(
+                                            manageRow,
+                                            charge,
+                                          )
+                                        }
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <label className="admin-form__field">
+                                Reason (required)
+                                <textarea
+                                  className="input textarea"
+                                  rows="3"
+                                  value={draft.reason}
+                                  disabled={rowBusy}
+                                  onChange={(event) =>
+                                    setDraftValue(
+                                      manageRow.subscriptionId,
+                                      "reason",
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              </label>
+                              {errorMessage && (
+                                <p className="admin-panel__error" role="alert">
+                                  {errorMessage}
+                                </p>
+                              )}
+                              <div className="admin-subscription-ops-manage__action-grid">
+                                <button
+                                  className="btn btn--secondary"
+                                  type="button"
+                                  disabled={
+                                    rowBusy ||
+                                    !inventoryEnabled ||
+                                    !draft.planId
+                                  }
+                                  onClick={() =>
+                                    handleApplyPlanAssignment(manageRow)
+                                  }
+                                >
+                                  {rowBusy
+                                    ? "Working..."
+                                    : "Apply plan reassignment"}
+                                </button>
+                                <button
+                                  className="btn btn--secondary"
+                                  type="button"
+                                  disabled={rowBusy || !inventoryEnabled}
+                                  onClick={() =>
+                                    handleApplyInvoiceCharge(manageRow)
+                                  }
+                                >
+                                  {rowBusy
+                                    ? "Working..."
+                                    : "Add invoice charge"}
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
-                      </>
+                      </section>
                     )}
                   </div>
-                </section>
-                )}
                 </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
 
       <ConfirmDialog
         open={Boolean(confirmState)}
@@ -8515,7 +10257,10 @@ export function AdminMediaLibraryView() {
   const [mediaUploadError, setMediaUploadError] = useState(null);
   const [mediaUploadMessage, setMediaUploadMessage] = useState(null);
   const [mediaDeleting, setMediaDeleting] = useState(false);
-  const [mediaDeleteDialog, setMediaDeleteDialog] = useState({ open: false, item: null });
+  const [mediaDeleteDialog, setMediaDeleteDialog] = useState({
+    open: false,
+    item: null,
+  });
   const [copiedMediaId, setCopiedMediaId] = useState(null);
   const mediaUploadInputRef = useRef(null);
   const {
@@ -8584,7 +10329,9 @@ export function AdminMediaLibraryView() {
     setMediaUploadMessage(null);
     try {
       if (storage) {
-        const storagePath = (item.storagePath || item.path || "").toString().trim();
+        const storagePath = (item.storagePath || item.path || "")
+          .toString()
+          .trim();
         const url = (item.url || "").toString().trim();
         if (storagePath) {
           await deleteObject(ref(storage, storagePath));
@@ -8630,8 +10377,8 @@ export function AdminMediaLibraryView() {
         <div>
           <h2>Image Library</h2>
           <p className="admin-panel__note">
-            Upload product images in bulk and copy direct links for the spreadsheet (Main Image URL
-            or Gallery Images columns).
+            Upload product images in bulk and copy direct links for the
+            spreadsheet (Main Image URL or Gallery Images columns).
           </p>
         </div>
         <div className="admin-panel__header-actions">
@@ -8658,7 +10405,9 @@ export function AdminMediaLibraryView() {
 
       <div className="admin-panel__content">
         <section className="admin-media">
-          {mediaUploadError && <p className="admin-panel__error">{mediaUploadError}</p>}
+          {mediaUploadError && (
+            <p className="admin-panel__error">{mediaUploadError}</p>
+          )}
           {mediaUploadMessage && (
             <p className="admin-panel__status">{mediaUploadMessage}</p>
           )}
@@ -8672,7 +10421,12 @@ export function AdminMediaLibraryView() {
             <div className="admin-media__grid">
               {mediaItems.map((item) => {
                 const imageUrl = (item.url || "").toString().trim();
-                const label = (item.name || item.filename || item.id || "Image").toString();
+                const label = (
+                  item.name ||
+                  item.filename ||
+                  item.id ||
+                  "Image"
+                ).toString();
                 return (
                   <article className="admin-media__card" key={item.id}>
                     {imageUrl ? (
@@ -8680,7 +10434,9 @@ export function AdminMediaLibraryView() {
                         className="admin-media__thumb"
                         src={imageUrl}
                         alt={label}
-                        loading="lazy" decoding="async"/>
+                        loading="lazy"
+                        decoding="async"
+                      />
                     ) : (
                       <div className="admin-media__thumb admin-media__thumb--empty">
                         <IconImage aria-hidden="true" />
@@ -8694,7 +10450,11 @@ export function AdminMediaLibraryView() {
                           type="button"
                           disabled={!imageUrl}
                           onClick={() => handleCopyMediaUrl(imageUrl, item.id)}
-                          aria-label={copiedMediaId === item.id ? "Link copied" : "Copy link"}
+                          aria-label={
+                            copiedMediaId === item.id
+                              ? "Link copied"
+                              : "Copy link"
+                          }
                         >
                           {copiedMediaId === item.id ? (
                             <IconCheck aria-hidden="true" title="Copied" />
@@ -8705,7 +10465,9 @@ export function AdminMediaLibraryView() {
                         <button
                           className="icon-btn icon-btn--danger"
                           type="button"
-                          onClick={() => setMediaDeleteDialog({ open: true, item })}
+                          onClick={() =>
+                            setMediaDeleteDialog({ open: true, item })
+                          }
                           aria-label={`Delete ${label}`}
                         >
                           <IconTrash aria-hidden="true" />
@@ -8718,7 +10480,8 @@ export function AdminMediaLibraryView() {
             </div>
           ) : (
             <p className="admin-panel__notice">
-              No images yet. Upload files to generate links for the product spreadsheet.
+              No images yet. Upload files to generate links for the product
+              spreadsheet.
             </p>
           )}
         </section>
@@ -8782,7 +10545,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
     today.setDate(1);
     return today;
   });
-  const [selectedDate, setSelectedDate] = useState(() => formatDateInput(new Date()));
+  const [selectedDate, setSelectedDate] = useState(() =>
+    formatDateInput(new Date()),
+  );
   const [activeWorkshopBooking, setActiveWorkshopBooking] = useState(null);
 
   useEffect(() => {
@@ -8797,11 +10562,14 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         URL.revokeObjectURL(workshopPreviewUrlRef.current);
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(workshops.length / ADMIN_PAGE_SIZE) - 1);
+    const maxPage = Math.max(
+      0,
+      Math.ceil(workshops.length / ADMIN_PAGE_SIZE) - 1,
+    );
     setWorkshopPage((prev) => Math.min(prev, maxPage));
   }, [workshops.length]);
 
@@ -8859,11 +10627,17 @@ function AdminWorkshopsPage({ view = "workshops" }) {
   const selectedDateBookings = useMemo(() => {
     const entries = [...(workshopBookingsByDate.get(selectedDate) || [])];
     entries.sort((left, right) => {
-      const leftDate = parseDateValue(left?.sessionDate)?.getTime() ?? Number.POSITIVE_INFINITY;
-      const rightDate = parseDateValue(right?.sessionDate)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const leftDate =
+        parseDateValue(left?.sessionDate)?.getTime() ??
+        Number.POSITIVE_INFINITY;
+      const rightDate =
+        parseDateValue(right?.sessionDate)?.getTime() ??
+        Number.POSITIVE_INFINITY;
       if (leftDate !== rightDate) return leftDate - rightDate;
-      const leftCreated = left?.createdAt?.toDate?.()?.getTime?.() ?? Number.POSITIVE_INFINITY;
-      const rightCreated = right?.createdAt?.toDate?.()?.getTime?.() ?? Number.POSITIVE_INFINITY;
+      const leftCreated =
+        left?.createdAt?.toDate?.()?.getTime?.() ?? Number.POSITIVE_INFINITY;
+      const rightCreated =
+        right?.createdAt?.toDate?.()?.getTime?.() ?? Number.POSITIVE_INFINITY;
       return leftCreated - rightCreated;
     });
     return entries;
@@ -8886,17 +10660,25 @@ function AdminWorkshopsPage({ view = "workshops" }) {
 
   const selectedWorkshopBookingDetails = useMemo(() => {
     if (!activeWorkshopBooking) return null;
-    const linkedOrder =
-      activeWorkshopBooking.orderId ? bookingOrdersById.get(activeWorkshopBooking.orderId) || null : null;
-    const linkedOrderItem = getWorkshopOrderItemForBooking(linkedOrder, activeWorkshopBooking);
+    const linkedOrder = activeWorkshopBooking.orderId
+      ? bookingOrdersById.get(activeWorkshopBooking.orderId) || null
+      : null;
+    const linkedOrderItem = getWorkshopOrderItemForBooking(
+      linkedOrder,
+      activeWorkshopBooking,
+    );
     const linkedMetadata = linkedOrderItem?.metadata || {};
-    const attendeeSelections = normalizeWorkshopBookingAttendeeSelections(linkedMetadata.attendeeSelections);
+    const attendeeSelections = normalizeWorkshopBookingAttendeeSelections(
+      linkedMetadata.attendeeSelections,
+    );
     const attendeeCountValue =
       Number.parseInt(linkedMetadata.attendeeCount, 10) ||
       Number.parseInt(activeWorkshopBooking.attendeeCount, 10) ||
       attendeeSelections.length ||
       1;
-    const attendeeCount = Number.isFinite(attendeeCountValue) ? attendeeCountValue : 1;
+    const attendeeCount = Number.isFinite(attendeeCountValue)
+      ? attendeeCountValue
+      : 1;
     const perAttendeePriceValue = Number(linkedMetadata.perAttendeePrice);
     const totalPriceValue = Number(linkedOrderItem?.price);
     const createdAt =
@@ -8913,13 +10695,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         activeWorkshopBooking.name ||
         "Guest",
       customerEmail:
-        linkedOrder?.customer?.email ||
-        activeWorkshopBooking.email ||
-        "-",
+        linkedOrder?.customer?.email || activeWorkshopBooking.email || "-",
       customerPhone:
-        linkedOrder?.customer?.phone ||
-        activeWorkshopBooking.phone ||
-        "",
+        linkedOrder?.customer?.phone || activeWorkshopBooking.phone || "",
       customerAddress:
         linkedOrder?.customer?.address ||
         linkedMetadata.customer?.address ||
@@ -8931,10 +10709,7 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         "Workshop",
       workshopDateLabel: getWorkshopBookingDateLabel(activeWorkshopBooking),
       workshopTimeLabel: getWorkshopBookingTimeLabel(activeWorkshopBooking),
-      location:
-        activeWorkshopBooking.location ||
-        linkedMetadata.location ||
-        "",
+      location: activeWorkshopBooking.location || linkedMetadata.location || "",
       attendeeCount,
       attendeeSelections,
       optionLabel:
@@ -8943,22 +10718,21 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         linkedMetadata.optionLabel ||
         linkedMetadata.framePreference ||
         "",
-      perAttendeePrice:
-        Number.isFinite(perAttendeePriceValue) ? perAttendeePriceValue : null,
-      totalPrice:
-        Number.isFinite(totalPriceValue) ? totalPriceValue : null,
-      orderLabel:
-        linkedOrder?.orderNumber ?
-          `#${linkedOrder.orderNumber}`
+      perAttendeePrice: Number.isFinite(perAttendeePriceValue)
+        ? perAttendeePriceValue
+        : null,
+      totalPrice: Number.isFinite(totalPriceValue) ? totalPriceValue : null,
+      orderLabel: linkedOrder?.orderNumber
+        ? `#${linkedOrder.orderNumber}`
         : activeWorkshopBooking.orderId || "",
-      submittedLabel:
-        createdAt ? bookingDateFormatter.format(createdAt) : "Pending",
-      notes:
-        activeWorkshopBooking.notes ||
-        linkedMetadata.notes ||
-        "",
+      submittedLabel: createdAt
+        ? bookingDateFormatter.format(createdAt)
+        : "Pending",
+      notes: activeWorkshopBooking.notes || linkedMetadata.notes || "",
       sessionCapacity:
-        typeof linkedMetadata.sessionCapacity === "number" ? linkedMetadata.sessionCapacity : null,
+        typeof linkedMetadata.sessionCapacity === "number"
+          ? linkedMetadata.sessionCapacity
+          : null,
     };
   }, [activeWorkshopBooking, bookingOrdersById]);
 
@@ -8971,7 +10745,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
       (workshopForm.dateGroups || []).some((group) => {
         const dateValue = (group?.date || "").toString().trim();
         if (!dateValue) return false;
-        return (group?.times || []).some((slot) => (slot?.time || "").toString().trim());
+        return (group?.times || []).some((slot) =>
+          (slot?.time || "").toString().trim(),
+        );
       }),
     [workshopForm.dateGroups],
   );
@@ -9029,7 +10805,7 @@ function AdminWorkshopsPage({ view = "workshops" }) {
     setWorkshopForm((prev) => ({
       ...prev,
       dateGroups: (prev.dateGroups || []).map((group) =>
-        group.id === groupId ? { ...group, date: value } : group
+        group.id === groupId ? { ...group, date: value } : group,
       ),
     }));
   };
@@ -9044,7 +10820,7 @@ function AdminWorkshopsPage({ view = "workshops" }) {
   const handleRemoveDateGroup = (groupId) => {
     setWorkshopForm((prev) => {
       const remaining = (prev.dateGroups || []).filter(
-        (group) => group.id !== groupId
+        (group) => group.id !== groupId,
       );
       return {
         ...prev,
@@ -9057,9 +10833,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
     setWorkshopForm((prev) => ({
       ...prev,
       dateGroups: (prev.dateGroups || []).map((group) =>
-        group.id === groupId ?
-           { ...group, times: [...(group.times || []), createTimeSlot()] }
-          : group
+        group.id === groupId
+          ? { ...group, times: [...(group.times || []), createTimeSlot()] }
+          : group,
       ),
     }));
   };
@@ -9072,7 +10848,7 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         return {
           ...group,
           times: (group.times || []).map((slot) =>
-            slot.id === slotId ? { ...slot, [field]: value } : slot
+            slot.id === slotId ? { ...slot, [field]: value } : slot,
           ),
         };
       }),
@@ -9085,7 +10861,7 @@ function AdminWorkshopsPage({ view = "workshops" }) {
       dateGroups: (prev.dateGroups || []).map((group) => {
         if (group.id !== groupId) return group;
         const remainingSlots = (group.times || []).filter(
-          (slot) => slot.id !== slotId
+          (slot) => slot.id !== slotId,
         );
         return {
           ...group,
@@ -9107,14 +10883,16 @@ function AdminWorkshopsPage({ view = "workshops" }) {
     setWorkshopForm((prev) => ({
       ...prev,
       options: (prev.options || []).map((option) =>
-        option.id === optionId ? { ...option, [field]: value } : option
+        option.id === optionId ? { ...option, [field]: value } : option,
       ),
     }));
   };
 
   const handleRemoveWorkshopOption = (optionId) => {
     setWorkshopForm((prev) => {
-      const remaining = (prev.options || []).filter((option) => option.id !== optionId);
+      const remaining = (prev.options || []).filter(
+        (option) => option.id !== optionId,
+      );
       return {
         ...prev,
         options: remaining.length > 0 ? remaining : [createCutFlowerOption()],
@@ -9129,8 +10907,8 @@ function AdminWorkshopsPage({ view = "workshops" }) {
       description: workshop.description || "",
       scheduledFor: workshop.scheduledFor || "",
       price:
-        workshop.price === undefined || workshop.price === null ?
-           ""
+        workshop.price === undefined || workshop.price === null
+          ? ""
           : String(workshop.price),
       location: workshop.location || "",
       image: workshop.image || "",
@@ -9144,25 +10922,32 @@ function AdminWorkshopsPage({ view = "workshops" }) {
       whyPeopleLove: workshop.whyPeopleLove || "",
       ctaNote: workshop.ctaNote || "",
       repeatWeekdays: false,
-      options: Array.isArray(workshop.options) && workshop.options.length > 0
-        ? workshop.options.map((opt) => ({
-            id: opt.id || createCutFlowerOption().id,
-            label: opt.label || "",
-            price: opt.price === null || opt.price === undefined ? "" : String(opt.price),
-            minAttendees: opt.minAttendees === null || opt.minAttendees === undefined ? "" : String(opt.minAttendees),
-            isExtra: Boolean(opt.isExtra),
-          }))
-        : [createCutFlowerOption()],
+      options:
+        Array.isArray(workshop.options) && workshop.options.length > 0
+          ? workshop.options.map((opt) => ({
+              id: opt.id || createCutFlowerOption().id,
+              label: opt.label || "",
+              price:
+                opt.price === null || opt.price === undefined
+                  ? ""
+                  : String(opt.price),
+              minAttendees:
+                opt.minAttendees === null || opt.minAttendees === undefined
+                  ? ""
+                  : String(opt.minAttendees),
+              isExtra: Boolean(opt.isExtra),
+            }))
+          : [createCutFlowerOption()],
       dateGroups: (() => {
-        const rawSessions = Array.isArray(workshop.sessions) ?
-           workshop.sessions
+        const rawSessions = Array.isArray(workshop.sessions)
+          ? workshop.sessions
           : [];
         if (rawSessions.length === 0) return [createDateGroup()];
         const grouped = new Map();
         rawSessions.forEach((session, index) => {
           if (!session) return;
           const startDate = parseDateValue(
-            session.start || session.startDate || workshop.scheduledFor
+            session.start || session.startDate || workshop.scheduledFor,
           );
           const dateValue =
             session.date || (startDate ? formatDateInput(startDate) : "");
@@ -9173,8 +10958,8 @@ function AdminWorkshopsPage({ view = "workshops" }) {
             time: timeValue,
             label: session.label || session.name || "",
             capacity:
-              session.capacity === undefined || session.capacity === null ?
-                 String(DEFAULT_SLOT_CAPACITY)
+              session.capacity === undefined || session.capacity === null
+                ? String(DEFAULT_SLOT_CAPACITY)
                 : String(session.capacity),
           };
           const dateKey = dateValue || `unscheduled-${index}`;
@@ -9280,14 +11065,14 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         time: trimmedTime,
         label: slot.label.trim() || bookingDateFormatter.format(combinedDate),
         capacity:
-          Number.isFinite(capacityNumber) && capacityNumber > 0 ?
-             capacityNumber
+          Number.isFinite(capacityNumber) && capacityNumber > 0
+            ? capacityNumber
             : DEFAULT_SLOT_CAPACITY,
       });
     };
 
-    const dateGroups = Array.isArray(workshopForm.dateGroups) ?
-       workshopForm.dateGroups
+    const dateGroups = Array.isArray(workshopForm.dateGroups)
+      ? workshopForm.dateGroups
       : [];
     const sanitizedSessions = [];
     const manualDates = new Set();
@@ -9340,13 +11125,13 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         times: validSlots,
       });
       validSlots.forEach((slot) =>
-        addSessionFromSlot(sanitizedSessions, dateValue, slot)
+        addSessionFromSlot(sanitizedSessions, dateValue, slot),
       );
     }
 
     if (workshopForm.repeatWeekdays && validRepeatGroups.length > 0) {
       const [templateGroup] = [...validRepeatGroups].sort((a, b) =>
-        a.date.localeCompare(b.date)
+        a.date.localeCompare(b.date),
       );
       const startDateLiteral = new Date(templateGroup.date);
       if (!Number.isNaN(startDateLiteral.getTime())) {
@@ -9358,7 +11143,7 @@ function AdminWorkshopsPage({ view = "workshops" }) {
           if (manualDates.has(isoDate)) continue;
           manualDates.add(isoDate);
           templateGroup.times.forEach((slot) =>
-            addSessionFromSlot(sanitizedSessions, isoDate, slot)
+            addSessionFromSlot(sanitizedSessions, isoDate, slot),
           );
         }
       }
@@ -9371,8 +11156,8 @@ function AdminWorkshopsPage({ view = "workshops" }) {
     });
     const primarySession = sanitizedSessions[0] ?? null;
     const priceNumber = Number(workshopForm.price);
-    const priceValue = Number.isFinite(priceNumber) ?
-       priceNumber
+    const priceValue = Number.isFinite(priceNumber)
+      ? priceNumber
       : workshopForm.price.trim();
     const sanitizedOptions = (workshopForm.options || [])
       .map((option) => {
@@ -9401,7 +11186,7 @@ function AdminWorkshopsPage({ view = "workshops" }) {
     try {
       setWorkshopSaving(true);
       setStatusMessage(
-        editingWorkshopId ? "Updating workshop..." : "Saving workshop..."
+        editingWorkshopId ? "Updating workshop..." : "Saving workshop...",
       );
       let imageUrl = workshopForm.image.trim();
       if (workshopImageFile) {
@@ -9454,9 +11239,7 @@ function AdminWorkshopsPage({ view = "workshops" }) {
       <Reveal as="div" className="admin-panel__header">
         <div>
           <h2>{panelHeading}</h2>
-          <p className="admin-panel__note">
-            {panelNote}
-          </p>
+          <p className="admin-panel__note">{panelNote}</p>
         </div>
         {showWorkshopManagement && (
           <div className="admin-panel__header-actions">
@@ -9507,7 +11290,10 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                                 <img
                                   src={workshop.image}
                                   alt={workshop.title}
-                                  className="admin-table__thumb" loading="lazy" decoding="async"/>
+                                  className="admin-table__thumb"
+                                  loading="lazy"
+                                  decoding="async"
+                                />
                               ) : (
                                 <span className="admin-table__thumb admin-table__thumb--placeholder">
                                   <IconImage aria-hidden="true" />
@@ -9526,7 +11312,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                           <td>
                             <p>{sessionLabel}</p>
                             {primarySession?.time && (
-                              <p className="modal__meta">{primarySession.time}</p>
+                              <p className="modal__meta">
+                                {primarySession.time}
+                              </p>
                             )}
                           </td>
                           <td>{formatPriceLabel(workshop.price)}</td>
@@ -9557,7 +11345,11 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                 No workshops yet. Create one to start selling seats.
               </p>
             )}
-            <AdminPagination page={workshopPage} total={workshops.length} onPageChange={setWorkshopPage} />
+            <AdminPagination
+              page={workshopPage}
+              total={workshops.length}
+              onPageChange={setWorkshopPage}
+            />
             {statusMessage && (
               <p className="admin-panel__status">{statusMessage}</p>
             )}
@@ -9565,7 +11357,11 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         )}
 
         {showWorkshopBookings && (
-          <Reveal as="section" className="admin-panel" delay={showWorkshopManagement ? 90 : 60}>
+          <Reveal
+            as="section"
+            className="admin-panel"
+            delay={showWorkshopManagement ? 90 : 60}
+          >
             <div className="admin-panel__header">
               <h3>Bookings</h3>
               {inventoryLoading && (
@@ -9584,13 +11380,17 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                         aria-label="Previous month"
                         title="Previous month"
                       >
-                        <IconChevronLeft className="btn__icon" title="Previous month" />
+                        <IconChevronLeft
+                          className="btn__icon"
+                          title="Previous month"
+                        />
                         <span className="sr-only">Previous month</span>
                       </button>
                       <div>
                         <h4>{visibleMonthLabel}</h4>
                         <p className="modal__meta">
-                          Bookings are shown for the selected day. The page opens on today.
+                          Bookings are shown for the selected day. The page
+                          opens on today.
                         </p>
                       </div>
                       <button
@@ -9600,29 +11400,36 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                         aria-label="Next month"
                         title="Next month"
                       >
-                        <IconChevronRight className="btn__icon" title="Next month" />
+                        <IconChevronRight
+                          className="btn__icon"
+                          title="Next month"
+                        />
                         <span className="sr-only">Next month</span>
                       </button>
                     </div>
 
                     <div className="admin-calendar__legend">
                       <span>
-                        <span className="legend-dot legend-dot--booked" /> Booking days
+                        <span className="legend-dot legend-dot--booked" />{" "}
+                        Booking days
                       </span>
                       <span>
                         <span className="legend-dot legend-dot--today" /> Today
                       </span>
                       <span>
-                        <span className="legend-dot legend-dot--selected" /> Selected date
+                        <span className="legend-dot legend-dot--selected" />{" "}
+                        Selected date
                       </span>
                     </div>
 
                     <div className="admin-calendar__grid">
-                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                        <div key={label} className="admin-calendar__weekday">
-                          {label}
-                        </div>
-                      ))}
+                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+                        (label) => (
+                          <div key={label} className="admin-calendar__weekday">
+                            {label}
+                          </div>
+                        ),
+                      )}
                       {monthMatrix.flat().map((day) => (
                         <button
                           key={day.iso}
@@ -9645,7 +11452,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                       <div>
                         <h4>{selectedDateLabel}</h4>
                         <p className="modal__meta">
-                          {selectedDateBookings.length} booking{selectedDateBookings.length === 1 ? "" : "s"} scheduled
+                          {selectedDateBookings.length} booking
+                          {selectedDateBookings.length === 1 ? "" : "s"}{" "}
+                          scheduled
                         </p>
                       </div>
                     </div>
@@ -9658,7 +11467,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                               <div>
                                 <strong>{bookingEntry.name || "Guest"}</strong>
                                 {bookingEntry.workshopTitle && (
-                                  <p className="modal__meta">{bookingEntry.workshopTitle}</p>
+                                  <p className="modal__meta">
+                                    {bookingEntry.workshopTitle}
+                                  </p>
                                 )}
                                 <p className="modal__meta">
                                   {getWorkshopBookingTimeLabel(bookingEntry)}
@@ -9678,7 +11489,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                                 <button
                                   className="btn btn--secondary"
                                   type="button"
-                                  onClick={() => openWorkshopBookingDetails(bookingEntry)}
+                                  onClick={() =>
+                                    openWorkshopBookingDetails(bookingEntry)
+                                  }
                                 >
                                   View Booking
                                 </button>
@@ -9713,17 +11526,26 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                         {selectedDateBookings.map((bookingEntry) => {
                           const submittedAt = bookingEntry.createdAt?.toDate?.()
                             ? bookingDateFormatter.format(
-                                bookingEntry.createdAt.toDate()
+                                bookingEntry.createdAt.toDate(),
                               )
                             : "Pending";
                           return (
                             <tr
                               key={bookingEntry.id}
                               className={`admin-table__row admin-table__row--clickable${
-                                activeWorkshopBooking?.id === bookingEntry.id ? " is-active" : ""
+                                activeWorkshopBooking?.id === bookingEntry.id
+                                  ? " is-active"
+                                  : ""
                               }`}
-                              onClick={() => openWorkshopBookingDetails(bookingEntry)}
-                              onKeyDown={(event) => handleWorkshopBookingRowKeyDown(event, bookingEntry)}
+                              onClick={() =>
+                                openWorkshopBookingDetails(bookingEntry)
+                              }
+                              onKeyDown={(event) =>
+                                handleWorkshopBookingRowKeyDown(
+                                  event,
+                                  bookingEntry,
+                                )
+                              }
                               tabIndex={0}
                               role="button"
                               aria-label={`View booking for ${bookingEntry.name || "guest"}`}
@@ -9741,7 +11563,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                                   "-"
                                 )}
                                 {bookingEntry.phone && (
-                                  <p className="modal__meta">{bookingEntry.phone}</p>
+                                  <p className="modal__meta">
+                                    {bookingEntry.phone}
+                                  </p>
                                 )}
                               </td>
                               <td>
@@ -9750,19 +11574,30 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                                     Workshop: {bookingEntry.workshopTitle}
                                   </p>
                                 )}
-                                {isCustomerRequestedWorkshopBooking(bookingEntry) ? (
+                                {isCustomerRequestedWorkshopBooking(
+                                  bookingEntry,
+                                ) ? (
                                   <>
                                     <p className="modal__meta">
-                                      Requested date: {getWorkshopBookingDateLabel(bookingEntry)}
+                                      Requested date:{" "}
+                                      {getWorkshopBookingDateLabel(
+                                        bookingEntry,
+                                      )}
                                     </p>
                                     <p className="modal__meta">
-                                      Requested time: {getWorkshopBookingTimeLabel(bookingEntry)}
+                                      Requested time:{" "}
+                                      {getWorkshopBookingTimeLabel(
+                                        bookingEntry,
+                                      )}
                                     </p>
                                   </>
                                 ) : (
                                   <>
                                     <p className="modal__meta">
-                                      Date: {getWorkshopBookingDateLabel(bookingEntry)}
+                                      Date:{" "}
+                                      {getWorkshopBookingDateLabel(
+                                        bookingEntry,
+                                      )}
                                     </p>
                                     {bookingEntry.sessionLabel && (
                                       <p className="modal__meta">
@@ -9771,9 +11606,12 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                                     )}
                                   </>
                                 )}
-                                {(bookingEntry.optionLabel || bookingEntry.frame) && (
+                                {(bookingEntry.optionLabel ||
+                                  bookingEntry.frame) && (
                                   <p className="modal__meta">
-                                    Option: {bookingEntry.optionLabel || bookingEntry.frame}
+                                    Option:{" "}
+                                    {bookingEntry.optionLabel ||
+                                      bookingEntry.frame}
                                   </p>
                                 )}
                                 {bookingEntry.notes && (
@@ -9826,7 +11664,8 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         aria-modal="true"
         aria-hidden={activeWorkshopBooking ? "false" : "true"}
         onClick={(event) => {
-          if (event.target === event.currentTarget) closeWorkshopBookingDetails();
+          if (event.target === event.currentTarget)
+            closeWorkshopBookingDetails();
         }}
       >
         <div className="modal__content admin-modal__content">
@@ -9845,10 +11684,16 @@ function AdminWorkshopsPage({ view = "workshops" }) {
             <div className="admin-detail-grid">
               <div className="admin-detail-card">
                 <h4>Customer</h4>
-                <p className="modal__meta">{selectedWorkshopBookingDetails.customerName}</p>
-                <p className="modal__meta">{selectedWorkshopBookingDetails.customerEmail}</p>
+                <p className="modal__meta">
+                  {selectedWorkshopBookingDetails.customerName}
+                </p>
+                <p className="modal__meta">
+                  {selectedWorkshopBookingDetails.customerEmail}
+                </p>
                 {selectedWorkshopBookingDetails.customerPhone && (
-                  <p className="modal__meta">{selectedWorkshopBookingDetails.customerPhone}</p>
+                  <p className="modal__meta">
+                    {selectedWorkshopBookingDetails.customerPhone}
+                  </p>
                 )}
                 {selectedWorkshopBookingDetails.customerAddress && (
                   <p className="modal__meta">
@@ -9877,24 +11722,28 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                 </p>
                 {selectedWorkshopBookingDetails.sessionCapacity && (
                   <p className="modal__meta">
-                    Session capacity: {selectedWorkshopBookingDetails.sessionCapacity}
+                    Session capacity:{" "}
+                    {selectedWorkshopBookingDetails.sessionCapacity}
                   </p>
                 )}
               </div>
               <div className="admin-detail-card">
                 <h4>Selections</h4>
-                {selectedWorkshopBookingDetails.attendeeSelections.length > 0 ? (
-                  selectedWorkshopBookingDetails.attendeeSelections.map((selection) => (
-                    <p
-                      className="modal__meta"
-                      key={`booking-selection-${selection.attendee}-${selection.optionValue || selection.optionLabel}`}
-                    >
-                      Attendee {selection.attendee}: {selection.optionLabel}
-                      {selection.estimatedPrice !== null
-                        ? ` (${moneyFormatter.format(selection.estimatedPrice)})`
-                        : ""}
-                    </p>
-                  ))
+                {selectedWorkshopBookingDetails.attendeeSelections.length >
+                0 ? (
+                  selectedWorkshopBookingDetails.attendeeSelections.map(
+                    (selection) => (
+                      <p
+                        className="modal__meta"
+                        key={`booking-selection-${selection.attendee}-${selection.optionValue || selection.optionLabel}`}
+                      >
+                        Attendee {selection.attendee}: {selection.optionLabel}
+                        {selection.estimatedPrice !== null
+                          ? ` (${moneyFormatter.format(selection.estimatedPrice)})`
+                          : ""}
+                      </p>
+                    ),
+                  )
                 ) : (
                   <p className="modal__meta">
                     Option: {selectedWorkshopBookingDetails.optionLabel || "-"}
@@ -9902,12 +11751,18 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                 )}
                 {selectedWorkshopBookingDetails.perAttendeePrice !== null && (
                   <p className="modal__meta">
-                    Per attendee: {moneyFormatter.format(selectedWorkshopBookingDetails.perAttendeePrice)}
+                    Per attendee:{" "}
+                    {moneyFormatter.format(
+                      selectedWorkshopBookingDetails.perAttendeePrice,
+                    )}
                   </p>
                 )}
                 {selectedWorkshopBookingDetails.totalPrice !== null && (
                   <p className="modal__meta">
-                    Total: {moneyFormatter.format(selectedWorkshopBookingDetails.totalPrice)}
+                    Total:{" "}
+                    {moneyFormatter.format(
+                      selectedWorkshopBookingDetails.totalPrice,
+                    )}
                   </p>
                 )}
               </div>
@@ -9929,7 +11784,10 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                   </p>
                 )}
                 <p className="modal__meta">
-                  Source: {isCustomerRequestedWorkshopBooking(selectedWorkshopBookingDetails.booking)
+                  Source:{" "}
+                  {isCustomerRequestedWorkshopBooking(
+                    selectedWorkshopBookingDetails.booking,
+                  )
                     ? "Customer requested slot"
                     : "Scheduled workshop"}
                 </p>
@@ -9937,7 +11795,11 @@ function AdminWorkshopsPage({ view = "workshops" }) {
             </div>
           )}
           <div className="admin-modal__actions">
-            <button className="btn btn--secondary" type="button" onClick={closeWorkshopBookingDetails}>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={closeWorkshopBookingDetails}
+            >
               Close
             </button>
           </div>
@@ -9970,439 +11832,468 @@ function AdminWorkshopsPage({ view = "workshops" }) {
             {editingWorkshopId ? "Edit Workshop" : "Add Workshop"}
           </h3>
           <div className="admin-workshop-modal__body">
-          <form className="admin-form" onSubmit={handleCreateWorkshop}>
-            <div className="admin-file-input admin-form__full">
-              <label htmlFor="workshop-image-upload" className="sr-only">
-                Workshop image
-              </label>
-              <input
-                key={editingWorkshopId ?? "new-workshop"}
-                className="input input--file"
-                id="workshop-image-upload"
-                type="file"
-                accept="image/*"
-                onChange={handleWorkshopImageChange}
-              />
-              <p className="admin-panel__note">
-                Upload JPG or PNG (max 3MB). A preview appears below.
-              </p>
-              {workshopImagePreview && (
-                <img
-                  src={workshopImagePreview}
-                  alt="Workshop preview"
-                  className="admin-preview" loading="lazy" decoding="async"/>
+            <form className="admin-form" onSubmit={handleCreateWorkshop}>
+              <div className="admin-file-input admin-form__full">
+                <label htmlFor="workshop-image-upload" className="sr-only">
+                  Workshop image
+                </label>
+                <input
+                  key={editingWorkshopId ?? "new-workshop"}
+                  className="input input--file"
+                  id="workshop-image-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleWorkshopImageChange}
+                />
+                <p className="admin-panel__note">
+                  Upload JPG or PNG (max 3MB). A preview appears below.
+                </p>
+                {workshopImagePreview && (
+                  <img
+                    src={workshopImagePreview}
+                    alt="Workshop preview"
+                    className="admin-preview"
+                    loading="lazy"
+                    decoding="async"
+                  />
                 )}
-            </div>
-            <input
-              className="input"
-              placeholder="Workshop title"
-              value={workshopForm.title}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  title: event.target.value,
-                }))
-              }
-              required
-            />
-            <div className="admin-session-panel admin-form__full">
-              <div className="admin-session-panel__header">
-                <h4>Workshop options</h4>
-                <button
-                  className="icon-btn"
-                  type="button"
-                  onClick={handleAddWorkshopOption}
-                  aria-label="Add option"
-                >
-                  <IconPlus aria-hidden="true" />
-                </button>
               </div>
-              <p className="admin-panel__note">
-                Add each ticket type with its own price. Leave the base price below blank if you use options only.
-              </p>
-              {(workshopForm.options || []).map((option, index) => (
-                <div className="admin-session-row" key={option.id}>
-                  <div className="admin-session-field admin-session-field--label">
-                    <label className="admin-session-label" htmlFor={`workshop-option-label-${option.id}`}>
-                      Option #{index + 1}
-                    </label>
-                    <input
-                      className="input"
-                      id={`workshop-option-label-${option.id}`}
-                      value={option.label}
-                      onChange={(event) =>
-                        handleWorkshopOptionChange(option.id, "label", event.target.value)
-                      }
-                      placeholder="Adult, Child, Group, etc."
-                    />
-                  </div>
-                  <div className="admin-session-field">
-                    <label className="admin-session-label" htmlFor={`workshop-option-price-${option.id}`}>
-                      Price (R)
-                    </label>
-                    <input
-                      className="input"
-                      type="number"
-                      min="0"
-                      step="1"
-                      id={`workshop-option-price-${option.id}`}
-                      value={option.price}
-                      onChange={(event) =>
-                        handleWorkshopOptionChange(option.id, "price", event.target.value)
-                      }
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="admin-session-field">
-                    <label className="admin-session-label" htmlFor={`workshop-option-min-${option.id}`}>
-                      Min attendees
-                    </label>
-                    <input
-                      className="input"
-                      type="number"
-                      min="1"
-                      step="1"
-                      id={`workshop-option-min-${option.id}`}
-                      value={option.minAttendees}
-                      onChange={(event) =>
-                        handleWorkshopOptionChange(option.id, "minAttendees", event.target.value)
-                      }
-                      placeholder="Optional"
-                    />
-                  </div>
+              <input
+                className="input"
+                placeholder="Workshop title"
+                value={workshopForm.title}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    title: event.target.value,
+                  }))
+                }
+                required
+              />
+              <div className="admin-session-panel admin-form__full">
+                <div className="admin-session-panel__header">
+                  <h4>Workshop options</h4>
                   <button
-                    className="icon-btn icon-btn--danger admin-session-remove"
+                    className="icon-btn"
                     type="button"
-                    onClick={() => handleRemoveWorkshopOption(option.id)}
-                    aria-label={`Remove option ${index + 1}`}
+                    onClick={handleAddWorkshopOption}
+                    aria-label="Add option"
                   >
-                    <IconTrash aria-hidden="true" />
+                    <IconPlus aria-hidden="true" />
                   </button>
                 </div>
-              ))}
-            </div>
-            <input
-              className="input"
-              placeholder="Base price fallback (optional, if no options above)"
-              value={workshopForm.price}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  price: event.target.value,
-                }))
-              }
-            />
-            <input
-              className="input"
-              placeholder="Location"
-              value={workshopForm.location}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  location: event.target.value,
-                }))
-              }
-            />
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Description"
-              value={workshopForm.description}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  description: event.target.value,
-                }))
-              }
-            />
-            <select
-              className="input"
-              value={workshopForm.status}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  status: event.target.value,
-                }))
-              }
-            >
-              <option value="draft">Draft</option>
-              <option value="live">Live</option>
-              <option value="archived">Archived</option>
-            </select>
-
-            <div className="admin-session-panel admin-form__full">
-              <div className="admin-session-panel__header">
-                <h4>Workshop sessions</h4>
-                <button
-                  className="icon-btn"
-                  type="button"
-                  onClick={handleAddDateGroup}
-                  aria-label="Add date"
-                >
-                  <IconPlus aria-hidden="true" />
-                </button>
-              </div>
-              <p className="admin-panel__note">
-                Sessions are optional. Leave every date and time blank to let customers request a preferred date and
-                start window when they book this workshop.
-              </p>
-              {(workshopForm.dateGroups || []).map((group, index) => (
-                <div className="admin-session-date-group" key={group.id}>
-                  <div className="admin-session-row admin-session-row--date">
+                <p className="admin-panel__note">
+                  Add each ticket type with its own price. Leave the base price
+                  below blank if you use options only.
+                </p>
+                {(workshopForm.options || []).map((option, index) => (
+                  <div className="admin-session-row" key={option.id}>
                     <div className="admin-session-field admin-session-field--label">
                       <label
                         className="admin-session-label"
-                        htmlFor={`session-date-${group.id}`}
+                        htmlFor={`workshop-option-label-${option.id}`}
                       >
-                        Date #{index + 1}
+                        Option #{index + 1}
                       </label>
                       <input
                         className="input"
-                        type="date"
-                        id={`session-date-${group.id}`}
-                        value={group.date}
+                        id={`workshop-option-label-${option.id}`}
+                        value={option.label}
                         onChange={(event) =>
-                          handleDateGroupChange(group.id, event.target.value)
+                          handleWorkshopOptionChange(
+                            option.id,
+                            "label",
+                            event.target.value,
+                          )
                         }
+                        placeholder="Adult, Child, Group, etc."
                       />
                     </div>
-                    {(workshopForm.dateGroups || []).length > 1 && (
-                      <button
-                        className="icon-btn icon-btn--danger admin-session-remove"
-                        type="button"
-                        onClick={() => handleRemoveDateGroup(group.id)}
-                        aria-label={`Remove date ${index + 1}`}
+                    <div className="admin-session-field">
+                      <label
+                        className="admin-session-label"
+                        htmlFor={`workshop-option-price-${option.id}`}
                       >
-                        <IconTrash aria-hidden="true" />
-                      </button>
-                    )}
-                  </div>
-                  <div className="admin-session-panel__header admin-session-panel__header--sub">
-                    <h5>Time slots</h5>
+                        Price (R)
+                      </label>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="1"
+                        id={`workshop-option-price-${option.id}`}
+                        value={option.price}
+                        onChange={(event) =>
+                          handleWorkshopOptionChange(
+                            option.id,
+                            "price",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="admin-session-field">
+                      <label
+                        className="admin-session-label"
+                        htmlFor={`workshop-option-min-${option.id}`}
+                      >
+                        Min attendees
+                      </label>
+                      <input
+                        className="input"
+                        type="number"
+                        min="1"
+                        step="1"
+                        id={`workshop-option-min-${option.id}`}
+                        value={option.minAttendees}
+                        onChange={(event) =>
+                          handleWorkshopOptionChange(
+                            option.id,
+                            "minAttendees",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Optional"
+                      />
+                    </div>
                     <button
-                      className="icon-btn"
+                      className="icon-btn icon-btn--danger admin-session-remove"
                       type="button"
-                      onClick={() => handleAddTimeSlot(group.id)}
-                      aria-label="Add time slot"
+                      onClick={() => handleRemoveWorkshopOption(option.id)}
+                      aria-label={`Remove option ${index + 1}`}
                     >
-                      <IconPlus aria-hidden="true" />
+                      <IconTrash aria-hidden="true" />
                     </button>
                   </div>
-                  {(group.times || []).map((slot) => (
-                    <div
-                      className="admin-session-row admin-session-row--nested"
-                      key={slot.id}
-                    >
-                      <div className="admin-session-field">
+                ))}
+              </div>
+              <input
+                className="input"
+                placeholder="Base price fallback (optional, if no options above)"
+                value={workshopForm.price}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    price: event.target.value,
+                  }))
+                }
+              />
+              <input
+                className="input"
+                placeholder="Location"
+                value={workshopForm.location}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    location: event.target.value,
+                  }))
+                }
+              />
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="Description"
+                value={workshopForm.description}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    description: event.target.value,
+                  }))
+                }
+              />
+              <select
+                className="input"
+                value={workshopForm.status}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    status: event.target.value,
+                  }))
+                }
+              >
+                <option value="draft">Draft</option>
+                <option value="live">Live</option>
+                <option value="archived">Archived</option>
+              </select>
+
+              <div className="admin-session-panel admin-form__full">
+                <div className="admin-session-panel__header">
+                  <h4>Workshop sessions</h4>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    onClick={handleAddDateGroup}
+                    aria-label="Add date"
+                  >
+                    <IconPlus aria-hidden="true" />
+                  </button>
+                </div>
+                <p className="admin-panel__note">
+                  Sessions are optional. Leave every date and time blank to let
+                  customers request a preferred date and start window when they
+                  book this workshop.
+                </p>
+                {(workshopForm.dateGroups || []).map((group, index) => (
+                  <div className="admin-session-date-group" key={group.id}>
+                    <div className="admin-session-row admin-session-row--date">
+                      <div className="admin-session-field admin-session-field--label">
                         <label
                           className="admin-session-label"
-                          htmlFor={`session-time-${slot.id}`}
+                          htmlFor={`session-date-${group.id}`}
                         >
-                          Time
+                          Date #{index + 1}
                         </label>
                         <input
                           className="input"
-                          type="time"
-                          id={`session-time-${slot.id}`}
-                          value={slot.time}
+                          type="date"
+                          id={`session-date-${group.id}`}
+                          value={group.date}
                           onChange={(event) =>
-                            handleTimeSlotChange(
-                              group.id,
-                              slot.id,
-                              "time",
-                              event.target.value
-                            )
+                            handleDateGroupChange(group.id, event.target.value)
                           }
                         />
                       </div>
-                      <div className="admin-session-field">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`session-label-${slot.id}`}
+                      {(workshopForm.dateGroups || []).length > 1 && (
+                        <button
+                          className="icon-btn icon-btn--danger admin-session-remove"
+                          type="button"
+                          onClick={() => handleRemoveDateGroup(group.id)}
+                          aria-label={`Remove date ${index + 1}`}
                         >
-                          Label
-                        </label>
-                        <input
-                          className="input"
-                          id={`session-label-${slot.id}`}
-                          value={slot.label}
-                          onChange={(event) =>
-                            handleTimeSlotChange(
-                              group.id,
-                              slot.id,
-                              "label",
-                              event.target.value
-                            )
-                          }
-                          placeholder="Morning, Afternoon, etc."
-                        />
-                      </div>
-                      <div className="admin-session-field">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`session-capacity-${slot.id}`}
-                        >
-                          Capacity
-                        </label>
-                        <input
-                          className="input"
-                          type="number"
-                          min="1"
-                          id={`session-capacity-${slot.id}`}
-                          value={slot.capacity}
-                          onChange={(event) =>
-                            handleTimeSlotChange(
-                              group.id,
-                              slot.id,
-                              "capacity",
-                              event.target.value
-                            )
-                          }
-                        />
-                      </div>
+                          <IconTrash aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="admin-session-panel__header admin-session-panel__header--sub">
+                      <h5>Time slots</h5>
                       <button
-                        className="icon-btn icon-btn--danger admin-session-remove"
+                        className="icon-btn"
                         type="button"
-                        onClick={() => handleRemoveTimeSlot(group.id, slot.id)}
-                        aria-label="Remove time slot"
+                        onClick={() => handleAddTimeSlot(group.id)}
+                        aria-label="Add time slot"
                       >
-                        <IconTrash aria-hidden="true" />
+                        <IconPlus aria-hidden="true" />
                       </button>
                     </div>
-                  ))}
-                </div>
-              ))}
-              <label className="admin-checkbox">
-                <input
-                  type="checkbox"
-                  checked={workshopForm.repeatWeekdays}
-                  disabled={!workshopHasSessionTemplate}
-                  onChange={(event) =>
-                    setWorkshopForm((prev) => ({
-                      ...prev,
-                      repeatWeekdays: event.target.checked,
-                    }))
-                  }
-                />
-                <span>Auto-schedule future dates (Mon-Sat)</span>
-              </label>
-              <p className="admin-panel__note">
-                When enabled, the first completed date's time slots repeat for the next 90 days, skipping Sundays.
-              </p>
-            </div>
+                    {(group.times || []).map((slot) => (
+                      <div
+                        className="admin-session-row admin-session-row--nested"
+                        key={slot.id}
+                      >
+                        <div className="admin-session-field">
+                          <label
+                            className="admin-session-label"
+                            htmlFor={`session-time-${slot.id}`}
+                          >
+                            Time
+                          </label>
+                          <input
+                            className="input"
+                            type="time"
+                            id={`session-time-${slot.id}`}
+                            value={slot.time}
+                            onChange={(event) =>
+                              handleTimeSlotChange(
+                                group.id,
+                                slot.id,
+                                "time",
+                                event.target.value,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="admin-session-field">
+                          <label
+                            className="admin-session-label"
+                            htmlFor={`session-label-${slot.id}`}
+                          >
+                            Label
+                          </label>
+                          <input
+                            className="input"
+                            id={`session-label-${slot.id}`}
+                            value={slot.label}
+                            onChange={(event) =>
+                              handleTimeSlotChange(
+                                group.id,
+                                slot.id,
+                                "label",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="Morning, Afternoon, etc."
+                          />
+                        </div>
+                        <div className="admin-session-field">
+                          <label
+                            className="admin-session-label"
+                            htmlFor={`session-capacity-${slot.id}`}
+                          >
+                            Capacity
+                          </label>
+                          <input
+                            className="input"
+                            type="number"
+                            min="1"
+                            id={`session-capacity-${slot.id}`}
+                            value={slot.capacity}
+                            onChange={(event) =>
+                              handleTimeSlotChange(
+                                group.id,
+                                slot.id,
+                                "capacity",
+                                event.target.value,
+                              )
+                            }
+                          />
+                        </div>
+                        <button
+                          className="icon-btn icon-btn--danger admin-session-remove"
+                          type="button"
+                          onClick={() =>
+                            handleRemoveTimeSlot(group.id, slot.id)
+                          }
+                          aria-label="Remove time slot"
+                        >
+                          <IconTrash aria-hidden="true" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                <label className="admin-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={workshopForm.repeatWeekdays}
+                    disabled={!workshopHasSessionTemplate}
+                    onChange={(event) =>
+                      setWorkshopForm((prev) => ({
+                        ...prev,
+                        repeatWeekdays: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Auto-schedule future dates (Mon-Sat)</span>
+                </label>
+                <p className="admin-panel__note">
+                  When enabled, the first completed date's time slots repeat for
+                  the next 90 days, skipping Sundays.
+                </p>
+              </div>
 
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="What to Expect"
-              value={workshopForm.whatToExpect}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  whatToExpect: event.target.value,
-                }))
-              }
-            />
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Booking & Pricing details"
-              value={workshopForm.bookingPricing}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  bookingPricing: event.target.value,
-                }))
-              }
-            />
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Good to Know"
-              value={workshopForm.goodToKnow}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  goodToKnow: event.target.value,
-                }))
-              }
-            />
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Cancellations & Policies"
-              value={workshopForm.cancellations}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  cancellations: event.target.value,
-                }))
-              }
-            />
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Groups & Private Events"
-              value={workshopForm.groupsInfo}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  groupsInfo: event.target.value,
-                }))
-              }
-            />
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Caring for Your Art"
-              value={workshopForm.careInfo}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  careInfo: event.target.value,
-                }))
-              }
-            />
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Why people love our workshops"
-              value={workshopForm.whyPeopleLove}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  whyPeopleLove: event.target.value,
-                }))
-              }
-            />
-            <input
-              className="input admin-form__full"
-              placeholder="CTA note (e.g. 'Book today to reserve your seat!')"
-              value={workshopForm.ctaNote}
-              onChange={(event) =>
-                setWorkshopForm((prev) => ({
-                  ...prev,
-                  ctaNote: event.target.value,
-                }))
-              }
-            />
-            <div className="admin-modal__actions admin-form__actions">
-              <button
-                className="btn btn--secondary"
-                type="button"
-                onClick={closeWorkshopModal}
-                disabled={workshopSaving}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn--primary"
-                type="submit"
-                disabled={!inventoryEnabled || workshopSaving}
-              >
-                {workshopSaving ?
-                   "Saving..."
-                  : editingWorkshopId ?
-                   "Update Workshop"
-                  : "Save Workshop"}
-              </button>
-            </div>
-            {workshopError && (
-              <p className="admin-panel__error">{workshopError}</p>
-            )}
-          </form>
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="What to Expect"
+                value={workshopForm.whatToExpect}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    whatToExpect: event.target.value,
+                  }))
+                }
+              />
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="Booking & Pricing details"
+                value={workshopForm.bookingPricing}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    bookingPricing: event.target.value,
+                  }))
+                }
+              />
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="Good to Know"
+                value={workshopForm.goodToKnow}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    goodToKnow: event.target.value,
+                  }))
+                }
+              />
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="Cancellations & Policies"
+                value={workshopForm.cancellations}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    cancellations: event.target.value,
+                  }))
+                }
+              />
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="Groups & Private Events"
+                value={workshopForm.groupsInfo}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    groupsInfo: event.target.value,
+                  }))
+                }
+              />
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="Caring for Your Art"
+                value={workshopForm.careInfo}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    careInfo: event.target.value,
+                  }))
+                }
+              />
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="Why people love our workshops"
+                value={workshopForm.whyPeopleLove}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    whyPeopleLove: event.target.value,
+                  }))
+                }
+              />
+              <input
+                className="input admin-form__full"
+                placeholder="CTA note (e.g. 'Book today to reserve your seat!')"
+                value={workshopForm.ctaNote}
+                onChange={(event) =>
+                  setWorkshopForm((prev) => ({
+                    ...prev,
+                    ctaNote: event.target.value,
+                  }))
+                }
+              />
+              <div className="admin-modal__actions admin-form__actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={closeWorkshopModal}
+                  disabled={workshopSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  type="submit"
+                  disabled={!inventoryEnabled || workshopSaving}
+                >
+                  {workshopSaving
+                    ? "Saving..."
+                    : editingWorkshopId
+                      ? "Update Workshop"
+                      : "Save Workshop"}
+                </button>
+              </div>
+              {workshopError && (
+                <p className="admin-panel__error">{workshopError}</p>
+              )}
+            </form>
           </div>
         </div>
       </div>
@@ -10421,7 +12312,8 @@ export function AdminWorkshopBookingsView() {
 export function AdminWorkshopsCalendarView() {
   usePageMetadata({
     title: "Admin - Calendar",
-    description: "Overview of scheduled workshops, bookings, and events by date.",
+    description:
+      "Overview of scheduled workshops, bookings, and events by date.",
   });
   const {
     db,
@@ -10438,7 +12330,7 @@ export function AdminWorkshopsCalendarView() {
     return today;
   });
   const [selectedDate, setSelectedDate] = useState(() =>
-    formatDateInput(new Date())
+    formatDateInput(new Date()),
   );
   const [quickEventOpen, setQuickEventOpen] = useState(false);
   const [quickEventForm, setQuickEventForm] = useState(() => ({
@@ -10496,7 +12388,8 @@ export function AdminWorkshopsCalendarView() {
   }, [cutFlowerBookings]);
 
   const undatedCutFlowerBookings = useMemo(
-    () => cutFlowerBookings.filter((booking) => !parseDateValue(booking.eventDate)),
+    () =>
+      cutFlowerBookings.filter((booking) => !parseDateValue(booking.eventDate)),
     [cutFlowerBookings],
   );
 
@@ -10537,17 +12430,24 @@ export function AdminWorkshopsCalendarView() {
           label: cellDate.getDate(),
           isCurrentMonth: cellDate.getMonth() === month,
           isToday: iso === formatDateInput(new Date()),
-          hasBookings: workshopBookingsByDate.has(iso) || cutFlowerBookingsByDate.has(iso),
+          hasBookings:
+            workshopBookingsByDate.has(iso) || cutFlowerBookingsByDate.has(iso),
           hasEvents: eventsByDate.has(iso),
         });
       }
       matrix.push(weekRow);
     }
     return matrix;
-  }, [visibleMonth, workshopBookingsByDate, cutFlowerBookingsByDate, eventsByDate]);
+  }, [
+    visibleMonth,
+    workshopBookingsByDate,
+    cutFlowerBookingsByDate,
+    eventsByDate,
+  ]);
 
   const activeWorkshopBookings = workshopBookingsByDate.get(selectedDate) || [];
-  const activeCutFlowerBookings = cutFlowerBookingsByDate.get(selectedDate) || [];
+  const activeCutFlowerBookings =
+    cutFlowerBookingsByDate.get(selectedDate) || [];
   const activeEvents = eventsByDate.get(selectedDate) || [];
   const workshopBookingCount = activeWorkshopBookings.length;
   const cutFlowerBookingCount = activeCutFlowerBookings.length;
@@ -10590,19 +12490,17 @@ export function AdminWorkshopsCalendarView() {
 
   const startQuickEventEdit = (eventDoc) => {
     const eventDate = parseDateValue(eventDoc?.eventDate);
-    const slotTime =
-      Array.isArray(eventDoc?.timeSlots)
-        ? eventDoc.timeSlots
-            .map((slot) => (slot?.time || "").toString().trim())
-            .find(Boolean) || ""
-        : "";
+    const slotTime = Array.isArray(eventDoc?.timeSlots)
+      ? eventDoc.timeSlots
+          .map((slot) => (slot?.time || "").toString().trim())
+          .find(Boolean) || ""
+      : "";
     setQuickEventForm({
       title: (eventDoc?.title || "").toString(),
       location: (eventDoc?.location || "").toString(),
-      date:
-        eventDate
-          ? formatDateInput(eventDate)
-          : selectedDate || formatDateInput(new Date()),
+      date: eventDate
+        ? formatDateInput(eventDate)
+        : selectedDate || formatDateInput(new Date()),
       time: slotTime || (eventDate ? formatTimeInput(eventDate) : ""),
       notes: (eventDoc?.description || "").toString(),
     });
@@ -10618,7 +12516,9 @@ export function AdminWorkshopsCalendarView() {
     }
 
     const eventLabel = (eventDoc.title || "event").toString().trim();
-    const confirmed = window.confirm(`Delete "${eventLabel}" from calendar? This action cannot be undone.`);
+    const confirmed = window.confirm(
+      `Delete "${eventLabel}" from calendar? This action cannot be undone.`,
+    );
     if (!confirmed) return;
 
     setQuickEventDeletingId(eventDoc.id);
@@ -10632,12 +12532,18 @@ export function AdminWorkshopsCalendarView() {
     } catch (deleteError) {
       console.error(deleteError);
       const errorCode = String(deleteError?.code || deleteError?.message || "");
-      if (errorCode.includes("permission-denied") || errorCode.includes("unauthenticated")) {
+      if (
+        errorCode.includes("permission-denied") ||
+        errorCode.includes("unauthenticated")
+      ) {
         setQuickEventError(
-          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.'
+          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.',
         );
       } else {
-        setQuickEventError(deleteError?.message || "We couldn't delete the event. Please try again.");
+        setQuickEventError(
+          deleteError?.message ||
+            "We couldn't delete the event. Please try again.",
+        );
       }
     } finally {
       setQuickEventDeletingId(null);
@@ -10666,12 +12572,13 @@ export function AdminWorkshopsCalendarView() {
     setQuickEventError(null);
 
     try {
-      const existingEvent =
-        quickEventEditingId
-          ? events.find((eventDoc) => eventDoc.id === quickEventEditingId) || null
-          : null;
+      const existingEvent = quickEventEditingId
+        ? events.find((eventDoc) => eventDoc.id === quickEventEditingId) || null
+        : null;
       if (quickEventEditingId && !existingEvent) {
-        setQuickEventError("This event no longer exists. Refresh and try again.");
+        setQuickEventError(
+          "This event no longer exists. Refresh and try again.",
+        );
         setQuickEventSaving(false);
         return;
       }
@@ -10695,12 +12602,16 @@ export function AdminWorkshopsCalendarView() {
         eventDate: combinedDate ?? null,
         timeSlots,
         repeatWeekly: Boolean(existingEvent?.repeatWeekly),
-        repeatDays: Array.isArray(existingEvent?.repeatDays) ? existingEvent.repeatDays : [],
-        image: typeof existingEvent?.image === "string" ? existingEvent.image : "",
+        repeatDays: Array.isArray(existingEvent?.repeatDays)
+          ? existingEvent.repeatDays
+          : [],
+        image:
+          typeof existingEvent?.image === "string" ? existingEvent.image : "",
         workshopId: existingEvent?.workshopId || null,
         workshopTitle: existingEvent?.workshopTitle || null,
         status:
-          typeof existingEvent?.status === "string" && existingEvent.status.trim()
+          typeof existingEvent?.status === "string" &&
+          existingEvent.status.trim()
             ? existingEvent.status
             : "draft",
         updatedAt: serverTimestamp(),
@@ -10735,12 +12646,17 @@ export function AdminWorkshopsCalendarView() {
     } catch (saveError) {
       console.error(saveError);
       const errorCode = String(saveError?.code || saveError?.message || "");
-      if (errorCode.includes("permission-denied") || errorCode.includes("unauthenticated")) {
+      if (
+        errorCode.includes("permission-denied") ||
+        errorCode.includes("unauthenticated")
+      ) {
         setQuickEventError(
-          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.'
+          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.',
         );
       } else {
-        setQuickEventError(saveError?.message || "We couldn't save the event. Please try again.");
+        setQuickEventError(
+          saveError?.message || "We couldn't save the event. Please try again.",
+        );
       }
     } finally {
       setQuickEventSaving(false);
@@ -10753,7 +12669,8 @@ export function AdminWorkshopsCalendarView() {
         <div>
           <h2>Studio Calendar</h2>
           <p className="admin-panel__note">
-            Track workshop bookings, cut flower bookings, and events in one timeline.
+            Track workshop bookings, cut flower bookings, and events in one
+            timeline.
           </p>
         </div>
       </Reveal>
@@ -10778,7 +12695,8 @@ export function AdminWorkshopsCalendarView() {
             <div>
               <h3>{monthLabel}</h3>
               <p className="modal__meta">
-                Showing all workshop bookings, cut flower bookings, and events for this month.
+                Showing all workshop bookings, cut flower bookings, and events
+                for this month.
               </p>
             </div>
             <button
@@ -10795,7 +12713,8 @@ export function AdminWorkshopsCalendarView() {
 
           <div className="admin-calendar__legend">
             <span>
-              <span className="legend-dot legend-dot--booked" /> Booking days (workshops + cut flowers)
+              <span className="legend-dot legend-dot--booked" /> Booking days
+              (workshops + cut flowers)
             </span>
             <span>
               <span className="legend-dot legend-dot--event" /> Event days
@@ -10838,24 +12757,36 @@ export function AdminWorkshopsCalendarView() {
             <div>
               <h4>{selectedDateLabel}</h4>
               <p className="modal__meta">
-                Workshops: {workshopBookingCount} | Cut flowers: {cutFlowerBookingCount} | Events: {activeEvents.length}
+                Workshops: {workshopBookingCount} | Cut flowers:{" "}
+                {cutFlowerBookingCount} | Events: {activeEvents.length}
               </p>
             </div>
             <button
               className="btn btn--secondary btn--icon admin-calendar__icon-btn"
               type="button"
-              onClick={quickEventOpen ? closeQuickEventForm : openQuickEventForm}
+              onClick={
+                quickEventOpen ? closeQuickEventForm : openQuickEventForm
+              }
               disabled={!inventoryEnabled}
-              aria-label={quickEventOpen ? "Close quick event form" : "Add calendar event"}
-              title={quickEventOpen ? "Close quick event form" : "Add calendar event"}
+              aria-label={
+                quickEventOpen ? "Close quick event form" : "Add calendar event"
+              }
+              title={
+                quickEventOpen ? "Close quick event form" : "Add calendar event"
+              }
             >
               {quickEventOpen ? (
-                <IconClose className="btn__icon" title="Close quick event form" />
+                <IconClose
+                  className="btn__icon"
+                  title="Close quick event form"
+                />
               ) : (
                 <IconPlus className="btn__icon" title="Add calendar event" />
               )}
               <span className="sr-only">
-                {quickEventOpen ? "Close quick event form" : "Add calendar event"}
+                {quickEventOpen
+                  ? "Close quick event form"
+                  : "Add calendar event"}
               </span>
             </button>
           </div>
@@ -10876,15 +12807,18 @@ export function AdminWorkshopsCalendarView() {
                       {isCustomerRequestedWorkshopBooking(booking) ? (
                         <>
                           <p className="modal__meta">
-                            Requested date: {getWorkshopBookingDateLabel(booking)}
+                            Requested date:{" "}
+                            {getWorkshopBookingDateLabel(booking)}
                           </p>
                           <p className="modal__meta">
-                            Requested time: {getWorkshopBookingTimeLabel(booking)}
+                            Requested time:{" "}
+                            {getWorkshopBookingTimeLabel(booking)}
                           </p>
                         </>
                       ) : (
                         <p className="modal__meta">
-                          {booking.sessionLabel || "Session"} - {booking.optionLabel || booking.frame || "Workshop"}
+                          {booking.sessionLabel || "Session"} -{" "}
+                          {booking.optionLabel || booking.frame || "Workshop"}
                         </p>
                       )}
                     </div>
@@ -10913,17 +12847,24 @@ export function AdminWorkshopsCalendarView() {
                   return (
                     <li key={booking.id}>
                       <div>
-                        <strong>{booking.customerName || "Cut flower booking"}</strong>
+                        <strong>
+                          {booking.customerName || "Cut flower booking"}
+                        </strong>
                         <p className="modal__meta">
-                          {timeLabel ? `${timeLabel} - ` : ""}{booking.location || "Location tbc"}
+                          {timeLabel ? `${timeLabel} - ` : ""}
+                          {booking.location || "Location tbc"}
                         </p>
                         {booking.occasion && (
-                          <p className="modal__meta">Occasion: {booking.occasion}</p>
+                          <p className="modal__meta">
+                            Occasion: {booking.occasion}
+                          </p>
                         )}
                       </div>
                       <div className="admin-calendar__details-actions">
                         {booking.email && (
-                          <a href={`mailto:${booking.email}`}>{booking.email}</a>
+                          <a href={`mailto:${booking.email}`}>
+                            {booking.email}
+                          </a>
                         )}
                         {booking.phone && (
                           <p className="modal__meta">{booking.phone}</p>
@@ -10967,7 +12908,11 @@ export function AdminWorkshopsCalendarView() {
                           className="btn btn--secondary btn--icon admin-calendar__icon-btn"
                           type="button"
                           onClick={() => startQuickEventEdit(eventDoc)}
-                          disabled={!inventoryEnabled || quickEventSaving || quickEventDeletingId === eventDoc.id}
+                          disabled={
+                            !inventoryEnabled ||
+                            quickEventSaving ||
+                            quickEventDeletingId === eventDoc.id
+                          }
                           aria-label={`Edit event ${eventDoc.title || ""}`.trim()}
                           title="Edit event"
                         >
@@ -10978,17 +12923,30 @@ export function AdminWorkshopsCalendarView() {
                           className="btn btn--secondary btn--icon admin-calendar__icon-btn admin-calendar__action-delete"
                           type="button"
                           onClick={() => handleQuickEventDelete(eventDoc)}
-                          disabled={!inventoryEnabled || quickEventSaving || quickEventDeletingId === eventDoc.id}
+                          disabled={
+                            !inventoryEnabled ||
+                            quickEventSaving ||
+                            quickEventDeletingId === eventDoc.id
+                          }
                           aria-label={
                             quickEventDeletingId === eventDoc.id
                               ? "Deleting event"
                               : `Delete event ${eventDoc.title || ""}`.trim()
                           }
-                          title={quickEventDeletingId === eventDoc.id ? "Deleting event" : "Delete event"}
+                          title={
+                            quickEventDeletingId === eventDoc.id
+                              ? "Deleting event"
+                              : "Delete event"
+                          }
                         >
-                          <IconTrash className="btn__icon" title="Delete event" />
+                          <IconTrash
+                            className="btn__icon"
+                            title="Delete event"
+                          />
                           <span className="sr-only">
-                            {quickEventDeletingId === eventDoc.id ? "Deleting event" : "Delete event"}
+                            {quickEventDeletingId === eventDoc.id
+                              ? "Deleting event"
+                              : "Delete event"}
                           </span>
                         </button>
                       </div>
@@ -11025,9 +12983,7 @@ export function AdminWorkshopsCalendarView() {
                           </a>
                         )}
                         {receivedAt && (
-                          <p className="modal__meta">
-                            Received {receivedAt}
-                          </p>
+                          <p className="modal__meta">Received {receivedAt}</p>
                         )}
                       </div>
                     </li>
@@ -11036,14 +12992,18 @@ export function AdminWorkshopsCalendarView() {
                 {undatedCutFlowerBookings.map((booking) => (
                   <li key={`undated-cut-flower-${booking.id}`}>
                     <div>
-                      <strong>{booking.customerName || "Cut flower booking"}</strong>
+                      <strong>
+                        {booking.customerName || "Cut flower booking"}
+                      </strong>
                       <p className="modal__meta">Cut flower booking</p>
                     </div>
                     <div className="admin-calendar__details-actions">
                       {booking.email && (
                         <a href={`mailto:${booking.email}`}>{booking.email}</a>
                       )}
-                      {booking.phone && <p className="modal__meta">{booking.phone}</p>}
+                      {booking.phone && (
+                        <p className="modal__meta">{booking.phone}</p>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -11062,7 +13022,11 @@ export function AdminWorkshopsCalendarView() {
                           className="btn btn--secondary btn--icon admin-calendar__icon-btn"
                           type="button"
                           onClick={() => startQuickEventEdit(eventDoc)}
-                          disabled={!inventoryEnabled || quickEventSaving || quickEventDeletingId === eventDoc.id}
+                          disabled={
+                            !inventoryEnabled ||
+                            quickEventSaving ||
+                            quickEventDeletingId === eventDoc.id
+                          }
                           aria-label={`Edit event ${eventDoc.title || ""}`.trim()}
                           title="Edit event"
                         >
@@ -11073,17 +13037,30 @@ export function AdminWorkshopsCalendarView() {
                           className="btn btn--secondary btn--icon admin-calendar__icon-btn admin-calendar__action-delete"
                           type="button"
                           onClick={() => handleQuickEventDelete(eventDoc)}
-                          disabled={!inventoryEnabled || quickEventSaving || quickEventDeletingId === eventDoc.id}
+                          disabled={
+                            !inventoryEnabled ||
+                            quickEventSaving ||
+                            quickEventDeletingId === eventDoc.id
+                          }
                           aria-label={
                             quickEventDeletingId === eventDoc.id
                               ? "Deleting event"
                               : `Delete event ${eventDoc.title || ""}`.trim()
                           }
-                          title={quickEventDeletingId === eventDoc.id ? "Deleting event" : "Delete event"}
+                          title={
+                            quickEventDeletingId === eventDoc.id
+                              ? "Deleting event"
+                              : "Delete event"
+                          }
                         >
-                          <IconTrash className="btn__icon" title="Delete event" />
+                          <IconTrash
+                            className="btn__icon"
+                            title="Delete event"
+                          />
                           <span className="sr-only">
-                            {quickEventDeletingId === eventDoc.id ? "Deleting event" : "Delete event"}
+                            {quickEventDeletingId === eventDoc.id
+                              ? "Deleting event"
+                              : "Delete event"}
                           </span>
                         </button>
                       </div>
@@ -11093,8 +13070,8 @@ export function AdminWorkshopsCalendarView() {
               </ul>
             </div>
           )}
+        </div>
       </div>
-    </div>
 
       {quickEventOpen && (
         <div
@@ -11116,7 +13093,11 @@ export function AdminWorkshopsCalendarView() {
             >
               x
             </button>
-            <h3>{quickEventEditingId ? "Edit calendar event" : "Add calendar event"}</h3>
+            <h3>
+              {quickEventEditingId
+                ? "Edit calendar event"
+                : "Add calendar event"}
+            </h3>
             <p className="admin-panel__note">
               {quickEventEditingId
                 ? "Update this event directly from the calendar."
@@ -11131,20 +13112,28 @@ export function AdminWorkshopsCalendarView() {
                   placeholder="Event title"
                   value={quickEventForm.title}
                   onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, title: event.target.value }))
+                    setQuickEventForm((prev) => ({
+                      ...prev,
+                      title: event.target.value,
+                    }))
                   }
                   required
                 />
               </div>
               <div className="admin-form__field">
-                <label htmlFor="quick-event-location">Location (optional)</label>
+                <label htmlFor="quick-event-location">
+                  Location (optional)
+                </label>
                 <input
                   className="input"
                   id="quick-event-location"
                   placeholder="Location (optional)"
                   value={quickEventForm.location}
                   onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, location: event.target.value }))
+                    setQuickEventForm((prev) => ({
+                      ...prev,
+                      location: event.target.value,
+                    }))
                   }
                 />
               </div>
@@ -11156,7 +13145,10 @@ export function AdminWorkshopsCalendarView() {
                   type="date"
                   value={quickEventForm.date}
                   onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, date: event.target.value }))
+                    setQuickEventForm((prev) => ({
+                      ...prev,
+                      date: event.target.value,
+                    }))
                   }
                   required
                 />
@@ -11169,7 +13161,10 @@ export function AdminWorkshopsCalendarView() {
                   type="time"
                   value={quickEventForm.time}
                   onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, time: event.target.value }))
+                    setQuickEventForm((prev) => ({
+                      ...prev,
+                      time: event.target.value,
+                    }))
                   }
                 />
               </div>
@@ -11181,12 +13176,19 @@ export function AdminWorkshopsCalendarView() {
                   placeholder="Notes (optional)"
                   value={quickEventForm.notes}
                   onChange={(event) =>
-                    setQuickEventForm((prev) => ({ ...prev, notes: event.target.value }))
+                    setQuickEventForm((prev) => ({
+                      ...prev,
+                      notes: event.target.value,
+                    }))
                   }
                 />
               </div>
               <div className="admin-form__actions">
-                <button className="btn btn--secondary" type="button" onClick={closeQuickEventForm}>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={closeQuickEventForm}
+                >
                   Cancel
                 </button>
                 <button
@@ -11201,7 +13203,9 @@ export function AdminWorkshopsCalendarView() {
                       : "Save event"}
                 </button>
               </div>
-              {quickEventError && <p className="admin-panel__error">{quickEventError}</p>}
+              {quickEventError && (
+                <p className="admin-panel__error">{quickEventError}</p>
+              )}
             </form>
           </div>
         </div>
@@ -11237,19 +13241,29 @@ export function AdminEventsView() {
   const eventPreviewUrlRef = useRef(null);
   const [eventPage, setEventPage] = useState(0);
   const blocked = !inventoryEnabled;
-  const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null, label: "" });
+  const [deleteDialog, setDeleteDialog] = useState({
+    open: false,
+    targetId: null,
+    label: "",
+  });
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const normalizedEvents = useMemo(() => {
     return events
       .map((eventDoc) => {
         const eventDate = parseDateValue(eventDoc.eventDate);
-        const repeatLabel = eventDoc.repeatWeekly ? formatRepeatLabel(eventDoc.repeatDays) : "";
+        const repeatLabel = eventDoc.repeatWeekly
+          ? formatRepeatLabel(eventDoc.repeatDays)
+          : "";
         const timeSummary = buildTimeSummary(eventDoc.timeSlots);
         return {
           ...eventDoc,
           eventDate,
-          displayDate: repeatLabel || (eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed"),
+          displayDate:
+            repeatLabel ||
+            (eventDate
+              ? bookingDateFormatter.format(eventDate)
+              : "Date to be confirmed"),
           timeSummary,
         };
       })
@@ -11273,11 +13287,14 @@ export function AdminEventsView() {
         URL.revokeObjectURL(eventPreviewUrlRef.current);
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(normalizedEvents.length / ADMIN_PAGE_SIZE) - 1);
+    const maxPage = Math.max(
+      0,
+      Math.ceil(normalizedEvents.length / ADMIN_PAGE_SIZE) - 1,
+    );
     setEventPage((prev) => Math.min(prev, maxPage));
   }, [normalizedEvents.length]);
 
@@ -11287,7 +13304,7 @@ export function AdminEventsView() {
         id: workshop.id,
         title: workshop.title || workshop.name || "Untitled Workshop",
       })),
-    [workshops]
+    [workshops],
   );
 
   const paginatedEvents = useMemo(() => {
@@ -11306,7 +13323,11 @@ export function AdminEventsView() {
   const handleEventDateChange = (value) => {
     setEventForm((prev) => {
       const next = { ...prev, date: value };
-      if (prev.repeatWeekly && (!prev.repeatDays || prev.repeatDays.length === 0) && value) {
+      if (
+        prev.repeatWeekly &&
+        (!prev.repeatDays || prev.repeatDays.length === 0) &&
+        value
+      ) {
         const parsed = new Date(value);
         if (!Number.isNaN(parsed.getTime())) {
           next.repeatDays = [parsed.getDay()];
@@ -11327,14 +13348,16 @@ export function AdminEventsView() {
     setEventForm((prev) => ({
       ...prev,
       timeSlots: (prev.timeSlots || []).map((slot) =>
-        slot.id === slotId ? { ...slot, [field]: value } : slot
+        slot.id === slotId ? { ...slot, [field]: value } : slot,
       ),
     }));
   };
 
   const handleRemoveEventTimeSlot = (slotId) => {
     setEventForm((prev) => {
-      const remaining = (prev.timeSlots || []).filter((slot) => slot.id !== slotId);
+      const remaining = (prev.timeSlots || []).filter(
+        (slot) => slot.id !== slotId,
+      );
       return {
         ...prev,
         timeSlots: remaining.length > 0 ? remaining : [createEventTimeSlot()],
@@ -11347,7 +13370,10 @@ export function AdminEventsView() {
       const next = { ...prev, repeatWeekly: checked };
       if (!checked) {
         next.repeatDays = [];
-      } else if ((!prev.repeatDays || prev.repeatDays.length === 0) && prev.date) {
+      } else if (
+        (!prev.repeatDays || prev.repeatDays.length === 0) &&
+        prev.date
+      ) {
         const parsed = new Date(prev.date);
         if (!Number.isNaN(parsed.getTime())) {
           next.repeatDays = [parsed.getDay()];
@@ -11360,8 +13386,8 @@ export function AdminEventsView() {
   const handleToggleRepeatDay = (dayValue) => {
     setEventForm((prev) => {
       const existing = Array.isArray(prev.repeatDays) ? prev.repeatDays : [];
-      const normalized = existing.includes(dayValue) ?
-         existing.filter((day) => day !== dayValue)
+      const normalized = existing.includes(dayValue)
+        ? existing.filter((day) => day !== dayValue)
         : [...existing, dayValue];
       return {
         ...prev,
@@ -11395,10 +13421,12 @@ export function AdminEventsView() {
   const handleEditEvent = (eventDoc) => {
     const eventDate = parseDateValue(eventDoc.eventDate);
     const fallbackTime =
-      eventDate && (eventDate.getHours() || eventDate.getMinutes()) ?
-         formatTimeInput(eventDate)
+      eventDate && (eventDate.getHours() || eventDate.getMinutes())
+        ? formatTimeInput(eventDate)
         : "";
-    const rawTimeSlots = Array.isArray(eventDoc.timeSlots) ? eventDoc.timeSlots.filter(Boolean) : [];
+    const rawTimeSlots = Array.isArray(eventDoc.timeSlots)
+      ? eventDoc.timeSlots.filter(Boolean)
+      : [];
     const normalizedSlots =
       rawTimeSlots.length > 0
         ? rawTimeSlots.map((slot, index) => ({
@@ -11486,7 +13514,8 @@ export function AdminEventsView() {
       const primaryTime = sanitizedSlots[0]?.time ?? "";
       const combinedDate = combineDateAndTime(eventForm.date, primaryTime);
       const linkedWorkshop =
-        workshops.find((workshop) => workshop.id === eventForm.workshopId) || null;
+        workshops.find((workshop) => workshop.id === eventForm.workshopId) ||
+        null;
       const repeatDays = eventForm.repeatWeekly
         ? Array.isArray(eventForm.repeatDays)
           ? eventForm.repeatDays
@@ -11525,12 +13554,17 @@ export function AdminEventsView() {
     } catch (saveError) {
       console.error(saveError);
       const errorCode = String(saveError?.code || saveError?.message || "");
-      if (errorCode.includes("permission-denied") || errorCode.includes("unauthenticated")) {
+      if (
+        errorCode.includes("permission-denied") ||
+        errorCode.includes("unauthenticated")
+      ) {
         setEventError(
-          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.'
+          'Permission denied. Confirm this user is signed in and has role "admin" in users/{uid}.',
         );
       } else {
-        setEventError(saveError?.message || "We couldn't save the event. Please try again.");
+        setEventError(
+          saveError?.message || "We couldn't save the event. Please try again.",
+        );
       }
     } finally {
       setEventSaving(false);
@@ -11545,312 +13579,340 @@ export function AdminEventsView() {
             <div className="admin-panel__header">
               <div>
                 <h2>Events</h2>
-              <p className="admin-panel__note">
-                Share pop-ups, markets, and studio open days, then link a workshop so guests can book in one click.
-              </p>
+                <p className="admin-panel__note">
+                  Share pop-ups, markets, and studio open days, then link a
+                  workshop so guests can book in one click.
+                </p>
+              </div>
+              {eventStatus && (
+                <span className="badge badge--muted">{eventStatus}</span>
+              )}
             </div>
-            {eventStatus && <span className="badge badge--muted">{eventStatus}</span>}
-          </div>
-            {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
-          {blocked && !inventoryError && (
-            <p className="admin-panel__error">
-              Admin permissions or Firestore connection not detected. Ensure your account has role "admin" in
-              users/{`{uid}`} and that Firestore is configured for this project.
-            </p>
-          )}
-          <div className="admin-panel__content">
-            <div>
-              <h3>{editingEventId ? "Edit Event" : "Create Event"}</h3>
-              <form className="admin-form" onSubmit={handleSaveEvent}>
-                <input
-                  className="input"
-                  placeholder="Event title"
-                  value={eventForm.title}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, title: e.target.value }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  placeholder="Location"
-                  value={eventForm.location}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, location: e.target.value }))
-                  }
-                />
-                <select
-                  className="input"
-                  value={eventForm.status}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, status: e.target.value }))
-                  }
-                >
-                  <option value="draft">Draft</option>
-                  <option value="live">Live</option>
-                  <option value="archived">Archived</option>
-                </select>
-                <input
-                  className="input"
-                  type="date"
-                  value={eventForm.date}
-                  onChange={(e) =>
-                    handleEventDateChange(e.target.value)
-                  }
-                  required
-                />
-                <div className="admin-session-panel admin-form__full">
-                  <div className="admin-session-panel__header">
-                    <h4>Event times</h4>
-                    <button
-                      className="icon-btn"
-                      type="button"
-                      onClick={handleAddEventTimeSlot}
-                      aria-label="Add time slot"
-                    >
-                      <IconPlus aria-hidden="true" />
-                    </button>
-                  </div>
-                  <p className="admin-panel__note">
-                    Add one or more time slots for this event day.
-                  </p>
-                  {(eventForm.timeSlots || []).map((slot) => (
-                    <div className="admin-session-row" key={slot.id}>
-                      <div className="admin-session-field">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`event-time-${slot.id}`}
-                        >
-                          Start
-                        </label>
-                        <input
-                          className="input"
-                          type="time"
-                          id={`event-time-${slot.id}`}
-                          value={slot.time}
-                          onChange={(event) =>
-                            handleEventTimeSlotChange(
-                              slot.id,
-                              "time",
-                              event.target.value
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="admin-session-field">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`event-end-${slot.id}`}
-                        >
-                          End
-                        </label>
-                        <input
-                          className="input"
-                          type="time"
-                          id={`event-end-${slot.id}`}
-                          value={slot.endTime || ""}
-                          onChange={(event) =>
-                            handleEventTimeSlotChange(
-                              slot.id,
-                              "endTime",
-                              event.target.value
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="admin-session-field admin-session-field--label">
-                        <label
-                          className="admin-session-label"
-                          htmlFor={`event-label-${slot.id}`}
-                        >
-                          Label (optional)
-                        </label>
-                        <input
-                          className="input"
-                          id={`event-label-${slot.id}`}
-                          value={slot.label}
-                          onChange={(event) =>
-                            handleEventTimeSlotChange(
-                              slot.id,
-                              "label",
-                              event.target.value
-                            )
-                          }
-                          placeholder="Morning, Afternoon, etc."
-                        />
-                      </div>
+            {inventoryError && (
+              <p className="admin-panel__error">{inventoryError}</p>
+            )}
+            {blocked && !inventoryError && (
+              <p className="admin-panel__error">
+                Admin permissions or Firestore connection not detected. Ensure
+                your account has role "admin" in users/{`{uid}`} and that
+                Firestore is configured for this project.
+              </p>
+            )}
+            <div className="admin-panel__content">
+              <div>
+                <h3>{editingEventId ? "Edit Event" : "Create Event"}</h3>
+                <form className="admin-form" onSubmit={handleSaveEvent}>
+                  <input
+                    className="input"
+                    placeholder="Event title"
+                    value={eventForm.title}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({
+                        ...prev,
+                        title: e.target.value,
+                      }))
+                    }
+                    required
+                  />
+                  <input
+                    className="input"
+                    placeholder="Location"
+                    value={eventForm.location}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({
+                        ...prev,
+                        location: e.target.value,
+                      }))
+                    }
+                  />
+                  <select
+                    className="input"
+                    value={eventForm.status}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({
+                        ...prev,
+                        status: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="live">Live</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                  <input
+                    className="input"
+                    type="date"
+                    value={eventForm.date}
+                    onChange={(e) => handleEventDateChange(e.target.value)}
+                    required
+                  />
+                  <div className="admin-session-panel admin-form__full">
+                    <div className="admin-session-panel__header">
+                      <h4>Event times</h4>
                       <button
-                        className="icon-btn icon-btn--danger admin-session-remove"
+                        className="icon-btn"
                         type="button"
-                        onClick={() => handleRemoveEventTimeSlot(slot.id)}
-                        aria-label="Remove time slot"
+                        onClick={handleAddEventTimeSlot}
+                        aria-label="Add time slot"
                       >
-                        <IconTrash aria-hidden="true" />
+                        <IconPlus aria-hidden="true" />
                       </button>
                     </div>
-                  ))}
-                </div>
-                <div className="admin-session-panel admin-form__full">
-                  <div className="admin-session-panel__header">
-                    <h4>Repeat weekly</h4>
-                  </div>
-                  <label className="admin-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={eventForm.repeatWeekly}
-                      onChange={(event) =>
-                        handleToggleRepeatWeekly(event.target.checked)
-                      }
-                    />
-                    <span>Repeat this event on selected weekdays</span>
-                  </label>
-                  {eventForm.repeatWeekly && (
-                    <div className="admin-repeat-days">
-                      {EVENT_REPEAT_WEEKDAYS.map((day) => (
-                        <label className="admin-repeat-day" key={day.value}>
+                    <p className="admin-panel__note">
+                      Add one or more time slots for this event day.
+                    </p>
+                    {(eventForm.timeSlots || []).map((slot) => (
+                      <div className="admin-session-row" key={slot.id}>
+                        <div className="admin-session-field">
+                          <label
+                            className="admin-session-label"
+                            htmlFor={`event-time-${slot.id}`}
+                          >
+                            Start
+                          </label>
                           <input
-                            type="checkbox"
-                            checked={
-                              Array.isArray(eventForm.repeatDays) &&
-                              eventForm.repeatDays.includes(day.value)
+                            className="input"
+                            type="time"
+                            id={`event-time-${slot.id}`}
+                            value={slot.time}
+                            onChange={(event) =>
+                              handleEventTimeSlotChange(
+                                slot.id,
+                                "time",
+                                event.target.value,
+                              )
                             }
-                            onChange={() => handleToggleRepeatDay(day.value)}
                           />
-                          <span>{day.label}</span>
-                        </label>
-                      ))}
+                        </div>
+                        <div className="admin-session-field">
+                          <label
+                            className="admin-session-label"
+                            htmlFor={`event-end-${slot.id}`}
+                          >
+                            End
+                          </label>
+                          <input
+                            className="input"
+                            type="time"
+                            id={`event-end-${slot.id}`}
+                            value={slot.endTime || ""}
+                            onChange={(event) =>
+                              handleEventTimeSlotChange(
+                                slot.id,
+                                "endTime",
+                                event.target.value,
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="admin-session-field admin-session-field--label">
+                          <label
+                            className="admin-session-label"
+                            htmlFor={`event-label-${slot.id}`}
+                          >
+                            Label (optional)
+                          </label>
+                          <input
+                            className="input"
+                            id={`event-label-${slot.id}`}
+                            value={slot.label}
+                            onChange={(event) =>
+                              handleEventTimeSlotChange(
+                                slot.id,
+                                "label",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="Morning, Afternoon, etc."
+                          />
+                        </div>
+                        <button
+                          className="icon-btn icon-btn--danger admin-session-remove"
+                          type="button"
+                          onClick={() => handleRemoveEventTimeSlot(slot.id)}
+                          aria-label="Remove time slot"
+                        >
+                          <IconTrash aria-hidden="true" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="admin-session-panel admin-form__full">
+                    <div className="admin-session-panel__header">
+                      <h4>Repeat weekly</h4>
                     </div>
-                  )}
-                  <p className="admin-panel__note">
-                    Use this for recurring events like every Saturday.
-                  </p>
-                </div>
-                <select
-                  className="input"
-                  value={eventForm.workshopId}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({
-                      ...prev,
-                      workshopId: e.target.value,
-                    }))
-                  }
-                >
-                  <option value="">Link a workshop (optional)</option>
-                  {workshopOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.title}
-                    </option>
-                  ))}
-                </select>
-                <textarea
-                  className="input textarea admin-form__full"
-                  placeholder="Event description"
-                  value={eventForm.description}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
-                  }
-                />
-                <div className="admin-file-input admin-form__full">
-                  <label htmlFor="event-image-upload" className="sr-only">
-                    Event image
-                  </label>
-                  <input
-                    key={editingEventId ?? "new-event"}
-                    className="input input--file"
-                    id="event-image-upload"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleEventImageChange}
+                    <label className="admin-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={eventForm.repeatWeekly}
+                        onChange={(event) =>
+                          handleToggleRepeatWeekly(event.target.checked)
+                        }
+                      />
+                      <span>Repeat this event on selected weekdays</span>
+                    </label>
+                    {eventForm.repeatWeekly && (
+                      <div className="admin-repeat-days">
+                        {EVENT_REPEAT_WEEKDAYS.map((day) => (
+                          <label className="admin-repeat-day" key={day.value}>
+                            <input
+                              type="checkbox"
+                              checked={
+                                Array.isArray(eventForm.repeatDays) &&
+                                eventForm.repeatDays.includes(day.value)
+                              }
+                              onChange={() => handleToggleRepeatDay(day.value)}
+                            />
+                            <span>{day.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="admin-panel__note">
+                      Use this for recurring events like every Saturday.
+                    </p>
+                  </div>
+                  <select
+                    className="input"
+                    value={eventForm.workshopId}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({
+                        ...prev,
+                        workshopId: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Link a workshop (optional)</option>
+                    {workshopOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.title}
+                      </option>
+                    ))}
+                  </select>
+                  <textarea
+                    className="input textarea admin-form__full"
+                    placeholder="Event description"
+                    value={eventForm.description}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({
+                        ...prev,
+                        description: e.target.value,
+                      }))
+                    }
                   />
-                  <p className="admin-panel__note">Upload JPG or PNG (max 3MB).</p>
-                  {(eventImagePreview || eventForm.image) && (
-                    <img
-                      src={eventImagePreview || eventForm.image}
-                      alt="Event preview"
-                      className="admin-preview" loading="lazy" decoding="async"/>
+                  <div className="admin-file-input admin-form__full">
+                    <label htmlFor="event-image-upload" className="sr-only">
+                      Event image
+                    </label>
+                    <input
+                      key={editingEventId ?? "new-event"}
+                      className="input input--file"
+                      id="event-image-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleEventImageChange}
+                    />
+                    <p className="admin-panel__note">
+                      Upload JPG or PNG (max 3MB).
+                    </p>
+                    {(eventImagePreview || eventForm.image) && (
+                      <img
+                        src={eventImagePreview || eventForm.image}
+                        alt="Event preview"
+                        className="admin-preview"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    )}
+                  </div>
+                  <div className="admin-form__actions">
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      onClick={resetEventForm}
+                      disabled={eventSaving}
+                    >
+                      Reset
+                    </button>
+                    <button
+                      className="btn btn--primary"
+                      type="submit"
+                      disabled={eventSaving || !inventoryEnabled}
+                    >
+                      {eventSaving
+                        ? "Saving..."
+                        : editingEventId
+                          ? "Update Event"
+                          : "Create Event"}
+                    </button>
+                  </div>
+                  {eventError && (
+                    <p className="admin-panel__error">{eventError}</p>
                   )}
-                </div>
-                <div className="admin-form__actions">
-                  <button
-                    className="btn btn--secondary"
-                    type="button"
-                    onClick={resetEventForm}
-                    disabled={eventSaving}
-                  >
-                    Reset
-                  </button>
-                  <button
-                    className="btn btn--primary"
-                    type="submit"
-                    disabled={eventSaving || !inventoryEnabled}
-                  >
-                    {eventSaving ?
-                       "Saving..."
-                      : editingEventId ?
-                       "Update Event"
-                      : "Create Event"}
-                  </button>
-                </div>
-                {eventError && <p className="admin-panel__error">{eventError}</p>}
-              </form>
-            </div>
-            <div>
-              <h3>Scheduled Events</h3>
-              {inventoryLoading && !events.length ? (
-                <p className="admin-panel__note">Loading events...</p>
+                </form>
+              </div>
+              <div>
+                <h3>Scheduled Events</h3>
+                {inventoryLoading && !events.length ? (
+                  <p className="admin-panel__note">Loading events...</p>
                 ) : (
-                <div className="admin-panel__list">
-                  {normalizedEvents.length === 0 ? (
-                    <p className="admin-panel__note">No events yet.</p>
-                  ) : (
-                    paginatedEvents.map((eventDoc) => (
-                      <article className="admin-event-card" key={eventDoc.id}>
-                        <div className="admin-event-card__info">
-                          <p className="admin-event-card__date">{eventDoc.displayDate}</p>
-                          <h4>{eventDoc.title}</h4>
-                          {eventDoc.location && (
-                            <p className="admin-event-card__meta">{eventDoc.location}</p>
-                          )}
-                          {eventDoc.timeSummary && (
-                            <p className="admin-event-card__meta">
-                              Times: {eventDoc.timeSummary}
+                  <div className="admin-panel__list">
+                    {normalizedEvents.length === 0 ? (
+                      <p className="admin-panel__note">No events yet.</p>
+                    ) : (
+                      paginatedEvents.map((eventDoc) => (
+                        <article className="admin-event-card" key={eventDoc.id}>
+                          <div className="admin-event-card__info">
+                            <p className="admin-event-card__date">
+                              {eventDoc.displayDate}
                             </p>
-                          )}
-                          {eventDoc.workshopTitle && (
-                            <p className="admin-event-card__meta">
-                              Linked workshop: {eventDoc.workshopTitle}
-                            </p>
-                          )}
-                        </div>
-                        <div className="admin-event-card__actions">
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            onClick={() => handleEditEvent(eventDoc)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn--danger"
-                            type="button"
-                            onClick={() => handleDeleteEvent(eventDoc.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </article>
-                    ))
-                  )}
-                </div>
+                            <h4>{eventDoc.title}</h4>
+                            {eventDoc.location && (
+                              <p className="admin-event-card__meta">
+                                {eventDoc.location}
+                              </p>
+                            )}
+                            {eventDoc.timeSummary && (
+                              <p className="admin-event-card__meta">
+                                Times: {eventDoc.timeSummary}
+                              </p>
+                            )}
+                            {eventDoc.workshopTitle && (
+                              <p className="admin-event-card__meta">
+                                Linked workshop: {eventDoc.workshopTitle}
+                              </p>
+                            )}
+                          </div>
+                          <div className="admin-event-card__actions">
+                            <button
+                              className="btn btn--secondary"
+                              type="button"
+                              onClick={() => handleEditEvent(eventDoc)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn--danger"
+                              type="button"
+                              onClick={() => handleDeleteEvent(eventDoc.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
                 )}
-              <AdminPagination page={eventPage} total={normalizedEvents.length} onPageChange={setEventPage} />
+                <AdminPagination
+                  page={eventPage}
+                  total={normalizedEvents.length}
+                  onPageChange={setEventPage}
+                />
+              </div>
             </div>
           </div>
         </div>
-      </div>
       </section>
       <ConfirmDialog
         open={deleteDialog.open}
@@ -11858,7 +13920,9 @@ export function AdminEventsView() {
         message="Are you sure you want to delete this event This cannot be undone."
         confirmLabel="Delete"
         busy={deleteBusy}
-        onCancel={() => setDeleteDialog({ open: false, targetId: null, label: "" })}
+        onCancel={() =>
+          setDeleteDialog({ open: false, targetId: null, label: "" })
+        }
         onConfirm={async () => {
           if (!db || !deleteDialog.targetId) return;
           setDeleteBusy(true);
@@ -11884,7 +13948,8 @@ export function AdminEventsView() {
 export function AdminEmailTestView() {
   usePageMetadata({
     title: "Admin - Email preview",
-    description: "Preview email HTML with dummy data without sending any emails.",
+    description:
+      "Preview email HTML with dummy data without sending any emails.",
   });
   const { inventoryEnabled } = useAdminData();
   const functionsInstance = useMemo(() => {
@@ -11937,7 +14002,10 @@ export function AdminEmailTestView() {
     setLoadingPreview(true);
     setError(null);
     try {
-      const callable = httpsCallable(functionsInstance, "previewTestEmailTemplate");
+      const callable = httpsCallable(
+        functionsInstance,
+        "previewTestEmailTemplate",
+      );
       const response = await callable({
         templateType: payload.templateType || "custom",
         subject: (payload.subject || "").toString(),
@@ -11949,10 +14017,14 @@ export function AdminEmailTestView() {
         generatedAt: (response?.data?.generatedAt || "").toString(),
       };
       setPreviewData(nextPreview);
-      const generatedLabel = nextPreview.generatedAt ?
-        new Date(nextPreview.generatedAt).toLocaleString("en-ZA") :
-        "";
-      setStatusMessage(generatedLabel ? `Preview refreshed at ${generatedLabel}.` : "Preview refreshed.");
+      const generatedLabel = nextPreview.generatedAt
+        ? new Date(nextPreview.generatedAt).toLocaleString("en-ZA")
+        : "";
+      setStatusMessage(
+        generatedLabel
+          ? `Preview refreshed at ${generatedLabel}.`
+          : "Preview refreshed.",
+      );
     } catch (previewError) {
       setError(previewError.message || "Unable to load email preview.");
     } finally {
@@ -11977,13 +14049,17 @@ export function AdminEmailTestView() {
         <div>
           <h2>Email Preview</h2>
           <p className="admin-panel__note">
-            Preview real email templates with dummy data. No emails are sent from this page.
+            Preview real email templates with dummy data. No emails are sent
+            from this page.
           </p>
         </div>
       </Reveal>
 
       <div className="admin-email-preview__layout">
-        <form className="admin-email-preview__controls" onSubmit={handleRefreshPreview}>
+        <form
+          className="admin-email-preview__controls"
+          onSubmit={handleRefreshPreview}
+        >
           <label className="admin-form__field" htmlFor="email-preview-template">
             <span>Template</span>
             <select
@@ -11992,7 +14068,10 @@ export function AdminEmailTestView() {
               value={formState.templateType}
               onChange={(event) => {
                 const nextTemplateType = event.target.value;
-                setFormState((prev) => ({ ...prev, templateType: nextTemplateType }));
+                setFormState((prev) => ({
+                  ...prev,
+                  templateType: nextTemplateType,
+                }));
                 if (nextTemplateType !== "custom") {
                   requestPreview({
                     templateType: nextTemplateType,
@@ -12002,39 +14081,67 @@ export function AdminEmailTestView() {
                 }
               }}
             >
-              <option value="eft-pending-customer">EFT pending (customer)</option>
+              <option value="eft-pending-customer">
+                EFT pending (customer)
+              </option>
               <option value="eft-pending-admin">EFT pending (admin)</option>
-              <option value="eft-approved-customer">EFT approved (customer)</option>
+              <option value="eft-approved-customer">
+                EFT approved (customer)
+              </option>
               <option value="eft-approved-admin">EFT approved (admin)</option>
-              <option value="eft-rejected-customer">EFT rejected (customer)</option>
+              <option value="eft-rejected-customer">
+                EFT rejected (customer)
+              </option>
               <option value="eft-rejected-admin">EFT rejected (admin)</option>
-              <option value="order-confirmation">Order confirmation (customer)</option>
+              <option value="order-confirmation">
+                Order confirmation (customer)
+              </option>
               <option value="order-admin">Order notification (admin)</option>
-              <option value="order-status">Order status update (customer)</option>
-              <option value="order-delivery-update">Order delivery update (customer)</option>
-              <option value="account-welcome">Account welcome (customer)</option>
+              <option value="order-status">
+                Order status update (customer)
+              </option>
+              <option value="order-delivery-update">
+                Order delivery update (customer)
+              </option>
+              <option value="account-welcome">
+                Account welcome (customer)
+              </option>
               <option value="pos-receipt">POS receipt (customer)</option>
               <option value="pos-admin">POS receipt (admin copy)</option>
               <option value="contact-admin">Contact enquiry (admin)</option>
-              <option value="contact-confirm">Contact confirmation (customer)</option>
-              <option value="cut-flower-admin">Cut flower booking (admin)</option>
-              <option value="cut-flower-customer">Cut flower booking (customer)</option>
+              <option value="contact-confirm">
+                Contact confirmation (customer)
+              </option>
+              <option value="cut-flower-admin">
+                Cut flower booking (admin)
+              </option>
+              <option value="cut-flower-customer">
+                Cut flower booking (customer)
+              </option>
               <option value="workshop-admin">Workshop booking (admin)</option>
-              <option value="workshop-customer">Workshop booking (customer)</option>
+              <option value="workshop-customer">
+                Workshop booking (customer)
+              </option>
               <option value="custom">Custom HTML</option>
             </select>
           </label>
 
           {isCustomTemplate && (
             <>
-              <label className="admin-form__field" htmlFor="email-preview-subject">
+              <label
+                className="admin-form__field"
+                htmlFor="email-preview-subject"
+              >
                 <span>Custom subject</span>
                 <input
                   className="input"
                   id="email-preview-subject"
                   value={formState.subject}
                   onChange={(event) =>
-                    setFormState((prev) => ({ ...prev, subject: event.target.value }))
+                    setFormState((prev) => ({
+                      ...prev,
+                      subject: event.target.value,
+                    }))
                   }
                 />
               </label>
@@ -12046,7 +14153,10 @@ export function AdminEmailTestView() {
                   rows="9"
                   value={formState.html}
                   onChange={(event) =>
-                    setFormState((prev) => ({ ...prev, html: event.target.value }))
+                    setFormState((prev) => ({
+                      ...prev,
+                      html: event.target.value,
+                    }))
                   }
                 />
               </label>
@@ -12055,7 +14165,8 @@ export function AdminEmailTestView() {
 
           {!isCustomTemplate && (
             <p className="admin-panel__note">
-              This template uses backend-rendered email HTML and dummy data from Cloud Functions.
+              This template uses backend-rendered email HTML and dummy data from
+              Cloud Functions.
             </p>
           )}
 
@@ -12063,7 +14174,9 @@ export function AdminEmailTestView() {
             <button
               className="btn btn--primary"
               type="submit"
-              disabled={loadingPreview || !inventoryEnabled || !functionsInstance}
+              disabled={
+                loadingPreview || !inventoryEnabled || !functionsInstance
+              }
             >
               {loadingPreview ? "Refreshing..." : "Refresh Preview"}
             </button>
@@ -12076,7 +14189,9 @@ export function AdminEmailTestView() {
               {showRawHtml ? "Hide Raw HTML" : "Show Raw HTML"}
             </button>
           </div>
-          {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+          {statusMessage && (
+            <p className="admin-panel__status">{statusMessage}</p>
+          )}
           {error && <p className="admin-panel__error">{error}</p>}
         </form>
 
@@ -12087,7 +14202,8 @@ export function AdminEmailTestView() {
             </p>
             {previewData.generatedAt && (
               <p className="modal__meta">
-                Generated: {new Date(previewData.generatedAt).toLocaleString("en-ZA")}
+                Generated:{" "}
+                {new Date(previewData.generatedAt).toLocaleString("en-ZA")}
               </p>
             )}
           </div>
@@ -12095,12 +14211,17 @@ export function AdminEmailTestView() {
             <iframe
               className="admin-email-preview__frame"
               title="Email HTML preview"
-              srcDoc={previewData.html || "<p style='padding:1rem;'>No preview available yet.</p>"}
+              srcDoc={
+                previewData.html ||
+                "<p style='padding:1rem;'>No preview available yet.</p>"
+              }
             />
           </div>
           {showRawHtml && (
             <div className="admin-email-preview__raw">
-              <p className="modal__meta"><strong>Raw HTML</strong></p>
+              <p className="modal__meta">
+                <strong>Raw HTML</strong>
+              </p>
               <pre>{previewData.html || "No HTML available."}</pre>
             </div>
           )}
@@ -12224,7 +14345,10 @@ export function AdminInvoicePreviewView() {
     setError(null);
     setStatusMessage(null);
     try {
-      const callable = httpsCallable(functionsInstance, "previewSubscriptionInvoiceTemplate");
+      const callable = httpsCallable(
+        functionsInstance,
+        "previewSubscriptionInvoiceTemplate",
+      );
       const response = await callable({
         invoiceId: selectedInvoiceId,
       });
@@ -12251,15 +14375,25 @@ export function AdminInvoicePreviewView() {
       const generatedAt = (data.generatedAt || "").toString();
       setPreviewState({
         previewUrl: nextPreviewUrl,
-        fileName: (data.fileName || "subscription-invoice-preview.pdf").toString(),
+        fileName: (
+          data.fileName || "subscription-invoice-preview.pdf"
+        ).toString(),
         generatedAt,
         invoiceNumber: (data.invoiceNumber || "").toString(),
         planName: (data.planName || "").toString(),
         cycleMonth: (data.cycleMonth || "").toString(),
-        amount: Number.isFinite(Number(data.amount)) ? Number(data.amount) : null,
+        amount: Number.isFinite(Number(data.amount))
+          ? Number(data.amount)
+          : null,
       });
-      const generatedLabel = generatedAt ? new Date(generatedAt).toLocaleString("en-ZA") : "";
-      setStatusMessage(generatedLabel ? `Preview generated at ${generatedLabel}.` : "Preview generated.");
+      const generatedLabel = generatedAt
+        ? new Date(generatedAt).toLocaleString("en-ZA")
+        : "";
+      setStatusMessage(
+        generatedLabel
+          ? `Preview generated at ${generatedLabel}.`
+          : "Preview generated.",
+      );
     } catch (previewError) {
       const rawMessage = (previewError?.message || "").toString();
       const normalizedMessage = rawMessage.trim().toLowerCase();
@@ -12300,7 +14434,10 @@ export function AdminInvoicePreviewView() {
       </Reveal>
 
       <div className="admin-email-preview__layout">
-        <form className="admin-email-preview__controls" onSubmit={refreshPreview}>
+        <form
+          className="admin-email-preview__controls"
+          onSubmit={refreshPreview}
+        >
           <label className="admin-form__field" htmlFor="invoice-preview-id">
             <span>Invoice</span>
             <select
@@ -12309,7 +14446,9 @@ export function AdminInvoicePreviewView() {
               value={selectedInvoiceId}
               onChange={(event) => setSelectedInvoiceId(event.target.value)}
             >
-              {!invoiceOptions.length && <option value="">No invoices available</option>}
+              {!invoiceOptions.length && (
+                <option value="">No invoices available</option>
+              )}
               {invoiceOptions.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}
@@ -12327,7 +14466,8 @@ export function AdminInvoicePreviewView() {
           )}
           {subscriptionInvoicesError && (
             <p className="admin-panel__error">
-              {subscriptionInvoicesError.message || "Unable to load subscription invoices."}
+              {subscriptionInvoicesError.message ||
+                "Unable to load subscription invoices."}
             </p>
           )}
 
@@ -12335,7 +14475,12 @@ export function AdminInvoicePreviewView() {
             <button
               className="btn btn--primary"
               type="submit"
-              disabled={loadingPreview || !inventoryEnabled || !functionsInstance || !selectedInvoiceId}
+              disabled={
+                loadingPreview ||
+                !inventoryEnabled ||
+                !functionsInstance ||
+                !selectedInvoiceId
+              }
             >
               {loadingPreview ? "Generating..." : "Refresh Preview"}
             </button>
@@ -12344,7 +14489,11 @@ export function AdminInvoicePreviewView() {
               type="button"
               onClick={() => {
                 if (!previewState.previewUrl) return;
-                window.open(previewState.previewUrl, "_blank", "noopener,noreferrer");
+                window.open(
+                  previewState.previewUrl,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
               }}
               disabled={!previewState.previewUrl}
             >
@@ -12353,7 +14502,9 @@ export function AdminInvoicePreviewView() {
             <a
               className={`btn btn--secondary ${previewState.previewUrl ? "" : "is-disabled"}`}
               href={previewState.previewUrl || "#"}
-              download={previewState.fileName || "subscription-invoice-preview.pdf"}
+              download={
+                previewState.fileName || "subscription-invoice-preview.pdf"
+              }
               onClick={(event) => {
                 if (!previewState.previewUrl) event.preventDefault();
               }}
@@ -12362,7 +14513,9 @@ export function AdminInvoicePreviewView() {
             </a>
           </div>
 
-          {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+          {statusMessage && (
+            <p className="admin-panel__status">{statusMessage}</p>
+          )}
           {error && <p className="admin-panel__error">{error}</p>}
         </form>
 
@@ -12390,7 +14543,8 @@ export function AdminInvoicePreviewView() {
             )}
             {previewState.generatedAt && (
               <p className="modal__meta">
-                Generated: {new Date(previewState.generatedAt).toLocaleString("en-ZA")}
+                Generated:{" "}
+                {new Date(previewState.generatedAt).toLocaleString("en-ZA")}
               </p>
             )}
           </div>
@@ -12427,10 +14581,14 @@ const GIFT_CARD_STUDIO_CALLABLE_HELP_MESSAGE =
 const resolveGiftCardStudioCallableError = (callableError, fallbackMessage) => {
   const rawMessage = (callableError?.message || "").toString();
   const normalizedMessage = rawMessage.trim().toLowerCase();
-  const normalizedCode = (callableError?.code || "").toString().trim().toLowerCase();
+  const normalizedCode = (callableError?.code || "")
+    .toString()
+    .trim()
+    .toLowerCase();
   const isLocalHost =
     typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    (window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1");
   const likelyUnreachableCallable =
     normalizedMessage.includes("failed to fetch") ||
     normalizedMessage.includes("network") ||
@@ -12485,11 +14643,17 @@ const ADMIN_GIFT_CARD_ITEM_TYPE_OPTIONS = Object.freeze([
 
 function AdminGiftCardModeSwitch({ value, onChange }) {
   return (
-    <div className="admin-form__actions" role="tablist" aria-label="Gift card mode">
+    <div
+      className="admin-form__actions"
+      role="tablist"
+      aria-label="Gift card mode"
+    >
       {ADMIN_GIFT_CARD_MODE_OPTIONS.map((option) => (
         <button
           key={option.value}
-          className={value === option.value ? "btn btn--primary" : "btn btn--secondary"}
+          className={
+            value === option.value ? "btn btn--primary" : "btn btn--secondary"
+          }
           type="button"
           role="tab"
           aria-selected={value === option.value}
@@ -12529,7 +14693,9 @@ function AdminLegacyGiftCardControls({
           onChange={(event) => onSelectedProductIdChange(event.target.value)}
           disabled={!giftCardProducts.length}
         >
-          {!giftCardProducts.length && <option value="">No gift card products found</option>}
+          {!giftCardProducts.length && (
+            <option value="">No gift card products found</option>
+          )}
           {giftCardProducts.map((product) => (
             <option key={product.id} value={product.id}>
               {product.title}
@@ -12564,21 +14730,28 @@ function AdminLegacyGiftCardControls({
       <div className="admin-giftcard-studio__options">
         <div className="admin-giftcard-studio__options-head">
           <h3>Live option selection</h3>
-          <p className="modal__meta">Option quantities set the giveaway value.</p>
+          <p className="modal__meta">
+            Option quantities set the giveaway value.
+          </p>
         </div>
         {liveGiftCardOptions.length === 0 ? (
           <p className="admin-panel__note">
-            No live workshop or cut-flower options were found. Add options in Workshops or Cut Flower Classes.
+            No live workshop or cut-flower options were found. Add options in
+            Workshops or Cut Flower Classes.
           </p>
         ) : (
           <div className="admin-giftcard-studio__options-grid">
             {liveGiftCardOptions.map((option) => {
-              const quantity = normalizeGiftCardOptionQuantity(optionQuantities?.[option.id], 0);
+              const quantity = normalizeGiftCardOptionQuantity(
+                optionQuantities?.[option.id],
+                0,
+              );
               const optionIsSelected = quantity > 0;
               const isWholeCrew = isWholeCrewOption(option);
               const optionHasWholeCrewViolation =
                 isWholeCrew &&
-                getWholeCrewSelectionValidation([{ ...option, quantity }]).hasViolation;
+                getWholeCrewSelectionValidation([{ ...option, quantity }])
+                  .hasViolation;
               return (
                 <article
                   key={option.id}
@@ -12586,9 +14759,14 @@ function AdminLegacyGiftCardControls({
                 >
                   <div className="admin-giftcard-studio__option-main">
                     <h4>{option.label}</h4>
-                    <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                    <p className="modal__meta">
+                      {formatPriceLabel(option.amount)} each
+                    </p>
                   </div>
-                  <label className="admin-giftcard-studio__option-qty" htmlFor={`${idPrefix}-option-${option.id}`}>
+                  <label
+                    className="admin-giftcard-studio__option-qty"
+                    htmlFor={`${idPrefix}-option-${option.id}`}
+                  >
                     <span>Quantity</span>
                     <input
                       className="input"
@@ -12598,7 +14776,9 @@ function AdminLegacyGiftCardControls({
                       max="200"
                       step="1"
                       value={quantity}
-                      onChange={(event) => onOptionQuantityChange(option.id, event.target.value)}
+                      onChange={(event) =>
+                        onOptionQuantityChange(option.id, event.target.value)
+                      }
                     />
                   </label>
                   {isWholeCrew && (
@@ -12625,7 +14805,9 @@ function AdminLegacyGiftCardControls({
           Giveaway value: <strong>{formatPriceLabel(total)}</strong>
         </p>
         {wholeCrewValidation.hasViolation && (
-          <p className="admin-panel__error">{wholeCrewValidation.minimumMessage}</p>
+          <p className="admin-panel__error">
+            {wholeCrewValidation.minimumMessage}
+          </p>
         )}
       </div>
     </>
@@ -12681,7 +14863,9 @@ function AdminCatalogGiftCardControls({
             }
             disabled={!hasItemsForType}
           >
-            {!hasItemsForType && <option value="">No eligible items found</option>}
+            {!hasItemsForType && (
+              <option value="">No eligible items found</option>
+            )}
             {selection.items.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.title}
@@ -12690,42 +14874,51 @@ function AdminCatalogGiftCardControls({
             ))}
           </select>
         </label>
-        {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT && selectedItem?.variants?.length > 0 && (
-          <label className="admin-form__field" htmlFor={`${idPrefix}-variant`}>
-            <span>Variant</span>
-            <select
-              className="input"
-              id={`${idPrefix}-variant`}
-              value={formState.variantId}
-              onChange={(event) => onFieldChange({ variantId: event.target.value })}
+        {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT &&
+          selectedItem?.variants?.length > 0 && (
+            <label
+              className="admin-form__field"
+              htmlFor={`${idPrefix}-variant`}
             >
-              <option value="">Select variant</option>
-              {selectedItem.variants.map((variant) => (
-                <option key={variant.id} value={variant.id}>
-                  {variant.label} - {formatPriceLabel(variant.price)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS && selectedItem?.options?.length > 0 && (
-          <label className="admin-form__field" htmlFor={`${idPrefix}-option`}>
-            <span>Class option</span>
-            <select
-              className="input"
-              id={`${idPrefix}-option`}
-              value={formState.optionId}
-              onChange={(event) => onFieldChange({ optionId: event.target.value })}
-            >
-              <option value="">Select option</option>
-              {selectedItem.options.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label} - {formatPriceLabel(option.price)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
+              <span>Variant</span>
+              <select
+                className="input"
+                id={`${idPrefix}-variant`}
+                value={formState.variantId}
+                onChange={(event) =>
+                  onFieldChange({ variantId: event.target.value })
+                }
+              >
+                <option value="">Select variant</option>
+                {selectedItem.variants.map((variant) => (
+                  <option key={variant.id} value={variant.id}>
+                    {variant.label} - {formatPriceLabel(variant.price)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS &&
+          selectedItem?.options?.length > 0 && (
+            <label className="admin-form__field" htmlFor={`${idPrefix}-option`}>
+              <span>Class option</span>
+              <select
+                className="input"
+                id={`${idPrefix}-option`}
+                value={formState.optionId}
+                onChange={(event) =>
+                  onFieldChange({ optionId: event.target.value })
+                }
+              >
+                <option value="">Select option</option>
+                {selectedItem.options.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label} - {formatPriceLabel(option.price)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         <label className="admin-form__field" htmlFor={`${idPrefix}-quantity`}>
           <span>{selection.quantityLabel}</span>
           <input
@@ -12736,7 +14929,9 @@ function AdminCatalogGiftCardControls({
             max="200"
             step="1"
             value={formState.quantity}
-            onChange={(event) => onFieldChange({ quantity: event.target.value })}
+            onChange={(event) =>
+              onFieldChange({ quantity: event.target.value })
+            }
           />
         </label>
         <label className="admin-form__field" htmlFor={`${idPrefix}-recipient`}>
@@ -12746,7 +14941,9 @@ function AdminCatalogGiftCardControls({
             id={`${idPrefix}-recipient`}
             type="text"
             value={formState.recipientName}
-            onChange={(event) => onFieldChange({ recipientName: event.target.value })}
+            onChange={(event) =>
+              onFieldChange({ recipientName: event.target.value })
+            }
             placeholder="Optional"
           />
         </label>
@@ -12757,7 +14954,9 @@ function AdminCatalogGiftCardControls({
             id={`${idPrefix}-purchaser`}
             type="text"
             value={formState.purchaserName}
-            onChange={(event) => onFieldChange({ purchaserName: event.target.value })}
+            onChange={(event) =>
+              onFieldChange({ purchaserName: event.target.value })
+            }
             placeholder="Optional"
           />
         </label>
@@ -12771,7 +14970,9 @@ function AdminCatalogGiftCardControls({
             max="1825"
             step="1"
             value={formState.expiryDays}
-            onChange={(event) => onFieldChange({ expiryDays: event.target.value })}
+            onChange={(event) =>
+              onFieldChange({ expiryDays: event.target.value })
+            }
           />
         </label>
         <label className="admin-form__field" htmlFor={`${idPrefix}-message`}>
@@ -12801,15 +15002,23 @@ function AdminCatalogGiftCardControls({
           </p>
         )}
         <p className="modal__meta">
-          Unit price: <strong>{Number.isFinite(selection.unitPrice) ? formatPriceLabel(selection.unitPrice) : "-"}</strong>
+          Unit price:{" "}
+          <strong>
+            {Number.isFinite(selection.unitPrice)
+              ? formatPriceLabel(selection.unitPrice)
+              : "-"}
+          </strong>
         </p>
         <p className="modal__meta">
-          {selection.quantityLabel}: <strong>{selection.quantityValue || 0}</strong>
+          {selection.quantityLabel}:{" "}
+          <strong>{selection.quantityValue || 0}</strong>
         </p>
         <p className="modal__meta">
           Voucher value: <strong>{formatPriceLabel(selection.total)}</strong>
         </p>
-        {selection.errorMessage && <p className="admin-panel__error">{selection.errorMessage}</p>}
+        {selection.errorMessage && (
+          <p className="admin-panel__error">{selection.errorMessage}</p>
+        )}
       </div>
     </>
   );
@@ -12856,9 +15065,14 @@ function LegacyAdminGiftCardPreviewView() {
   const giftCardProducts = useMemo(() => {
     return (Array.isArray(products) ? products : [])
       .filter((product) => {
-        const isGiftCard = Boolean(product?.isGiftCard || product?.is_gift_card);
+        const isGiftCard = Boolean(
+          product?.isGiftCard || product?.is_gift_card,
+        );
         if (!isGiftCard) return false;
-        const status = (product?.status || "live").toString().trim().toLowerCase();
+        const status = (product?.status || "live")
+          .toString()
+          .trim()
+          .toLowerCase();
         return status !== "archived";
       })
       .map((product) => ({
@@ -12871,12 +15085,16 @@ function LegacyAdminGiftCardPreviewView() {
       }))
       .filter((product) => product.id)
       .sort((left, right) =>
-        left.title.localeCompare(right.title, undefined, { sensitivity: "base" }),
+        left.title.localeCompare(right.title, undefined, {
+          sensitivity: "base",
+        }),
       );
   }, [products]);
 
   const selectedProduct = useMemo(
-    () => giftCardProducts.find((product) => product.id === selectedProductId) || null,
+    () =>
+      giftCardProducts.find((product) => product.id === selectedProductId) ||
+      null,
     [giftCardProducts, selectedProductId],
   );
 
@@ -12885,7 +15103,9 @@ function LegacyAdminGiftCardPreviewView() {
       if (selectedProductId) setSelectedProductId("");
       return;
     }
-    const stillExists = giftCardProducts.some((product) => product.id === selectedProductId);
+    const stillExists = giftCardProducts.some(
+      (product) => product.id === selectedProductId,
+    );
     if (!stillExists) {
       setSelectedProductId(giftCardProducts[0].id);
     }
@@ -12947,9 +15167,7 @@ function LegacyAdminGiftCardPreviewView() {
     !wholeCrewValidation.hasViolation;
 
   const canCallFunctions =
-    inventoryEnabled &&
-    Boolean(functionsInstance) &&
-    canGenerateGiftCard;
+    inventoryEnabled && Boolean(functionsInstance) && canGenerateGiftCard;
 
   const handleOptionQuantityChange = (optionId, value) => {
     if (!optionId) return;
@@ -12983,14 +15201,21 @@ function LegacyAdminGiftCardPreviewView() {
       return;
     }
     if (!canGenerateGiftCard) {
-      setError(wholeCrewValidation.hasViolation ? wholeCrewValidation.minimumMessage : "Select valid gift card options.");
+      setError(
+        wholeCrewValidation.hasViolation
+          ? wholeCrewValidation.minimumMessage
+          : "Select valid gift card options.",
+      );
       return;
     }
     setLoadingPreview(true);
     setError(null);
     setStatusMessage(null);
     try {
-      const callable = httpsCallable(functionsInstance, "previewAdminGiveawayGiftCard");
+      const callable = httpsCallable(
+        functionsInstance,
+        "previewAdminGiveawayGiftCard",
+      );
       const response = await callable(buildRequestPayload());
       const data = response?.data || {};
       const preview = data.preview || {};
@@ -13028,7 +15253,11 @@ function LegacyAdminGiftCardPreviewView() {
       return;
     }
     if (!canGenerateGiftCard) {
-      setError(wholeCrewValidation.hasViolation ? wholeCrewValidation.minimumMessage : "Select valid gift card options.");
+      setError(
+        wholeCrewValidation.hasViolation
+          ? wholeCrewValidation.minimumMessage
+          : "Select valid gift card options.",
+      );
       return;
     }
 
@@ -13036,7 +15265,10 @@ function LegacyAdminGiftCardPreviewView() {
     setError(null);
     setStatusMessage(null);
     try {
-      const callable = httpsCallable(functionsInstance, "saveAdminGiveawayGiftCardDraft");
+      const callable = httpsCallable(
+        functionsInstance,
+        "saveAdminGiveawayGiftCardDraft",
+      );
       const response = await callable(buildRequestPayload());
       const draft = response?.data?.draft || null;
       setSavedDraft(draft);
@@ -13059,14 +15291,21 @@ function LegacyAdminGiftCardPreviewView() {
         <div>
           <h2>Gift Cards - Preview</h2>
           <p className="admin-panel__note">
-            Build a gift card preview and save a draft. Generation is handled separately in Generate & Manage.
+            Build a gift card preview and save a draft. Generation is handled
+            separately in Generate & Manage.
           </p>
         </div>
       </Reveal>
 
       <div className="admin-giftcard-studio__layout">
-        <form className="admin-giftcard-studio__controls" onSubmit={handleRefreshPreview}>
-          <label className="admin-form__field" htmlFor="giftcard-studio-product">
+        <form
+          className="admin-giftcard-studio__controls"
+          onSubmit={handleRefreshPreview}
+        >
+          <label
+            className="admin-form__field"
+            htmlFor="giftcard-studio-product"
+          >
             <span>Gift card product</span>
             <select
               className="input"
@@ -13079,7 +15318,9 @@ function LegacyAdminGiftCardPreviewView() {
               }}
               disabled={!giftCardProducts.length}
             >
-              {!giftCardProducts.length && <option value="">No gift card products found</option>}
+              {!giftCardProducts.length && (
+                <option value="">No gift card products found</option>
+              )}
               {giftCardProducts.map((product) => (
                 <option key={product.id} value={product.id}>
                   {product.title}
@@ -13102,7 +15343,10 @@ function LegacyAdminGiftCardPreviewView() {
             />
           </label>
 
-          <label className="admin-form__field" htmlFor="giftcard-studio-message">
+          <label
+            className="admin-form__field"
+            htmlFor="giftcard-studio-message"
+          >
             <span>Optional message</span>
             <textarea
               className="input textarea"
@@ -13123,12 +15367,16 @@ function LegacyAdminGiftCardPreviewView() {
             </div>
             {liveGiftCardOptions.length === 0 ? (
               <p className="admin-panel__note">
-                No live workshop or cut-flower options were found. Add options in Workshops or Cut Flower Classes.
+                No live workshop or cut-flower options were found. Add options
+                in Workshops or Cut Flower Classes.
               </p>
             ) : (
               <div className="admin-giftcard-studio__options-grid">
                 {liveGiftCardOptions.map((option) => {
-                  const quantity = normalizeGiftCardOptionQuantity(optionQuantities?.[option.id], 0);
+                  const quantity = normalizeGiftCardOptionQuantity(
+                    optionQuantities?.[option.id],
+                    0,
+                  );
                   const optionIsSelected = quantity > 0;
                   const isWholeCrew = isWholeCrewOption(option);
                   const optionHasWholeCrewViolation =
@@ -13146,7 +15394,9 @@ function LegacyAdminGiftCardPreviewView() {
                     >
                       <div className="admin-giftcard-studio__option-main">
                         <h4>{option.label}</h4>
-                        <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                        <p className="modal__meta">
+                          {formatPriceLabel(option.amount)} each
+                        </p>
                       </div>
                       <label
                         className="admin-giftcard-studio__option-qty"
@@ -13161,7 +15411,12 @@ function LegacyAdminGiftCardPreviewView() {
                           max="200"
                           step="1"
                           value={quantity}
-                          onChange={(event) => handleOptionQuantityChange(option.id, event.target.value)}
+                          onChange={(event) =>
+                            handleOptionQuantityChange(
+                              option.id,
+                              event.target.value,
+                            )
+                          }
                         />
                       </label>
                       {isWholeCrew && (
@@ -13186,10 +15441,13 @@ function LegacyAdminGiftCardPreviewView() {
               Selected options: <strong>{selectedOptionCount}</strong>
             </p>
             <p className="modal__meta">
-              Giveaway value: <strong>{formatPriceLabel(selectedGiftCardValue)}</strong>
+              Giveaway value:{" "}
+              <strong>{formatPriceLabel(selectedGiftCardValue)}</strong>
             </p>
             {wholeCrewValidation.hasViolation && (
-              <p className="admin-panel__error">{wholeCrewValidation.minimumMessage}</p>
+              <p className="admin-panel__error">
+                {wholeCrewValidation.minimumMessage}
+              </p>
             )}
           </div>
 
@@ -13216,9 +15474,15 @@ function LegacyAdminGiftCardPreviewView() {
               Saved draft: <strong>{savedDraft.id}</strong>
             </p>
           )}
-          {inventoryLoading && <p className="modal__meta">Loading admin inventory...</p>}
-          {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
-          {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+          {inventoryLoading && (
+            <p className="modal__meta">Loading admin inventory...</p>
+          )}
+          {inventoryError && (
+            <p className="admin-panel__error">{inventoryError}</p>
+          )}
+          {statusMessage && (
+            <p className="admin-panel__status">{statusMessage}</p>
+          )}
           {error && <p className="admin-panel__error">{error}</p>}
         </form>
 
@@ -13229,7 +15493,8 @@ function LegacyAdminGiftCardPreviewView() {
             </p>
             {previewState.generatedAt && (
               <p className="modal__meta">
-                Generated: {new Date(previewState.generatedAt).toLocaleString("en-ZA")}
+                Generated:{" "}
+                {new Date(previewState.generatedAt).toLocaleString("en-ZA")}
               </p>
             )}
           </div>
@@ -13252,12 +15517,14 @@ function LegacyAdminGiftCardPreviewView() {
   );
 }
 
-export const AdminGiftCardGenerateManageView = AdminGiftCardGenerateManageExperience;
+export const AdminGiftCardGenerateManageView =
+  AdminGiftCardGenerateManageExperience;
 
 function LegacyAdminGiftCardGenerateManageView() {
   usePageMetadata({
     title: "Admin - Gift Card Generate & Manage",
-    description: "Generate gift cards instantly or from drafts, and manage issued cards.",
+    description:
+      "Generate gift cards instantly or from drafts, and manage issued cards.",
   });
 
   const {
@@ -13329,9 +15596,14 @@ function LegacyAdminGiftCardGenerateManageView() {
   const giftCardProducts = useMemo(() => {
     return (Array.isArray(products) ? products : [])
       .filter((product) => {
-        const isGiftCard = Boolean(product?.isGiftCard || product?.is_gift_card);
+        const isGiftCard = Boolean(
+          product?.isGiftCard || product?.is_gift_card,
+        );
         if (!isGiftCard) return false;
-        const status = (product?.status || "live").toString().trim().toLowerCase();
+        const status = (product?.status || "live")
+          .toString()
+          .trim()
+          .toLowerCase();
         return status !== "archived";
       })
       .map((product) => ({
@@ -13344,15 +15616,21 @@ function LegacyAdminGiftCardGenerateManageView() {
       }))
       .filter((product) => product.id)
       .sort((left, right) =>
-        left.title.localeCompare(right.title, undefined, { sensitivity: "base" }),
+        left.title.localeCompare(right.title, undefined, {
+          sensitivity: "base",
+        }),
       );
   }, [products]);
   const quickSelectedProduct = useMemo(
-    () => giftCardProducts.find((product) => product.id === quickSelectedProductId) || null,
+    () =>
+      giftCardProducts.find(
+        (product) => product.id === quickSelectedProductId,
+      ) || null,
     [giftCardProducts, quickSelectedProductId],
   );
   const quickSelectedOptions = useMemo(
-    () => buildSelectedGiftCardOptions(liveGiftCardOptions, quickOptionQuantities),
+    () =>
+      buildSelectedGiftCardOptions(liveGiftCardOptions, quickOptionQuantities),
     [liveGiftCardOptions, quickOptionQuantities],
   );
   const quickSummary = useMemo(
@@ -13390,7 +15668,9 @@ function LegacyAdminGiftCardGenerateManageView() {
       if (quickSelectedProductId) setQuickSelectedProductId("");
       return;
     }
-    if (!giftCardProducts.some((product) => product.id === quickSelectedProductId)) {
+    if (
+      !giftCardProducts.some((product) => product.id === quickSelectedProductId)
+    ) {
       setQuickSelectedProductId(giftCardProducts[0].id);
     }
   }, [giftCardProducts, quickSelectedProductId]);
@@ -13419,26 +15699,38 @@ function LegacyAdminGiftCardGenerateManageView() {
         id: (row.id || row.giftCardId || "").toString().trim(),
         giftCardId: (row.giftCardId || row.id || "").toString().trim(),
         code: (row.code || "").toString().trim(),
-        status: (row.status || "active").toString().trim().toLowerCase() || "active",
-        sourceType: (row.sourceType || "unknown").toString().trim().toLowerCase() || "unknown",
+        status:
+          (row.status || "active").toString().trim().toLowerCase() || "active",
+        sourceType:
+          (row.sourceType || "unknown").toString().trim().toLowerCase() ||
+          "unknown",
         value: Number(row.value || 0),
-        selectedOptions: Array.isArray(row.selectedOptions) ? row.selectedOptions : [],
-        isGiveaway: Boolean(row.isGiveaway || row.sourceType === "admin-giveaway"),
+        selectedOptions: Array.isArray(row.selectedOptions)
+          ? row.selectedOptions
+          : [],
+        isGiveaway: Boolean(
+          row.isGiveaway || row.sourceType === "admin-giveaway",
+        ),
         isDeleted: Boolean(row.isDeleted),
       }))
       .filter((row) => !row.isDeleted && row.status !== "deleted");
   }, [giftCardRegistry]);
   const availableStatuses = useMemo(() => {
-    return Array.from(new Set(registryRows.map((row) => row.status).filter(Boolean))).sort();
+    return Array.from(
+      new Set(registryRows.map((row) => row.status).filter(Boolean)),
+    ).sort();
   }, [registryRows]);
   const availableSources = useMemo(() => {
-    return Array.from(new Set(registryRows.map((row) => row.sourceType).filter(Boolean))).sort();
+    return Array.from(
+      new Set(registryRows.map((row) => row.sourceType).filter(Boolean)),
+    ).sort();
   }, [registryRows]);
   const filteredRegistryRows = useMemo(() => {
     const normalizedSearch = searchValue.toString().trim().toLowerCase();
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
-    const resolveComparableTime = (value) => parseDateValue(value)?.getTime() || 0;
+    const resolveComparableTime = (value) =>
+      parseDateValue(value)?.getTime() || 0;
     const createdOrIssuedTime = (row) =>
       resolveComparableTime(row.createdAt) ||
       resolveComparableTime(row.issuedAt) ||
@@ -13447,10 +15739,16 @@ function LegacyAdminGiftCardGenerateManageView() {
 
     const filteredRows = registryRows.filter((row) => {
       if (statusFilter !== "all" && row.status !== statusFilter) return false;
-      if (sourceFilter !== "all" && row.sourceType !== sourceFilter) return false;
+      if (sourceFilter !== "all" && row.sourceType !== sourceFilter)
+        return false;
 
-      if (dateFilter === "last7" && createdOrIssuedTime(row) < now - 7 * dayMs) return false;
-      if (dateFilter === "last30" && createdOrIssuedTime(row) < now - 30 * dayMs) return false;
+      if (dateFilter === "last7" && createdOrIssuedTime(row) < now - 7 * dayMs)
+        return false;
+      if (
+        dateFilter === "last30" &&
+        createdOrIssuedTime(row) < now - 30 * dayMs
+      )
+        return false;
       if (dateFilter === "expired") {
         const expiry = expiresTime(row);
         if (!expiry || expiry >= now) return false;
@@ -13501,15 +15799,26 @@ function LegacyAdminGiftCardGenerateManageView() {
         case "expiry-asc":
           return leftExpiry - rightExpiry;
         case "code-desc":
-          return rightCode.localeCompare(leftCode, undefined, { sensitivity: "base" });
+          return rightCode.localeCompare(leftCode, undefined, {
+            sensitivity: "base",
+          });
         case "code-asc":
-          return leftCode.localeCompare(rightCode, undefined, { sensitivity: "base" });
+          return leftCode.localeCompare(rightCode, undefined, {
+            sensitivity: "base",
+          });
         case "created-desc":
         default:
           return rightCreated - leftCreated;
       }
     });
-  }, [registryRows, searchValue, statusFilter, sourceFilter, dateFilter, sortBy]);
+  }, [
+    registryRows,
+    searchValue,
+    statusFilter,
+    sourceFilter,
+    dateFilter,
+    sortBy,
+  ]);
   const hasActiveRegistryFilters =
     Boolean(searchValue.toString().trim()) ||
     statusFilter !== "all" ||
@@ -13577,18 +15886,29 @@ function LegacyAdminGiftCardGenerateManageView() {
         message: quickMessage.toString().trim(),
         expiryDays: normalizedQuickExpiryDays,
       };
-      const saveDraftCallable = httpsCallable(functionsInstance, "saveAdminGiveawayGiftCardDraft");
+      const saveDraftCallable = httpsCallable(
+        functionsInstance,
+        "saveAdminGiveawayGiftCardDraft",
+      );
       const draftResponse = await saveDraftCallable(payload);
       const draftId = (draftResponse?.data?.draft?.id || "").toString().trim();
       if (!draftId) {
         throw new Error("Draft could not be created for quick generation.");
       }
 
-      const createCallable = httpsCallable(functionsInstance, "createAdminGiveawayGiftCardFromDraft");
+      const createCallable = httpsCallable(
+        functionsInstance,
+        "createAdminGiveawayGiftCardFromDraft",
+      );
       const createResponse = await createCallable({ draftId });
       const giftCard = createResponse?.data?.giftCard || null;
-      if (!giftCard) throw new Error("Gift card was created, but no card payload was returned.");
-      setStatusMessage(`Gift card created: ${giftCard.code || "Code unavailable"}.`);
+      if (!giftCard)
+        throw new Error(
+          "Gift card was created, but no card payload was returned.",
+        );
+      setStatusMessage(
+        `Gift card created: ${giftCard.code || "Code unavailable"}.`,
+      );
       setQuickCreateDialogOpen(false);
     } catch (quickCreateError) {
       setError(
@@ -13616,12 +15936,14 @@ function LegacyAdminGiftCardGenerateManageView() {
 
   const openEditModal = (row) => {
     const optionQuantities = {};
-    (Array.isArray(row.selectedOptions) ? row.selectedOptions : []).forEach((option) => {
-      const optionId = (option?.id || "").toString().trim();
-      const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 0);
-      if (!optionId || quantity <= 0) return;
-      optionQuantities[optionId] = quantity;
-    });
+    (Array.isArray(row.selectedOptions) ? row.selectedOptions : []).forEach(
+      (option) => {
+        const optionId = (option?.id || "").toString().trim();
+        const quantity = normalizeGiftCardOptionQuantity(option?.quantity, 0);
+        if (!optionId || quantity <= 0) return;
+        optionQuantities[optionId] = quantity;
+      },
+    );
     const expiresDate = parseDateValue(row.expiresAt);
     setEditState({
       open: true,
@@ -13688,7 +16010,12 @@ function LegacyAdminGiftCardGenerateManageView() {
       }
       setStatusMessage(`Gift card archived: ${displayCode}.`);
     } catch (archiveError) {
-      setError(resolveGiftCardStudioCallableError(archiveError, "Unable to archive gift card."));
+      setError(
+        resolveGiftCardStudioCallableError(
+          archiveError,
+          "Unable to archive gift card.",
+        ),
+      );
     } finally {
       setArchivingGiftCardId("");
     }
@@ -13714,7 +16041,10 @@ function LegacyAdminGiftCardGenerateManageView() {
     setError(null);
     setStatusMessage(null);
     try {
-      const callable = httpsCallable(functionsInstance, "adminBackfillGiftCardRegistry");
+      const callable = httpsCallable(
+        functionsInstance,
+        "adminBackfillGiftCardRegistry",
+      );
       const response = await callable({ apply: true });
       const data = response?.data || {};
       const summary = {
@@ -13741,7 +16071,11 @@ function LegacyAdminGiftCardGenerateManageView() {
   };
 
   const editSelectedOptions = useMemo(
-    () => buildSelectedGiftCardOptions(liveGiftCardOptions, editState.optionQuantities),
+    () =>
+      buildSelectedGiftCardOptions(
+        liveGiftCardOptions,
+        editState.optionQuantities,
+      ),
     [liveGiftCardOptions, editState.optionQuantities],
   );
   const editSummary = useMemo(
@@ -13754,7 +16088,9 @@ function LegacyAdminGiftCardGenerateManageView() {
   );
   const editMissingOptionIds = useMemo(() => {
     return Object.entries(editState.optionQuantities || {})
-      .filter(([, quantity]) => normalizeGiftCardOptionQuantity(quantity, 0) > 0)
+      .filter(
+        ([, quantity]) => normalizeGiftCardOptionQuantity(quantity, 0) > 0,
+      )
       .map(([optionId]) => optionId)
       .filter((optionId) => !liveOptionIdSet.has(optionId));
   }, [editState.optionQuantities, liveOptionIdSet]);
@@ -13818,10 +16154,17 @@ function LegacyAdminGiftCardGenerateManageView() {
           quantity: normalizeGiftCardOptionQuantity(option.quantity, 1),
         })),
       });
-      setStatusMessage(`Gift card updated: ${editState.code || editState.giftCardId}.`);
+      setStatusMessage(
+        `Gift card updated: ${editState.code || editState.giftCardId}.`,
+      );
       closeEditModal();
     } catch (saveError) {
-      setError(resolveGiftCardStudioCallableError(saveError, "Unable to update gift card."));
+      setError(
+        resolveGiftCardStudioCallableError(
+          saveError,
+          "Unable to update gift card.",
+        ),
+      );
     } finally {
       setSavingEdit(false);
     }
@@ -13870,7 +16213,9 @@ function LegacyAdminGiftCardGenerateManageView() {
               className="btn btn--secondary btn--small"
               type="button"
               onClick={handleSyncLegacyGiftCards}
-              disabled={syncingRegistry || !functionsInstance || !inventoryEnabled}
+              disabled={
+                syncingRegistry || !functionsInstance || !inventoryEnabled
+              }
             >
               {syncingRegistry ? "Syncing..." : "Sync legacy cards"}
             </button>
@@ -13886,12 +16231,16 @@ function LegacyAdminGiftCardGenerateManageView() {
         </div>
         {lastSyncSummary && (
           <p className="modal__meta admin-giftcard-registry__sync-summary">
-            Last sync: scanned {lastSyncSummary.scannedGiftCards} card(s), synced{" "}
-            {lastSyncSummary.docsSynced}, already in sync {lastSyncSummary.docsAlreadyInSync}.
+            Last sync: scanned {lastSyncSummary.scannedGiftCards} card(s),
+            synced {lastSyncSummary.docsSynced}, already in sync{" "}
+            {lastSyncSummary.docsAlreadyInSync}.
           </p>
         )}
         <div className="admin-form__grid admin-giftcard-registry__filters">
-          <label className="admin-form__field" htmlFor="giftcard-registry-search">
+          <label
+            className="admin-form__field"
+            htmlFor="giftcard-registry-search"
+          >
             <span>Search</span>
             <input
               className="input"
@@ -13902,7 +16251,10 @@ function LegacyAdminGiftCardGenerateManageView() {
               placeholder="Code, order no, recipient, purchaser"
             />
           </label>
-          <label className="admin-form__field" htmlFor="giftcard-registry-status">
+          <label
+            className="admin-form__field"
+            htmlFor="giftcard-registry-status"
+          >
             <span>Status</span>
             <select
               className="input"
@@ -13918,7 +16270,10 @@ function LegacyAdminGiftCardGenerateManageView() {
               ))}
             </select>
           </label>
-          <label className="admin-form__field" htmlFor="giftcard-registry-source">
+          <label
+            className="admin-form__field"
+            htmlFor="giftcard-registry-source"
+          >
             <span>Source</span>
             <select
               className="input"
@@ -13971,14 +16326,21 @@ function LegacyAdminGiftCardGenerateManageView() {
           </label>
         </div>
         {filteredRegistryRows.length === 0 ? (
-          <p className="modal__meta">No gift cards match the current filters.</p>
+          <p className="modal__meta">
+            No gift cards match the current filters.
+          </p>
         ) : (
           <div className="admin-giftcard-registry__mobile-list">
             {filteredRegistryRows.map((row) => (
-              <article className="admin-giftcard-registry-card" key={`mobile-${row.giftCardId || row.id}`}>
+              <article
+                className="admin-giftcard-registry-card"
+                key={`mobile-${row.giftCardId || row.id}`}
+              >
                 <div className="admin-giftcard-registry-card__head">
                   <strong>{row.code || "-"}</strong>
-                  <span className="admin-giftcard-registry-card__status">{row.status || "active"}</span>
+                  <span className="admin-giftcard-registry-card__status">
+                    {row.status || "active"}
+                  </span>
                 </div>
                 <div className="admin-giftcard-registry-card__meta">
                   <span>Source: {row.sourceType || "unknown"}</span>
@@ -13992,12 +16354,19 @@ function LegacyAdminGiftCardGenerateManageView() {
                   <button
                     className="btn btn--secondary btn--small"
                     type="button"
-                    onClick={() => copyValue(row.code || "", `mobile-code-${row.giftCardId}`)}
+                    onClick={() =>
+                      copyValue(row.code || "", `mobile-code-${row.giftCardId}`)
+                    }
                   >
                     Copy code
                   </button>
                   {row.siteAccessUrl && (
-                    <a className="btn btn--secondary btn--small" href={row.siteAccessUrl} target="_blank" rel="noreferrer">
+                    <a
+                      className="btn btn--secondary btn--small"
+                      href={row.siteAccessUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
                       View
                     </a>
                   )}
@@ -14005,7 +16374,9 @@ function LegacyAdminGiftCardGenerateManageView() {
                     className="btn btn--secondary btn--small"
                     type="button"
                     onClick={() => openEditModal(row)}
-                    disabled={archivingGiftCardId === (row.giftCardId || row.id)}
+                    disabled={
+                      archivingGiftCardId === (row.giftCardId || row.id)
+                    }
                   >
                     Edit
                   </button>
@@ -14014,9 +16385,13 @@ function LegacyAdminGiftCardGenerateManageView() {
                       className="btn btn--danger btn--small"
                       type="button"
                       onClick={() => handleArchiveGiftCard(row)}
-                      disabled={archivingGiftCardId === (row.giftCardId || row.id)}
+                      disabled={
+                        archivingGiftCardId === (row.giftCardId || row.id)
+                      }
                     >
-                      {archivingGiftCardId === (row.giftCardId || row.id) ? "Archiving..." : "Archive"}
+                      {archivingGiftCardId === (row.giftCardId || row.id)
+                        ? "Archiving..."
+                        : "Archive"}
                     </button>
                   )}
                 </div>
@@ -14042,7 +16417,9 @@ function LegacyAdminGiftCardGenerateManageView() {
               {filteredRegistryRows.length === 0 ? (
                 <tr>
                   <td colSpan={8}>
-                    <p className="modal__meta">No gift cards match the current filters.</p>
+                    <p className="modal__meta">
+                      No gift cards match the current filters.
+                    </p>
                   </td>
                 </tr>
               ) : (
@@ -14060,12 +16437,19 @@ function LegacyAdminGiftCardGenerateManageView() {
                         <button
                           className="btn btn--secondary btn--small"
                           type="button"
-                          onClick={() => copyValue(row.code || "", `code-${row.giftCardId}`)}
+                          onClick={() =>
+                            copyValue(row.code || "", `code-${row.giftCardId}`)
+                          }
                         >
                           Copy code
                         </button>
                         {row.siteAccessUrl && (
-                          <a className="btn btn--secondary btn--small" href={row.siteAccessUrl} target="_blank" rel="noreferrer">
+                          <a
+                            className="btn btn--secondary btn--small"
+                            href={row.siteAccessUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
                             View
                           </a>
                         )}
@@ -14073,7 +16457,9 @@ function LegacyAdminGiftCardGenerateManageView() {
                           className="btn btn--secondary btn--small"
                           type="button"
                           onClick={() => openEditModal(row)}
-                          disabled={archivingGiftCardId === (row.giftCardId || row.id)}
+                          disabled={
+                            archivingGiftCardId === (row.giftCardId || row.id)
+                          }
                         >
                           Edit
                         </button>
@@ -14082,9 +16468,13 @@ function LegacyAdminGiftCardGenerateManageView() {
                             className="btn btn--danger btn--small"
                             type="button"
                             onClick={() => handleArchiveGiftCard(row)}
-                            disabled={archivingGiftCardId === (row.giftCardId || row.id)}
+                            disabled={
+                              archivingGiftCardId === (row.giftCardId || row.id)
+                            }
                           >
-                            {archivingGiftCardId === (row.giftCardId || row.id) ? "Archiving..." : "Archive"}
+                            {archivingGiftCardId === (row.giftCardId || row.id)
+                              ? "Archiving..."
+                              : "Archive"}
                           </button>
                         )}
                       </div>
@@ -14101,12 +16491,21 @@ function LegacyAdminGiftCardGenerateManageView() {
         <p className="modal__meta">Loading gift card data...</p>
       )}
       {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
-      {registryError && <p className="admin-panel__error">{registryError.message || "Unable to load registry."}</p>}
+      {registryError && (
+        <p className="admin-panel__error">
+          {registryError.message || "Unable to load registry."}
+        </p>
+      )}
       {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
       {error && <p className="admin-panel__error">{error}</p>}
 
       {quickCreateDialogOpen && (
-        <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="giftcard-create-title">
+        <div
+          className="modal is-active admin-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="giftcard-create-title"
+        >
           <div className="modal__content">
             <button
               className="modal__close"
@@ -14120,7 +16519,10 @@ function LegacyAdminGiftCardGenerateManageView() {
               Create Gift Card
             </h3>
             <div className="admin-form__grid">
-              <label className="admin-form__field" htmlFor="giftcard-generate-product">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-generate-product"
+              >
                 <span>Gift card product</span>
                 <select
                   className="input"
@@ -14132,7 +16534,9 @@ function LegacyAdminGiftCardGenerateManageView() {
                   }}
                   disabled={!giftCardProducts.length}
                 >
-                  {!giftCardProducts.length && <option value="">No gift card products found</option>}
+                  {!giftCardProducts.length && (
+                    <option value="">No gift card products found</option>
+                  )}
                   {giftCardProducts.map((product) => (
                     <option key={product.id} value={product.id}>
                       {product.title}
@@ -14140,7 +16544,10 @@ function LegacyAdminGiftCardGenerateManageView() {
                   ))}
                 </select>
               </label>
-              <label className="admin-form__field" htmlFor="giftcard-generate-expiry">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-generate-expiry"
+              >
                 <span>Expiry days</span>
                 <input
                   className="input"
@@ -14153,7 +16560,10 @@ function LegacyAdminGiftCardGenerateManageView() {
                   onChange={(event) => setQuickExpiryDays(event.target.value)}
                 />
               </label>
-              <label className="admin-form__field" htmlFor="giftcard-generate-message">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-generate-message"
+              >
                 <span>Optional message</span>
                 <textarea
                   className="input textarea"
@@ -14168,11 +16578,14 @@ function LegacyAdminGiftCardGenerateManageView() {
             <div className="admin-giftcard-studio__options">
               <div className="admin-giftcard-studio__options-head">
                 <h3>Live option selection</h3>
-                <p className="modal__meta">Option quantities determine card value.</p>
+                <p className="modal__meta">
+                  Option quantities determine card value.
+                </p>
               </div>
               {liveGiftCardOptions.length === 0 ? (
                 <p className="admin-panel__note">
-                  No live workshop or cut-flower options were found. Add options in Workshops or Cut Flower Classes.
+                  No live workshop or cut-flower options were found. Add options
+                  in Workshops or Cut Flower Classes.
                 </p>
               ) : (
                 <div className="admin-giftcard-studio__options-grid">
@@ -14198,7 +16611,9 @@ function LegacyAdminGiftCardGenerateManageView() {
                       >
                         <div className="admin-giftcard-studio__option-main">
                           <h4>{option.label}</h4>
-                          <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                          <p className="modal__meta">
+                            {formatPriceLabel(option.amount)} each
+                          </p>
                         </div>
                         <label
                           className="admin-giftcard-studio__option-qty"
@@ -14214,7 +16629,10 @@ function LegacyAdminGiftCardGenerateManageView() {
                             step="1"
                             value={quantity}
                             onChange={(event) =>
-                              handleQuickOptionQuantityChange(option.id, event.target.value)
+                              handleQuickOptionQuantityChange(
+                                option.id,
+                                event.target.value,
+                              )
                             }
                           />
                         </label>
@@ -14239,10 +16657,13 @@ function LegacyAdminGiftCardGenerateManageView() {
                 Selected options: <strong>{quickSummary.selectedCount}</strong>
               </p>
               <p className="modal__meta">
-                Giveaway value: <strong>{formatPriceLabel(quickSummary.total)}</strong>
+                Giveaway value:{" "}
+                <strong>{formatPriceLabel(quickSummary.total)}</strong>
               </p>
               {quickWholeCrewValidation.hasViolation && (
-                <p className="admin-panel__error">{quickWholeCrewValidation.minimumMessage}</p>
+                <p className="admin-panel__error">
+                  {quickWholeCrewValidation.minimumMessage}
+                </p>
               )}
             </div>
             <div className="admin-form__actions">
@@ -14259,7 +16680,10 @@ function LegacyAdminGiftCardGenerateManageView() {
                 type="button"
                 onClick={handleQuickCreateGiftCard}
                 disabled={
-                  quickCreatingGiftCard || !canQuickCreateGiftCard || !inventoryEnabled || !functionsInstance
+                  quickCreatingGiftCard ||
+                  !canQuickCreateGiftCard ||
+                  !inventoryEnabled ||
+                  !functionsInstance
                 }
               >
                 {quickCreatingGiftCard ? "Creating..." : "Create Gift Card Now"}
@@ -14270,27 +16694,46 @@ function LegacyAdminGiftCardGenerateManageView() {
       )}
 
       {editState.open && (
-        <div className="modal is-active admin-modal" role="dialog" aria-modal="true" aria-labelledby="giftcard-edit-title">
+        <div
+          className="modal is-active admin-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="giftcard-edit-title"
+        >
           <div className="modal__content">
-            <button className="modal__close" type="button" onClick={closeEditModal} aria-label="Close">
+            <button
+              className="modal__close"
+              type="button"
+              onClick={closeEditModal}
+              aria-label="Close"
+            >
               x
             </button>
             <h3 className="modal__title" id="giftcard-edit-title">
               Edit Gift Card {editState.code ? `- ${editState.code}` : ""}
             </h3>
             <div className="admin-form__grid">
-              <label className="admin-form__field" htmlFor="giftcard-edit-status">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-edit-status"
+              >
                 <span>Status</span>
                 <input
                   className="input"
                   id="giftcard-edit-status"
                   value={editState.status}
                   onChange={(event) =>
-                    setEditState((previous) => ({ ...previous, status: event.target.value }))
+                    setEditState((previous) => ({
+                      ...previous,
+                      status: event.target.value,
+                    }))
                   }
                 />
               </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-expiry">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-edit-expiry"
+              >
                 <span>Expiry date</span>
                 <input
                   className="input"
@@ -14298,11 +16741,17 @@ function LegacyAdminGiftCardGenerateManageView() {
                   type="date"
                   value={editState.expiresAt}
                   onChange={(event) =>
-                    setEditState((previous) => ({ ...previous, expiresAt: event.target.value }))
+                    setEditState((previous) => ({
+                      ...previous,
+                      expiresAt: event.target.value,
+                    }))
                   }
                 />
               </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-recipient">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-edit-recipient"
+              >
                 <span>Recipient name</span>
                 <input
                   className="input"
@@ -14316,7 +16765,10 @@ function LegacyAdminGiftCardGenerateManageView() {
                   }
                 />
               </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-purchaser">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-edit-purchaser"
+              >
                 <span>Purchaser name</span>
                 <input
                   className="input"
@@ -14331,18 +16783,27 @@ function LegacyAdminGiftCardGenerateManageView() {
                   disabled={editState.isGiveaway}
                 />
               </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-title-field">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-edit-title-field"
+              >
                 <span>Product title</span>
                 <input
                   className="input"
                   id="giftcard-edit-title-field"
                   value={editState.productTitle}
                   onChange={(event) =>
-                    setEditState((previous) => ({ ...previous, productTitle: event.target.value }))
+                    setEditState((previous) => ({
+                      ...previous,
+                      productTitle: event.target.value,
+                    }))
                   }
                 />
               </label>
-              <label className="admin-form__field" htmlFor="giftcard-edit-message-field">
+              <label
+                className="admin-form__field"
+                htmlFor="giftcard-edit-message-field"
+              >
                 <span>Message</span>
                 <textarea
                   className="input textarea"
@@ -14350,12 +16811,18 @@ function LegacyAdminGiftCardGenerateManageView() {
                   rows="2"
                   value={editState.message}
                   onChange={(event) =>
-                    setEditState((previous) => ({ ...previous, message: event.target.value }))
+                    setEditState((previous) => ({
+                      ...previous,
+                      message: event.target.value,
+                    }))
                   }
                 />
               </label>
             </div>
-            <label className="admin-form__field" htmlFor="giftcard-edit-terms-field">
+            <label
+              className="admin-form__field"
+              htmlFor="giftcard-edit-terms-field"
+            >
               <span>Terms</span>
               <textarea
                 className="input textarea"
@@ -14363,14 +16830,19 @@ function LegacyAdminGiftCardGenerateManageView() {
                 rows="3"
                 value={editState.terms}
                 onChange={(event) =>
-                  setEditState((previous) => ({ ...previous, terms: event.target.value }))
+                  setEditState((previous) => ({
+                    ...previous,
+                    terms: event.target.value,
+                  }))
                 }
               />
             </label>
             <div className="admin-giftcard-studio__options">
               <div className="admin-giftcard-studio__options-head">
                 <h3>Live option selection</h3>
-                <p className="modal__meta">Option quantities determine card value.</p>
+                <p className="modal__meta">
+                  Option quantities determine card value.
+                </p>
               </div>
               <div className="admin-giftcard-studio__options-grid">
                 {liveGiftCardOptions.map((option) => {
@@ -14380,7 +16852,8 @@ function LegacyAdminGiftCardGenerateManageView() {
                   );
                   const wholeCrewOptionSelectedInvalid =
                     isWholeCrewOption(option) &&
-                    getWholeCrewSelectionValidation([{ ...option, quantity }]).hasViolation;
+                    getWholeCrewSelectionValidation([{ ...option, quantity }])
+                      .hasViolation;
                   return (
                     <article
                       key={option.id}
@@ -14388,9 +16861,14 @@ function LegacyAdminGiftCardGenerateManageView() {
                     >
                       <div className="admin-giftcard-studio__option-main">
                         <h4>{option.label}</h4>
-                        <p className="modal__meta">{formatPriceLabel(option.amount)} each</p>
+                        <p className="modal__meta">
+                          {formatPriceLabel(option.amount)} each
+                        </p>
                       </div>
-                      <label className="admin-giftcard-studio__option-qty" htmlFor={`giftcard-edit-option-${option.id}`}>
+                      <label
+                        className="admin-giftcard-studio__option-qty"
+                        htmlFor={`giftcard-edit-option-${option.id}`}
+                      >
                         <span>Quantity</span>
                         <input
                           className="input"
@@ -14400,7 +16878,12 @@ function LegacyAdminGiftCardGenerateManageView() {
                           max="200"
                           step="1"
                           value={quantity}
-                          onChange={(event) => handleEditOptionQuantityChange(option.id, event.target.value)}
+                          onChange={(event) =>
+                            handleEditOptionQuantityChange(
+                              option.id,
+                              event.target.value,
+                            )
+                          }
                         />
                       </label>
                       {isWholeCrewOption(option) && (
@@ -14408,24 +16891,28 @@ function LegacyAdminGiftCardGenerateManageView() {
                           {editWholeCrewValidation.minimumMessage}
                         </p>
                       )}
-                      {isWholeCrewOption(option) && wholeCrewOptionSelectedInvalid && (
-                        <p className="admin-panel__error admin-giftcard-studio__whole-crew-error">
-                          Select at least 4 for Whole Crew.
-                        </p>
-                      )}
+                      {isWholeCrewOption(option) &&
+                        wholeCrewOptionSelectedInvalid && (
+                          <p className="admin-panel__error admin-giftcard-studio__whole-crew-error">
+                            Select at least 4 for Whole Crew.
+                          </p>
+                        )}
                     </article>
                   );
                 })}
               </div>
             </div>
             <p className="modal__meta">
-              Recalculated value: <strong>{formatPriceLabel(editSummary.total)}</strong>
+              Recalculated value:{" "}
+              <strong>{formatPriceLabel(editSummary.total)}</strong>
             </p>
             <p className="modal__meta">
               Selected options: <strong>{editSummary.selectedCount}</strong>
             </p>
             {editWholeCrewValidation.hasViolation && (
-              <p className="admin-panel__error">{editWholeCrewValidation.minimumMessage}</p>
+              <p className="admin-panel__error">
+                {editWholeCrewValidation.minimumMessage}
+              </p>
             )}
             {editMissingOptionIds.length > 0 && (
               <p className="admin-panel__error">
@@ -14433,10 +16920,19 @@ function LegacyAdminGiftCardGenerateManageView() {
               </p>
             )}
             <div className="admin-form__actions" style={{ marginTop: "1rem" }}>
-              <button className="btn btn--secondary" type="button" onClick={closeEditModal}>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={closeEditModal}
+              >
                 Cancel
               </button>
-              <button className="btn btn--primary" type="button" disabled={!canSaveEdit} onClick={handleSaveEdit}>
+              <button
+                className="btn btn--primary"
+                type="button"
+                disabled={!canSaveEdit}
+                onClick={handleSaveEdit}
+              >
                 {savingEdit ? "Saving..." : "Save changes"}
               </button>
             </div>
@@ -14475,19 +16971,28 @@ export function AdminCutFlowerClassesView() {
   const [statusMessage, setStatusMessage] = useState(null);
   const classPreviewUrlRef = useRef(null);
   const [classPage, setClassPage] = useState(0);
-  const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null });
+  const [deleteDialog, setDeleteDialog] = useState({
+    open: false,
+    targetId: null,
+  });
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const normalizedClasses = useMemo(() => {
     return cutFlowerClasses
       .map((doc) => {
         const eventDate = parseDateValue(doc.eventDate);
-        const repeatLabel = doc.repeatWeekly ? formatRepeatLabel(doc.repeatDays) : "";
+        const repeatLabel = doc.repeatWeekly
+          ? formatRepeatLabel(doc.repeatDays)
+          : "";
         const timeSummary = buildTimeSummary(doc.timeSlots);
         return {
           ...doc,
           eventDate,
-          displayDate: repeatLabel || (eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed"),
+          displayDate:
+            repeatLabel ||
+            (eventDate
+              ? bookingDateFormatter.format(eventDate)
+              : "Date to be confirmed"),
           timeSummary,
           priceLabel: formatPriceLabel(doc.price),
         };
@@ -14512,11 +17017,14 @@ export function AdminCutFlowerClassesView() {
         URL.revokeObjectURL(classPreviewUrlRef.current);
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(normalizedClasses.length / ADMIN_PAGE_SIZE) - 1);
+    const maxPage = Math.max(
+      0,
+      Math.ceil(normalizedClasses.length / ADMIN_PAGE_SIZE) - 1,
+    );
     setClassPage((prev) => Math.min(prev, maxPage));
   }, [normalizedClasses.length]);
 
@@ -14547,7 +17055,11 @@ export function AdminCutFlowerClassesView() {
   const handleClassDateChange = (value) => {
     setClassForm((prev) => {
       const next = { ...prev, date: value };
-      if (prev.repeatWeekly && (!prev.repeatDays || prev.repeatDays.length === 0) && value) {
+      if (
+        prev.repeatWeekly &&
+        (!prev.repeatDays || prev.repeatDays.length === 0) &&
+        value
+      ) {
         const parsed = new Date(value);
         if (!Number.isNaN(parsed.getTime())) {
           next.repeatDays = [parsed.getDay()];
@@ -14568,14 +17080,16 @@ export function AdminCutFlowerClassesView() {
     setClassForm((prev) => ({
       ...prev,
       timeSlots: (prev.timeSlots || []).map((slot) =>
-        slot.id === slotId ? { ...slot, [field]: value } : slot
+        slot.id === slotId ? { ...slot, [field]: value } : slot,
       ),
     }));
   };
 
   const handleRemoveClassTimeSlot = (slotId) => {
     setClassForm((prev) => {
-      const remaining = (prev.timeSlots || []).filter((slot) => slot.id !== slotId);
+      const remaining = (prev.timeSlots || []).filter(
+        (slot) => slot.id !== slotId,
+      );
       return {
         ...prev,
         timeSlots: remaining.length > 0 ? remaining : [createEventTimeSlot()],
@@ -14594,14 +17108,16 @@ export function AdminCutFlowerClassesView() {
     setClassForm((prev) => ({
       ...prev,
       options: (prev.options || []).map((option) =>
-        option.id === optionId ? { ...option, [field]: value } : option
+        option.id === optionId ? { ...option, [field]: value } : option,
       ),
     }));
   };
 
   const handleRemoveClassOption = (optionId) => {
     setClassForm((prev) => {
-      const remaining = (prev.options || []).filter((option) => option.id !== optionId);
+      const remaining = (prev.options || []).filter(
+        (option) => option.id !== optionId,
+      );
       return {
         ...prev,
         options: remaining.length > 0 ? remaining : [createCutFlowerOption()],
@@ -14622,7 +17138,10 @@ export function AdminCutFlowerClassesView() {
       const next = { ...prev, repeatWeekly: checked };
       if (!checked) {
         next.repeatDays = [];
-      } else if ((!prev.repeatDays || prev.repeatDays.length === 0) && prev.date) {
+      } else if (
+        (!prev.repeatDays || prev.repeatDays.length === 0) &&
+        prev.date
+      ) {
         const parsed = new Date(prev.date);
         if (!Number.isNaN(parsed.getTime())) {
           next.repeatDays = [parsed.getDay()];
@@ -14635,8 +17154,8 @@ export function AdminCutFlowerClassesView() {
   const handleToggleClassRepeatDay = (dayValue) => {
     setClassForm((prev) => {
       const existing = Array.isArray(prev.repeatDays) ? prev.repeatDays : [];
-      const normalized = existing.includes(dayValue) ?
-         existing.filter((day) => day !== dayValue)
+      const normalized = existing.includes(dayValue)
+        ? existing.filter((day) => day !== dayValue)
         : [...existing, dayValue];
       return {
         ...prev,
@@ -14670,10 +17189,12 @@ export function AdminCutFlowerClassesView() {
   const handleEditClass = (classDoc) => {
     const eventDate = parseDateValue(classDoc.eventDate);
     const fallbackTime =
-      eventDate && (eventDate.getHours() || eventDate.getMinutes()) ?
-         formatTimeInput(eventDate)
+      eventDate && (eventDate.getHours() || eventDate.getMinutes())
+        ? formatTimeInput(eventDate)
         : "";
-    const rawTimeSlots = Array.isArray(classDoc.timeSlots) ? classDoc.timeSlots.filter(Boolean) : [];
+    const rawTimeSlots = Array.isArray(classDoc.timeSlots)
+      ? classDoc.timeSlots.filter(Boolean)
+      : [];
     const normalizedSlots =
       rawTimeSlots.length > 0
         ? rawTimeSlots.map((slot, index) => ({
@@ -14695,12 +17216,12 @@ export function AdminCutFlowerClassesView() {
             id: option.id || `class-option-${index}-${classDoc.id}`,
             label: option.label || option.name || "",
             price:
-              option.price === undefined || option.price === null ?
-                 ""
+              option.price === undefined || option.price === null
+                ? ""
                 : String(option.price),
             minAttendees:
-              option.minAttendees === undefined || option.minAttendees === null ?
-                 ""
+              option.minAttendees === undefined || option.minAttendees === null
+                ? ""
                 : String(option.minAttendees),
             isExtra: Boolean(option.isExtra),
           }))
@@ -14711,16 +17232,21 @@ export function AdminCutFlowerClassesView() {
       rawCapacity !== null &&
       String(rawCapacity).trim() !== "";
     const capacityLimited =
-      classDoc.capacityLimited !== undefined ?
-         Boolean(classDoc.capacityLimited)
+      classDoc.capacityLimited !== undefined
+        ? Boolean(classDoc.capacityLimited)
         : hasCapacityValue;
     setClassForm({
       title: classDoc.title || "",
       description: classDoc.description || "",
       location: classDoc.location || "",
-      price: classDoc.price === undefined || classDoc.price === null ? "" : String(classDoc.price),
+      price:
+        classDoc.price === undefined || classDoc.price === null
+          ? ""
+          : String(classDoc.price),
       capacity:
-        classDoc.capacity === undefined || classDoc.capacity === null ? "" : String(classDoc.capacity),
+        classDoc.capacity === undefined || classDoc.capacity === null
+          ? ""
+          : String(classDoc.capacity),
       capacityLimited,
       image: classDoc.image || "",
       date: eventDate ? formatDateInput(eventDate) : "",
@@ -14815,13 +17341,13 @@ export function AdminCutFlowerClassesView() {
           if (!label) return null;
           const rawPrice = option.price;
           const priceNumber =
-            rawPrice === "" || rawPrice === null || rawPrice === undefined ?
-               null
+            rawPrice === "" || rawPrice === null || rawPrice === undefined
+              ? null
               : Number(rawPrice);
           const minAttendeesValue = Number.parseInt(option.minAttendees, 10);
           const minAttendees =
-            Number.isFinite(minAttendeesValue) && minAttendeesValue > 0 ?
-               minAttendeesValue
+            Number.isFinite(minAttendeesValue) && minAttendeesValue > 0
+              ? minAttendeesValue
               : null;
           return {
             id: option.id || createCutFlowerOption().id,
@@ -14842,7 +17368,11 @@ export function AdminCutFlowerClassesView() {
         description: classForm.description.trim(),
         location: classForm.location.trim(),
         price:
-          classForm.price === "" ? null : Number.isFinite(Number(classForm.price)) ? Number(classForm.price) : classForm.price,
+          classForm.price === ""
+            ? null
+            : Number.isFinite(Number(classForm.price))
+              ? Number(classForm.price)
+              : classForm.price,
         capacity: capacityValue,
         capacityLimited: Boolean(classForm.capacityLimited),
         image: imageUrl,
@@ -14892,12 +17422,17 @@ export function AdminCutFlowerClassesView() {
               <div>
                 <h2>Cut Flower Classes</h2>
                 <p className="admin-panel__note">
-                  Publish bookable sessions for bouquets, styling experiences, and private floral classes.
+                  Publish bookable sessions for bouquets, styling experiences,
+                  and private floral classes.
                 </p>
               </div>
               <div className="admin-panel__header-actions">
-                {inventoryLoading && <span className="badge badge--muted">Syncing...</span>}
-                {statusMessage && <span className="badge badge--muted">{statusMessage}</span>}
+                {inventoryLoading && (
+                  <span className="badge badge--muted">Syncing...</span>
+                )}
+                {statusMessage && (
+                  <span className="badge badge--muted">{statusMessage}</span>
+                )}
                 <button
                   className="btn btn--primary"
                   type="button"
@@ -14909,33 +17444,49 @@ export function AdminCutFlowerClassesView() {
                 </button>
               </div>
             </div>
-            {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+            {inventoryError && (
+              <p className="admin-panel__error">{inventoryError}</p>
+            )}
             <div className="admin-panel__content">
               <div>
                 <h3>Scheduled Classes</h3>
                 {inventoryLoading && !normalizedClasses.length ? (
-                  <p className="admin-panel__note">Loading cut flower classes...</p>
+                  <p className="admin-panel__note">
+                    Loading cut flower classes...
+                  </p>
                 ) : (
                   <div className="admin-panel__list">
                     {normalizedClasses.length === 0 ? (
-                      <p className="admin-panel__note">No cut flower classes yet.</p>
+                      <p className="admin-panel__note">
+                        No cut flower classes yet.
+                      </p>
                     ) : (
                       paginatedClasses.map((classDoc) => (
                         <article className="admin-event-card" key={classDoc.id}>
                           <div className="admin-event-card__info">
-                            <p className="admin-event-card__date">{classDoc.displayDate}</p>
+                            <p className="admin-event-card__date">
+                              {classDoc.displayDate}
+                            </p>
                             <h4>{classDoc.title}</h4>
                             {classDoc.location && (
-                              <p className="admin-event-card__meta">{classDoc.location}</p>
+                              <p className="admin-event-card__meta">
+                                {classDoc.location}
+                              </p>
                             )}
                             {classDoc.timeSummary && (
-                              <p className="admin-event-card__meta">Times: {classDoc.timeSummary}</p>
+                              <p className="admin-event-card__meta">
+                                Times: {classDoc.timeSummary}
+                              </p>
                             )}
                             {classDoc.priceLabel && (
-                              <p className="admin-event-card__meta">Fee: {classDoc.priceLabel}</p>
+                              <p className="admin-event-card__meta">
+                                Fee: {classDoc.priceLabel}
+                              </p>
                             )}
                             {classDoc.capacity && (
-                              <p className="admin-event-card__meta">Capacity: {classDoc.capacity}</p>
+                              <p className="admin-event-card__meta">
+                                Capacity: {classDoc.capacity}
+                              </p>
                             )}
                           </div>
                           <div className="admin-event-card__actions">
@@ -14959,7 +17510,11 @@ export function AdminCutFlowerClassesView() {
                     )}
                   </div>
                 )}
-                <AdminPagination page={classPage} total={normalizedClasses.length} onPageChange={setClassPage} />
+                <AdminPagination
+                  page={classPage}
+                  total={normalizedClasses.length}
+                  onPageChange={setClassPage}
+                />
               </div>
             </div>
           </div>
@@ -14975,314 +17530,394 @@ export function AdminCutFlowerClassesView() {
         }}
       >
         <div className="modal__content admin-modal__content">
-          <button className="modal__close" type="button" aria-label="Close" onClick={closeClassModal}>
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close"
+            onClick={closeClassModal}
+          >
             &times;
           </button>
-          <h3 className="modal__title">{editingClassId ? "Edit Class" : "Create Class"}</h3>
+          <h3 className="modal__title">
+            {editingClassId ? "Edit Class" : "Create Class"}
+          </h3>
           <div className="admin-workshop-modal__body">
-          <form className="admin-form" onSubmit={handleSaveClass}>
-            <input
-              className="input"
-              placeholder="Class title"
-              value={classForm.title}
-              onChange={(e) =>
-                setClassForm((prev) => ({
-                  ...prev,
-                  title: e.target.value,
-                }))
-              }
-              required
-            />
-            <input
-              className="input"
-              placeholder="Location"
-              value={classForm.location}
-              onChange={(e) =>
-                setClassForm((prev) => ({
-                  ...prev,
-                  location: e.target.value,
-                }))
-              }
-            />
-            <input
-              className="input"
-              placeholder="Base price (optional)"
-              value={classForm.price}
-              onChange={(e) =>
-                setClassForm((prev) => ({
-                  ...prev,
-                  price: e.target.value,
-                }))
-              }
-            />
-            <label className="admin-checkbox">
-              <input
-                type="checkbox"
-                checked={classForm.capacityLimited}
-                onChange={(event) => handleToggleClassCapacity(event.target.checked)}
-              />
-              <span>Limit seats per time slot</span>
-            </label>
-            {classForm.capacityLimited && (
+            <form className="admin-form" onSubmit={handleSaveClass}>
               <input
                 className="input"
-                placeholder="Seats per time slot"
-                value={classForm.capacity}
-                onChange={(event) =>
+                placeholder="Class title"
+                value={classForm.title}
+                onChange={(e) =>
                   setClassForm((prev) => ({
                     ...prev,
-                    capacity: event.target.value.replace(/[^\d]/g, ""),
+                    title: e.target.value,
+                  }))
+                }
+                required
+              />
+              <input
+                className="input"
+                placeholder="Location"
+                value={classForm.location}
+                onChange={(e) =>
+                  setClassForm((prev) => ({
+                    ...prev,
+                    location: e.target.value,
                   }))
                 }
               />
-            )}
-            <div className="admin-session-panel admin-form__full">
-              <div className="admin-session-panel__header">
-                <h4>Cut flower options</h4>
-                <button
-                  className="icon-btn"
-                  type="button"
-                  onClick={handleAddClassOption}
-                  aria-label="Add option"
-                >
-                  <IconPlus aria-hidden="true" />
-                </button>
-              </div>
-              <p className="admin-panel__note">
-                Add the options shown in the booking dropdown. Leave blank to use the base price only.
-              </p>
-              {(classForm.options || []).map((option, index) => (
-                <div className="admin-session-row" key={option.id}>
-                  <div className="admin-session-field admin-session-field--label">
-                    <label className="admin-session-label" htmlFor={`class-option-label-${option.id}`}>
-                      Option #{index + 1}
-                    </label>
-                    <input
-                      className="input"
-                      id={`class-option-label-${option.id}`}
-                      value={option.label}
-                      onChange={(event) =>
-                        handleClassOptionChange(option.id, "label", event.target.value)
-                      }
-                      placeholder="Small bouquet, Garden mix, etc."
-                    />
-                  </div>
-                  <div className="admin-session-field">
-                    <label className="admin-session-label" htmlFor={`class-option-price-${option.id}`}>
-                      Price (optional)
-                    </label>
-                    <input
-                      className="input"
-                      type="number"
-                      min="0"
-                      step="1"
-                      id={`class-option-price-${option.id}`}
-                      value={option.price}
-                      onChange={(event) =>
-                        handleClassOptionChange(option.id, "price", event.target.value)
-                      }
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="admin-session-field">
-                    <label className="admin-session-label" htmlFor={`class-option-min-${option.id}`}>
-                      Min attendees (optional)
-                    </label>
-                    <input
-                      className="input"
-                      type="number"
-                      min="1"
-                      step="1"
-                      id={`class-option-min-${option.id}`}
-                      value={option.minAttendees}
-                      onChange={(event) =>
-                        handleClassOptionChange(option.id, "minAttendees", event.target.value)
-                      }
-                      placeholder="0"
-                    />
-                  </div>
-                  <label className="admin-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(option.isExtra)}
-                      onChange={(event) =>
-                        handleClassOptionChange(option.id, "isExtra", event.target.checked)
-                      }
-                    />
-                    <span>Extra add-on</span>
-                  </label>
-                  <button
-                    className="icon-btn icon-btn--danger admin-session-remove"
-                    type="button"
-                    onClick={() => handleRemoveClassOption(option.id)}
-                    aria-label={`Remove option ${index + 1}`}
-                  >
-                    <IconTrash aria-hidden="true" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <select
-              className="input"
-              value={classForm.status}
-              onChange={(e) =>
-                setClassForm((prev) => ({
-                  ...prev,
-                  status: e.target.value,
-                }))
-              }
-            >
-              <option value="draft">Draft</option>
-              <option value="live">Live</option>
-              <option value="archived">Archived</option>
-            </select>
-            <input
-              className="input"
-              type="date"
-              value={classForm.date}
-              onChange={(e) => handleClassDateChange(e.target.value)}
-              required
-            />
-            <div className="admin-session-panel admin-form__full">
-              <div className="admin-session-panel__header">
-                <h4>Class times</h4>
-                <button
-                  className="icon-btn"
-                  type="button"
-                  onClick={handleAddClassTimeSlot}
-                  aria-label="Add time slot"
-                >
-                  <IconPlus aria-hidden="true" />
-                </button>
-              </div>
-              <p className="admin-panel__note">Add one or more time slots for this class day.</p>
-              {(classForm.timeSlots || []).map((slot) => (
-                <div className="admin-session-row" key={slot.id}>
-                  <div className="admin-session-field">
-                    <label className="admin-session-label" htmlFor={`class-time-${slot.id}`}>
-                      Start
-                    </label>
-                    <input
-                      className="input"
-                      type="time"
-                      id={`class-time-${slot.id}`}
-                      value={slot.time}
-                      onChange={(event) =>
-                        handleClassTimeSlotChange(slot.id, "time", event.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="admin-session-field">
-                    <label className="admin-session-label" htmlFor={`class-end-${slot.id}`}>
-                      End
-                    </label>
-                    <input
-                      className="input"
-                      type="time"
-                      id={`class-end-${slot.id}`}
-                      value={slot.endTime || ""}
-                      onChange={(event) =>
-                        handleClassTimeSlotChange(slot.id, "endTime", event.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="admin-session-field admin-session-field--label">
-                    <label className="admin-session-label" htmlFor={`class-label-${slot.id}`}>
-                      Label (optional)
-                    </label>
-                    <input
-                      className="input"
-                      id={`class-label-${slot.id}`}
-                      value={slot.label}
-                      onChange={(event) =>
-                        handleClassTimeSlotChange(slot.id, "label", event.target.value)
-                      }
-                      placeholder="Morning, Afternoon, etc."
-                    />
-                  </div>
-                  <button
-                    className="icon-btn icon-btn--danger admin-session-remove"
-                    type="button"
-                    onClick={() => handleRemoveClassTimeSlot(slot.id)}
-                    aria-label="Remove time slot"
-                  >
-                    <IconTrash aria-hidden="true" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="admin-session-panel admin-form__full">
-              <div className="admin-session-panel__header">
-                <h4>Repeat weekly</h4>
-              </div>
+              <input
+                className="input"
+                placeholder="Base price (optional)"
+                value={classForm.price}
+                onChange={(e) =>
+                  setClassForm((prev) => ({
+                    ...prev,
+                    price: e.target.value,
+                  }))
+                }
+              />
               <label className="admin-checkbox">
                 <input
                   type="checkbox"
-                  checked={classForm.repeatWeekly}
-                  onChange={(event) => handleToggleClassRepeatWeekly(event.target.checked)}
+                  checked={classForm.capacityLimited}
+                  onChange={(event) =>
+                    handleToggleClassCapacity(event.target.checked)
+                  }
                 />
-                <span>Repeat this class on selected weekdays</span>
+                <span>Limit seats per time slot</span>
               </label>
-              {classForm.repeatWeekly && (
-                <div className="admin-repeat-days">
-                  {EVENT_REPEAT_WEEKDAYS.map((day) => (
-                    <label className="admin-repeat-day" key={day.value}>
+              {classForm.capacityLimited && (
+                <input
+                  className="input"
+                  placeholder="Seats per time slot"
+                  value={classForm.capacity}
+                  onChange={(event) =>
+                    setClassForm((prev) => ({
+                      ...prev,
+                      capacity: event.target.value.replace(/[^\d]/g, ""),
+                    }))
+                  }
+                />
+              )}
+              <div className="admin-session-panel admin-form__full">
+                <div className="admin-session-panel__header">
+                  <h4>Cut flower options</h4>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    onClick={handleAddClassOption}
+                    aria-label="Add option"
+                  >
+                    <IconPlus aria-hidden="true" />
+                  </button>
+                </div>
+                <p className="admin-panel__note">
+                  Add the options shown in the booking dropdown. Leave blank to
+                  use the base price only.
+                </p>
+                {(classForm.options || []).map((option, index) => (
+                  <div className="admin-session-row" key={option.id}>
+                    <div className="admin-session-field admin-session-field--label">
+                      <label
+                        className="admin-session-label"
+                        htmlFor={`class-option-label-${option.id}`}
+                      >
+                        Option #{index + 1}
+                      </label>
+                      <input
+                        className="input"
+                        id={`class-option-label-${option.id}`}
+                        value={option.label}
+                        onChange={(event) =>
+                          handleClassOptionChange(
+                            option.id,
+                            "label",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Small bouquet, Garden mix, etc."
+                      />
+                    </div>
+                    <div className="admin-session-field">
+                      <label
+                        className="admin-session-label"
+                        htmlFor={`class-option-price-${option.id}`}
+                      >
+                        Price (optional)
+                      </label>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="1"
+                        id={`class-option-price-${option.id}`}
+                        value={option.price}
+                        onChange={(event) =>
+                          handleClassOptionChange(
+                            option.id,
+                            "price",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="admin-session-field">
+                      <label
+                        className="admin-session-label"
+                        htmlFor={`class-option-min-${option.id}`}
+                      >
+                        Min attendees (optional)
+                      </label>
+                      <input
+                        className="input"
+                        type="number"
+                        min="1"
+                        step="1"
+                        id={`class-option-min-${option.id}`}
+                        value={option.minAttendees}
+                        onChange={(event) =>
+                          handleClassOptionChange(
+                            option.id,
+                            "minAttendees",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="0"
+                      />
+                    </div>
+                    <label className="admin-checkbox">
                       <input
                         type="checkbox"
-                        checked={
-                          Array.isArray(classForm.repeatDays) &&
-                          classForm.repeatDays.includes(day.value)
+                        checked={Boolean(option.isExtra)}
+                        onChange={(event) =>
+                          handleClassOptionChange(
+                            option.id,
+                            "isExtra",
+                            event.target.checked,
+                          )
                         }
-                        onChange={() => handleToggleClassRepeatDay(day.value)}
                       />
-                      <span>{day.label}</span>
+                      <span>Extra add-on</span>
                     </label>
-                  ))}
-                </div>
-              )}
-              <p className="admin-panel__note">Use this for recurring classes like every Saturday.</p>
-            </div>
-            <textarea
-              className="input textarea admin-form__full"
-              placeholder="Description"
-              value={classForm.description}
-              onChange={(e) =>
-                setClassForm((prev) => ({
-                  ...prev,
-                  description: e.target.value,
-                }))
-              }
-            />
-            <div className="admin-file-input admin-form__full">
-              <label htmlFor="cutflower-class-image" className="sr-only">
-                Class image
-              </label>
+                    <button
+                      className="icon-btn icon-btn--danger admin-session-remove"
+                      type="button"
+                      onClick={() => handleRemoveClassOption(option.id)}
+                      aria-label={`Remove option ${index + 1}`}
+                    >
+                      <IconTrash aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <select
+                className="input"
+                value={classForm.status}
+                onChange={(e) =>
+                  setClassForm((prev) => ({
+                    ...prev,
+                    status: e.target.value,
+                  }))
+                }
+              >
+                <option value="draft">Draft</option>
+                <option value="live">Live</option>
+                <option value="archived">Archived</option>
+              </select>
               <input
-                key={editingClassId ?? "new-class"}
-                className="input input--file"
-                id="cutflower-class-image"
-                type="file"
-                accept="image/*"
-                onChange={handleClassImageChange}
+                className="input"
+                type="date"
+                value={classForm.date}
+                onChange={(e) => handleClassDateChange(e.target.value)}
+                required
               />
-              <p className="admin-panel__note">Upload JPG or PNG (max 3MB).</p>
-              {(classImagePreview || classForm.image) && (
-                <img
-                  src={classImagePreview || classForm.image}
-                  alt="Cut flower class preview"
-                  className="admin-preview" loading="lazy" decoding="async"/>
-              )}
-            </div>
-            <div className="admin-modal__actions admin-form__actions">
-              <button className="btn btn--secondary" type="button" onClick={closeClassModal} disabled={classSaving}>
-                Cancel
-              </button>
-              <button className="btn btn--primary" type="submit" disabled={classSaving || !inventoryEnabled}>
-                {classSaving ? "Saving..." : editingClassId ? "Update Class" : "Create Class"}
-              </button>
-            </div>
-            {classError && <p className="admin-panel__error">{classError}</p>}
-          </form>
+              <div className="admin-session-panel admin-form__full">
+                <div className="admin-session-panel__header">
+                  <h4>Class times</h4>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    onClick={handleAddClassTimeSlot}
+                    aria-label="Add time slot"
+                  >
+                    <IconPlus aria-hidden="true" />
+                  </button>
+                </div>
+                <p className="admin-panel__note">
+                  Add one or more time slots for this class day.
+                </p>
+                {(classForm.timeSlots || []).map((slot) => (
+                  <div className="admin-session-row" key={slot.id}>
+                    <div className="admin-session-field">
+                      <label
+                        className="admin-session-label"
+                        htmlFor={`class-time-${slot.id}`}
+                      >
+                        Start
+                      </label>
+                      <input
+                        className="input"
+                        type="time"
+                        id={`class-time-${slot.id}`}
+                        value={slot.time}
+                        onChange={(event) =>
+                          handleClassTimeSlotChange(
+                            slot.id,
+                            "time",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="admin-session-field">
+                      <label
+                        className="admin-session-label"
+                        htmlFor={`class-end-${slot.id}`}
+                      >
+                        End
+                      </label>
+                      <input
+                        className="input"
+                        type="time"
+                        id={`class-end-${slot.id}`}
+                        value={slot.endTime || ""}
+                        onChange={(event) =>
+                          handleClassTimeSlotChange(
+                            slot.id,
+                            "endTime",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="admin-session-field admin-session-field--label">
+                      <label
+                        className="admin-session-label"
+                        htmlFor={`class-label-${slot.id}`}
+                      >
+                        Label (optional)
+                      </label>
+                      <input
+                        className="input"
+                        id={`class-label-${slot.id}`}
+                        value={slot.label}
+                        onChange={(event) =>
+                          handleClassTimeSlotChange(
+                            slot.id,
+                            "label",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Morning, Afternoon, etc."
+                      />
+                    </div>
+                    <button
+                      className="icon-btn icon-btn--danger admin-session-remove"
+                      type="button"
+                      onClick={() => handleRemoveClassTimeSlot(slot.id)}
+                      aria-label="Remove time slot"
+                    >
+                      <IconTrash aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="admin-session-panel admin-form__full">
+                <div className="admin-session-panel__header">
+                  <h4>Repeat weekly</h4>
+                </div>
+                <label className="admin-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={classForm.repeatWeekly}
+                    onChange={(event) =>
+                      handleToggleClassRepeatWeekly(event.target.checked)
+                    }
+                  />
+                  <span>Repeat this class on selected weekdays</span>
+                </label>
+                {classForm.repeatWeekly && (
+                  <div className="admin-repeat-days">
+                    {EVENT_REPEAT_WEEKDAYS.map((day) => (
+                      <label className="admin-repeat-day" key={day.value}>
+                        <input
+                          type="checkbox"
+                          checked={
+                            Array.isArray(classForm.repeatDays) &&
+                            classForm.repeatDays.includes(day.value)
+                          }
+                          onChange={() => handleToggleClassRepeatDay(day.value)}
+                        />
+                        <span>{day.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <p className="admin-panel__note">
+                  Use this for recurring classes like every Saturday.
+                </p>
+              </div>
+              <textarea
+                className="input textarea admin-form__full"
+                placeholder="Description"
+                value={classForm.description}
+                onChange={(e) =>
+                  setClassForm((prev) => ({
+                    ...prev,
+                    description: e.target.value,
+                  }))
+                }
+              />
+              <div className="admin-file-input admin-form__full">
+                <label htmlFor="cutflower-class-image" className="sr-only">
+                  Class image
+                </label>
+                <input
+                  key={editingClassId ?? "new-class"}
+                  className="input input--file"
+                  id="cutflower-class-image"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleClassImageChange}
+                />
+                <p className="admin-panel__note">
+                  Upload JPG or PNG (max 3MB).
+                </p>
+                {(classImagePreview || classForm.image) && (
+                  <img
+                    src={classImagePreview || classForm.image}
+                    alt="Cut flower class preview"
+                    className="admin-preview"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                )}
+              </div>
+              <div className="admin-modal__actions admin-form__actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={closeClassModal}
+                  disabled={classSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  type="submit"
+                  disabled={classSaving || !inventoryEnabled}
+                >
+                  {classSaving
+                    ? "Saving..."
+                    : editingClassId
+                      ? "Update Class"
+                      : "Create Class"}
+                </button>
+              </div>
+              {classError && <p className="admin-panel__error">{classError}</p>}
+            </form>
           </div>
         </div>
       </div>
@@ -15338,7 +17973,10 @@ export function AdminCutFlowerBookingsView() {
   const [dateFilter, setDateFilter] = useState("today");
   const [sortOrder, setSortOrder] = useState("event-asc");
   const [showExtraOptions, setShowExtraOptions] = useState(false);
-  const [deleteDialog, setDeleteDialog] = useState({ open: false, targetId: null });
+  const [deleteDialog, setDeleteDialog] = useState({
+    open: false,
+    targetId: null,
+  });
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
@@ -15354,7 +17992,9 @@ export function AdminCutFlowerBookingsView() {
         return {
           ...booking,
           eventDate,
-          displayDate: eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed",
+          displayDate: eventDate
+            ? bookingDateFormatter.format(eventDate)
+            : "Date to be confirmed",
         };
       })
       .sort((a, b) => {
@@ -15368,14 +18008,28 @@ export function AdminCutFlowerBookingsView() {
   const filteredBookings = useMemo(() => {
     if (!normalizedBookings.length) return [];
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    const endOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59,
+      999,
+    );
 
     return normalizedBookings.filter((booking) => {
       if (!booking.eventDate) return dateFilter === "all";
       const eventTime = booking.eventDate.getTime();
       if (dateFilter === "today") {
-        return eventTime >= startOfDay.getTime() && eventTime <= endOfDay.getTime();
+        return (
+          eventTime >= startOfDay.getTime() && eventTime <= endOfDay.getTime()
+        );
       }
       if (dateFilter === "upcoming") return eventTime > endOfDay.getTime();
       if (dateFilter === "past") return eventTime < startOfDay.getTime();
@@ -15394,9 +18048,13 @@ export function AdminCutFlowerBookingsView() {
       return firstTime - secondTime;
     };
     const compareByName = (first, second) =>
-      (first.customerName || "").localeCompare(second.customerName || "", undefined, {
-        sensitivity: "base",
-      });
+      (first.customerName || "").localeCompare(
+        second.customerName || "",
+        undefined,
+        {
+          sensitivity: "base",
+        },
+      );
 
     bookings.sort((a, b) => {
       if (sortOrder === "event-desc") return compareByDate(b, a);
@@ -15410,13 +18068,17 @@ export function AdminCutFlowerBookingsView() {
 
   const selectionOptions = useMemo(() => {
     const rawOptions = (cutFlowerClasses || [])
-      .flatMap((classItem) => (Array.isArray(classItem.options) ? classItem.options : []))
+      .flatMap((classItem) =>
+        Array.isArray(classItem.options) ? classItem.options : [],
+      )
       .filter(Boolean);
     const normalized = rawOptions
       .map((option, index) => {
         if (typeof option !== "object" || option === null) return null;
-        const value = option.value ?? option.id ?? option.label ?? `option-${index}`;
-        const label = option.label ?? option.name ?? option.value ?? `Option ${index + 1}`;
+        const value =
+          option.value ?? option.id ?? option.label ?? `option-${index}`;
+        const label =
+          option.label ?? option.name ?? option.value ?? `Option ${index + 1}`;
         const price = parseOptionalNumber(option.price);
         const minAttendees = parseMinAttendees(option, label);
         const isExtra = parseIsExtra(option, label);
@@ -15469,14 +18131,16 @@ export function AdminCutFlowerBookingsView() {
   const restrictedCutFlowerOptions = useMemo(
     () =>
       visibleCutFlowerOptions.filter(
-        (option) => option.minAttendees && option.minAttendees > attendeeCountNumber,
+        (option) =>
+          option.minAttendees && option.minAttendees > attendeeCountNumber,
       ),
     [attendeeCountNumber, visibleCutFlowerOptions],
   );
   const availableCutFlowerOptions = useMemo(
     () =>
       visibleCutFlowerOptions.filter(
-        (option) => !option.minAttendees || option.minAttendees <= attendeeCountNumber,
+        (option) =>
+          !option.minAttendees || option.minAttendees <= attendeeCountNumber,
       ),
     [attendeeCountNumber, visibleCutFlowerOptions],
   );
@@ -15493,18 +18157,24 @@ export function AdminCutFlowerBookingsView() {
       ),
     ).sort((a, b) => a - b);
     const minText =
-      minValues.length === 1 ? `at least ${minValues[0]} attendees` : "a minimum number of attendees";
+      minValues.length === 1
+        ? `at least ${minValues[0]} attendees`
+        : "a minimum number of attendees";
     const labelText = labels.length > 0 ? `: ${labels.join(", ")}` : ".";
     return `Options requiring ${minText} are hidden${labelText}`;
   }, [restrictedCutFlowerOptions]);
 
   const normalizedAttendeeSelections = useMemo(() => {
-    const optionValues = new Set(availableCutFlowerOptions.map((option) => option.value));
+    const optionValues = new Set(
+      availableCutFlowerOptions.map((option) => option.value),
+    );
     if (optionValues.size === 0 && selectionOptions[0]) {
       optionValues.add(selectionOptions[0].value);
     }
     const fallbackValue =
-      availableCutFlowerOptions[0].value ?? selectionOptions[0].value ?? defaultSelectionValue;
+      availableCutFlowerOptions[0].value ??
+      selectionOptions[0].value ??
+      defaultSelectionValue;
     return buildAttendeeSelections(
       attendeeCountNumber,
       formState.attendeeSelections,
@@ -15520,7 +18190,12 @@ export function AdminCutFlowerBookingsView() {
   ]);
 
   useEffect(() => {
-    if (selectionsMatch(formState.attendeeSelections, normalizedAttendeeSelections)) {
+    if (
+      selectionsMatch(
+        formState.attendeeSelections,
+        normalizedAttendeeSelections,
+      )
+    ) {
       return;
     }
     setFormState((prev) => ({
@@ -15550,12 +18225,18 @@ export function AdminCutFlowerBookingsView() {
     const eventDate = parseDateValue(booking.eventDate);
     const attendeeSelections = Array.isArray(booking.attendeeSelections)
       ? booking.attendeeSelections
-          .map((selection) => selection.optionValue || selection.optionLabel || selection.value || "")
+          .map(
+            (selection) =>
+              selection.optionValue ||
+              selection.optionLabel ||
+              selection.value ||
+              "",
+          )
           .filter((value) => value)
       : [];
     const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
-    const attendeeCount = Number.isFinite(attendeeCountValue) ?
-       attendeeCountValue
+    const attendeeCount = Number.isFinite(attendeeCountValue)
+      ? attendeeCountValue
       : attendeeSelections.length || 1;
     setFormState({
       customerName: booking.customerName || "",
@@ -15574,7 +18255,9 @@ export function AdminCutFlowerBookingsView() {
     setEditingId(booking.id);
     setFormError(null);
     const hasExtraSelection = attendeeSelections.some((value) =>
-      selectionOptions.some((option) => option.value === value && option.isExtra),
+      selectionOptions.some(
+        (option) => option.value === value && option.isExtra,
+      ),
     );
     setShowExtraOptions(hasExtraSelection);
   };
@@ -15596,20 +18279,22 @@ export function AdminCutFlowerBookingsView() {
   };
 
   const getBookingSummary = (booking) => {
-    const attendeeSelections = Array.isArray(booking.attendeeSelections) ?
-       booking.attendeeSelections
+    const attendeeSelections = Array.isArray(booking.attendeeSelections)
+      ? booking.attendeeSelections
       : [];
     const attendeeCountValue = Number.parseInt(booking.attendeeCount, 10);
-    const attendeeCount = Number.isFinite(attendeeCountValue) ?
-       attendeeCountValue
+    const attendeeCount = Number.isFinite(attendeeCountValue)
+      ? attendeeCountValue
       : attendeeSelections.length || null;
     const hasEstimatedTotal =
       booking.estimatedTotal !== undefined &&
       booking.estimatedTotal !== null &&
       booking.estimatedTotal !== "";
-    const estimatedTotalValue = hasEstimatedTotal ? Number(booking.estimatedTotal) : NaN;
-    const estimatedTotalLabel = Number.isFinite(estimatedTotalValue) ?
-       moneyFormatter.format(estimatedTotalValue)
+    const estimatedTotalValue = hasEstimatedTotal
+      ? Number(booking.estimatedTotal)
+      : NaN;
+    const estimatedTotalLabel = Number.isFinite(estimatedTotalValue)
+      ? moneyFormatter.format(estimatedTotalValue)
       : null;
     const optionSummary = booking.optionLabel || booking.optionValue || "";
     let optionSummaryLabel = "Option: -";
@@ -15618,10 +18303,11 @@ export function AdminCutFlowerBookingsView() {
       optionSummaryLabel = "Options: Multiple";
     } else if (attendeeSelections.length === 1) {
       const selection = attendeeSelections[0];
-      const selectionLabel = selection.optionLabel || selection.optionValue || "Option";
+      const selectionLabel =
+        selection.optionLabel || selection.optionValue || "Option";
       const selectionPriceValue = Number(selection.estimatedPrice);
-      const selectionPriceLabel = Number.isFinite(selectionPriceValue) ?
-         ` (est. ${moneyFormatter.format(selectionPriceValue)})`
+      const selectionPriceLabel = Number.isFinite(selectionPriceValue)
+        ? ` (est. ${moneyFormatter.format(selectionPriceValue)})`
         : "";
       optionSummaryLabel = `Option: ${selectionLabel}${selectionPriceLabel}`;
     } else if (optionSummary) {
@@ -15631,14 +18317,15 @@ export function AdminCutFlowerBookingsView() {
     const optionLines =
       attendeeSelections.length > 0
         ? attendeeSelections.map((selection, index) => {
-            const selectionLabel = selection.optionLabel || selection.optionValue || "Option";
+            const selectionLabel =
+              selection.optionLabel || selection.optionValue || "Option";
             const selectionIndexValue = Number.parseInt(selection.attendee, 10);
-            const selectionIndex = Number.isFinite(selectionIndexValue) ?
-               selectionIndexValue
+            const selectionIndex = Number.isFinite(selectionIndexValue)
+              ? selectionIndexValue
               : index + 1;
             const selectionPriceValue = Number(selection.estimatedPrice);
-            const selectionPriceLabel = Number.isFinite(selectionPriceValue) ?
-               ` (est. ${moneyFormatter.format(selectionPriceValue)})`
+            const selectionPriceLabel = Number.isFinite(selectionPriceValue)
+              ? ` (est. ${moneyFormatter.format(selectionPriceValue)})`
               : "";
             return {
               key: `attendee-${booking.id}-${selectionIndex}-${selectionLabel}`,
@@ -15697,7 +18384,9 @@ export function AdminCutFlowerBookingsView() {
 
     try {
       const eventDate = combineDateAndTime(formState.date, formState.time);
-      const optionLookup = new Map(selectionOptions.map((option) => [option.value, option]));
+      const optionLookup = new Map(
+        selectionOptions.map((option) => [option.value, option]),
+      );
       const attendeeItems = normalizedAttendeeSelections.map((value, index) => {
         const option = optionLookup.get(value);
         return {
@@ -15711,8 +18400,11 @@ export function AdminCutFlowerBookingsView() {
       const hasEstimatedTotal = attendeeItems.some((item) =>
         Number.isFinite(Number(item.estimatedPrice)),
       );
-      const estimatedTotal = hasEstimatedTotal ?
-         attendeeItems.reduce((sum, item) => sum + (Number(item.estimatedPrice) || 0), 0)
+      const estimatedTotal = hasEstimatedTotal
+        ? attendeeItems.reduce(
+            (sum, item) => sum + (Number(item.estimatedPrice) || 0),
+            0,
+          )
         : null;
       const firstSelection = attendeeItems[0] || null;
       const payload = {
@@ -15753,7 +18445,9 @@ export function AdminCutFlowerBookingsView() {
     }
   };
 
-  const detailsSummary = activeBooking ? getBookingSummary(activeBooking) : null;
+  const detailsSummary = activeBooking
+    ? getBookingSummary(activeBooking)
+    : null;
   const detailsStatusLabel = activeBooking?.status
     ? activeBooking.status.replace(/-/g, " ")
     : "new";
@@ -15761,13 +18455,13 @@ export function AdminCutFlowerBookingsView() {
     ? bookingDateFormatter.format(activeBooking.createdAt.toDate())
     : null;
   const emptyFilterLabel =
-    dateFilter === "today" ?
-       "No cut flower bookings scheduled for today."
-      : dateFilter === "upcoming" ?
-       "No upcoming cut flower bookings."
-      : dateFilter === "past" ?
-       "No past cut flower bookings."
-      : "No cut flower bookings match this view.";
+    dateFilter === "today"
+      ? "No cut flower bookings scheduled for today."
+      : dateFilter === "upcoming"
+        ? "No upcoming cut flower bookings."
+        : dateFilter === "past"
+          ? "No past cut flower bookings."
+          : "No cut flower bookings match this view.";
 
   return (
     <>
@@ -15778,13 +18472,17 @@ export function AdminCutFlowerBookingsView() {
               <div>
                 <h2>Cut Flower Bookings</h2>
                 <p className="admin-panel__note">
-                  Manage requests for installations, weekly drops, and bespoke bouquets without mixing them into
-                  workshop bookings.
+                  Manage requests for installations, weekly drops, and bespoke
+                  bouquets without mixing them into workshop bookings.
                 </p>
               </div>
               <div className="admin-panel__header-actions">
-                {inventoryLoading && <span className="badge badge--muted">Syncing...</span>}
-                {statusMessage && <span className="badge badge--muted">{statusMessage}</span>}
+                {inventoryLoading && (
+                  <span className="badge badge--muted">Syncing...</span>
+                )}
+                {statusMessage && (
+                  <span className="badge badge--muted">{statusMessage}</span>
+                )}
                 <button
                   className="btn btn--primary"
                   type="button"
@@ -15796,10 +18494,14 @@ export function AdminCutFlowerBookingsView() {
                 </button>
               </div>
             </div>
-            {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
+            {inventoryError && (
+              <p className="admin-panel__error">{inventoryError}</p>
+            )}
             <div className="admin-panel__content">
               {inventoryLoading && !normalizedBookings.length ? (
-                <p className="admin-panel__note">Loading cut flower bookings...</p>
+                <p className="admin-panel__note">
+                  Loading cut flower bookings...
+                </p>
               ) : normalizedBookings.length > 0 ? (
                 <>
                   <div className="admin-filters">
@@ -15809,7 +18511,9 @@ export function AdminCutFlowerBookingsView() {
                         <select
                           className="input"
                           value={dateFilter}
-                          onChange={(event) => setDateFilter(event.target.value)}
+                          onChange={(event) =>
+                            setDateFilter(event.target.value)
+                          }
                         >
                           <option value="today">Today</option>
                           <option value="upcoming">Upcoming</option>
@@ -15844,7 +18548,10 @@ export function AdminCutFlowerBookingsView() {
                                 <th scope="col">Event</th>
                                 <th scope="col">Options</th>
                                 <th scope="col">Status</th>
-                                <th scope="col" className="admin-table__actions">
+                                <th
+                                  scope="col"
+                                  className="admin-table__actions"
+                                >
                                   Actions
                                 </th>
                               </tr>
@@ -15852,48 +18559,71 @@ export function AdminCutFlowerBookingsView() {
                             <tbody>
                               {sortedBookings.map((booking) => {
                                 const summary = getBookingSummary(booking);
-                                const statusLabel = booking.status ?
-                                   booking.status.replace(/-/g, " ")
+                                const statusLabel = booking.status
+                                  ? booking.status.replace(/-/g, " ")
                                   : "new";
-                                const rowLabel = booking.customerName || "Booking";
+                                const rowLabel =
+                                  booking.customerName || "Booking";
                                 return (
                                   <tr
                                     key={booking.id}
                                     className="admin-table__row admin-table__row--clickable"
                                     onClick={() => openBookingDetails(booking)}
-                                    onKeyDown={(event) => handleRowKeyDown(event, booking)}
+                                    onKeyDown={(event) =>
+                                      handleRowKeyDown(event, booking)
+                                    }
                                     tabIndex={0}
                                     role="button"
                                     aria-label={`View booking for ${rowLabel}`}
                                   >
                                     <td>
-                                      <strong>{booking.customerName || "-"}</strong>
+                                      <strong>
+                                        {booking.customerName || "-"}
+                                      </strong>
                                       {booking.occasion && (
-                                        <p className="modal__meta">Occasion: {booking.occasion}</p>
+                                        <p className="modal__meta">
+                                          Occasion: {booking.occasion}
+                                        </p>
                                       )}
                                       {booking.budget && (
-                                        <p className="modal__meta">Budget: {booking.budget}</p>
+                                        <p className="modal__meta">
+                                          Budget: {booking.budget}
+                                        </p>
                                       )}
                                     </td>
                                     <td>
                                       {booking.email ? (
                                         <a
                                           href={`mailto:${booking.email}`}
-                                          onClick={(event) => event.stopPropagation()}
+                                          onClick={(event) =>
+                                            event.stopPropagation()
+                                          }
                                         >
                                           {booking.email}
                                         </a>
                                       ) : (
                                         "-"
                                       )}
-                                      {booking.phone && <p className="modal__meta">{booking.phone}</p>}
+                                      {booking.phone && (
+                                        <p className="modal__meta">
+                                          {booking.phone}
+                                        </p>
+                                      )}
                                     </td>
                                     <td>
-                                      <p className="modal__meta">{booking.displayDate}</p>
+                                      <p className="modal__meta">
+                                        {booking.displayDate}
+                                      </p>
                                       {booking.sessionLabel && (
-                                        <p className="modal__meta">{booking.sessionLabel}</p>
+                                        <p className="modal__meta">
+                                          {booking.sessionLabel}
+                                        </p>
                                       )}
-                                      {booking.location && <p className="modal__meta">{booking.location}</p>}
+                                      {booking.location && (
+                                        <p className="modal__meta">
+                                          {booking.location}
+                                        </p>
+                                      )}
                                     </td>
                                     <td>
                                       {Number.isFinite(summary.attendeeCount) &&
@@ -15902,15 +18632,20 @@ export function AdminCutFlowerBookingsView() {
                                             Attendees: {summary.attendeeCount}
                                           </p>
                                         )}
-                                      <p className="modal__meta">{summary.optionSummaryLabel}</p>
+                                      <p className="modal__meta">
+                                        {summary.optionSummaryLabel}
+                                      </p>
                                       {summary.estimatedTotalLabel && (
                                         <p className="modal__meta">
-                                          Estimate: {summary.estimatedTotalLabel}
+                                          Estimate:{" "}
+                                          {summary.estimatedTotalLabel}
                                         </p>
                                       )}
                                     </td>
                                     <td>
-                                      <span className="badge badge--muted">{statusLabel}</span>
+                                      <span className="badge badge--muted">
+                                        {statusLabel}
+                                      </span>
                                     </td>
                                     <td className="admin-table__actions">
                                       <button
@@ -15946,8 +18681,8 @@ export function AdminCutFlowerBookingsView() {
                       <div className="admin-bookings-cards">
                         {sortedBookings.map((booking) => {
                           const summary = getBookingSummary(booking);
-                          const statusLabel = booking.status ?
-                             booking.status.replace(/-/g, " ")
+                          const statusLabel = booking.status
+                            ? booking.status.replace(/-/g, " ")
                             : "new";
                           const cardLabel = booking.customerName || "Booking";
                           return (
@@ -15955,22 +18690,32 @@ export function AdminCutFlowerBookingsView() {
                               className="admin-event-card admin-booking-card"
                               key={`card-${booking.id}`}
                               onClick={() => openBookingDetails(booking)}
-                              onKeyDown={(event) => handleRowKeyDown(event, booking)}
+                              onKeyDown={(event) =>
+                                handleRowKeyDown(event, booking)
+                              }
                               tabIndex={0}
                               role="button"
                               aria-label={`View booking for ${cardLabel}`}
                             >
                               <div className="admin-event-card__info">
-                                <p className="admin-event-card__date">{booking.displayDate}</p>
+                                <p className="admin-event-card__date">
+                                  {booking.displayDate}
+                                </p>
                                 <h4>{booking.customerName || "-"}</h4>
                                 {booking.location && (
-                                  <p className="admin-event-card__meta">{booking.location}</p>
+                                  <p className="admin-event-card__meta">
+                                    {booking.location}
+                                  </p>
                                 )}
                                 {booking.email && (
-                                  <p className="admin-event-card__meta">{booking.email}</p>
+                                  <p className="admin-event-card__meta">
+                                    {booking.email}
+                                  </p>
                                 )}
                                 {booking.phone && (
-                                  <p className="admin-event-card__meta">{booking.phone}</p>
+                                  <p className="admin-event-card__meta">
+                                    {booking.phone}
+                                  </p>
                                 )}
                                 {Number.isFinite(summary.attendeeCount) &&
                                   summary.attendeeCount > 0 && (
@@ -15978,13 +18723,17 @@ export function AdminCutFlowerBookingsView() {
                                       Attendees: {summary.attendeeCount}
                                     </p>
                                   )}
-                                <p className="admin-event-card__meta">{summary.optionSummaryLabel}</p>
+                                <p className="admin-event-card__meta">
+                                  {summary.optionSummaryLabel}
+                                </p>
                                 {summary.estimatedTotalLabel && (
                                   <p className="admin-event-card__meta">
                                     Estimate: {summary.estimatedTotalLabel}
                                   </p>
                                 )}
-                                <p className="admin-event-card__meta">Status: {statusLabel}</p>
+                                <p className="admin-event-card__meta">
+                                  Status: {statusLabel}
+                                </p>
                               </div>
                             </article>
                           );
@@ -15999,8 +18748,8 @@ export function AdminCutFlowerBookingsView() {
                 <p className="admin-panel__note">No cut flower bookings yet.</p>
               )}
             </div>
+          </div>
         </div>
-      </div>
       </section>
       <div
         className={`modal admin-modal ${isBookingModalOpen ? "is-active" : ""}`}
@@ -16012,10 +18761,17 @@ export function AdminCutFlowerBookingsView() {
         }}
       >
         <div className="modal__content admin-modal__content">
-          <button className="modal__close" type="button" aria-label="Close" onClick={closeBookingModal}>
+          <button
+            className="modal__close"
+            type="button"
+            aria-label="Close"
+            onClick={closeBookingModal}
+          >
             &times;
           </button>
-          <h3 className="modal__title">{editingId ? "Edit Booking" : "Make Booking"}</h3>
+          <h3 className="modal__title">
+            {editingId ? "Edit Booking" : "Make Booking"}
+          </h3>
           <form className="admin-form" onSubmit={handleSave}>
             <input
               className="input"
@@ -16136,10 +18892,15 @@ export function AdminCutFlowerBookingsView() {
                   </label>
                 )}
               </div>
-              {restrictedOptionsNote && <p className="admin-panel__note">{restrictedOptionsNote}</p>}
+              {restrictedOptionsNote && (
+                <p className="admin-panel__note">{restrictedOptionsNote}</p>
+              )}
               <div className="admin-form__section-grid">
                 {normalizedAttendeeSelections.map((selection, index) => (
-                  <label className="admin-form__field" key={`attendee-option-${index + 1}`}>
+                  <label
+                    className="admin-form__field"
+                    key={`attendee-option-${index + 1}`}
+                  >
                     Attendee {index + 1} option
                     <select
                       className="input"
@@ -16147,7 +18908,9 @@ export function AdminCutFlowerBookingsView() {
                       onChange={(event) => {
                         const value = event.target.value;
                         setFormState((prev) => {
-                          const nextSelections = [...(prev.attendeeSelections || [])];
+                          const nextSelections = [
+                            ...(prev.attendeeSelections || []),
+                          ];
                           nextSelections[index] = value;
                           return {
                             ...prev,
@@ -16194,11 +18957,24 @@ export function AdminCutFlowerBookingsView() {
               }
             />
             <div className="admin-modal__actions admin-form__actions">
-              <button className="btn btn--secondary" type="button" onClick={closeBookingModal} disabled={saving}>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={closeBookingModal}
+                disabled={saving}
+              >
                 Cancel
               </button>
-              <button className="btn btn--primary" type="submit" disabled={saving || !inventoryEnabled}>
-                {saving ? "Saving..." : editingId ? "Update Booking" : "Create Booking"}
+              <button
+                className="btn btn--primary"
+                type="submit"
+                disabled={saving || !inventoryEnabled}
+              >
+                {saving
+                  ? "Saving..."
+                  : editingId
+                    ? "Update Booking"
+                    : "Create Booking"}
               </button>
             </div>
             {formError && <p className="admin-panel__error">{formError}</p>}
@@ -16224,15 +19000,25 @@ export function AdminCutFlowerBookingsView() {
             >
               &times;
             </button>
-            <h3 className="modal__title">{activeBooking.customerName || "Booking Details"}</h3>
+            <h3 className="modal__title">
+              {activeBooking.customerName || "Booking Details"}
+            </h3>
             <div className="admin-detail-grid">
               <div className="admin-detail-card">
                 <h4>Customer</h4>
-                <p className="modal__meta">{activeBooking.customerName || "-"}</p>
-                {activeBooking.email && <p className="modal__meta">{activeBooking.email}</p>}
-                {activeBooking.phone && <p className="modal__meta">{activeBooking.phone}</p>}
+                <p className="modal__meta">
+                  {activeBooking.customerName || "-"}
+                </p>
+                {activeBooking.email && (
+                  <p className="modal__meta">{activeBooking.email}</p>
+                )}
+                {activeBooking.phone && (
+                  <p className="modal__meta">{activeBooking.phone}</p>
+                )}
                 {activeBooking.occasion && (
-                  <p className="modal__meta">Occasion: {activeBooking.occasion}</p>
+                  <p className="modal__meta">
+                    Occasion: {activeBooking.occasion}
+                  </p>
                 )}
                 {activeBooking.budget && (
                   <p className="modal__meta">Budget: {activeBooking.budget}</p>
@@ -16252,7 +19038,9 @@ export function AdminCutFlowerBookingsView() {
                 <h4>Options</h4>
                 {Number.isFinite(detailsSummary.attendeeCount) &&
                   detailsSummary.attendeeCount > 0 && (
-                    <p className="modal__meta">Attendees: {detailsSummary.attendeeCount}</p>
+                    <p className="modal__meta">
+                      Attendees: {detailsSummary.attendeeCount}
+                    </p>
                   )}
                 {detailsSummary.optionLines.map((line) => (
                   <p className="modal__meta" key={line.key}>
@@ -16261,19 +19049,28 @@ export function AdminCutFlowerBookingsView() {
                 ))}
                 {detailsSummary.estimatedTotalLabel && (
                   <p className="modal__meta">
-                    Estimate: {detailsSummary.estimatedTotalLabel} (estimate only)
+                    Estimate: {detailsSummary.estimatedTotalLabel} (estimate
+                    only)
                   </p>
                 )}
               </div>
               <div className="admin-detail-card">
                 <h4>Status</h4>
                 <p className="modal__meta">Status: {detailsStatusLabel}</p>
-                {createdAtLabel && <p className="modal__meta">Submitted: {createdAtLabel}</p>}
-                {activeBooking.notes && <p className="modal__meta">Notes: {activeBooking.notes}</p>}
+                {createdAtLabel && (
+                  <p className="modal__meta">Submitted: {createdAtLabel}</p>
+                )}
+                {activeBooking.notes && (
+                  <p className="modal__meta">Notes: {activeBooking.notes}</p>
+                )}
               </div>
             </div>
             <div className="admin-modal__actions">
-              <button className="btn btn--secondary" type="button" onClick={closeBookingDetails}>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={closeBookingDetails}
+              >
                 Close
               </button>
               <button
@@ -16314,7 +19111,9 @@ export function AdminCutFlowerBookingsView() {
           setDeleteBusy(true);
           setFormError(null);
           try {
-            await deleteDoc(doc(db, "cutFlowerBookings", deleteDialog.targetId));
+            await deleteDoc(
+              doc(db, "cutFlowerBookings", deleteDialog.targetId),
+            );
             setStatusMessage("Cut flower booking removed");
             if (editingId === deleteDialog.targetId) {
               closeBookingModal();
@@ -16335,7 +19134,15 @@ export function AdminOrdersView() {
     title: "Admin - Orders",
     description: "Review cart checkouts and fulfilment status.",
   });
-  const { db, storage, orders, products, productCategories, inventoryLoading, inventoryError } = useAdminData();
+  const {
+    db,
+    storage,
+    orders,
+    products,
+    productCategories,
+    inventoryLoading,
+    inventoryError,
+  } = useAdminData();
   const [statusMessage, setStatusMessage] = useState(null);
   const functionsInstance = useMemo(() => {
     try {
@@ -16351,13 +19158,18 @@ export function AdminOrdersView() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [openOrderActions, setOpenOrderActions] = useState(null);
-  const [activeOrderDetailTab, setActiveOrderDetailTab] = useState(ORDER_DETAIL_TABS[0].id);
+  const [activeOrderDetailTab, setActiveOrderDetailTab] = useState(
+    ORDER_DETAIL_TABS[0].id,
+  );
   const [paymentUpdating, setPaymentUpdating] = useState(false);
   const [deliveryMethod, setDeliveryMethod] = useState("company");
-  const [deliveryAddressForm, setDeliveryAddressForm] = useState({ ...EMPTY_SHIPPING_ADDRESS });
+  const [deliveryAddressForm, setDeliveryAddressForm] = useState({
+    ...EMPTY_SHIPPING_ADDRESS,
+  });
   const [deliveryCourierId, setDeliveryCourierId] = useState("");
   const [deliverySaving, setDeliverySaving] = useState(false);
-  const [deliveryUpdateEmailSending, setDeliveryUpdateEmailSending] = useState(false);
+  const [deliveryUpdateEmailSending, setDeliveryUpdateEmailSending] =
+    useState(false);
   const [resendOrderEmailSending, setResendOrderEmailSending] = useState(false);
   const [preorderNoticeMonth, setPreorderNoticeMonth] = useState("");
   const [preorderNoticeSending, setPreorderNoticeSending] = useState(false);
@@ -16371,8 +19183,10 @@ export function AdminOrdersView() {
   const [createOrderFilters, setCreateOrderFilters] = useState(() => ({
     ...CREATE_ORDER_FILTER_DEFAULTS,
   }));
-  const [createOrderVariantSelections, setCreateOrderVariantSelections] = useState({});
-  const [createOrderSelectedCourierId, setCreateOrderSelectedCourierId] = useState("");
+  const [createOrderVariantSelections, setCreateOrderVariantSelections] =
+    useState({});
+  const [createOrderSelectedCourierId, setCreateOrderSelectedCourierId] =
+    useState("");
   const [createOrderForm, setCreateOrderForm] = useState({
     customer: {
       fullName: "",
@@ -16388,16 +19202,24 @@ export function AdminOrdersView() {
     },
     items: [],
   });
-  const { items: createOrderCourierOptions = [], status: createOrderCourierStatus } =
-    useFirestoreCollection("courierOptions", {
-      orderByField: "createdAt",
-      orderDirection: "desc",
-      fallback: [],
-    });
+  const {
+    items: createOrderCourierOptions = [],
+    status: createOrderCourierStatus,
+  } = useFirestoreCollection("courierOptions", {
+    orderByField: "createdAt",
+    orderDirection: "desc",
+    fallback: [],
+  });
   const [ordersPage, setOrdersPage] = useState(0);
-  const [ordersPageSize, setOrdersPageSize] = useState(ORDER_PAGE_SIZE_OPTIONS[0]);
+  const [ordersPageSize, setOrdersPageSize] = useState(
+    ORDER_PAGE_SIZE_OPTIONS[0],
+  );
   const [editingOrderId, setEditingOrderId] = useState(null);
-  const [editOrderForm, setEditOrderForm] = useState({ items: [], totalPrice: 0, originalTotalPrice: 0 });
+  const [editOrderForm, setEditOrderForm] = useState({
+    items: [],
+    totalPrice: 0,
+    originalTotalPrice: 0,
+  });
   const [editOrderSaving, setEditOrderSaving] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
 
@@ -16427,7 +19249,8 @@ export function AdminOrdersView() {
       if (
         target &&
         typeof target.closest === "function" &&
-        (target.closest(".admin-order-row-actions") || target.closest(".admin-order-row-actions__menu"))
+        (target.closest(".admin-order-row-actions") ||
+          target.closest(".admin-order-row-actions__menu"))
       ) {
         return;
       }
@@ -16463,56 +19286,94 @@ export function AdminOrdersView() {
   const needsTrackingLink = (status) => ["shipped"].includes(status);
 
   const normalizePaymentMethod = (order) =>
-    normalizeOrderPaymentMethod(order?.paymentMethod || (order?.payfast ? PAYMENT_METHODS.PAYFAST : ""));
+    normalizeOrderPaymentMethod(
+      order?.paymentMethod || (order?.payfast ? PAYMENT_METHODS.PAYFAST : ""),
+    );
 
   const normalizePaymentApprovalStatus = (order) =>
     normalizeOrderPaymentApprovalStatus(order || {});
 
-  const isEftOrder = (order) => normalizePaymentMethod(order) === PAYMENT_METHODS.EFT;
+  const isEftOrder = (order) =>
+    normalizePaymentMethod(order) === PAYMENT_METHODS.EFT;
   const isEftApproved = (order) =>
     isEftOrder(order) &&
-    normalizePaymentApprovalStatus(order) === PAYMENT_APPROVAL_STATUSES.APPROVED;
+    normalizePaymentApprovalStatus(order) ===
+      PAYMENT_APPROVAL_STATUSES.APPROVED;
   const isEftRejected = (order) =>
     isEftOrder(order) &&
-    normalizePaymentApprovalStatus(order) === PAYMENT_APPROVAL_STATUSES.REJECTED;
+    normalizePaymentApprovalStatus(order) ===
+      PAYMENT_APPROVAL_STATUSES.REJECTED;
   const isEftBlocked = (order) => isEftOrder(order) && !isEftApproved(order);
 
   const normalizePaymentStatus = (order) => {
     const method = normalizePaymentMethod(order);
     if (method === PAYMENT_METHODS.EFT) {
       const approvalStatus = normalizePaymentApprovalStatus(order);
-      if (approvalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED) return "approved";
-      if (approvalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED) return "rejected";
-      return (order?.paymentStatus || "awaiting-approval").toString().toLowerCase() || "awaiting-approval";
+      if (approvalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED)
+        return "approved";
+      if (approvalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED)
+        return "rejected";
+      return (
+        (order?.paymentStatus || "awaiting-approval")
+          .toString()
+          .toLowerCase() || "awaiting-approval"
+      );
     }
     return (
-      (order?.payfast?.paymentStatus || order?.paymentStatus || "").toString().toLowerCase() || "unknown"
+      (order?.payfast?.paymentStatus || order?.paymentStatus || "")
+        .toString()
+        .toLowerCase() || "unknown"
     );
   };
+  const isSettledPaymentStatus = (status = "") =>
+    ["paid", "complete", "completed"].includes(
+      (status || "").toString().trim().toLowerCase(),
+    );
 
   const getAllowedOrderStatuses = (order) => {
     const filterStatusesForFulfilmentMethod = (statuses) => {
       const filteredStatuses = isCollectionDeliveryMethod(order?.deliveryMethod)
         ? statuses.filter(
-            (status) => !["order-ready-for-shipping", "out-for-delivery", "delivered", "shipped"].includes(status),
+            (status) =>
+              ![
+                "order-ready-for-shipping",
+                "out-for-delivery",
+                "delivered",
+                "shipped",
+              ].includes(status),
           )
-        : statuses.filter((status) => status !== "ready-to-collect-at-farm");
+        : statuses;
       const currentStatus = normalizeOrderStatus(order?.status);
-      return filteredStatuses.includes(currentStatus) ? filteredStatuses : [currentStatus, ...filteredStatuses];
+      return filteredStatuses.includes(currentStatus)
+        ? filteredStatuses
+        : [currentStatus, ...filteredStatuses];
     };
 
     if (!isEftOrder(order)) {
       return filterStatusesForFulfilmentMethod(
-        ORDER_STATUSES.filter((status) => !["pending-payment-approval", "payment-rejected"].includes(status)),
+        ORDER_STATUSES.filter(
+          (status) =>
+            !["pending-payment-approval", "payment-rejected"].includes(status),
+        ),
       );
     }
     if (isEftApproved(order)) {
       return filterStatusesForFulfilmentMethod(
-        ORDER_STATUSES.filter((status) => !["pending-payment-approval", "payment-rejected"].includes(status)),
+        ORDER_STATUSES.filter(
+          (status) =>
+            !["pending-payment-approval", "payment-rejected"].includes(status),
+        ),
       );
     }
-    if (isEftRejected(order)) return filterStatusesForFulfilmentMethod(["payment-rejected", "cancelled"]);
-    return filterStatusesForFulfilmentMethod(["pending-payment-approval", "cancelled"]);
+    if (isEftRejected(order))
+      return filterStatusesForFulfilmentMethod([
+        "payment-rejected",
+        "cancelled",
+      ]);
+    return filterStatusesForFulfilmentMethod([
+      "pending-payment-approval",
+      "cancelled",
+    ]);
   };
 
   const normalizeDeliveryStatus = (order) => {
@@ -16534,10 +19395,18 @@ export function AdminOrdersView() {
     if (!Array.isArray(order?.items) || !order.items.length) return false;
     return order.items.some((item) => {
       if (!item || item.metadata?.type !== "product") return false;
-      if (item.metadata?.preorderSendMonth || item.metadata?.preorder_send_month || item.metadata?.preorderSendMonthLabel) {
+      if (
+        item.metadata?.preorderSendMonth ||
+        item.metadata?.preorder_send_month ||
+        item.metadata?.preorderSendMonthLabel
+      ) {
         return true;
       }
-      const metadataStockStatus = (item.metadata?.stockStatus || item.metadata?.stock_status || "")
+      const metadataStockStatus = (
+        item.metadata?.stockStatus ||
+        item.metadata?.stock_status ||
+        ""
+      )
         .toString()
         .trim()
         .toLowerCase();
@@ -16550,7 +19419,11 @@ export function AdminOrdersView() {
         null;
       if (!productId) return false;
       const product = productLookup.get(String(productId));
-      const productStockStatus = (product?.stock_status || product?.stockStatus || "")
+      const productStockStatus = (
+        product?.stock_status ||
+        product?.stockStatus ||
+        ""
+      )
         .toString()
         .trim()
         .toLowerCase();
@@ -16585,7 +19458,10 @@ export function AdminOrdersView() {
 
     setPreorderNoticeSending(true);
     try {
-      const sendPreorderListEmail = httpsCallable(functionsInstance, "sendPreorderListEmail");
+      const sendPreorderListEmail = httpsCallable(
+        functionsInstance,
+        "sendPreorderListEmail",
+      );
       await sendPreorderListEmail({
         customer: selectedOrder.customer,
         customerEmail: selectedOrder.customer?.email || "",
@@ -16595,7 +19471,9 @@ export function AdminOrdersView() {
       });
       setStatusMessage("Pre-order notice email sent.");
     } catch (error) {
-      setStatusMessage(error.message || "Unable to send pre-order notice email.");
+      setStatusMessage(
+        error.message || "Unable to send pre-order notice email.",
+      );
     } finally {
       setPreorderNoticeSending(false);
     }
@@ -16603,7 +19481,9 @@ export function AdminOrdersView() {
 
   const handleResendOrderConfirmationEmail = async () => {
     if (!functionsInstance || !selectedOrder) return;
-    const customerEmail = (selectedOrder.customer?.email || "").toString().trim();
+    const customerEmail = (selectedOrder.customer?.email || "")
+      .toString()
+      .trim();
     if (!customerEmail) {
       setStatusMessage("Customer email is missing.");
       return;
@@ -16611,13 +19491,19 @@ export function AdminOrdersView() {
 
     setResendOrderEmailSending(true);
     try {
-      const resendOrderConfirmationEmail = httpsCallable(functionsInstance, "resendOrderConfirmationEmail");
+      const resendOrderConfirmationEmail = httpsCallable(
+        functionsInstance,
+        "resendOrderConfirmationEmail",
+      );
       const result = await resendOrderConfirmationEmail({
         orderId: selectedOrder.id,
         orderNumber: selectedOrder.orderNumber ?? null,
         customerEmail,
       });
-      const templateUsed = (result?.data?.templateUsed || "").toString().trim().toLowerCase();
+      const templateUsed = (result?.data?.templateUsed || "")
+        .toString()
+        .trim()
+        .toLowerCase();
       if (templateUsed === "eft-pending") {
         setStatusMessage("EFT pending payment email resent to customer.");
       } else {
@@ -16635,7 +19521,9 @@ export function AdminOrdersView() {
     try {
       printOrderInvoice(order);
     } catch (error) {
-      setStatusMessage(error?.message || "Unable to open the invoice print view.");
+      setStatusMessage(
+        error?.message || "Unable to open the invoice print view.",
+      );
     }
   };
 
@@ -16672,10 +19560,15 @@ export function AdminOrdersView() {
           );
       const maxLeft = Math.max(
         ORDER_ROW_MENU_VIEWPORT_PADDING,
-        window.innerWidth - ORDER_ROW_MENU_WIDTH - ORDER_ROW_MENU_VIEWPORT_PADDING,
+        window.innerWidth -
+          ORDER_ROW_MENU_WIDTH -
+          ORDER_ROW_MENU_VIEWPORT_PADDING,
       );
       const left = Math.min(
-        Math.max(ORDER_ROW_MENU_VIEWPORT_PADDING, rect.right - ORDER_ROW_MENU_WIDTH),
+        Math.max(
+          ORDER_ROW_MENU_VIEWPORT_PADDING,
+          rect.right - ORDER_ROW_MENU_WIDTH,
+        ),
         maxLeft,
       );
 
@@ -16701,9 +19594,10 @@ export function AdminOrdersView() {
     try {
       await updateDoc(doc(db, "orders", order.id), {
         paymentStatus: "paid",
-        status: normalizeOrderStatus(order.status) === "pending-payment-approval"
-          ? "order-placed"
-          : normalizeOrderStatus(order.status) || "order-placed",
+        status:
+          normalizeOrderStatus(order.status) === "pending-payment-approval"
+            ? "order-placed"
+            : normalizeOrderStatus(order.status) || "order-placed",
         paymentMethod: PAYMENT_METHODS.PAYFAST,
         paymentApprovalStatus: PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED,
         paymentApproval: {
@@ -16721,7 +19615,10 @@ export function AdminOrdersView() {
       const bookingRefs = [];
       if (order.items.some((item) => item.metadata.type === "workshop")) {
         const { getDocs, query, where } = await import("firebase/firestore");
-        const bookingsQuery = query(collection(db, "bookings"), where("orderId", "==", order.id));
+        const bookingsQuery = query(
+          collection(db, "bookings"),
+          where("orderId", "==", order.id),
+        );
         const snapshot = await getDocs(bookingsQuery);
         snapshot.forEach((docSnap) => bookingRefs.push(docSnap.ref));
         if (bookingRefs.length) {
@@ -16750,12 +19647,17 @@ export function AdminOrdersView() {
     if (!functionsInstance || !order?.id || !isEftOrder(order)) return;
     setEftReviewLoading(true);
     try {
-      const reviewEftPayment = httpsCallable(functionsInstance, "reviewEftPayment");
+      const reviewEftPayment = httpsCallable(
+        functionsInstance,
+        "reviewEftPayment",
+      );
       const result = await reviewEftPayment({
         orderId: order.id,
         decision,
       });
-      const nextStatus = result?.data?.status || (decision === "approve" ? "order-placed" : "payment-rejected");
+      const nextStatus =
+        result?.data?.status ||
+        (decision === "approve" ? "order-placed" : "payment-rejected");
       setStatusMessage(
         decision === "approve"
           ? `EFT payment approved. Order moved to ${formatOrderStatusLabel(nextStatus)}.`
@@ -16826,11 +19728,17 @@ export function AdminOrdersView() {
     }));
   };
 
-  const createOrderPostalCode = (createOrderForm.shippingAddress?.postalCode || "").toString().trim();
+  const createOrderPostalCode = (
+    createOrderForm.shippingAddress?.postalCode || ""
+  )
+    .toString()
+    .trim();
   const createOrderPostalCodeValid = /^\d{4}$/.test(createOrderPostalCode);
 
   const createOrderAvailableCouriers = useMemo(() => {
-    const province = (createOrderForm.shippingAddress?.province || "").toString().trim();
+    const province = (createOrderForm.shippingAddress?.province || "")
+      .toString()
+      .trim();
     if (!province) return [];
     return createOrderCourierOptions
       .filter((option) => option?.isActive !== false)
@@ -16849,11 +19757,17 @@ export function AdminOrdersView() {
   }, [createOrderCourierOptions, createOrderForm.shippingAddress?.province]);
 
   const createOrderSelectedCourier =
-    createOrderAvailableCouriers.find((option) => option.id === createOrderSelectedCourierId) || null;
-  const createOrderShippingCost = createOrderSelectedCourier ? createOrderSelectedCourier.price : 0;
+    createOrderAvailableCouriers.find(
+      (option) => option.id === createOrderSelectedCourierId,
+    ) || null;
+  const createOrderShippingCost = createOrderSelectedCourier
+    ? createOrderSelectedCourier.price
+    : 0;
 
   useEffect(() => {
-    const province = (createOrderForm.shippingAddress?.province || "").toString().trim();
+    const province = (createOrderForm.shippingAddress?.province || "")
+      .toString()
+      .trim();
     if (!province) {
       setCreateOrderSelectedCourierId("");
       return;
@@ -16873,7 +19787,9 @@ export function AdminOrdersView() {
     const lookup = new Map();
     (productCategories || []).forEach((category, index) => {
       if (!category) return;
-      const label = (category.name || category.title || category.label || "").toString().trim();
+      const label = (category.name || category.title || category.label || "")
+        .toString()
+        .trim();
       const canonicalId =
         normalizeCreateOrderCategoryToken(category.id) ||
         normalizeCreateOrderCategoryToken(category.slug) ||
@@ -16885,7 +19801,9 @@ export function AdminOrdersView() {
       };
       const tokens = new Set([canonicalId]);
       [category.id, category.slug, label].forEach((value) => {
-        buildCreateOrderCategoryTokens(value).forEach((token) => tokens.add(token));
+        buildCreateOrderCategoryTokens(value).forEach((token) =>
+          tokens.add(token),
+        );
       });
       tokens.forEach((token) => lookup.set(token, entry));
     });
@@ -16903,7 +19821,9 @@ export function AdminOrdersView() {
         const variants = Array.isArray(product.variants)
           ? product.variants
               .map((variant, index) => {
-                const label = (variant?.label || variant?.name || "").toString().trim();
+                const label = (variant?.label || variant?.name || "")
+                  .toString()
+                  .trim();
                 if (!label) return null;
                 return {
                   id: variant.id || `${product.id}-variant-${index}`,
@@ -16918,17 +19838,22 @@ export function AdminOrdersView() {
           .filter((price) => Number.isFinite(price));
         const filterPrice = variantPrices.length
           ? Math.min(...variantPrices)
-          : Number.isFinite(numericPrice) ?
-             numericPrice
+          : Number.isFinite(numericPrice)
+            ? numericPrice
             : null;
         const isGiftCard = Boolean(product.isGiftCard || product.is_gift_card);
         const stockStatus = getStockStatus({
           quantity: product.stock_quantity ?? product.quantity,
-          forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
+          forceOutOfStock:
+            product.forceOutOfStock || product.stock_status === "out_of_stock",
           status: product.stock_status,
           isGiftCard,
         });
-        const stockStatusKey = (isGiftCard ? "in_stock" : (product.stock_status || product.stockStatus || ""))
+        const stockStatusKey = (
+          isGiftCard
+            ? "in_stock"
+            : product.stock_status || product.stockStatus || ""
+        )
           .toString()
           .trim()
           .toLowerCase();
@@ -16962,10 +19887,15 @@ export function AdminOrdersView() {
           }
         }
 
-        const fallbackCategoryLabel = (product.category || product.categoryName || "")
+        const fallbackCategoryLabel = (
+          product.category ||
+          product.categoryName ||
+          ""
+        )
           .toString()
           .trim();
-        const categoryLabel = resolvedCategory?.label || fallbackCategoryLabel || "";
+        const categoryLabel =
+          resolvedCategory?.label || fallbackCategoryLabel || "";
         const categoryId =
           resolvedCategory?.id ||
           normalizeCreateOrderCategoryToken(slugifyId(categoryLabel)) ||
@@ -16974,10 +19904,12 @@ export function AdminOrdersView() {
         if (categoryId && !categoryTokens.includes(categoryId)) {
           categoryTokens.push(categoryId);
         }
-        const freshFlowerCategoryTokens = collectFreshFlowerCategoryTokens(categoryTokens);
-        const deliveryContactCandidate = requiresFreshFlowerDeliveryContactForCategoryTokens(
-          freshFlowerCategoryTokens,
-        );
+        const freshFlowerCategoryTokens =
+          collectFreshFlowerCategoryTokens(categoryTokens);
+        const deliveryContactCandidate =
+          requiresFreshFlowerDeliveryContactForCategoryTokens(
+            freshFlowerCategoryTokens,
+          );
 
         return {
           id: product.id,
@@ -16985,7 +19917,9 @@ export function AdminOrdersView() {
           sku: (product.sku || "").toString().trim(),
           name,
           numericPrice,
-          displayPrice: Number.isFinite(numericPrice) ? formatPriceLabel(numericPrice) : "Price on request",
+          displayPrice: Number.isFinite(numericPrice)
+            ? formatPriceLabel(numericPrice)
+            : "Price on request",
           variants,
           stockStatus,
           stockStatusKey,
@@ -17023,7 +19957,9 @@ export function AdminOrdersView() {
     createOrderCatalogProducts.forEach((product) => {
       const id =
         normalizeCreateOrderCategoryToken(product.categoryId) ||
-        normalizeCreateOrderCategoryToken(slugifyId(product.categoryLabel || ""));
+        normalizeCreateOrderCategoryToken(
+          slugifyId(product.categoryLabel || ""),
+        );
       if (!id) return;
       if (!options.has(id)) {
         options.set(id, {
@@ -17032,15 +19968,25 @@ export function AdminOrdersView() {
         });
       }
     });
-    return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return Array.from(options.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
   }, [productCategories, createOrderCatalogProducts]);
 
   const filteredCreateOrderProducts = useMemo(() => {
     const term = createOrderProductSearch.trim().toLowerCase();
-    const selectedCategoryId = normalizeCreateOrderCategoryToken(createOrderFilters.categoryId);
-    const selectedStock = normalizeCreateOrderCategoryToken(createOrderFilters.stock);
-    const minPrice = parseOptionalNumber((createOrderFilters.minPrice || "").toString().trim());
-    const maxPrice = parseOptionalNumber((createOrderFilters.maxPrice || "").toString().trim());
+    const selectedCategoryId = normalizeCreateOrderCategoryToken(
+      createOrderFilters.categoryId,
+    );
+    const selectedStock = normalizeCreateOrderCategoryToken(
+      createOrderFilters.stock,
+    );
+    const minPrice = parseOptionalNumber(
+      (createOrderFilters.minPrice || "").toString().trim(),
+    );
+    const maxPrice = parseOptionalNumber(
+      (createOrderFilters.maxPrice || "").toString().trim(),
+    );
     const hasMinPrice = Number.isFinite(minPrice);
     const hasMaxPrice = Number.isFinite(maxPrice);
 
@@ -17055,10 +20001,15 @@ export function AdminOrdersView() {
       );
     }
     if (selectedCategoryId && selectedCategoryId !== "all") {
-      filtered = filtered.filter((product) => product.categoryTokens.includes(selectedCategoryId));
+      filtered = filtered.filter((product) =>
+        product.categoryTokens.includes(selectedCategoryId),
+      );
     }
     if (selectedStock && selectedStock !== "all") {
-      filtered = filtered.filter((product) => (product.stockStatus?.state || "").toLowerCase() === selectedStock);
+      filtered = filtered.filter(
+        (product) =>
+          (product.stockStatus?.state || "").toLowerCase() === selectedStock,
+      );
     }
     if (hasMinPrice || hasMaxPrice) {
       filtered = filtered.filter((product) => {
@@ -17070,12 +20021,16 @@ export function AdminOrdersView() {
       });
     }
 
-    if (createOrderFilters.sort === "price-asc" || createOrderFilters.sort === "price-desc") {
+    if (
+      createOrderFilters.sort === "price-asc" ||
+      createOrderFilters.sort === "price-desc"
+    ) {
       const priceDirection = createOrderFilters.sort === "price-asc" ? 1 : -1;
       filtered.sort((a, b) => {
         const aPrice = Number.isFinite(a.filterPrice) ? a.filterPrice : null;
         const bPrice = Number.isFinite(b.filterPrice) ? b.filterPrice : null;
-        if (aPrice === null && bPrice === null) return a.name.localeCompare(b.name);
+        if (aPrice === null && bPrice === null)
+          return a.name.localeCompare(b.name);
         if (aPrice === null) return 1;
         if (bPrice === null) return -1;
         const diff = (aPrice - bPrice) * priceDirection;
@@ -17086,35 +20041,50 @@ export function AdminOrdersView() {
     }
 
     return filtered;
-  }, [createOrderCatalogProducts, createOrderFilters, createOrderProductSearch]);
+  }, [
+    createOrderCatalogProducts,
+    createOrderFilters,
+    createOrderProductSearch,
+  ]);
 
   const hasActiveCreateOrderFilters = useMemo(
     () =>
-      createOrderFilters.categoryId !== CREATE_ORDER_FILTER_DEFAULTS.categoryId ||
+      createOrderFilters.categoryId !==
+        CREATE_ORDER_FILTER_DEFAULTS.categoryId ||
       createOrderFilters.stock !== CREATE_ORDER_FILTER_DEFAULTS.stock ||
-      (createOrderFilters.minPrice || "").toString().trim() !== CREATE_ORDER_FILTER_DEFAULTS.minPrice ||
-      (createOrderFilters.maxPrice || "").toString().trim() !== CREATE_ORDER_FILTER_DEFAULTS.maxPrice ||
+      (createOrderFilters.minPrice || "").toString().trim() !==
+        CREATE_ORDER_FILTER_DEFAULTS.minPrice ||
+      (createOrderFilters.maxPrice || "").toString().trim() !==
+        CREATE_ORDER_FILTER_DEFAULTS.maxPrice ||
       createOrderFilters.sort !== CREATE_ORDER_FILTER_DEFAULTS.sort,
     [createOrderFilters],
   );
   const hasActiveCreateOrderSearch = createOrderProductSearch.trim().length > 0;
   const createOrderEmptyMessage = hasActiveCreateOrderFilters
     ? "No products match current filters."
-    : hasActiveCreateOrderSearch ?
-       "No products match this search."
+    : hasActiveCreateOrderSearch
+      ? "No products match this search."
       : "No products available in your catalog.";
 
   const handleAddCatalogProductToOrder = (product) => {
     const selectedVariantId = createOrderVariantSelections[product.id] || "";
-    const selectedVariant = product.variants.find((variant) => variant.id === selectedVariantId) || null;
+    const selectedVariant =
+      product.variants.find((variant) => variant.id === selectedVariantId) ||
+      null;
     if (product.variants.length > 0 && !selectedVariant) {
-      setCreateOrderError(`Select a variant for ${product.name} before adding it.`);
+      setCreateOrderError(
+        `Select a variant for ${product.name} before adding it.`,
+      );
       return;
     }
 
-    const unitPrice = Number.isFinite(selectedVariant?.price) ? selectedVariant.price : product.numericPrice;
+    const unitPrice = Number.isFinite(selectedVariant?.price)
+      ? selectedVariant.price
+      : product.numericPrice;
     if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-      setCreateOrderError(`Unable to add ${product.name}. Please check that a valid price is set.`);
+      setCreateOrderError(
+        `Unable to add ${product.name}. Please check that a valid price is set.`,
+      );
       return;
     }
 
@@ -17129,12 +20099,15 @@ export function AdminOrdersView() {
       productSlug: product.slug || null,
       categoryId: product.categoryId || null,
       categoryLabel: product.categoryLabel || null,
-      categoryTokens: product.freshFlowerCategoryTokens || collectFreshFlowerCategoryTokens(product.categoryTokens),
+      categoryTokens:
+        product.freshFlowerCategoryTokens ||
+        collectFreshFlowerCategoryTokens(product.categoryTokens),
       variantId: selectedVariant?.id || null,
       variantLabel: selectedVariant?.label || null,
       stockStatus: product.stockStatusKey || null,
       preorderSendMonth: product.preorderSendMonth || null,
-      deliveryContactCandidate: !product.isGiftCard && Boolean(product.deliveryContactCandidate),
+      deliveryContactCandidate:
+        !product.isGiftCard && Boolean(product.deliveryContactCandidate),
     };
     if (product.isGiftCard) {
       metadata.isGiftCard = true;
@@ -17143,7 +20116,9 @@ export function AdminOrdersView() {
     }
 
     setCreateOrderForm((prev) => {
-      const existingIndex = prev.items.findIndex((item) => item.key === itemKey);
+      const existingIndex = prev.items.findIndex(
+        (item) => item.key === itemKey,
+      );
       if (existingIndex === -1) {
         return {
           ...prev,
@@ -17187,9 +20162,7 @@ export function AdminOrdersView() {
     setCreateOrderForm((prev) => ({
       ...prev,
       items: prev.items.map((item) =>
-        item.key === itemKey
-          ? { ...item, quantity: nextQuantity }
-          : item,
+        item.key === itemKey ? { ...item, quantity: nextQuantity } : item,
       ),
     }));
   };
@@ -17217,7 +20190,13 @@ export function AdminOrdersView() {
       const name = (item.name || "").toString().trim();
       const quantity = Number.parseInt(item.quantity, 10);
       const price = parseNumber(item.price, null);
-      if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price < 0) {
+      if (
+        !name ||
+        !Number.isFinite(quantity) ||
+        quantity <= 0 ||
+        !Number.isFinite(price) ||
+        price < 0
+      ) {
         return acc;
       }
       acc.push({
@@ -17235,10 +20214,14 @@ export function AdminOrdersView() {
       return acc;
     }, []);
 
-    const subtotal = validItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const shippingCost = Number.isFinite(createOrderShippingCost) && createOrderShippingCost >= 0
-      ? createOrderShippingCost
-      : 0;
+    const subtotal = validItems.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0,
+    );
+    const shippingCost =
+      Number.isFinite(createOrderShippingCost) && createOrderShippingCost >= 0
+        ? createOrderShippingCost
+        : 0;
     return {
       validItems,
       subtotal,
@@ -17259,30 +20242,51 @@ export function AdminOrdersView() {
       street: (createOrderForm.shippingAddress?.street || "").toString().trim(),
       suburb: (createOrderForm.shippingAddress?.suburb || "").toString().trim(),
       city: (createOrderForm.shippingAddress?.city || "").toString().trim(),
-      province: (createOrderForm.shippingAddress?.province || "").toString().trim(),
+      province: (createOrderForm.shippingAddress?.province || "")
+        .toString()
+        .trim(),
       postalCode: createOrderPostalCode,
     };
     customer.address = formatShippingAddress(normalizedShippingAddress);
 
     const requiredCustomer = ["fullName", "email", "phone"];
-    const missingCustomer = requiredCustomer.filter((field) => !customer[field]);
+    const missingCustomer = requiredCustomer.filter(
+      (field) => !customer[field],
+    );
     if (missingCustomer.length) {
-      setCreateOrderError("Please complete customer details before creating the order.");
+      setCreateOrderError(
+        "Please complete customer details before creating the order.",
+      );
       return;
     }
 
-    const requiredShipping = ["street", "suburb", "city", "province", "postalCode"];
-    const missingShipping = requiredShipping.filter((field) => !normalizedShippingAddress[field]);
+    const requiredShipping = [
+      "street",
+      "suburb",
+      "city",
+      "province",
+      "postalCode",
+    ];
+    const missingShipping = requiredShipping.filter(
+      (field) => !normalizedShippingAddress[field],
+    );
     if (missingShipping.length) {
-      setCreateOrderError("Please complete shipping address details before creating the order.");
+      setCreateOrderError(
+        "Please complete shipping address details before creating the order.",
+      );
       return;
     }
     if (!createOrderPostalCodeValid) {
       setCreateOrderError("Postal code should be 4 digits.");
       return;
     }
-    if (normalizedShippingAddress.province && createOrderAvailableCouriers.length === 0) {
-      setCreateOrderError(`No courier options are available for ${normalizedShippingAddress.province}.`);
+    if (
+      normalizedShippingAddress.province &&
+      createOrderAvailableCouriers.length === 0
+    ) {
+      setCreateOrderError(
+        `No courier options are available for ${normalizedShippingAddress.province}.`,
+      );
       return;
     }
     if (!createOrderSelectedCourier) {
@@ -17298,7 +20302,10 @@ export function AdminOrdersView() {
     setCreateOrderSaving(true);
     setCreateOrderError(null);
     try {
-      const createAdminEftOrder = httpsCallable(functionsInstance, "createAdminEftOrder");
+      const createAdminEftOrder = httpsCallable(
+        functionsInstance,
+        "createAdminEftOrder",
+      );
       const result = await createAdminEftOrder({
         customer,
         items: createOrderPricing.validItems.map((item) => ({
@@ -17306,7 +20313,10 @@ export function AdminOrdersView() {
           name: item.name,
           quantity: item.quantity,
           price: item.price,
-          metadata: item.metadata || { type: "product", source: "admin-created-order" },
+          metadata: item.metadata || {
+            type: "product",
+            source: "admin-created-order",
+          },
         })),
         subtotal: createOrderPricing.subtotal,
         shippingCost: createOrderPricing.shippingCost,
@@ -17352,9 +20362,12 @@ export function AdminOrdersView() {
       setStatusMessage("Delivery update service is unavailable.");
       return;
     }
-    const normalizedAddress = normalizeShippingAddressDraft(deliveryAddressForm);
+    const normalizedAddress =
+      normalizeShippingAddressDraft(deliveryAddressForm);
     if (!isShippingAddressComplete(normalizedAddress)) {
-      setStatusMessage("Complete street, suburb, city, province, and a 4-digit postal code before saving.");
+      setStatusMessage(
+        "Complete street, suburb, city, province, and a 4-digit postal code before saving.",
+      );
       return;
     }
     if (deliveryMethod === "courier" && !deliveryCourierId) {
@@ -17364,20 +20377,27 @@ export function AdminOrdersView() {
 
     setDeliverySaving(true);
     try {
-      const callable = httpsCallable(functionsInstance, "adminUpdateOrderDeliveryDetails");
+      const callable = httpsCallable(
+        functionsInstance,
+        "adminUpdateOrderDeliveryDetails",
+      );
       const response = await callable({
         orderId: selectedOrder.id,
         deliveryMethod,
         courierId: deliveryMethod === "courier" ? deliveryCourierId : "",
-        courierName: deliveryMethod === "courier" ? selectedDeliveryCourier?.name || "" : "",
+        courierName:
+          deliveryMethod === "courier"
+            ? selectedDeliveryCourier?.name || ""
+            : "",
         trackingLink: trackingInput.trim(),
         shippingAddress: normalizedAddress,
       });
       const result = response?.data || {};
-      const changedAmount =
-        Number.isFinite(Number(result.paymentAdjustmentDelta)) ?
-          Number(result.paymentAdjustmentDelta)
-          : 0;
+      const changedAmount = Number.isFinite(
+        Number(result.paymentAdjustmentDelta),
+      )
+        ? Number(result.paymentAdjustmentDelta)
+        : 0;
       if (result.paymentAdjustmentRequired) {
         setStatusMessage(
           `Delivery updated. Paid order total changed by ${formatPriceLabel(changedAmount)} and now needs payment review.`,
@@ -17400,7 +20420,10 @@ export function AdminOrdersView() {
     }
     setDeliveryUpdateEmailSending(true);
     try {
-      const callable = httpsCallable(functionsInstance, "adminSendOrderDeliveryUpdateEmail");
+      const callable = httpsCallable(
+        functionsInstance,
+        "adminSendOrderDeliveryUpdateEmail",
+      );
       const response = await callable({
         orderId: selectedOrder.id,
       });
@@ -17408,10 +20431,14 @@ export function AdminOrdersView() {
       if (result.emailStatus === "sent") {
         setStatusMessage("Delivery update email sent.");
       } else {
-        setStatusMessage(result.emailError || "Unable to send delivery update email.");
+        setStatusMessage(
+          result.emailError || "Unable to send delivery update email.",
+        );
       }
     } catch (error) {
-      setStatusMessage(error.message || "Unable to send delivery update email.");
+      setStatusMessage(
+        error.message || "Unable to send delivery update email.",
+      );
     } finally {
       setDeliveryUpdateEmailSending(false);
     }
@@ -17422,7 +20449,7 @@ export function AdminOrdersView() {
   const handleMarkAllOutForDelivery = async () => {
     if (!db) return;
     const eligible = orders.filter(
-      (o) => normalizeOrderStatus(o.status) === "order-ready-for-shipping"
+      (o) => normalizeOrderStatus(o.status) === "order-ready-for-shipping",
     );
     if (eligible.length === 0) {
       setStatusMessage("No orders are ready for shipping.");
@@ -17441,7 +20468,10 @@ export function AdminOrdersView() {
               updatedAt: serverTimestamp(),
             });
             if (functionsInstance && order.customer?.email) {
-              const sendOrderStatusEmail = httpsCallable(functionsInstance, "sendOrderStatusEmail");
+              const sendOrderStatusEmail = httpsCallable(
+                functionsInstance,
+                "sendOrderStatusEmail",
+              );
               await sendOrderStatusEmail({
                 status: "Out For Delivery",
                 orderNumber: order.orderNumber ?? null,
@@ -17455,12 +20485,12 @@ export function AdminOrdersView() {
           } catch {
             failed++;
           }
-        })
+        }),
       );
       setStatusMessage(
         failed === 0
           ? `${sent} order${sent !== 1 ? "s" : ""} marked Out for Delivery — customers notified.`
-          : `${sent} updated, ${failed} failed.`
+          : `${sent} updated, ${failed} failed.`,
       );
     } finally {
       setBatchDeliveryBusy(false);
@@ -17470,7 +20500,7 @@ export function AdminOrdersView() {
   const handleUpdateOrderStatus = async (
     orderId,
     nextStatus,
-    trackingLinkOverride = null
+    trackingLinkOverride = null,
   ) => {
     if (!db) return;
     const targetOrder = orders.find((order) => order.id === orderId);
@@ -17483,7 +20513,10 @@ export function AdminOrdersView() {
       return;
     }
 
-    if (needsTrackingLink(normalizedNextStatus) && trackingLinkOverride === null) {
+    if (
+      needsTrackingLink(normalizedNextStatus) &&
+      trackingLinkOverride === null
+    ) {
       setPendingStatusUpdate({
         orderId,
         status: normalizedNextStatus,
@@ -17494,12 +20527,12 @@ export function AdminOrdersView() {
     }
 
     const normalizedLink =
-      typeof trackingLinkOverride === "string" ?
-         trackingLinkOverride.trim()
+      typeof trackingLinkOverride === "string"
+        ? trackingLinkOverride.trim()
         : targetOrder.trackingLink || "";
     const fallbackLink = normalizedLink || targetOrder.trackingLink || "";
-    const finalTrackingLink = needsTrackingLink(normalizedNextStatus) ?
-       fallbackLink || null
+    const finalTrackingLink = needsTrackingLink(normalizedNextStatus)
+      ? fallbackLink || null
       : targetOrder.trackingLink || null;
 
     await updateDoc(doc(db, "orders", orderId), {
@@ -17513,7 +20546,7 @@ export function AdminOrdersView() {
       try {
         const sendOrderStatusEmail = httpsCallable(
           functionsInstance,
-          "sendOrderStatusEmail"
+          "sendOrderStatusEmail",
         );
         await sendOrderStatusEmail({
           status: getOrderStatusLabel(targetOrder, normalizedNextStatus),
@@ -17554,7 +20587,10 @@ export function AdminOrdersView() {
     setEditOrderForm((prev) => ({
       ...prev,
       items,
-      totalPrice: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+      totalPrice: items.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0,
+      ),
     }));
   };
 
@@ -17564,7 +20600,10 @@ export function AdminOrdersView() {
     setEditOrderForm((prev) => ({
       ...prev,
       items,
-      totalPrice: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+      totalPrice: items.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0,
+      ),
     }));
   };
 
@@ -17573,7 +20612,10 @@ export function AdminOrdersView() {
     setEditOrderForm((prev) => ({
       ...prev,
       items,
-      totalPrice: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+      totalPrice: items.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0,
+      ),
     }));
   };
 
@@ -17584,7 +20626,10 @@ export function AdminOrdersView() {
       const order = orders.find((o) => o.id === editingOrderId);
       if (!order) return;
       const diff = editOrderForm.originalTotalPrice - editOrderForm.totalPrice;
-      const note = diff !== 0 ? `Admin adjusted order items and total by R${Math.abs(diff).toFixed(2)}` : "Admin adjusted order items";
+      const note =
+        diff !== 0
+          ? `Admin adjusted order items and total by R${Math.abs(diff).toFixed(2)}`
+          : "Admin adjusted order items";
       await updateDoc(doc(db, "orders", editingOrderId), {
         items: editOrderForm.items,
         totalPrice: editOrderForm.totalPrice,
@@ -17604,7 +20649,10 @@ export function AdminOrdersView() {
   const filteredOrders = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return orders.filter((order) => {
-      const matchesStatus = statusFilter === "all" ? true : normalizeOrderStatus(order.status) === statusFilter;
+      const matchesStatus =
+        statusFilter === "all"
+          ? true
+          : normalizeOrderStatus(order.status) === statusFilter;
       if (!matchesStatus) return false;
       if (!term) return true;
       const haystack = [
@@ -17621,7 +20669,10 @@ export function AdminOrdersView() {
   }, [orders, searchTerm, statusFilter]);
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(filteredOrders.length / ordersPageSize) - 1);
+    const maxPage = Math.max(
+      0,
+      Math.ceil(filteredOrders.length / ordersPageSize) - 1,
+    );
     setOrdersPage((prev) => Math.min(prev, maxPage));
   }, [filteredOrders.length, ordersPageSize]);
 
@@ -17638,12 +20689,20 @@ export function AdminOrdersView() {
       );
       if (method === PAYMENT_METHODS.EFT) {
         const approvalStatus = normalizeOrderPaymentApprovalStatus(order || {});
-        if (approvalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED) return "approved";
-        if (approvalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED) return "rejected";
-        return (order?.paymentStatus || "awaiting-approval").toString().toLowerCase() || "awaiting-approval";
+        if (approvalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED)
+          return "approved";
+        if (approvalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED)
+          return "rejected";
+        return (
+          (order?.paymentStatus || "awaiting-approval")
+            .toString()
+            .toLowerCase() || "awaiting-approval"
+        );
       }
       return (
-        (order?.payfast?.paymentStatus || order?.paymentStatus || "").toString().toLowerCase() || "unknown"
+        (order?.payfast?.paymentStatus || order?.paymentStatus || "")
+          .toString()
+          .toLowerCase() || "unknown"
       );
     };
     const isPaidOrderForKpi = (order) => {
@@ -17651,7 +20710,10 @@ export function AdminOrdersView() {
         order?.paymentMethod || (order?.payfast ? PAYMENT_METHODS.PAYFAST : ""),
       );
       if (method === PAYMENT_METHODS.EFT) {
-        return normalizeOrderPaymentApprovalStatus(order || {}) === PAYMENT_APPROVAL_STATUSES.APPROVED;
+        return (
+          normalizeOrderPaymentApprovalStatus(order || {}) ===
+          PAYMENT_APPROVAL_STATUSES.APPROVED
+        );
       }
       return ["complete", "paid"].includes(normalizePaymentStatusForKpi(order));
     };
@@ -17679,17 +20741,21 @@ export function AdminOrdersView() {
         shipped: 0,
         completed: 0,
         cancelled: 0,
-      }
+      },
     );
     const paidCount = orders.filter((order) => isPaidOrderForKpi(order)).length;
-    const failedPayments = orders.filter((order) => normalizePaymentStatusForKpi(order) === "failed").length;
+    const failedPayments = orders.filter(
+      (order) => normalizePaymentStatusForKpi(order) === "failed",
+    ).length;
     return { totalToday, statusCounts, paidCount, failedPayments };
   }, [orders]);
 
-  const selectedOrder = selectedOrderId ?
-     orders.find((order) => order.id === selectedOrderId) || null
+  const selectedOrder = selectedOrderId
+    ? orders.find((order) => order.id === selectedOrderId) || null
     : null;
-  const deliveryProvince = (deliveryAddressForm.province || "").toString().trim();
+  const deliveryProvince = (deliveryAddressForm.province || "")
+    .toString()
+    .trim();
   const deliveryAvailableCouriers = useMemo(() => {
     if (deliveryMethod !== "courier" || !deliveryProvince) return [];
     return createOrderCourierOptions
@@ -17704,25 +20770,38 @@ export function AdminOrdersView() {
           isAvailable: provinceConfig.isAvailable === true,
         };
       })
-      .filter((option) => option.isAvailable && Number.isFinite(option.price) && option.price >= 0)
+      .filter(
+        (option) =>
+          option.isAvailable &&
+          Number.isFinite(option.price) &&
+          option.price >= 0,
+      )
       .sort((left, right) => left.price - right.price);
   }, [createOrderCourierOptions, deliveryMethod, deliveryProvince]);
-  const selectedDeliveryCourier = deliveryAvailableCouriers.find(
-    (entry) => entry.id === deliveryCourierId,
-  ) || null;
+  const selectedDeliveryCourier =
+    deliveryAvailableCouriers.find((entry) => entry.id === deliveryCourierId) ||
+    null;
   const shippingAddressLabel = selectedOrder
     ? formatShippingAddress(selectedOrder.shippingAddress) ||
       selectedOrder.customer?.address ||
       ""
     : "";
-  const selectedPaymentMethod = selectedOrder ? normalizePaymentMethod(selectedOrder) : PAYMENT_METHODS.PAYFAST;
+  const selectedPaymentMethod = selectedOrder
+    ? normalizePaymentMethod(selectedOrder)
+    : PAYMENT_METHODS.PAYFAST;
   const selectedPaymentApprovalStatus = selectedOrder
     ? normalizePaymentApprovalStatus(selectedOrder)
     : PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
-  const selectedPaymentStatus = selectedOrder ? normalizePaymentStatus(selectedOrder) : "unknown";
+  const selectedPaymentStatus = selectedOrder
+    ? normalizePaymentStatus(selectedOrder)
+    : "unknown";
   const selectedPaymentAdjustment = selectedOrder?.paymentAdjustment || null;
-  const selectedStatusOptions = selectedOrder ? getAllowedOrderStatuses(selectedOrder) : ORDER_STATUSES;
-  const selectedStatusLocked = selectedOrder ? isEftBlocked(selectedOrder) : false;
+  const selectedStatusOptions = selectedOrder
+    ? getAllowedOrderStatuses(selectedOrder)
+    : ORDER_STATUSES;
+  const selectedStatusLocked = selectedOrder
+    ? isEftBlocked(selectedOrder)
+    : false;
   const selectedPayfast = selectedOrder?.payfast || {};
   const selectedShipping = selectedOrder?.shipping || {};
   const activeOrderActionsOrder = openOrderActions
@@ -17742,7 +20821,10 @@ export function AdminOrdersView() {
     activeOrderActionsApprovalStatus === PAYMENT_APPROVAL_STATUSES.PENDING;
   const activeOrderActionsCanMarkPaymentReceived =
     activeOrderActionsPaymentMethod !== PAYMENT_METHODS.EFT &&
-    !["paid", "complete"].includes(activeOrderActionsPaymentStatus);
+    !isSettledPaymentStatus(activeOrderActionsPaymentStatus);
+  const selectedCanMarkPaymentReceived =
+    selectedPaymentMethod !== PAYMENT_METHODS.EFT &&
+    !isSettledPaymentStatus(selectedPaymentStatus);
   const activeOrderActionsLabel = activeOrderActionsOrder
     ? Number.isFinite(activeOrderActionsOrder.orderNumber)
       ? `Order #${activeOrderActionsOrder.orderNumber}`
@@ -17750,29 +20832,34 @@ export function AdminOrdersView() {
     : "Order";
   const deliveryPreview = useMemo(() => {
     if (!selectedOrder) return null;
-    const previousShippingCostRaw =
-      Number(selectedOrder.shippingCost ?? selectedOrder.shipping?.courierPrice ?? 0);
-    const previousShippingCost = Number.isFinite(previousShippingCostRaw) ?
-       previousShippingCostRaw
+    const previousShippingCostRaw = Number(
+      selectedOrder.shippingCost ?? selectedOrder.shipping?.courierPrice ?? 0,
+    );
+    const previousShippingCost = Number.isFinite(previousShippingCostRaw)
+      ? previousShippingCostRaw
       : 0;
     const subtotal = resolveOrderSubtotalAmount(selectedOrder);
     const previousTotalRaw = Number(selectedOrder.totalPrice);
-    const previousTotal = Number.isFinite(previousTotalRaw) ?
-       previousTotalRaw
+    const previousTotal = Number.isFinite(previousTotalRaw)
+      ? previousTotalRaw
       : subtotal + previousShippingCost;
-    const nextShippingCost = deliveryMethod === "courier"
-      ? Number(selectedDeliveryCourier?.price)
-      : previousShippingCost;
+    const nextShippingCost =
+      deliveryMethod === "courier"
+        ? Number(selectedDeliveryCourier?.price)
+        : previousShippingCost;
     const canResolveNewShippingCost =
       deliveryMethod === "courier" ? Number.isFinite(nextShippingCost) : true;
-    const resolvedShippingCost = canResolveNewShippingCost ? nextShippingCost : previousShippingCost;
+    const resolvedShippingCost = canResolveNewShippingCost
+      ? nextShippingCost
+      : previousShippingCost;
     const nextTotal = subtotal + resolvedShippingCost;
     const totalsChanged = Math.abs(nextTotal - previousTotal) > 0.009;
     const isPaidOrder =
       normalizePaymentStatus(selectedOrder) === "paid" ||
       normalizePaymentStatus(selectedOrder) === "complete" ||
       (isEftOrder(selectedOrder) &&
-        normalizePaymentApprovalStatus(selectedOrder) === PAYMENT_APPROVAL_STATUSES.APPROVED);
+        normalizePaymentApprovalStatus(selectedOrder) ===
+          PAYMENT_APPROVAL_STATUSES.APPROVED);
     const paymentAdjustmentRequired = isPaidOrder && totalsChanged;
     return {
       previousShippingCost,
@@ -17790,32 +20877,54 @@ export function AdminOrdersView() {
     selectedDeliveryCourier?.price,
     selectedOrder,
   ]);
-  const selectedOrderEmailNotification = selectedOrder?.notifications?.orderCreated?.customer || null;
-  const selectedOrderEmailStatusRaw = (selectedOrderEmailNotification?.status || "").toString().trim().toLowerCase();
-  const selectedOrderEmailStatus = ["sent", "failed", "skipped"].includes(selectedOrderEmailStatusRaw)
+  const selectedOrderEmailNotification =
+    selectedOrder?.notifications?.orderCreated?.customer || null;
+  const selectedOrderEmailStatusRaw = (
+    selectedOrderEmailNotification?.status || ""
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+  const selectedOrderEmailStatus = ["sent", "failed", "skipped"].includes(
+    selectedOrderEmailStatusRaw,
+  )
     ? selectedOrderEmailStatusRaw
     : "unknown";
-  const selectedOrderEmailStatusLabel = selectedOrderEmailStatus === "unknown"
-    ? "No attempt recorded"
-    : selectedOrderEmailStatus.charAt(0).toUpperCase() + selectedOrderEmailStatus.slice(1);
-  const selectedOrderEmailTemplate = (selectedOrderEmailNotification?.template || "")
+  const selectedOrderEmailStatusLabel =
+    selectedOrderEmailStatus === "unknown"
+      ? "No attempt recorded"
+      : selectedOrderEmailStatus.charAt(0).toUpperCase() +
+        selectedOrderEmailStatus.slice(1);
+  const selectedOrderEmailTemplate = (
+    selectedOrderEmailNotification?.template || ""
+  )
     .toString()
     .trim()
     .toLowerCase();
-  const selectedOrderEmailTemplateLabel = selectedOrderEmailTemplate === "eft-pending"
-    ? "EFT pending"
-    : selectedOrderEmailTemplate === "standard"
-      ? "Standard confirmation"
-      : "N/A";
-  const selectedOrderEmailAttemptedAtLabel = selectedOrderEmailNotification?.attemptedAt?.toDate?.()
-    ? bookingDateFormatter.format(selectedOrderEmailNotification.attemptedAt.toDate())
-    : "";
-  const selectedOrderEmailLastAttemptSource = (selectedOrderEmailNotification?.lastAttemptSource || "")
+  const selectedOrderEmailTemplateLabel =
+    selectedOrderEmailTemplate === "eft-pending"
+      ? "EFT pending"
+      : selectedOrderEmailTemplate === "standard"
+        ? "Standard confirmation"
+        : "N/A";
+  const selectedOrderEmailAttemptedAtLabel =
+    selectedOrderEmailNotification?.attemptedAt?.toDate?.()
+      ? bookingDateFormatter.format(
+          selectedOrderEmailNotification.attemptedAt.toDate(),
+        )
+      : "";
+  const selectedOrderEmailLastAttemptSource = (
+    selectedOrderEmailNotification?.lastAttemptSource || ""
+  )
     .toString()
     .trim()
     .toLowerCase();
-  const selectedOrderEmailError = (selectedOrderEmailNotification?.error || "").toString().trim();
-  const selectedOrderEmailNeedsRetry = selectedOrderEmailStatus === "failed" || selectedOrderEmailStatus === "skipped";
+  const selectedOrderEmailError = (selectedOrderEmailNotification?.error || "")
+    .toString()
+    .trim();
+  const selectedOrderEmailNeedsRetry =
+    selectedOrderEmailStatus === "failed" ||
+    selectedOrderEmailStatus === "skipped";
   const handleOrderDetailTabKeyDown = (event) => {
     const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
     if (!keys.includes(event.key)) return;
@@ -17832,7 +20941,8 @@ export function AdminOrdersView() {
       return;
     }
     const direction = event.key === "ArrowRight" ? 1 : -1;
-    const nextIndex = (currentIndex + direction + tabIds.length) % tabIds.length;
+    const nextIndex =
+      (currentIndex + direction + tabIds.length) % tabIds.length;
     setActiveOrderDetailTab(tabIds[nextIndex]);
   };
 
@@ -17842,7 +20952,9 @@ export function AdminOrdersView() {
       for (const item of order.items) {
         if (!item || item.metadata?.type !== "product") continue;
         const fromMetadata = normalizePreorderSendMonth(
-          item.metadata?.preorderSendMonth || item.metadata?.preorder_send_month || "",
+          item.metadata?.preorderSendMonth ||
+            item.metadata?.preorder_send_month ||
+            "",
         );
         if (fromMetadata) return fromMetadata;
         const productId =
@@ -17860,14 +20972,23 @@ export function AdminOrdersView() {
       return "";
     };
     if (selectedOrder) {
-      setDeliveryMethod((selectedOrder.deliveryMethod || "company").toString().toLowerCase() === "courier" ? "courier" : "company");
+      setDeliveryMethod(
+        (selectedOrder.deliveryMethod || "company").toString().toLowerCase() ===
+          "courier"
+          ? "courier"
+          : "company",
+      );
       setDeliveryAddressForm(resolveOrderDeliveryAddressDraft(selectedOrder));
-      const selectedOrderCourierId = (selectedOrder.shipping?.courierId || "").toString().trim();
+      const selectedOrderCourierId = (selectedOrder.shipping?.courierId || "")
+        .toString()
+        .trim();
       const selectedOrderCourierName = (
         selectedOrder.shipping?.courierName ||
         selectedOrder.courierName ||
         ""
-      ).toString().trim();
+      )
+        .toString()
+        .trim();
       if (selectedOrderCourierId) {
         setDeliveryCourierId(selectedOrderCourierId);
       } else if (selectedOrderCourierName) {
@@ -17882,7 +21003,9 @@ export function AdminOrdersView() {
       }
       setTrackingInput(selectedOrder.trackingLink || "");
       const fallbackMarchMonth = `${new Date().getFullYear()}-03`;
-      setPreorderNoticeMonth(resolvePreorderSendMonthFromOrder(selectedOrder) || fallbackMarchMonth);
+      setPreorderNoticeMonth(
+        resolvePreorderSendMonthFromOrder(selectedOrder) || fallbackMarchMonth,
+      );
     } else {
       setDeliveryAddressForm({ ...EMPTY_SHIPPING_ADDRESS });
       setDeliveryCourierId("");
@@ -17900,19 +21023,27 @@ export function AdminOrdersView() {
       setDeliveryCourierId("");
       return;
     }
-    const stillValid = deliveryAvailableCouriers.some((entry) => entry.id === deliveryCourierId);
+    const stillValid = deliveryAvailableCouriers.some(
+      (entry) => entry.id === deliveryCourierId,
+    );
     if (stillValid) return;
     const preferredCourierName = (
       selectedOrder.shipping?.courierName ||
       selectedOrder.courierName ||
       ""
-    ).toString().trim().toLowerCase();
+    )
+      .toString()
+      .trim()
+      .toLowerCase();
     const matchedByName = preferredCourierName
       ? deliveryAvailableCouriers.find(
-          (entry) => entry.name.toString().trim().toLowerCase() === preferredCourierName,
+          (entry) =>
+            entry.name.toString().trim().toLowerCase() === preferredCourierName,
         )
       : null;
-    setDeliveryCourierId(matchedByName?.id || deliveryAvailableCouriers[0]?.id || "");
+    setDeliveryCourierId(
+      matchedByName?.id || deliveryAvailableCouriers[0]?.id || "",
+    );
   }, [
     deliveryAvailableCouriers,
     deliveryCourierId,
@@ -17989,11 +21120,15 @@ export function AdminOrdersView() {
         </div>
         <div className="admin-kpi">
           <p className="admin-kpi__label">Order placed</p>
-          <p className="admin-kpi__value">{kpi.statusCounts["order-placed"] || 0}</p>
+          <p className="admin-kpi__value">
+            {kpi.statusCounts["order-placed"] || 0}
+          </p>
         </div>
         <div className="admin-kpi">
           <p className="admin-kpi__label">Packing</p>
-          <p className="admin-kpi__value">{kpi.statusCounts["packing-order"] || 0}</p>
+          <p className="admin-kpi__value">
+            {kpi.statusCounts["packing-order"] || 0}
+          </p>
         </div>
         <div className="admin-kpi">
           <p className="admin-kpi__label">Ready / Completed</p>
@@ -18047,7 +21182,11 @@ export function AdminOrdersView() {
               value={ordersPageSize}
               onChange={(event) => {
                 const nextPageSize = Number(event.target.value);
-                setOrdersPageSize(Number.isFinite(nextPageSize) ? nextPageSize : ORDER_PAGE_SIZE_OPTIONS[0]);
+                setOrdersPageSize(
+                  Number.isFinite(nextPageSize)
+                    ? nextPageSize
+                    : ORDER_PAGE_SIZE_OPTIONS[0],
+                );
                 setOrdersPage(0);
               }}
             >
@@ -18081,31 +21220,40 @@ export function AdminOrdersView() {
                   ? bookingDateFormatter.format(order.createdAt.toDate())
                   : "Pending";
                 const total =
-                  typeof order.totalPrice === "number" ?
-                     order.totalPrice
+                  typeof order.totalPrice === "number"
+                    ? order.totalPrice
                     : Number(order.totalPrice) || 0;
-                const orderLabel = Number.isFinite(order.orderNumber) ?
-                   `Order #${order.orderNumber}`
+                const orderLabel = Number.isFinite(order.orderNumber)
+                  ? `Order #${order.orderNumber}`
                   : "Order";
                 const isPreordered = isPreorderedOrder(order);
                 const paymentStatus = normalizePaymentStatus(order);
                 const paymentMethod = normalizePaymentMethod(order);
-                const paymentApprovalStatus = normalizePaymentApprovalStatus(order);
+                const paymentApprovalStatus =
+                  normalizePaymentApprovalStatus(order);
                 const statusOptions = getAllowedOrderStatuses(order);
                 const statusLocked = isEftBlocked(order);
                 const deliveryStatus = normalizeDeliveryStatus(order);
                 const deliveryLabel = deliveryStatus.replace(/-/g, " ");
-                const isActionsMenuOpen = openOrderActions?.orderId === order.id;
+                const isActionsMenuOpen =
+                  openOrderActions?.orderId === order.id;
                 return (
                   <tr
                     key={order.id}
                     className={`admin-orders-table__row ${order.id === selectedOrderId ? "is-active" : ""}`}
                     onClick={() => setSelectedOrderId(order.id)}
                   >
-                    <td className="admin-orders-table__order" data-label="Order">
-                      <strong className="admin-orders-table__order-number">{orderLabel}</strong>
+                    <td
+                      className="admin-orders-table__order"
+                      data-label="Order"
+                    >
+                      <strong className="admin-orders-table__order-number">
+                        {orderLabel}
+                      </strong>
                       <p className="modal__meta">{createdAtLabel}</p>
-                      <p className="modal__meta admin-orders-table__ref">Ref: {order.id}</p>
+                      <p className="modal__meta admin-orders-table__ref">
+                        Ref: {order.id}
+                      </p>
                       {order.trackingLink && (
                         <p className="modal__meta admin-orders-table__tracking">
                           <a
@@ -18118,43 +21266,66 @@ export function AdminOrdersView() {
                         </p>
                       )}
                     </td>
-                    <td className="admin-orders-table__customer" data-label="Customer">
+                    <td
+                      className="admin-orders-table__customer"
+                      data-label="Customer"
+                    >
                       <p>{order.customer?.fullName || "-"}</p>
                       <p className="modal__meta admin-orders-table__contact">
                         {order.customer?.email || "-"}
                       </p>
                       {order.customer?.phone && (
-                        <p className="modal__meta admin-orders-table__contact">{order.customer.phone}</p>
+                        <p className="modal__meta admin-orders-table__contact">
+                          {order.customer.phone}
+                        </p>
                       )}
                     </td>
-                    <td className="admin-orders-table__amount" data-label="Amount">
+                    <td
+                      className="admin-orders-table__amount"
+                      data-label="Amount"
+                    >
                       <strong>{formatPriceLabel(total)}</strong>
                     </td>
-                    <td className="admin-orders-table__payment" data-label="Payment">
+                    <td
+                      className="admin-orders-table__payment"
+                      data-label="Payment"
+                    >
                       <div className="admin-orders-table__badges">
-                        <span className={`admin-status admin-status--${paymentMethod}`}>
+                        <span
+                          className={`admin-status admin-status--${paymentMethod}`}
+                        >
                           {paymentMethod}
                         </span>
-                        <span className={`admin-status admin-status--${paymentStatus}`}>
+                        <span
+                          className={`admin-status admin-status--${paymentStatus}`}
+                        >
                           {paymentStatus}
                         </span>
                       </div>
                       {paymentMethod === PAYMENT_METHODS.EFT && (
                         <div className="admin-orders-table__badges">
-                          <span className={`admin-status admin-status--${paymentApprovalStatus}`}>
+                          <span
+                            className={`admin-status admin-status--${paymentApprovalStatus}`}
+                          >
                             approval {paymentApprovalStatus}
                           </span>
                         </div>
                       )}
                     </td>
-                    <td className="admin-orders-table__status" data-label="Order status">
+                    <td
+                      className="admin-orders-table__status"
+                      data-label="Order status"
+                    >
                       <div className="admin-orders-table__status-wrap">
                         <select
                           className="input admin-orders-table__status-select"
                           value={normalizeOrderStatus(order.status)}
                           disabled={statusLocked}
                           onChange={(event) =>
-                            handleUpdateOrderStatus(order.id, event.target.value)
+                            handleUpdateOrderStatus(
+                              order.id,
+                              event.target.value,
+                            )
                           }
                         >
                           {statusOptions.map((status) => (
@@ -18164,17 +21335,31 @@ export function AdminOrdersView() {
                           ))}
                         </select>
                         {statusLocked && (
-                          <p className="modal__meta admin-orders-table__status-note">Awaiting EFT payment approval</p>
+                          <p className="modal__meta admin-orders-table__status-note">
+                            Awaiting EFT payment approval
+                          </p>
                         )}
-                        {isPreordered && normalizeOrderStatus(order.status) === "order-placed" && (
-                          <p className="modal__meta admin-orders-table__status-note">Preordered</p>
-                        )}
+                        {isPreordered &&
+                          normalizeOrderStatus(order.status) ===
+                            "order-placed" && (
+                            <p className="modal__meta admin-orders-table__status-note">
+                              Preordered
+                            </p>
+                          )}
                       </div>
                     </td>
-                    <td className="admin-orders-table__delivery" data-label="Delivery">
-                      <span className="modal__meta admin-orders-table__delivery-value">{deliveryLabel}</span>
+                    <td
+                      className="admin-orders-table__delivery"
+                      data-label="Delivery"
+                    >
+                      <span className="modal__meta admin-orders-table__delivery-value">
+                        {deliveryLabel}
+                      </span>
                     </td>
-                    <td className="admin-orders-table__actions-cell" data-label="Actions">
+                    <td
+                      className="admin-orders-table__actions-cell"
+                      data-label="Actions"
+                    >
                       <div
                         className="admin-order-row-actions"
                         onClick={(event) => event.stopPropagation()}
@@ -18185,10 +21370,20 @@ export function AdminOrdersView() {
                           aria-label={`Open actions for ${orderLabel}`}
                           aria-haspopup="menu"
                           aria-expanded={isActionsMenuOpen ? "true" : "false"}
-                          onClick={(event) => toggleOrderActionsMenu(order.id, event.currentTarget)}
+                          onClick={(event) =>
+                            toggleOrderActionsMenu(
+                              order.id,
+                              event.currentTarget,
+                            )
+                          }
                         >
-                          <span className="admin-order-row-actions__trigger-label">More</span>
-                          <IconMoreVertical className="admin-order-row-actions__icon" aria-hidden="true" />
+                          <span className="admin-order-row-actions__trigger-label">
+                            More
+                          </span>
+                          <IconMoreVertical
+                            className="admin-order-row-actions__icon"
+                            aria-hidden="true"
+                          />
                         </button>
                       </div>
                     </td>
@@ -18259,7 +21454,9 @@ export function AdminOrdersView() {
                 openOrderTrackingDialog(activeOrderActionsOrder);
               }}
             >
-              {activeOrderActionsOrder.trackingLink ? "Update tracking" : "Add tracking"}
+              {activeOrderActionsOrder.trackingLink
+                ? "Update tracking"
+                : "Add tracking"}
             </button>
             {activeOrderActionsCanMarkPaymentReceived && (
               <button
@@ -18334,13 +21531,16 @@ export function AdminOrdersView() {
           </button>
           <h3 className="modal__title">Create Order On Behalf Of Customer</h3>
           <p className="modal__meta admin-order-create-lead">
-            Admin-created orders default to EFT and remain pending until payment is approved by an admin.
+            Admin-created orders default to EFT and remain pending until payment
+            is approved by an admin.
           </p>
 
           <div className="admin-order-create-section">
             <div className="admin-order-create-section__head">
               <h4>Customer Details</h4>
-              <p className="modal__meta">Who this order is for and where it should be delivered.</p>
+              <p className="modal__meta">
+                Who this order is for and where it should be delivered.
+              </p>
             </div>
             <div className="admin-order-create-grid">
               <label>
@@ -18416,7 +21616,9 @@ export function AdminOrdersView() {
                     className="input"
                     autoComplete="address-level1"
                     value={createOrderForm.shippingAddress.province}
-                    onChange={handleCreateOrderShippingAddressChange("province")}
+                    onChange={handleCreateOrderShippingAddressChange(
+                      "province",
+                    )}
                   >
                     <option value="">Select province</option>
                     {SA_PROVINCES.map((province) => (
@@ -18433,37 +21635,48 @@ export function AdminOrdersView() {
                     type="text"
                     autoComplete="postal-code"
                     value={createOrderForm.shippingAddress.postalCode}
-                    onChange={handleCreateOrderShippingAddressChange("postalCode")}
+                    onChange={handleCreateOrderShippingAddressChange(
+                      "postalCode",
+                    )}
                     placeholder="0000"
                     pattern="\\d{4}"
                   />
                 </label>
               </div>
-              {!createOrderPostalCodeValid && createOrderForm.shippingAddress.postalCode && (
-                <p className="admin-panel__error admin-order-create-grid__wide">Postal code should be 4 digits.</p>
-              )}
+              {!createOrderPostalCodeValid &&
+                createOrderForm.shippingAddress.postalCode && (
+                  <p className="admin-panel__error admin-order-create-grid__wide">
+                    Postal code should be 4 digits.
+                  </p>
+                )}
               <div className="admin-order-create-grid__wide admin-order-create-courier">
                 <h4>Courier options</h4>
                 {!createOrderForm.shippingAddress.province && (
-                  <p className="modal__meta">Select a province to view available couriers.</p>
+                  <p className="modal__meta">
+                    Select a province to view available couriers.
+                  </p>
                 )}
-                {createOrderForm.shippingAddress.province && createOrderCourierStatus === "loading" && (
-                  <p className="modal__meta">Loading courier options...</p>
-                )}
+                {createOrderForm.shippingAddress.province &&
+                  createOrderCourierStatus === "loading" && (
+                    <p className="modal__meta">Loading courier options...</p>
+                  )}
                 {createOrderForm.shippingAddress.province &&
                   createOrderCourierStatus !== "loading" &&
                   createOrderAvailableCouriers.length === 0 && (
-                  <p className="admin-panel__error">
-                    No courier options are available for {createOrderForm.shippingAddress.province}.
-                  </p>
-                )}
+                    <p className="admin-panel__error">
+                      No courier options are available for{" "}
+                      {createOrderForm.shippingAddress.province}.
+                    </p>
+                  )}
                 {createOrderAvailableCouriers.length > 0 && (
                   <div className="admin-order-create-courier-options checkout-courier-options">
                     {createOrderAvailableCouriers.map((option) => (
                       <label
                         key={option.id}
                         className={`admin-order-create-courier-option checkout-courier__option ${
-                          createOrderSelectedCourierId === option.id ? "is-selected" : ""
+                          createOrderSelectedCourierId === option.id
+                            ? "is-selected"
+                            : ""
                         }`}
                       >
                         <input
@@ -18471,7 +21684,9 @@ export function AdminOrdersView() {
                           name="admin-create-order-courier"
                           value={option.id}
                           checked={createOrderSelectedCourierId === option.id}
-                          onChange={(event) => setCreateOrderSelectedCourierId(event.target.value)}
+                          onChange={(event) =>
+                            setCreateOrderSelectedCourierId(event.target.value)
+                          }
                         />
                         <span>{option.name}</span>
                         <strong>{formatPriceLabel(option.price)}</strong>
@@ -18488,10 +21703,13 @@ export function AdminOrdersView() {
               <div className="admin-order-create-toolbar">
                 <div className="admin-order-create-toolbar__text">
                   <h4>Add Products</h4>
-                  <p className="modal__meta">Search and add items from your product catalog.</p>
+                  <p className="modal__meta">
+                    Search and add items from your product catalog.
+                  </p>
                 </div>
                 <span className="admin-order-create-count">
-                  Showing {filteredCreateOrderProducts.length} of {createOrderCatalogProducts.length}
+                  Showing {filteredCreateOrderProducts.length} of{" "}
+                  {createOrderCatalogProducts.length}
                 </span>
               </div>
               <input
@@ -18499,7 +21717,9 @@ export function AdminOrdersView() {
                 type="search"
                 placeholder="Search products by name, SKU, or ID"
                 value={createOrderProductSearch}
-                onChange={(event) => setCreateOrderProductSearch(event.target.value)}
+                onChange={(event) =>
+                  setCreateOrderProductSearch(event.target.value)
+                }
               />
               <div className="admin-order-create-filters">
                 <div className="admin-order-create-filters__grid">
@@ -18580,52 +21800,76 @@ export function AdminOrdersView() {
                   </button>
                 </div>
               </div>
-              {inventoryLoading && <p className="modal__meta">Loading inventory...</p>}
-              {!inventoryLoading && filteredCreateOrderProducts.length === 0 && (
-                <div className="empty-state admin-order-create-empty-state">
-                  <p>{createOrderEmptyMessage}</p>
-                  {hasActiveCreateOrderFilters && (
-                    <button
-                      className="btn btn--secondary btn--small"
-                      type="button"
-                      onClick={resetCreateOrderFilters}
-                    >
-                      Clear filters
-                    </button>
-                  )}
-                </div>
+              {inventoryLoading && (
+                <p className="modal__meta">Loading inventory...</p>
               )}
+              {!inventoryLoading &&
+                filteredCreateOrderProducts.length === 0 && (
+                  <div className="empty-state admin-order-create-empty-state">
+                    <p>{createOrderEmptyMessage}</p>
+                    {hasActiveCreateOrderFilters && (
+                      <button
+                        className="btn btn--secondary btn--small"
+                        type="button"
+                        onClick={resetCreateOrderFilters}
+                      >
+                        Clear filters
+                      </button>
+                    )}
+                  </div>
+                )}
               {!inventoryLoading && filteredCreateOrderProducts.length > 0 && (
                 <div className="pos-grid admin-order-create-products">
                   {filteredCreateOrderProducts.map((product) => {
-                    const selection = createOrderVariantSelections[product.id] || "";
-                    const selectedVariant = product.variants.find((variant) => variant.id === selection) || null;
-                    const unitPrice = Number.isFinite(selectedVariant?.price) ? selectedVariant.price : product.numericPrice;
-                    const priceLabel = Number.isFinite(unitPrice) ? formatPriceLabel(unitPrice) : "Price on request";
+                    const selection =
+                      createOrderVariantSelections[product.id] || "";
+                    const selectedVariant =
+                      product.variants.find(
+                        (variant) => variant.id === selection,
+                      ) || null;
+                    const unitPrice = Number.isFinite(selectedVariant?.price)
+                      ? selectedVariant.price
+                      : product.numericPrice;
+                    const priceLabel = Number.isFinite(unitPrice)
+                      ? formatPriceLabel(unitPrice)
+                      : "Price on request";
                     const isOutOfStock = product.stockStatus?.state === "out";
                     const requiresVariant = product.variants.length > 0;
                     const missingVariant = requiresVariant && !selection;
                     const addDisabled = isOutOfStock || missingVariant;
                     let disabledHint = null;
                     if (isOutOfStock) disabledHint = "Out of stock";
-                    else if (missingVariant) disabledHint = "Select a variant first";
+                    else if (missingVariant)
+                      disabledHint = "Select a variant first";
                     const cardClassName = addDisabled
                       ? "pos-item-card admin-order-create-product-card admin-order-create-product-card--disabled"
                       : "pos-item-card admin-order-create-product-card admin-order-create-product-card--interactive";
                     const isInteractiveCardTarget = (target) =>
                       !!target &&
                       typeof target.closest === "function" &&
-                      Boolean(target.closest("button, input, select, textarea, label, a"));
+                      Boolean(
+                        target.closest(
+                          "button, input, select, textarea, label, a",
+                        ),
+                      );
                     return (
                       <article
                         className={cardClassName}
                         key={product.id}
                         onClick={(event) => {
-                          if (addDisabled || isInteractiveCardTarget(event.target)) return;
+                          if (
+                            addDisabled ||
+                            isInteractiveCardTarget(event.target)
+                          )
+                            return;
                           handleAddCatalogProductToOrder(product);
                         }}
                         onKeyDown={(event) => {
-                          if (addDisabled || isInteractiveCardTarget(event.target)) return;
+                          if (
+                            addDisabled ||
+                            isInteractiveCardTarget(event.target)
+                          )
+                            return;
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
                             handleAddCatalogProductToOrder(product);
@@ -18634,14 +21878,22 @@ export function AdminOrdersView() {
                         role={addDisabled ? undefined : "button"}
                         tabIndex={addDisabled ? undefined : 0}
                         aria-disabled={addDisabled ? "true" : undefined}
-                        aria-label={addDisabled ? undefined : `Add ${product.name} to order`}
+                        aria-label={
+                          addDisabled
+                            ? undefined
+                            : `Add ${product.name} to order`
+                        }
                       >
                         <div>
                           <h4>{product.name}</h4>
                           <p className="modal__meta">{priceLabel}</p>
-                          {product.sku && <p className="modal__meta">SKU: {product.sku}</p>}
+                          {product.sku && (
+                            <p className="modal__meta">SKU: {product.sku}</p>
+                          )}
                           {product.stockStatus && (
-                            <span className={`badge badge--stock-${product.stockStatus.state}`}>
+                            <span
+                              className={`badge badge--stock-${product.stockStatus.state}`}
+                            >
                               {product.stockStatus.label}
                             </span>
                           )}
@@ -18663,7 +21915,9 @@ export function AdminOrdersView() {
                                 {product.variants.map((variant) => (
                                   <option key={variant.id} value={variant.id}>
                                     {variant.label}
-                                    {Number.isFinite(variant.price) ? ` - ${formatPriceLabel(variant.price)}` : ""}
+                                    {Number.isFinite(variant.price)
+                                      ? ` - ${formatPriceLabel(variant.price)}`
+                                      : ""}
                                   </option>
                                 ))}
                               </select>
@@ -18682,7 +21936,11 @@ export function AdminOrdersView() {
                           >
                             Add
                           </button>
-                          {disabledHint && <p className="modal__meta admin-order-create-product-hint">{disabledHint}</p>}
+                          {disabledHint && (
+                            <p className="modal__meta admin-order-create-product-hint">
+                              {disabledHint}
+                            </p>
+                          )}
                         </div>
                       </article>
                     );
@@ -18695,7 +21953,9 @@ export function AdminOrdersView() {
                 <div className="admin-order-create-toolbar">
                   <div className="admin-order-create-toolbar__text">
                     <h4>Order Items</h4>
-                    <p className="modal__meta">Review quantities before creating the order.</p>
+                    <p className="modal__meta">
+                      Review quantities before creating the order.
+                    </p>
                   </div>
                   <span className="admin-order-create-count">
                     {(createOrderForm.items || []).length} line
@@ -18703,7 +21963,9 @@ export function AdminOrdersView() {
                   </span>
                 </div>
                 {(createOrderForm.items || []).length === 0 ? (
-                  <p className="empty-state">Add products to start this order.</p>
+                  <p className="empty-state">
+                    Add products to start this order.
+                  </p>
                 ) : (
                   <ul className="pos-cart__list admin-order-create-cart-list">
                     {(createOrderForm.items || []).map((item) => {
@@ -18715,13 +21977,20 @@ export function AdminOrdersView() {
                               <p className="pos-cart__name">{item.name}</p>
                               <div className="pos-cart__meta">
                                 {item.metadata?.variantLabel && (
-                                  <span>Variant: {item.metadata.variantLabel}</span>
+                                  <span>
+                                    Variant: {item.metadata.variantLabel}
+                                  </span>
                                 )}
-                                <span>Unit: {formatPriceLabel(item.price)}</span>
+                                <span>
+                                  Unit: {formatPriceLabel(item.price)}
+                                </span>
                               </div>
                             </div>
                             <div className="pos-cart__line-total">
-                              {formatPriceLabel((Number(item.price) || 0) * (Number(item.quantity) || 0))}
+                              {formatPriceLabel(
+                                (Number(item.price) || 0) *
+                                  (Number(item.quantity) || 0),
+                              )}
                             </div>
                           </div>
                           <div className="pos-cart__controls">
@@ -18731,7 +22000,9 @@ export function AdminOrdersView() {
                                 <button
                                   className="pos-cart__stepper-btn"
                                   type="button"
-                                  onClick={() => adjustCreateOrderCartQuantity(itemKey, -1)}
+                                  onClick={() =>
+                                    adjustCreateOrderCartQuantity(itemKey, -1)
+                                  }
                                   aria-label={`Decrease ${item.name} quantity`}
                                 >
                                   -
@@ -18742,13 +22013,18 @@ export function AdminOrdersView() {
                                   min="1"
                                   value={item.quantity}
                                   onChange={(event) =>
-                                    handleCreateOrderCartQuantityChange(itemKey, event.target.value)
+                                    handleCreateOrderCartQuantityChange(
+                                      itemKey,
+                                      event.target.value,
+                                    )
                                   }
                                 />
                                 <button
                                   className="pos-cart__stepper-btn"
                                   type="button"
-                                  onClick={() => adjustCreateOrderCartQuantity(itemKey, 1)}
+                                  onClick={() =>
+                                    adjustCreateOrderCartQuantity(itemKey, 1)
+                                  }
                                   aria-label={`Increase ${item.name} quantity`}
                                 >
                                   +
@@ -18773,26 +22049,40 @@ export function AdminOrdersView() {
               <div className="admin-order-create__totals">
                 <p className="modal__meta admin-order-create-total-row">
                   <span>Courier</span>
-                  <strong>{createOrderSelectedCourier ? createOrderSelectedCourier.name : "Select a courier"}</strong>
+                  <strong>
+                    {createOrderSelectedCourier
+                      ? createOrderSelectedCourier.name
+                      : "Select a courier"}
+                  </strong>
                 </p>
                 <p className="modal__meta admin-order-create-total-row">
                   <span>Subtotal</span>
-                  <strong>{formatPriceLabel(createOrderPricing.subtotal)}</strong>
+                  <strong>
+                    {formatPriceLabel(createOrderPricing.subtotal)}
+                  </strong>
                 </p>
                 <p className="modal__meta admin-order-create-total-row">
                   <span>Shipping</span>
                   <strong>
-                    {createOrderSelectedCourier ? formatPriceLabel(createOrderPricing.shippingCost) : "Select a courier"}
+                    {createOrderSelectedCourier
+                      ? formatPriceLabel(createOrderPricing.shippingCost)
+                      : "Select a courier"}
                   </strong>
                 </p>
                 <p className="modal__meta admin-order-create-total-row admin-order-create-total-row--final">
                   <span>Total</span>
-                  <strong>{formatPriceLabel(createOrderPricing.totalPrice)}</strong>
+                  <strong>
+                    {formatPriceLabel(createOrderPricing.totalPrice)}
+                  </strong>
                 </p>
-                <p className="modal__meta">Payment method: EFT (pending admin approval)</p>
+                <p className="modal__meta">
+                  Payment method: EFT (pending admin approval)
+                </p>
               </div>
 
-              {createOrderError && <p className="admin-panel__error">{createOrderError}</p>}
+              {createOrderError && (
+                <p className="admin-panel__error">{createOrderError}</p>
+              )}
 
               <div className="admin-modal__actions admin-order-create-actions">
                 <button
@@ -18845,32 +22135,43 @@ export function AdminOrdersView() {
               <div>
                 <p className="modal__meta">Ref: {selectedOrder.id}</p>
                 <h3>
-                  {Number.isFinite(selectedOrder.orderNumber) ?
-                     `Order #${selectedOrder.orderNumber}`
+                  {Number.isFinite(selectedOrder.orderNumber)
+                    ? `Order #${selectedOrder.orderNumber}`
                     : "Order"}
                 </h3>
                 <p className="modal__meta">
                   {selectedOrder.createdAt?.toDate?.()
-                    ? bookingDateFormatter.format(selectedOrder.createdAt.toDate())
+                    ? bookingDateFormatter.format(
+                        selectedOrder.createdAt.toDate(),
+                      )
                     : "Pending"}
                 </p>
               </div>
               <div className="admin-order-detail__chips">
-                <span className={`admin-status admin-status--${selectedPaymentMethod}`}>
+                <span
+                  className={`admin-status admin-status--${selectedPaymentMethod}`}
+                >
                   Method: {selectedPaymentMethod}
                 </span>
-                <span className={`admin-status admin-status--${selectedPaymentStatus}`}>
+                <span
+                  className={`admin-status admin-status--${selectedPaymentStatus}`}
+                >
                   Payment: {selectedPaymentStatus}
                 </span>
                 {selectedPaymentMethod === PAYMENT_METHODS.EFT && (
-                  <span className={`admin-status admin-status--${selectedPaymentApprovalStatus}`}>
+                  <span
+                    className={`admin-status admin-status--${selectedPaymentApprovalStatus}`}
+                  >
                     Approval: {selectedPaymentApprovalStatus}
                   </span>
                 )}
                 <span className="admin-status">
-                  Delivery: {normalizeDeliveryStatus(selectedOrder).replace(/-/g, " ")}
+                  Delivery:{" "}
+                  {normalizeDeliveryStatus(selectedOrder).replace(/-/g, " ")}
                 </span>
-                <span className="admin-status">Status: {getOrderStatusLabel(selectedOrder)}</span>
+                <span className="admin-status">
+                  Status: {getOrderStatusLabel(selectedOrder)}
+                </span>
               </div>
             </div>
 
@@ -18882,7 +22183,10 @@ export function AdminOrdersView() {
                   value={normalizeOrderStatus(selectedOrder.status)}
                   disabled={selectedStatusLocked}
                   onChange={(event) =>
-                    handleUpdateOrderStatus(selectedOrder.id, event.target.value)
+                    handleUpdateOrderStatus(
+                      selectedOrder.id,
+                      event.target.value,
+                    )
                   }
                 >
                   {selectedStatusOptions.map((status) => (
@@ -18897,7 +22201,9 @@ export function AdminOrdersView() {
                 type="button"
                 onClick={() => openOrderTrackingDialog(selectedOrder)}
               >
-                {selectedOrder.trackingLink ? "Update Tracking" : "Add Tracking"}
+                {selectedOrder.trackingLink
+                  ? "Update Tracking"
+                  : "Add Tracking"}
               </button>
               <button
                 className="btn btn--secondary"
@@ -18909,13 +22215,16 @@ export function AdminOrdersView() {
               </button>
               {selectedPaymentMethod === PAYMENT_METHODS.EFT ? (
                 <>
-                  {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.PENDING && (
+                  {selectedPaymentApprovalStatus ===
+                    PAYMENT_APPROVAL_STATUSES.PENDING && (
                     <>
                       <button
                         className="btn btn--primary"
                         type="button"
                         disabled={eftReviewLoading}
-                        onClick={() => handleReviewEftPayment(selectedOrder, "approve")}
+                        onClick={() =>
+                          handleReviewEftPayment(selectedOrder, "approve")
+                        }
                       >
                         {eftReviewLoading ? "Working..." : "Approve Payment"}
                       </button>
@@ -18923,20 +22232,28 @@ export function AdminOrdersView() {
                         className="btn btn--secondary"
                         type="button"
                         disabled={eftReviewLoading}
-                        onClick={() => handleReviewEftPayment(selectedOrder, "reject")}
+                        onClick={() =>
+                          handleReviewEftPayment(selectedOrder, "reject")
+                        }
                       >
                         {eftReviewLoading ? "Working..." : "Reject Payment"}
                       </button>
                     </>
                   )}
-                  {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.APPROVED && (
-                    <span className="admin-status admin-status--approved">Payment approved</span>
+                  {selectedPaymentApprovalStatus ===
+                    PAYMENT_APPROVAL_STATUSES.APPROVED && (
+                    <span className="admin-status admin-status--approved">
+                      Payment approved
+                    </span>
                   )}
-                  {selectedPaymentApprovalStatus === PAYMENT_APPROVAL_STATUSES.REJECTED && (
-                    <span className="admin-status admin-status--rejected">Payment rejected</span>
+                  {selectedPaymentApprovalStatus ===
+                    PAYMENT_APPROVAL_STATUSES.REJECTED && (
+                    <span className="admin-status admin-status--rejected">
+                      Payment rejected
+                    </span>
                   )}
                 </>
-              ) : (
+              ) : selectedCanMarkPaymentReceived ? (
                 <button
                   className="btn btn--primary"
                   type="button"
@@ -18945,6 +22262,12 @@ export function AdminOrdersView() {
                 >
                   {paymentUpdating ? "Updating..." : "Mark Payment Received"}
                 </button>
+              ) : (
+                <span
+                  className={`admin-status admin-status--${selectedPaymentStatus}`}
+                >
+                  Payment received
+                </span>
               )}
               <button
                 className="btn btn--secondary"
@@ -18969,7 +22292,9 @@ export function AdminOrdersView() {
             )}
             {deliveryPreview?.paymentAdjustmentRequired && (
               <p className="modal__meta admin-order-email-status__error">
-                Paid order total will change by {formatPriceLabel(deliveryPreview.delta)} and require payment review.
+                Paid order total will change by{" "}
+                {formatPriceLabel(deliveryPreview.delta)} and require payment
+                review.
               </p>
             )}
 
@@ -18986,7 +22311,9 @@ export function AdminOrdersView() {
                   className={`admin-order-detail__tab ${activeOrderDetailTab === tab.id ? "is-active" : ""}`}
                   type="button"
                   role="tab"
-                  aria-selected={activeOrderDetailTab === tab.id ? "true" : "false"}
+                  aria-selected={
+                    activeOrderDetailTab === tab.id ? "true" : "false"
+                  }
                   aria-controls={`admin-order-detail-panel-${tab.id}`}
                   onClick={() => setActiveOrderDetailTab(tab.id)}
                 >
@@ -19002,7 +22329,10 @@ export function AdminOrdersView() {
                 aria-labelledby="admin-order-detail-tab-overview"
                 className="admin-order-detail__tabpanel"
               >
-                <section className="admin-order-detail__key-overview" aria-label="Important order details">
+                <section
+                  className="admin-order-detail__key-overview"
+                  aria-label="Important order details"
+                >
                   <h4>Important details</h4>
                   <div className="admin-order-detail__key-strip">
                     <article className="admin-order-detail__key-card admin-order-detail__key-card--total">
@@ -19030,13 +22360,17 @@ export function AdminOrdersView() {
                       </p>
                     </article>
                     <article className="admin-order-detail__key-card">
-                      <p className="admin-order-detail__key-label">Order status</p>
+                      <p className="admin-order-detail__key-label">
+                        Order status
+                      </p>
                       <p className="admin-order-detail__key-value">
                         {getOrderStatusLabel(selectedOrder)}
                       </p>
                     </article>
                     <article className="admin-order-detail__key-card">
-                      <p className="admin-order-detail__key-label">Payment status</p>
+                      <p className="admin-order-detail__key-label">
+                        Payment status
+                      </p>
                       <p className="admin-order-detail__key-value">
                         {selectedPaymentStatus}
                       </p>
@@ -19047,38 +22381,67 @@ export function AdminOrdersView() {
                   <section className="admin-order-detail__section-card">
                     <h4>Customer</h4>
                     <p>{selectedOrder.customer?.fullName || "-"}</p>
-                    <p className="modal__meta">{selectedOrder.customer?.email || "-"}</p>
-                    {selectedOrder.customer?.phone && <p className="modal__meta">{selectedOrder.customer.phone}</p>}
-                    {shippingAddressLabel && <p className="modal__meta">{shippingAddressLabel}</p>}
+                    <p className="modal__meta">
+                      {selectedOrder.customer?.email || "-"}
+                    </p>
+                    {selectedOrder.customer?.phone && (
+                      <p className="modal__meta">
+                        {selectedOrder.customer.phone}
+                      </p>
+                    )}
+                    {shippingAddressLabel && (
+                      <p className="modal__meta">{shippingAddressLabel}</p>
+                    )}
                   </section>
                   <section className="admin-order-detail__section-card">
                     <h4>Payment</h4>
-                    <p className="modal__meta">Method: {selectedPaymentMethod}</p>
-                    <p className="modal__meta">Status: {selectedPaymentStatus}</p>
+                    <p className="modal__meta">
+                      Method: {selectedPaymentMethod}
+                    </p>
+                    <p className="modal__meta">
+                      Status: {selectedPaymentStatus}
+                    </p>
                     {Number.isFinite(selectedOrder.subtotal) && (
-                      <p className="modal__meta">Subtotal: {formatPriceLabel(selectedOrder.subtotal)}</p>
+                      <p className="modal__meta">
+                        Subtotal: {formatPriceLabel(selectedOrder.subtotal)}
+                      </p>
                     )}
                     {Number.isFinite(selectedOrder.shippingCost) && (
-                      <p className="modal__meta">Shipping: {formatPriceLabel(selectedOrder.shippingCost)}</p>
+                      <p className="modal__meta">
+                        Shipping: {formatPriceLabel(selectedOrder.shippingCost)}
+                      </p>
                     )}
-                    <p className="modal__meta">Total: {formatPriceLabel(selectedOrder.totalPrice)}</p>
+                    <p className="modal__meta">
+                      Total: {formatPriceLabel(selectedOrder.totalPrice)}
+                    </p>
                     {selectedPayfast.paymentReference && (
-                      <p className="modal__meta">Reference: {selectedPayfast.paymentReference}</p>
+                      <p className="modal__meta">
+                        Reference: {selectedPayfast.paymentReference}
+                      </p>
                     )}
                     {selectedPayfast.paymentId && (
-                      <p className="modal__meta">PayFast ID: {selectedPayfast.paymentId}</p>
+                      <p className="modal__meta">
+                        PayFast ID: {selectedPayfast.paymentId}
+                      </p>
                     )}
                   </section>
                   <section className="admin-order-detail__section-card">
                     <h4>Delivery</h4>
                     <p className="modal__meta">
-                      Method: {(selectedOrder.deliveryMethod || "company").toString().toLowerCase()}
+                      Method:{" "}
+                      {(selectedOrder.deliveryMethod || "company")
+                        .toString()
+                        .toLowerCase()}
                     </p>
                     {selectedShipping.courierName && (
-                      <p className="modal__meta">Courier: {selectedShipping.courierName}</p>
+                      <p className="modal__meta">
+                        Courier: {selectedShipping.courierName}
+                      </p>
                     )}
                     {selectedShipping.province && (
-                      <p className="modal__meta">Province: {selectedShipping.province}</p>
+                      <p className="modal__meta">
+                        Province: {selectedShipping.province}
+                      </p>
                     )}
                     {selectedOrder.trackingLink ? (
                       <a
@@ -19093,7 +22456,9 @@ export function AdminOrdersView() {
                       <p className="modal__meta">No tracking link yet</p>
                     )}
                     {shippingAddressLabel && (
-                      <p className="modal__meta">Ship to: {shippingAddressLabel}</p>
+                      <p className="modal__meta">
+                        Ship to: {shippingAddressLabel}
+                      </p>
                     )}
                   </section>
                 </div>
@@ -19103,11 +22468,14 @@ export function AdminOrdersView() {
                     {(selectedOrder.items || []).map((item) => (
                       <li key={`${selectedOrder.id}-${item.id}`}>
                         <strong>{item.name}</strong> x{item.quantity || 1}
-                        <span className="modal__meta">{formatPriceLabel(item.price)}</span>
+                        <span className="modal__meta">
+                          {formatPriceLabel(item.price)}
+                        </span>
                         {item.metadata?.type === "workshop" && (
                           <>
                             <span className="modal__meta">
-                              {item.metadata?.sessionSource === "customer-requested"
+                              {item.metadata?.sessionSource ===
+                              "customer-requested"
                                 ? `Requested date: ${
                                     item.metadata?.sessionDayLabel ||
                                     item.metadata?.scheduledDateLabel ||
@@ -19119,10 +22487,16 @@ export function AdminOrdersView() {
                                     "Session"
                                   }`}
                             </span>
-                            {(item.metadata?.sessionTimeRange || item.metadata?.sessionTime) && (
+                            {(item.metadata?.sessionTimeRange ||
+                              item.metadata?.sessionTime) && (
                               <span className="modal__meta">
-                                {item.metadata?.sessionSource === "customer-requested" ? "Requested time" : "Time"}:{" "}
-                                {item.metadata?.sessionTimeRange || item.metadata?.sessionTime}
+                                {item.metadata?.sessionSource ===
+                                "customer-requested"
+                                  ? "Requested time"
+                                  : "Time"}
+                                :{" "}
+                                {item.metadata?.sessionTimeRange ||
+                                  item.metadata?.sessionTime}
                               </span>
                             )}
                             <span className="modal__meta">
@@ -19130,17 +22504,21 @@ export function AdminOrdersView() {
                             </span>
                           </>
                         )}
-                        {item.metadata?.type === "product" && item.metadata?.variantLabel && (
-                          <span className="modal__meta">
-                            Variant: {item.metadata.variantLabel}
-                          </span>
-                        )}
                         {item.metadata?.type === "product" &&
-                          (item.metadata?.preorderSendMonth || item.metadata?.preorderSendMonthLabel) && (
+                          item.metadata?.variantLabel && (
+                            <span className="modal__meta">
+                              Variant: {item.metadata.variantLabel}
+                            </span>
+                          )}
+                        {item.metadata?.type === "product" &&
+                          (item.metadata?.preorderSendMonth ||
+                            item.metadata?.preorderSendMonthLabel) && (
                             <span className="modal__meta">
                               Send month:{" "}
                               {item.metadata.preorderSendMonthLabel ||
-                                formatPreorderSendMonth(item.metadata.preorderSendMonth) ||
+                                formatPreorderSendMonth(
+                                  item.metadata.preorderSendMonth,
+                                ) ||
                                 item.metadata.preorderSendMonth}
                             </span>
                           )}
@@ -19162,24 +22540,37 @@ export function AdminOrdersView() {
                   <section className="admin-order-detail__section-card">
                     <h4>Customer details</h4>
                     <p>{selectedOrder.customer?.fullName || "-"}</p>
-                    <p className="modal__meta">{selectedOrder.customer?.email || "-"}</p>
-                    <p className="modal__meta">{selectedOrder.customer?.phone || "-"}</p>
+                    <p className="modal__meta">
+                      {selectedOrder.customer?.email || "-"}
+                    </p>
+                    <p className="modal__meta">
+                      {selectedOrder.customer?.phone || "-"}
+                    </p>
                   </section>
                   <section className="admin-order-detail__section-card">
                     <h4>Address on order</h4>
                     {shippingAddressLabel ? (
                       <p className="modal__meta">{shippingAddressLabel}</p>
                     ) : (
-                      <p className="modal__meta">No delivery address on file.</p>
+                      <p className="modal__meta">
+                        No delivery address on file.
+                      </p>
                     )}
                     {selectedShipping.courierName && (
-                      <p className="modal__meta">Courier: {selectedShipping.courierName}</p>
+                      <p className="modal__meta">
+                        Courier: {selectedShipping.courierName}
+                      </p>
                     )}
                     {selectedShipping.province && (
-                      <p className="modal__meta">Province: {selectedShipping.province}</p>
+                      <p className="modal__meta">
+                        Province: {selectedShipping.province}
+                      </p>
                     )}
                     <p className="modal__meta">
-                      Delivery method: {(selectedOrder.deliveryMethod || "company").toString().toLowerCase()}
+                      Delivery method:{" "}
+                      {(selectedOrder.deliveryMethod || "company")
+                        .toString()
+                        .toLowerCase()}
                     </p>
                   </section>
                 </div>
@@ -19205,27 +22596,45 @@ export function AdminOrdersView() {
                     <p className="modal__meta">
                       Placed:{" "}
                       {selectedOrder.createdAt?.toDate?.()
-                        ? bookingDateFormatter.format(selectedOrder.createdAt.toDate())
+                        ? bookingDateFormatter.format(
+                            selectedOrder.createdAt.toDate(),
+                          )
                         : "Pending"}
                     </p>
-                    <p className="modal__meta">Order status: {getOrderStatusLabel(selectedOrder)}</p>
-                    <p className="modal__meta">Payment method: {selectedPaymentMethod}</p>
-                    <p className="modal__meta">Payment status: {selectedPaymentStatus}</p>
+                    <p className="modal__meta">
+                      Order status: {getOrderStatusLabel(selectedOrder)}
+                    </p>
+                    <p className="modal__meta">
+                      Payment method: {selectedPaymentMethod}
+                    </p>
+                    <p className="modal__meta">
+                      Payment status: {selectedPaymentStatus}
+                    </p>
                   </section>
                   <section className="admin-order-detail__section-card">
                     <h4>Payment</h4>
                     {Number.isFinite(selectedOrder.subtotal) && (
-                      <p className="modal__meta">Subtotal: {formatPriceLabel(selectedOrder.subtotal)}</p>
+                      <p className="modal__meta">
+                        Subtotal: {formatPriceLabel(selectedOrder.subtotal)}
+                      </p>
                     )}
                     {Number.isFinite(selectedOrder.shippingCost) && (
-                      <p className="modal__meta">Shipping: {formatPriceLabel(selectedOrder.shippingCost)}</p>
+                      <p className="modal__meta">
+                        Shipping: {formatPriceLabel(selectedOrder.shippingCost)}
+                      </p>
                     )}
-                    <p className="modal__meta">Total: {formatPriceLabel(selectedOrder.totalPrice)}</p>
+                    <p className="modal__meta">
+                      Total: {formatPriceLabel(selectedOrder.totalPrice)}
+                    </p>
                     {selectedPayfast.paymentReference && (
-                      <p className="modal__meta">Reference: {selectedPayfast.paymentReference}</p>
+                      <p className="modal__meta">
+                        Reference: {selectedPayfast.paymentReference}
+                      </p>
                     )}
                     {selectedPayfast.paymentId && (
-                      <p className="modal__meta">PayFast ID: {selectedPayfast.paymentId}</p>
+                      <p className="modal__meta">
+                        PayFast ID: {selectedPayfast.paymentId}
+                      </p>
                     )}
                     {selectedOrder.paymentProof?.storagePath && (
                       <p className="modal__meta">
@@ -19233,7 +22642,11 @@ export function AdminOrdersView() {
                         {paymentProofUrlLoading ? (
                           "Loading..."
                         ) : paymentProofUrl ? (
-                          <a href={paymentProofUrl} target="_blank" rel="noopener noreferrer">
+                          <a
+                            href={paymentProofUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
                             View proof
                           </a>
                         ) : (
@@ -19245,10 +22658,14 @@ export function AdminOrdersView() {
                   <section className="admin-order-detail__section-card">
                     <h4>Delivery summary</h4>
                     {selectedShipping.courierName && (
-                      <p className="modal__meta">Courier: {selectedShipping.courierName}</p>
+                      <p className="modal__meta">
+                        Courier: {selectedShipping.courierName}
+                      </p>
                     )}
                     {selectedShipping.province && (
-                      <p className="modal__meta">Province: {selectedShipping.province}</p>
+                      <p className="modal__meta">
+                        Province: {selectedShipping.province}
+                      </p>
                     )}
                     {selectedOrder.trackingLink ? (
                       <a
@@ -19263,7 +22680,9 @@ export function AdminOrdersView() {
                       <p className="modal__meta">No tracking link yet</p>
                     )}
                     {shippingAddressLabel && (
-                      <p className="modal__meta">Ship to: {shippingAddressLabel}</p>
+                      <p className="modal__meta">
+                        Ship to: {shippingAddressLabel}
+                      </p>
                     )}
                   </section>
                 </div>
@@ -19273,11 +22692,14 @@ export function AdminOrdersView() {
                     {(selectedOrder.items || []).map((item) => (
                       <li key={`${selectedOrder.id}-${item.id}`}>
                         <strong>{item.name}</strong> x{item.quantity || 1}
-                        <span className="modal__meta">{formatPriceLabel(item.price)}</span>
+                        <span className="modal__meta">
+                          {formatPriceLabel(item.price)}
+                        </span>
                         {item.metadata?.type === "workshop" && (
                           <>
                             <span className="modal__meta">
-                              {item.metadata?.sessionSource === "customer-requested"
+                              {item.metadata?.sessionSource ===
+                              "customer-requested"
                                 ? `Requested date: ${
                                     item.metadata?.sessionDayLabel ||
                                     item.metadata?.scheduledDateLabel ||
@@ -19289,10 +22711,16 @@ export function AdminOrdersView() {
                                     "Session"
                                   }`}
                             </span>
-                            {(item.metadata?.sessionTimeRange || item.metadata?.sessionTime) && (
+                            {(item.metadata?.sessionTimeRange ||
+                              item.metadata?.sessionTime) && (
                               <span className="modal__meta">
-                                {item.metadata?.sessionSource === "customer-requested" ? "Requested time" : "Time"}:{" "}
-                                {item.metadata?.sessionTimeRange || item.metadata?.sessionTime}
+                                {item.metadata?.sessionSource ===
+                                "customer-requested"
+                                  ? "Requested time"
+                                  : "Time"}
+                                :{" "}
+                                {item.metadata?.sessionTimeRange ||
+                                  item.metadata?.sessionTime}
                               </span>
                             )}
                             <span className="modal__meta">
@@ -19300,17 +22728,21 @@ export function AdminOrdersView() {
                             </span>
                           </>
                         )}
-                        {item.metadata?.type === "product" && item.metadata?.variantLabel && (
-                          <span className="modal__meta">
-                            Variant: {item.metadata.variantLabel}
-                          </span>
-                        )}
                         {item.metadata?.type === "product" &&
-                          (item.metadata?.preorderSendMonth || item.metadata?.preorderSendMonthLabel) && (
+                          item.metadata?.variantLabel && (
+                            <span className="modal__meta">
+                              Variant: {item.metadata.variantLabel}
+                            </span>
+                          )}
+                        {item.metadata?.type === "product" &&
+                          (item.metadata?.preorderSendMonth ||
+                            item.metadata?.preorderSendMonthLabel) && (
                             <span className="modal__meta">
                               Send month:{" "}
                               {item.metadata.preorderSendMonthLabel ||
-                                formatPreorderSendMonth(item.metadata.preorderSendMonth) ||
+                                formatPreorderSendMonth(
+                                  item.metadata.preorderSendMonth,
+                                ) ||
                                 item.metadata.preorderSendMonth}
                             </span>
                           )}
@@ -19328,136 +22760,152 @@ export function AdminOrdersView() {
                 aria-labelledby="admin-order-detail-tab-delivery"
                 className="admin-order-detail__tabpanel"
               >
-              <section className="admin-order-detail__section-card">
-                <h4>Delivery details</h4>
-                <div className="admin-order-detail__actions-grid">
-                  <label>
-                    Delivery Method
-                    <select
-                      className="input"
-                      value={deliveryMethod}
-                      onChange={(event) => setDeliveryMethod(event.target.value)}
-                    >
-                      {DELIVERY_METHODS.map((method) => (
-                        <option key={method} value={method}>
-                          {method}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {deliveryMethod === "courier" && (
+                <section className="admin-order-detail__section-card">
+                  <h4>Delivery details</h4>
+                  <div className="admin-order-detail__actions-grid">
                     <label>
-                      Courier
+                      Delivery Method
                       <select
                         className="input"
-                        value={deliveryCourierId}
-                        onChange={(event) => setDeliveryCourierId(event.target.value)}
+                        value={deliveryMethod}
+                        onChange={(event) =>
+                          setDeliveryMethod(event.target.value)
+                        }
                       >
-                        <option value="">Select courier</option>
-                        {deliveryAvailableCouriers.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.name} ({formatPriceLabel(option.price)})
+                        {DELIVERY_METHODS.map((method) => (
+                          <option key={method} value={method}>
+                            {method}
                           </option>
                         ))}
                       </select>
                     </label>
-                  )}
-                  <label className="admin-order-detail__wide">
-                    Street address
-                    <input
-                      className="input"
-                      type="text"
-                      value={deliveryAddressForm.street}
-                      onChange={handleDeliveryAddressChange("street")}
-                      placeholder="Street address"
-                    />
-                  </label>
-                  <label>
-                    Suburb
-                    <input
-                      className="input"
-                      type="text"
-                      value={deliveryAddressForm.suburb}
-                      onChange={handleDeliveryAddressChange("suburb")}
-                      placeholder="Suburb"
-                    />
-                  </label>
-                  <label>
-                    City
-                    <input
-                      className="input"
-                      type="text"
-                      value={deliveryAddressForm.city}
-                      onChange={handleDeliveryAddressChange("city")}
-                      placeholder="City"
-                    />
-                  </label>
-                  <label>
-                    Province
-                    <select
-                      className="input"
-                      value={deliveryAddressForm.province}
-                      onChange={handleDeliveryAddressChange("province")}
-                    >
-                      <option value="">Select province</option>
-                      {SA_PROVINCES.map((provinceOption) => (
-                        <option key={provinceOption.value} value={provinceOption.value}>
-                          {provinceOption.value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Postal code
-                    <input
-                      className="input"
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={4}
-                      value={deliveryAddressForm.postalCode}
-                      onChange={handleDeliveryAddressChange("postalCode")}
-                      placeholder="0000"
-                    />
-                  </label>
-                  <label className="admin-order-detail__wide">
-                    Tracking Link (optional)
-                    <input
-                      className="input"
-                      type="url"
-                      value={trackingInput}
-                      onChange={(event) => setTrackingInput(event.target.value)}
-                      placeholder="https://courier.example/track/123"
-                    />
-                  </label>
-                </div>
-                {deliveryPreview && (
-                  <div className="admin-order-email-status">
-                    <p className="modal__meta">
-                      <strong>Delivery totals preview:</strong> Shipping {formatPriceLabel(deliveryPreview.previousShippingCost)} {"->"}{" "}
-                      {deliveryPreview.canResolveNewShippingCost
-                        ? formatPriceLabel(deliveryPreview.nextShippingCost)
-                        : "Select courier"}{" "}
-                      | Total {formatPriceLabel(deliveryPreview.previousTotal)} {"->"}{" "}
-                      {formatPriceLabel(deliveryPreview.nextTotal)}
-                    </p>
-                    {deliveryMethod === "courier" &&
-                      !deliveryPreview.canResolveNewShippingCost &&
-                      deliveryProvince && (
-                        <p className="modal__meta admin-order-email-status__warning">
-                          No active courier pricing is available for {deliveryProvince}.
+                    {deliveryMethod === "courier" && (
+                      <label>
+                        Courier
+                        <select
+                          className="input"
+                          value={deliveryCourierId}
+                          onChange={(event) =>
+                            setDeliveryCourierId(event.target.value)
+                          }
+                        >
+                          <option value="">Select courier</option>
+                          {deliveryAvailableCouriers.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.name} ({formatPriceLabel(option.price)})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <label className="admin-order-detail__wide">
+                      Street address
+                      <input
+                        className="input"
+                        type="text"
+                        value={deliveryAddressForm.street}
+                        onChange={handleDeliveryAddressChange("street")}
+                        placeholder="Street address"
+                      />
+                    </label>
+                    <label>
+                      Suburb
+                      <input
+                        className="input"
+                        type="text"
+                        value={deliveryAddressForm.suburb}
+                        onChange={handleDeliveryAddressChange("suburb")}
+                        placeholder="Suburb"
+                      />
+                    </label>
+                    <label>
+                      City
+                      <input
+                        className="input"
+                        type="text"
+                        value={deliveryAddressForm.city}
+                        onChange={handleDeliveryAddressChange("city")}
+                        placeholder="City"
+                      />
+                    </label>
+                    <label>
+                      Province
+                      <select
+                        className="input"
+                        value={deliveryAddressForm.province}
+                        onChange={handleDeliveryAddressChange("province")}
+                      >
+                        <option value="">Select province</option>
+                        {SA_PROVINCES.map((provinceOption) => (
+                          <option
+                            key={provinceOption.value}
+                            value={provinceOption.value}
+                          >
+                            {provinceOption.value}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Postal code
+                      <input
+                        className="input"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={deliveryAddressForm.postalCode}
+                        onChange={handleDeliveryAddressChange("postalCode")}
+                        placeholder="0000"
+                      />
+                    </label>
+                    <label className="admin-order-detail__wide">
+                      Tracking Link (optional)
+                      <input
+                        className="input"
+                        type="url"
+                        value={trackingInput}
+                        onChange={(event) =>
+                          setTrackingInput(event.target.value)
+                        }
+                        placeholder="https://courier.example/track/123"
+                      />
+                    </label>
+                  </div>
+                  {deliveryPreview && (
+                    <div className="admin-order-email-status">
+                      <p className="modal__meta">
+                        <strong>Delivery totals preview:</strong> Shipping{" "}
+                        {formatPriceLabel(deliveryPreview.previousShippingCost)}{" "}
+                        {"->"}{" "}
+                        {deliveryPreview.canResolveNewShippingCost
+                          ? formatPriceLabel(deliveryPreview.nextShippingCost)
+                          : "Select courier"}{" "}
+                        | Total{" "}
+                        {formatPriceLabel(deliveryPreview.previousTotal)} {"->"}{" "}
+                        {formatPriceLabel(deliveryPreview.nextTotal)}
+                      </p>
+                      {deliveryMethod === "courier" &&
+                        !deliveryPreview.canResolveNewShippingCost &&
+                        deliveryProvince && (
+                          <p className="modal__meta admin-order-email-status__warning">
+                            No active courier pricing is available for{" "}
+                            {deliveryProvince}.
+                          </p>
+                        )}
+                      {deliveryPreview.paymentAdjustmentRequired && (
+                        <p className="modal__meta admin-order-email-status__error">
+                          Paid order total will change by{" "}
+                          {formatPriceLabel(deliveryPreview.delta)} and require
+                          payment review.
                         </p>
                       )}
-                    {deliveryPreview.paymentAdjustmentRequired && (
-                      <p className="modal__meta admin-order-email-status__error">
-                        Paid order total will change by {formatPriceLabel(deliveryPreview.delta)} and require payment review.
-                      </p>
-                    )}
-                  </div>
-                )}
-                <p className="modal__meta admin-order-detail__save-hint">
-                  Use "Save Delivery" in the top action bar to apply delivery changes.
-                </p>
-              </section>
+                    </div>
+                  )}
+                  <p className="modal__meta admin-order-detail__save-hint">
+                    Use "Save Delivery" in the top action bar to apply delivery
+                    changes.
+                  </p>
+                </section>
               </div>
             )}
 
@@ -19468,94 +22916,118 @@ export function AdminOrdersView() {
                 aria-labelledby="admin-order-detail-tab-communication"
                 className="admin-order-detail__tabpanel"
               >
-              <section className="admin-order-detail__section-card">
-                <h4>Customer communication</h4>
-                <div className="admin-order-detail__actions-row">
-                  <button
-                    className="btn btn--secondary"
-                    type="button"
-                    disabled={deliveryUpdateEmailSending || !selectedOrder?.customer?.email}
-                    onClick={handleSendDeliveryUpdateEmail}
-                  >
-                    {deliveryUpdateEmailSending ? "Sending..." : "Send Delivery Update Email"}
-                  </button>
-                  <button
-                    className="btn btn--secondary"
-                    type="button"
-                    disabled={resendOrderEmailSending}
-                    onClick={handleResendOrderConfirmationEmail}
-                  >
-                    {resendOrderEmailSending ? "Sending..." : "Resend Order Email"}
-                  </button>
-                </div>
-                <div className="admin-order-email-status">
-                  <p className="modal__meta">
-                    <strong>Order email:</strong>{" "}
-                    {selectedOrderEmailStatusLabel}
-                    {selectedOrderEmailStatus !== "unknown" ? ` (${selectedOrderEmailTemplateLabel})` : ""}
-                  </p>
-                  {selectedOrderEmailAttemptedAtLabel && (
-                    <p className="modal__meta">
-                      Last attempt: {selectedOrderEmailAttemptedAtLabel}
-                      {selectedOrderEmailLastAttemptSource ? ` via ${selectedOrderEmailLastAttemptSource}` : ""}
-                    </p>
-                  )}
-                  {selectedOrderEmailError && (
-                    <p className="modal__meta admin-order-email-status__error">
-                      Details: {selectedOrderEmailError}
-                    </p>
-                  )}
-                  {selectedOrderEmailNeedsRetry && (
-                    <p className="modal__meta admin-order-email-status__warning">
-                      Customer may not have received the order email yet. Use "Resend Order Email".
-                    </p>
-                  )}
-                  {selectedPaymentAdjustment?.required && (
-                    <p className="modal__meta admin-order-email-status__warning">
-                      Payment review needed: order total changed after delivery update.
-                    </p>
-                  )}
-                </div>
-                {isPreorderedOrder(selectedOrder) && (
+                <section className="admin-order-detail__section-card">
+                  <h4>Customer communication</h4>
                   <div className="admin-order-detail__actions-row">
-                    <label>
-                      Pre-order send month
-                      <input
-                        className="input"
-                        type="month"
-                        value={preorderNoticeMonth}
-                        onChange={(event) => setPreorderNoticeMonth(event.target.value)}
-                      />
-                    </label>
                     <button
                       className="btn btn--secondary"
                       type="button"
-                      disabled={preorderNoticeSending}
-                      onClick={handleSendPreorderNoticeEmail}
+                      disabled={
+                        deliveryUpdateEmailSending ||
+                        !selectedOrder?.customer?.email
+                      }
+                      onClick={handleSendDeliveryUpdateEmail}
                     >
-                      {preorderNoticeSending ? "Sending..." : "Send Pre-order Notice"}
+                      {deliveryUpdateEmailSending
+                        ? "Sending..."
+                        : "Send Delivery Update Email"}
+                    </button>
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      disabled={resendOrderEmailSending}
+                      onClick={handleResendOrderConfirmationEmail}
+                    >
+                      {resendOrderEmailSending
+                        ? "Sending..."
+                        : "Resend Order Email"}
                     </button>
                   </div>
-                )}
-                <details className="admin-order-detail__advanced">
-                  <summary>Advanced diagnostics</summary>
-                  <div className="admin-order-detail__advanced-body">
-                    {selectedPayfast.gatewayResponse && (
+                  <div className="admin-order-email-status">
+                    <p className="modal__meta">
+                      <strong>Order email:</strong>{" "}
+                      {selectedOrderEmailStatusLabel}
+                      {selectedOrderEmailStatus !== "unknown"
+                        ? ` (${selectedOrderEmailTemplateLabel})`
+                        : ""}
+                    </p>
+                    {selectedOrderEmailAttemptedAtLabel && (
                       <p className="modal__meta">
-                        Gateway: {selectedPayfast.gatewayResponse} - Amount verified:{" "}
-                        {selectedPayfast.validatedWithGateway ? "yes" : "no"}
+                        Last attempt: {selectedOrderEmailAttemptedAtLabel}
+                        {selectedOrderEmailLastAttemptSource
+                          ? ` via ${selectedOrderEmailLastAttemptSource}`
+                          : ""}
                       </p>
                     )}
-                    {selectedPayfast.paymentReference && (
-                      <p className="modal__meta">Gateway reference: {selectedPayfast.paymentReference}</p>
+                    {selectedOrderEmailError && (
+                      <p className="modal__meta admin-order-email-status__error">
+                        Details: {selectedOrderEmailError}
+                      </p>
                     )}
-                    {selectedPayfast.paymentId && (
-                      <p className="modal__meta">Gateway payment ID: {selectedPayfast.paymentId}</p>
+                    {selectedOrderEmailNeedsRetry && (
+                      <p className="modal__meta admin-order-email-status__warning">
+                        Customer may not have received the order email yet. Use
+                        "Resend Order Email".
+                      </p>
                     )}
-                    <p className="modal__meta">Internal order ID: {selectedOrder.id}</p>
+                    {selectedPaymentAdjustment?.required && (
+                      <p className="modal__meta admin-order-email-status__warning">
+                        Payment review needed: order total changed after
+                        delivery update.
+                      </p>
+                    )}
                   </div>
-                </details>
-              </section>
+                  {isPreorderedOrder(selectedOrder) && (
+                    <div className="admin-order-detail__actions-row">
+                      <label>
+                        Pre-order send month
+                        <input
+                          className="input"
+                          type="month"
+                          value={preorderNoticeMonth}
+                          onChange={(event) =>
+                            setPreorderNoticeMonth(event.target.value)
+                          }
+                        />
+                      </label>
+                      <button
+                        className="btn btn--secondary"
+                        type="button"
+                        disabled={preorderNoticeSending}
+                        onClick={handleSendPreorderNoticeEmail}
+                      >
+                        {preorderNoticeSending
+                          ? "Sending..."
+                          : "Send Pre-order Notice"}
+                      </button>
+                    </div>
+                  )}
+                  <details className="admin-order-detail__advanced">
+                    <summary>Advanced diagnostics</summary>
+                    <div className="admin-order-detail__advanced-body">
+                      {selectedPayfast.gatewayResponse && (
+                        <p className="modal__meta">
+                          Gateway: {selectedPayfast.gatewayResponse} - Amount
+                          verified:{" "}
+                          {selectedPayfast.validatedWithGateway ? "yes" : "no"}
+                        </p>
+                      )}
+                      {selectedPayfast.paymentReference && (
+                        <p className="modal__meta">
+                          Gateway reference: {selectedPayfast.paymentReference}
+                        </p>
+                      )}
+                      {selectedPayfast.paymentId && (
+                        <p className="modal__meta">
+                          Gateway payment ID: {selectedPayfast.paymentId}
+                        </p>
+                      )}
+                      <p className="modal__meta">
+                        Internal order ID: {selectedOrder.id}
+                      </p>
+                    </div>
+                  </details>
+                </section>
               </div>
             )}
           </div>
@@ -19621,7 +23093,7 @@ export function AdminOrdersView() {
                 handleUpdateOrderStatus(
                   pendingStatusUpdate.orderId,
                   pendingStatusUpdate.status,
-                  trackingInput
+                  trackingInput,
                 );
               }}
             >
@@ -19637,41 +23109,125 @@ export function AdminOrdersView() {
         onClick={(e) => e.target === e.currentTarget && closeEditOrderModal()}
         style={{ maxHeight: "90vh" }}
       >
-        <div className="modal__content" style={{ maxWidth: "500px", maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <button className="modal__close" onClick={closeEditOrderModal}>&times;</button>
+        <div
+          className="modal__content"
+          style={{
+            maxWidth: "500px",
+            maxHeight: "85vh",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <button className="modal__close" onClick={closeEditOrderModal}>
+            &times;
+          </button>
           <h3 className="modal__title">Edit Order Items</h3>
 
           {/* Scrollable Items List */}
-          <div style={{ flex: "1", overflowY: "auto", marginBottom: "1rem", paddingRight: "0.5rem" }}>
+          <div
+            style={{
+              flex: "1",
+              overflowY: "auto",
+              marginBottom: "1rem",
+              paddingRight: "0.5rem",
+            }}
+          >
             {editOrderForm.items.map((item, idx) => (
-              <div key={idx} style={{ marginBottom: "0.75rem", padding: "0.75rem", border: "1px solid #e0d4be", borderRadius: "4px", background: "#fafaf8" }}>
+              <div
+                key={idx}
+                style={{
+                  marginBottom: "0.75rem",
+                  padding: "0.75rem",
+                  border: "1px solid #e0d4be",
+                  borderRadius: "4px",
+                  background: "#fafaf8",
+                }}
+              >
                 {editingItemIndex === idx ? (
                   // Edit Mode
                   <div>
-                    <div style={{ marginBottom: "0.75rem", fontSize: "0.9rem", fontWeight: "600" }}>
+                    <div
+                      style={{
+                        marginBottom: "0.75rem",
+                        fontSize: "0.9rem",
+                        fontWeight: "600",
+                      }}
+                    >
                       {item.name}
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                      <label style={{ display: "flex", flexDirection: "column", fontSize: "0.8rem", overflow: "hidden" }}>
-                        <span style={{ marginBottom: "0.25rem", fontWeight: "600" }}>Qty</span>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: "0.5rem",
+                        marginBottom: "0.5rem",
+                      }}
+                    >
+                      <label
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          fontSize: "0.8rem",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <span
+                          style={{ marginBottom: "0.25rem", fontWeight: "600" }}
+                        >
+                          Qty
+                        </span>
                         <input
                           type="number"
                           min="1"
                           value={item.quantity}
-                          onChange={(e) => handleEditOrderItemQuantity(idx, parseInt(e.target.value) || 1)}
-                          style={{ padding: "0.5rem", border: "1px solid #d4c4b0", borderRadius: "4px", width: "100%", boxSizing: "border-box" }}
+                          onChange={(e) =>
+                            handleEditOrderItemQuantity(
+                              idx,
+                              parseInt(e.target.value) || 1,
+                            )
+                          }
+                          style={{
+                            padding: "0.5rem",
+                            border: "1px solid #d4c4b0",
+                            borderRadius: "4px",
+                            width: "100%",
+                            boxSizing: "border-box",
+                          }}
                           autoFocus
                         />
                       </label>
-                      <label style={{ display: "flex", flexDirection: "column", fontSize: "0.8rem", overflow: "hidden" }}>
-                        <span style={{ marginBottom: "0.25rem", fontWeight: "600" }}>Price</span>
+                      <label
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          fontSize: "0.8rem",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <span
+                          style={{ marginBottom: "0.25rem", fontWeight: "600" }}
+                        >
+                          Price
+                        </span>
                         <input
                           type="number"
                           min="0"
                           step="0.01"
                           value={item.price}
-                          onChange={(e) => handleEditOrderItemPrice(idx, parseFloat(e.target.value) || 0)}
-                          style={{ padding: "0.5rem", border: "1px solid #d4c4b0", borderRadius: "4px", width: "100%", boxSizing: "border-box" }}
+                          onChange={(e) =>
+                            handleEditOrderItemPrice(
+                              idx,
+                              parseFloat(e.target.value) || 0,
+                            )
+                          }
+                          style={{
+                            padding: "0.5rem",
+                            border: "1px solid #d4c4b0",
+                            borderRadius: "4px",
+                            width: "100%",
+                            boxSizing: "border-box",
+                          }}
                         />
                       </label>
                     </div>
@@ -19679,7 +23235,11 @@ export function AdminOrdersView() {
                       <button
                         type="button"
                         className="btn btn--primary"
-                        style={{ padding: "0.35rem 0.75rem", fontSize: "0.75rem", flex: "1" }}
+                        style={{
+                          padding: "0.35rem 0.75rem",
+                          fontSize: "0.75rem",
+                          flex: "1",
+                        }}
                         onClick={() => setEditingItemIndex(null)}
                       >
                         Done
@@ -19687,7 +23247,11 @@ export function AdminOrdersView() {
                       <button
                         type="button"
                         className="btn btn--secondary"
-                        style={{ padding: "0.35rem 0.75rem", fontSize: "0.75rem", flex: "1" }}
+                        style={{
+                          padding: "0.35rem 0.75rem",
+                          fontSize: "0.75rem",
+                          flex: "1",
+                        }}
                         onClick={() => handleRemoveEditOrderItem(idx)}
                       >
                         Remove
@@ -19696,17 +23260,38 @@ export function AdminOrdersView() {
                   </div>
                 ) : (
                   // View Mode
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
                     <div>
-                      <div style={{ fontSize: "0.9rem", fontWeight: "600", marginBottom: "0.25rem" }}>{item.name}</div>
+                      <div
+                        style={{
+                          fontSize: "0.9rem",
+                          fontWeight: "600",
+                          marginBottom: "0.25rem",
+                        }}
+                      >
+                        {item.name}
+                      </div>
                       <div style={{ fontSize: "0.8rem", color: "#666" }}>
-                        {item.quantity}x @ {formatPriceLabel(item.price)} = <strong>{formatPriceLabel(item.price * item.quantity)}</strong>
+                        {item.quantity}x @ {formatPriceLabel(item.price)} ={" "}
+                        <strong>
+                          {formatPriceLabel(item.price * item.quantity)}
+                        </strong>
                       </div>
                     </div>
                     <button
                       type="button"
                       className="btn btn--secondary"
-                      style={{ padding: "0.4rem 0.6rem", fontSize: "1rem", minWidth: "auto" }}
+                      style={{
+                        padding: "0.4rem 0.6rem",
+                        fontSize: "1rem",
+                        minWidth: "auto",
+                      }}
                       onClick={() => setEditingItemIndex(idx)}
                       title="Edit item"
                     >
@@ -19719,14 +23304,44 @@ export function AdminOrdersView() {
           </div>
 
           {/* Totals Summary */}
-          <div style={{ background: "#f5ead7", padding: "0.75rem", borderRadius: "4px", marginBottom: "1rem", fontSize: "0.9rem" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+          <div
+            style={{
+              background: "#f5ead7",
+              padding: "0.75rem",
+              borderRadius: "4px",
+              marginBottom: "1rem",
+              fontSize: "0.9rem",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: "0.5rem",
+              }}
+            >
               <span>Original:</span>
               <span>{formatPriceLabel(editOrderForm.originalTotalPrice)}</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "600" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontWeight: "600",
+              }}
+            >
               <span>New:</span>
-              <span style={{ color: editOrderForm.totalPrice < editOrderForm.originalTotalPrice ? "#22c55e" : editOrderForm.totalPrice > editOrderForm.originalTotalPrice ? "#dc2626" : "#556b2f" }}>
+              <span
+                style={{
+                  color:
+                    editOrderForm.totalPrice < editOrderForm.originalTotalPrice
+                      ? "#22c55e"
+                      : editOrderForm.totalPrice >
+                          editOrderForm.originalTotalPrice
+                        ? "#dc2626"
+                        : "#556b2f",
+                }}
+              >
                 {formatPriceLabel(editOrderForm.totalPrice)}
               </span>
             </div>
@@ -19772,14 +23387,19 @@ export function AdminShippingView() {
       return null;
     }
   }, []);
-  const { items: courierOptions = [], status, error } = useFirestoreCollection("courierOptions", {
+  const {
+    items: courierOptions = [],
+    status,
+    error,
+  } = useFirestoreCollection("courierOptions", {
     orderByField: "createdAt",
     orderDirection: "desc",
     fallback: [],
   });
   const [drafts, setDrafts] = useState({});
   const [newCourier, setNewCourier] = useState({ name: "", isActive: true });
-  const [isCreateCourierDialogOpen, setCreateCourierDialogOpen] = useState(false);
+  const [isCreateCourierDialogOpen, setCreateCourierDialogOpen] =
+    useState(false);
   const [expandedCourierIds, setExpandedCourierIds] = useState({});
   const [statusMessage, setStatusMessage] = useState(null);
   const [savingId, setSavingId] = useState(null);
@@ -19958,7 +23578,8 @@ export function AdminShippingView() {
           <div>
             <h2>Shipping & Courier</h2>
             <p className="admin-panel__note">
-              Configure courier options with province-specific pricing and availability.
+              Configure courier options with province-specific pricing and
+              availability.
             </p>
           </div>
           <div className="admin-panel__header-actions">
@@ -19976,19 +23597,30 @@ export function AdminShippingView() {
           </div>
         </div>
 
-        {status === "loading" && <p className="modal__meta">Loading courier options...</p>}
+        {status === "loading" && (
+          <p className="modal__meta">Loading courier options...</p>
+        )}
         {error && <p className="admin-panel__error">{error.message}</p>}
-        {statusMessage && <p className="admin-panel__status">{statusMessage}</p>}
+        {statusMessage && (
+          <p className="admin-panel__status">{statusMessage}</p>
+        )}
 
         {courierOptions.length === 0 ? (
           <div className="admin-shipping-empty">
             <p className="admin-shipping-empty__icon">🚚</p>
-            <p className="admin-shipping-empty__title">No shipping methods yet</p>
-            <p className="admin-shipping-empty__note">Add your first shipping method to enable delivery at checkout.</p>
+            <p className="admin-shipping-empty__title">
+              No shipping methods yet
+            </p>
+            <p className="admin-shipping-empty__note">
+              Add your first shipping method to enable delivery at checkout.
+            </p>
             <button
               className="btn btn--primary"
               type="button"
-              onClick={() => { setNewCourier({ name: "", isActive: true }); setCreateCourierDialogOpen(true); }}
+              onClick={() => {
+                setNewCourier({ name: "", isActive: true });
+                setCreateCourierDialogOpen(true);
+              }}
               disabled={!inventoryEnabled}
             >
               + Add Shipping Method
@@ -20001,7 +23633,7 @@ export function AdminShippingView() {
               if (!draft) return null;
               const isExpanded = expandedCourierIds[option.id] ?? true;
               const activeProvinces = SA_PROVINCES.filter(
-                (p) => draft.provinces?.[p.value]?.isAvailable
+                (p) => draft.provinces?.[p.value]?.isAvailable,
               );
               const isSaving = savingId === option.id;
 
@@ -20018,31 +23650,57 @@ export function AdminShippingView() {
                       aria-expanded={isExpanded}
                       onClick={() => handleToggleCourierExpanded(option.id)}
                     >
-                      <span className="admin-shipping-card__chevron" aria-hidden="true">
+                      <span
+                        className="admin-shipping-card__chevron"
+                        aria-hidden="true"
+                      >
                         {isExpanded ? "▾" : "▸"}
                       </span>
                       <div className="admin-shipping-card__title-group">
-                        <span className="admin-shipping-card__name">{draft.name || "Unnamed method"}</span>
+                        <span className="admin-shipping-card__name">
+                          {draft.name || "Unnamed method"}
+                        </span>
                         <span className="admin-shipping-card__meta">
                           {draft.isActive ? (
-                            <span className="admin-shipping-badge admin-shipping-badge--active">Active</span>
+                            <span className="admin-shipping-badge admin-shipping-badge--active">
+                              Active
+                            </span>
                           ) : (
-                            <span className="admin-shipping-badge admin-shipping-badge--inactive">Inactive</span>
+                            <span className="admin-shipping-badge admin-shipping-badge--inactive">
+                              Inactive
+                            </span>
                           )}
                           <span className="admin-shipping-card__province-count">
-                            {activeProvinces.length} of {SA_PROVINCES.length} provinces enabled
+                            {activeProvinces.length} of {SA_PROVINCES.length}{" "}
+                            provinces enabled
                           </span>
                         </span>
                       </div>
                     </button>
                     <div className="admin-shipping-card__header-right">
-                      <label className="admin-shipping-toggle" title={draft.isActive ? "Disable this method" : "Enable this method"}>
+                      <label
+                        className="admin-shipping-toggle"
+                        title={
+                          draft.isActive
+                            ? "Disable this method"
+                            : "Enable this method"
+                        }
+                      >
                         <input
                           type="checkbox"
                           checked={Boolean(draft.isActive)}
-                          onChange={(e) => handleDraftChange(option.id, "isActive", e.target.checked)}
+                          onChange={(e) =>
+                            handleDraftChange(
+                              option.id,
+                              "isActive",
+                              e.target.checked,
+                            )
+                          }
                         />
-                        <span className="admin-shipping-toggle__track" aria-hidden="true" />
+                        <span
+                          className="admin-shipping-toggle__track"
+                          aria-hidden="true"
+                        />
                       </label>
                     </div>
                   </div>
@@ -20059,7 +23717,9 @@ export function AdminShippingView() {
                           type="text"
                           value={draft.name}
                           placeholder="e.g. Standard Delivery"
-                          onChange={(e) => handleDraftChange(option.id, "name", e.target.value)}
+                          onChange={(e) =>
+                            handleDraftChange(option.id, "name", e.target.value)
+                          }
                         />
                       </div>
 
@@ -20078,21 +23738,33 @@ export function AdminShippingView() {
                               key={`${option.id}-${province.value}`}
                               className={`admin-shipping-row${isOn ? " admin-shipping-row--on" : ""}`}
                             >
-                              <span className="admin-shipping-row__province">{province.label}</span>
+                              <span className="admin-shipping-row__province">
+                                {province.label}
+                              </span>
 
                               <label className="admin-shipping-toggle">
                                 <input
                                   type="checkbox"
                                   checked={isOn}
                                   onChange={(e) =>
-                                    handleProvinceChange(option.id, province.value, "isAvailable", e.target.checked)
+                                    handleProvinceChange(
+                                      option.id,
+                                      province.value,
+                                      "isAvailable",
+                                      e.target.checked,
+                                    )
                                   }
                                 />
-                                <span className="admin-shipping-toggle__track" aria-hidden="true" />
+                                <span
+                                  className="admin-shipping-toggle__track"
+                                  aria-hidden="true"
+                                />
                               </label>
 
                               <div className="admin-shipping-row__price">
-                                <span className="admin-shipping-row__currency">R</span>
+                                <span className="admin-shipping-row__currency">
+                                  R
+                                </span>
                                 <input
                                   className="input admin-shipping-price-input"
                                   type="number"
@@ -20102,7 +23774,12 @@ export function AdminShippingView() {
                                   disabled={!isOn}
                                   placeholder="0.00"
                                   onChange={(e) =>
-                                    handleProvinceChange(option.id, province.value, "price", e.target.value)
+                                    handleProvinceChange(
+                                      option.id,
+                                      province.value,
+                                      "price",
+                                      e.target.value,
+                                    )
                                   }
                                 />
                               </div>
@@ -20174,7 +23851,8 @@ export function AdminShippingView() {
               Create new shipping method
             </h3>
             <p className="modal__meta">
-              Add the method name here, then configure province pricing in the courier list.
+              Add the method name here, then configure province pricing in the
+              courier list.
             </p>
             <form className="admin-form" onSubmit={handleCreateCourier}>
               <label className="admin-form__field">
@@ -20184,7 +23862,10 @@ export function AdminShippingView() {
                   type="text"
                   value={newCourier.name}
                   onChange={(event) =>
-                    setNewCourier((prev) => ({ ...prev, name: event.target.value }))
+                    setNewCourier((prev) => ({
+                      ...prev,
+                      name: event.target.value,
+                    }))
                   }
                   placeholder="Standard Delivery"
                   required
@@ -20195,7 +23876,10 @@ export function AdminShippingView() {
                   type="checkbox"
                   checked={newCourier.isActive}
                   onChange={(event) =>
-                    setNewCourier((prev) => ({ ...prev, isActive: event.target.checked }))
+                    setNewCourier((prev) => ({
+                      ...prev,
+                      isActive: event.target.checked,
+                    }))
                   }
                 />
                 Active for checkout
@@ -20209,7 +23893,11 @@ export function AdminShippingView() {
                 >
                   Cancel
                 </button>
-                <button className="btn btn--primary" type="submit" disabled={savingId === "new"}>
+                <button
+                  className="btn btn--primary"
+                  type="submit"
+                  disabled={savingId === "new"}
+                >
                   {savingId === "new" ? "Saving..." : "Create method"}
                 </button>
               </div>
@@ -20245,13 +23933,19 @@ export function AdminProfileView() {
     }
   }, []);
 
-  const { items: adminPosSettings } = useFirestoreCollection("adminPosSettings", {
-    orderByField: null,
-    orderDirection: null,
-  });
+  const { items: adminPosSettings } = useFirestoreCollection(
+    "adminPosSettings",
+    {
+      orderByField: null,
+      orderDirection: null,
+    },
+  );
 
   const activePosSettings = useMemo(
-    () => adminPosSettings.find((entry) => entry.uid === user?.uid || entry.id === user?.uid) || null,
+    () =>
+      adminPosSettings.find(
+        (entry) => entry.uid === user?.uid || entry.id === user?.uid,
+      ) || null,
     [adminPosSettings, user?.uid],
   );
 
@@ -20266,8 +23960,12 @@ export function AdminProfileView() {
             : value
               ? new Date(value)
               : null;
-    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Not set";
-    return date.toLocaleString("en-ZA", { dateStyle: "medium", timeStyle: "short" });
+    if (!(date instanceof Date) || Number.isNaN(date.getTime()))
+      return "Not set";
+    return date.toLocaleString("en-ZA", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
   };
 
   const handleRefreshRole = async () => {
@@ -20320,7 +24018,9 @@ export function AdminProfileView() {
       setCurrentPin("");
       setNewPin("");
       setConfirmPin("");
-      setPinStatusMessage(activePosSettings?.pinConfigured ? "POS PIN updated." : "POS PIN set.");
+      setPinStatusMessage(
+        activePosSettings?.pinConfigured ? "POS PIN updated." : "POS PIN set.",
+      );
     } catch (error) {
       setPinError(error?.message || "Unable to save POS PIN.");
     } finally {
@@ -20351,7 +24051,11 @@ export function AdminProfileView() {
           >
             {roleLoading ? "Refreshing..." : "Refresh Role"}
           </button>
-          <button className="btn btn--primary" type="button" onClick={handleSignOut}>
+          <button
+            className="btn btn--primary"
+            type="button"
+            onClick={handleSignOut}
+          >
             Sign Out
           </button>
         </div>
@@ -20363,14 +24067,17 @@ export function AdminProfileView() {
         <h3>POS PIN</h3>
         <div className="admin-profile__pin-status">
           <p className="modal__meta">
-            <strong>Status:</strong> {activePosSettings?.pinConfigured ? "Configured" : "Not configured"}
+            <strong>Status:</strong>{" "}
+            {activePosSettings?.pinConfigured ? "Configured" : "Not configured"}
           </p>
           <p className="modal__meta">
-            <strong>Last updated:</strong> {formatPinTimestamp(activePosSettings?.pinUpdatedAt)}
+            <strong>Last updated:</strong>{" "}
+            {formatPinTimestamp(activePosSettings?.pinUpdatedAt)}
           </p>
           {activePosSettings?.pinResetAt && (
             <p className="modal__meta">
-              <strong>Last reset:</strong> {formatPinTimestamp(activePosSettings.pinResetAt)}
+              <strong>Last reset:</strong>{" "}
+              {formatPinTimestamp(activePosSettings.pinResetAt)}
             </p>
           )}
         </div>
@@ -20384,7 +24091,9 @@ export function AdminProfileView() {
                 inputMode="numeric"
                 maxLength={8}
                 value={currentPin}
-                onChange={(event) => setCurrentPin(event.target.value.replace(/\D+/g, ""))}
+                onChange={(event) =>
+                  setCurrentPin(event.target.value.replace(/\D+/g, ""))
+                }
                 placeholder="Current PIN"
               />
             </label>
@@ -20397,7 +24106,9 @@ export function AdminProfileView() {
               inputMode="numeric"
               maxLength={8}
               value={newPin}
-              onChange={(event) => setNewPin(event.target.value.replace(/\D+/g, ""))}
+              onChange={(event) =>
+                setNewPin(event.target.value.replace(/\D+/g, ""))
+              }
               placeholder="4 to 8 digits"
             />
           </label>
@@ -20409,17 +24120,30 @@ export function AdminProfileView() {
               inputMode="numeric"
               maxLength={8}
               value={confirmPin}
-              onChange={(event) => setConfirmPin(event.target.value.replace(/\D+/g, ""))}
+              onChange={(event) =>
+                setConfirmPin(event.target.value.replace(/\D+/g, ""))
+              }
               placeholder="Repeat PIN"
             />
           </label>
         </div>
         <div className="admin-profile__actions">
-          <button className="btn btn--primary" type="button" onClick={handleSavePosPin} disabled={pinSaving}>
-            {pinSaving ? "Saving..." : activePosSettings?.pinConfigured ? "Change POS PIN" : "Set POS PIN"}
+          <button
+            className="btn btn--primary"
+            type="button"
+            onClick={handleSavePosPin}
+            disabled={pinSaving}
+          >
+            {pinSaving
+              ? "Saving..."
+              : activePosSettings?.pinConfigured
+                ? "Change POS PIN"
+                : "Set POS PIN"}
           </button>
         </div>
-        {pinStatusMessage && <p className="admin-panel__status">{pinStatusMessage}</p>}
+        {pinStatusMessage && (
+          <p className="admin-panel__status">{pinStatusMessage}</p>
+        )}
         {pinError && <p className="admin-panel__error">{pinError}</p>}
       </Reveal>
     </div>
@@ -20427,7 +24151,12 @@ export function AdminProfileView() {
 }
 
 export default AdminDashboardView;
-function AdminPagination({ page, total, onPageChange, pageSize = ADMIN_PAGE_SIZE }) {
+function AdminPagination({
+  page,
+  total,
+  onPageChange,
+  pageSize = ADMIN_PAGE_SIZE,
+}) {
   if (total <= pageSize) return null;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = page * pageSize + 1;

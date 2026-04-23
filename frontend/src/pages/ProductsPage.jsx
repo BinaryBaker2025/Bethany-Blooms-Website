@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
+import ImageLoader from "../components/ImageLoader.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
+import { useImageListPreloader } from "../hooks/useImageListPreloader.js";
 import { formatPreorderSendMonth, getProductPreorderSendMonth } from "../lib/preorder.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
@@ -22,6 +24,55 @@ const normalizeCategoryToken = (value = "") =>
     .trim()
     .toLowerCase()
     .replace(/[_\s]+/g, "-");
+
+const normalizeProductCategoryStatus = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "live" || normalized === "draft" || normalized === "archived") {
+    return normalized;
+  }
+  return "live";
+};
+
+const isCategoryHidden = (category = {}) =>
+  Boolean(category.hidden || category.isHidden) ||
+  normalizeProductCategoryStatus(category.status) !== "live";
+
+const getCategoryLookupTokens = (category = {}) =>
+  [category.id, category.slug, category.name, category.title, category.label]
+    .map((value) => normalizeCategoryToken(value ?? ""))
+    .filter(Boolean);
+
+const getCatalogItemCategoryValues = (item = {}) => {
+  const values = [];
+  if (Array.isArray(item.category_ids)) values.push(...item.category_ids);
+  if (Array.isArray(item.categoryIds)) values.push(...item.categoryIds);
+  if (item.categoryId) values.push(item.categoryId);
+  if (item.categorySlug) values.push(item.categorySlug);
+  if (item.category) values.push(item.category);
+  if (item.categoryName) values.push(item.categoryName);
+  return values.map((value) => normalizeCategoryToken(value ?? "")).filter(Boolean);
+};
+
+const hasHiddenCategoryAssignment = (item = {}, hiddenCategoryKeys = new Set()) => {
+  if (!hiddenCategoryKeys.size) return false;
+  return getCatalogItemCategoryValues(item).some((value) => hiddenCategoryKeys.has(value));
+};
+
+const preloadedProductHeroImages = new Set();
+
+const preloadProductHeroImage = (src = "", priority = "low") => {
+  const imageUrl = (src || "").toString().trim();
+  if (!imageUrl || preloadedProductHeroImages.has(imageUrl) || typeof window === "undefined") {
+    return;
+  }
+  preloadedProductHeroImages.add(imageUrl);
+  const image = new Image();
+  image.decoding = "async";
+  if ("fetchPriority" in image) {
+    image.fetchPriority = priority;
+  }
+  image.src = imageUrl;
+};
 
 const normalizeSubscriptionPlanStatus = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
@@ -97,9 +148,17 @@ function ProductsPage() {
     orderByField: "name",
     orderDirection: "asc",
   });
+  const hiddenCategoryKeys = useMemo(() => {
+    const keys = new Set();
+    categoryItems.filter(isCategoryHidden).forEach((category) => {
+      getCategoryLookupTokens(category).forEach((token) => keys.add(token));
+    });
+    return keys;
+  }, [categoryItems]);
   const categoryOptions = useMemo(
     () =>
       categoryItems
+        .filter((category) => !isCategoryHidden(category))
         .map((category) => {
           const name = (category.name || category.title || category.label || category.id || "").toString().trim();
           if (!name) return null;
@@ -133,6 +192,23 @@ function ProductsPage() {
         .filter(Boolean),
     [categoryItems],
   );
+  const categoryHeroImagesToPreload = useMemo(() => {
+    const urls = categoryOptions
+      .map((category) => {
+        const tokens = [category.id, category.slug, category.name].map(normalizeCategoryToken);
+        const isCutFlower = tokens.some(
+          (token) =>
+            token === "cut-flower" ||
+            token === "cutflower" ||
+            token.includes("cut-flower") ||
+            token.includes("cutflower"),
+        );
+        return isCutFlower ? CUT_FLOWER_PAGE_IMAGES.productsCutFlowerHero : category.coverImage;
+      })
+      .map((value) => (value || "").toString().trim())
+      .filter(Boolean);
+    return Array.from(new Set(urls));
+  }, [categoryOptions]);
   const categoryLookup = useMemo(() => {
     const map = new Map();
     categoryOptions.forEach((category) => {
@@ -153,7 +229,11 @@ function ProductsPage() {
     return categoryLookup.get(key) || null;
   };
 
-  const liveProducts = remoteProducts.filter((product) => (product.status ?? "live") === "live");
+  const liveProducts = remoteProducts.filter(
+    (product) =>
+      (product.status ?? "live") === "live" &&
+      !hasHiddenCategoryAssignment(product, hiddenCategoryKeys),
+  );
 
   const normalizedProducts = liveProducts.map((product, index) => {
     const priceNumber = typeof product.price === "number" ? product.price : Number(product.price);
@@ -273,6 +353,7 @@ function ProductsPage() {
 
     return remoteSubscriptionPlans
       .filter((plan) => normalizeSubscriptionPlanStatus(plan?.status || "draft") === "live")
+      .filter((plan) => !hasHiddenCategoryAssignment(plan, hiddenCategoryKeys))
       .map((plan, index) => {
         const planId = (plan?.id || "").toString().trim();
         if (!planId) return null;
@@ -355,7 +436,7 @@ function ProductsPage() {
         };
       })
       .filter(Boolean);
-  }, [categoryLookup, remoteSubscriptionPlans]);
+  }, [categoryLookup, hiddenCategoryKeys, remoteSubscriptionPlans]);
 
   const activeCategory = useMemo(() => {
     if (!activeCategoryParam) return null;
@@ -455,6 +536,21 @@ function ProductsPage() {
     return result;
   }, [baseProducts, searchQuery, stockFilter, onSaleOnly, priceMin, priceMax, sortBy]);
 
+  // Extract all product images for intelligent preloading
+  const displayProductImages = useMemo(() => {
+    return displayProducts
+      .map((product) => product.image)
+      .filter(Boolean)
+      .slice(0, 50); // Limit to first 50 to avoid memory issues
+  }, [displayProducts]);
+
+  // Preload images intelligently as user scrolls
+  useImageListPreloader(displayProductImages, {
+    lookaheadCount: 12,
+    priority: "low",
+    enabled: true,
+  });
+
   const hasActiveFilters = Boolean(
     searchQuery || activeCategoryParam || stockFilter !== "all" || onSaleOnly || priceMin || priceMax || sortBy !== "newest",
   );
@@ -491,12 +587,33 @@ function ProductsPage() {
     activeCategory?.description ||
     "Discover limited releases, seasonal blooms, and bespoke keepsakes designed to celebrate meaningful moments.";
 
+  useEffect(() => {
+    preloadProductHeroImage(heroImage || heroBackground, "high");
+  }, [heroImage]);
+
+  useEffect(() => {
+    if (!categoryHeroImagesToPreload.length || typeof window === "undefined") return undefined;
+    const preloadAllCategoryHeroImages = () => {
+      categoryHeroImagesToPreload.forEach((imageUrl) => {
+        preloadProductHeroImage(imageUrl, "low");
+      });
+    };
+
+    if (typeof window.requestIdleCallback === "function") {
+      const callbackId = window.requestIdleCallback(preloadAllCategoryHeroImages, { timeout: 1500 });
+      return () => window.cancelIdleCallback?.(callbackId);
+    }
+
+    const timeoutId = window.setTimeout(preloadAllCategoryHeroImages, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [categoryHeroImagesToPreload]);
+
   return (
     <>
       {/* Page hero */}
       <section className="section--no-pad">
         <div className="page-hero">
-          <img className="page-hero__bg" src={heroImage || heroBackground} alt="" aria-hidden="true" loading="eager" decoding="async" fetchpriority="high" />
+          <img className="page-hero__bg" src={heroImage || heroBackground} alt="" aria-hidden="true" loading="eager" decoding="async" fetchPriority="high" />
           <div className="page-hero__overlay" aria-hidden="true" />
           <div className="page-hero__content">
             <span className="editorial-eyebrow">Studio Collection</span>
@@ -665,7 +782,13 @@ function ProductsPage() {
                 >
                   <span className="product-card__category">{categoryLabel}</span>
                   <div className="product-card__media" aria-hidden="true">
-                    <img className="product-card__image" src={product.image} alt="" loading={index < 4 ? "eager" : "lazy"} decoding="async"/>
+                    <ImageLoader
+                      src={product.image}
+                      alt=""
+                      className="product-card__image"
+                      containerClassName="product-card__image-container"
+                      fetchPriority={index < 4 ? "high" : "low"}
+                    />
                     {product.stockBadgeLabel && (
                       <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
                         {product.stockBadgeLabel}

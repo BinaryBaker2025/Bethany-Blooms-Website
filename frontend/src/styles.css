@@ -4506,6 +4506,13 @@ main {
   align-items: center;
 }
 
+.admin-category-card__title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .admin-category-card .icon-btn {
   flex-shrink: 0;
 }
@@ -4548,6 +4555,16 @@ main {
 
 .admin-media__grid--compact {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.admin-media-modal__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.25rem;
+  -webkit-overflow-scrolling: touch;
 }
 
 .admin-media__card {
@@ -5347,6 +5364,16 @@ main {
 .admin-status--approved {
   background: rgba(167, 199, 161, 0.22);
   color: #2f3624;
+}
+
+.admin-status--live {
+  background: rgba(167, 199, 161, 0.22);
+  color: #2f3624;
+}
+
+.admin-status--draft {
+  background: rgba(176, 120, 47, 0.18);
+  color: #6b4a1f;
 }
 
 .admin-status--payfast {
@@ -6574,7 +6601,7 @@ main {
 }
 
 .admin-modal .admin-form__actions {
-  position: sticky;
+  position: fixed;
   bottom: 0;
   z-index: 6;
   margin-top: 0.35rem;
@@ -7821,10 +7848,9 @@ main {
 }
 
 .cart-list__item--row {
-  grid-template-columns: minmax(200px, 2.2fr) minmax(160px, 1.2fr) minmax(
-      160px,
-      1.1fr
-    ) minmax(120px, 0.9fr);
+  grid-template-columns:
+    minmax(200px, 2.2fr) minmax(160px, 1.2fr) minmax(160px, 1.1fr)
+    minmax(120px, 0.9fr);
   grid-template-areas: "info qty variant total";
   align-items: start;
   gap: 1rem;
@@ -23770,6 +23796,16 @@ td.admin-table__actions {
   color: #2a4c0a;
   border-color: #b0d080;
 }
+.admin-status--live {
+  background: #e6f2d8;
+  color: #2a4c0a;
+  border-color: #b0d080;
+}
+.admin-status--draft {
+  background: #fef4dc;
+  color: #7a5000;
+  border-color: #ead070;
+}
 .admin-status--pending {
   background: #fef4dc;
   color: #7a5000;
@@ -24294,7 +24330,7 @@ td.admin-table__actions {
   background: #f5ead7 !important;
   border-radius: 0 !important;
   flex-shrink: 0 !important;
-  position: static !important; /* undo old sticky; modal flex handles positioning */
+  position: fixed !important; /* undo old sticky; modal flex handles positioning */
   margin-top: 0 !important;
   backdrop-filter: none !important;
 }
@@ -24506,11 +24542,12 @@ td.admin-table__actions {
   background: var(--dlg-surface) !important;
   border-radius: 0 !important;
   flex-shrink: 0 !important;
-  position: static !important;
+  position: sticky !important;
   margin-top: 0 !important;
   backdrop-filter: none !important;
   flex-wrap: wrap !important;
   z-index: auto !important;
+  width: 100%;
 }
 
 /* Buttons inside dialogs */
@@ -24961,6 +24998,244 @@ td.admin-table__actions {
   margin: 0 !important;
   word-break: break-word !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   IMAGE LOADING & FADE-IN ANIMATIONS — Smooth category switching
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Fade-in animation for images */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Skeleton loader shimmer animation */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+/* Slide-up fade animation for product grids */
+@keyframes slide-up-fade {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Image loading state — skeleton placeholder */
+.image-loader {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--color-bg-light);
+  border-radius: 12px;
+}
+
+.image-loader.is-loading {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-light) 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    var(--color-bg-light) 100%
+  );
+  background-size: 1000px 100%;
+  animation: skeleton-shimmer 2s infinite;
+}
+
+.image-loader img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 12px;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.4s ease-in-out;
+}
+
+.image-loader img.is-loaded {
+  opacity: 1;
+  animation: fade-in 0.4s ease-in-out forwards;
+}
+
+/* Product grid fade-in on category change */
+.kits-grid {
+  animation: slide-up-fade 0.5s ease-out forwards;
+}
+
+/* Category transition effect */
+.shop-filters__chips {
+  animation: fade-in 0.3s ease-out;
+}
+
+.shop-chip {
+  transition: all 0.2s ease;
+}
+
+.shop-chip.shop-chip--active {
+  animation: pop-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Loading indicator for category transition */
+.shop-loading-overlay {
+  position: relative;
+  animation: fade-in 0.25s ease-out;
+}
+
+/* Stagger animation for product cards */
+.product-card {
+  animation: slide-up-fade 0.45s ease-out backwards;
+}
+
+.product-card:nth-child(1) {
+  animation-delay: 0ms;
+}
+
+.product-card:nth-child(2) {
+  animation-delay: 45ms;
+}
+
+.product-card:nth-child(3) {
+  animation-delay: 90ms;
+}
+
+.product-card:nth-child(4) {
+  animation-delay: 135ms;
+}
+
+.product-card:nth-child(5) {
+  animation-delay: 180ms;
+}
+
+.product-card:nth-child(n+6) {
+  animation-delay: 225ms;
+}
+
+/* Hero image fade-in on category switch */
+.page-hero__bg {
+  animation: fade-in 0.5s ease-out;
+}
+
+/* Loading spinner animation */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(47, 54, 36, 0.1);
+  border-top-color: #556b2f;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Pulse animation for loading placeholders */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   IMAGE LOADER COMPONENT — Advanced caching & preloading system
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Image container with skeleton placeholder */
+.image-loader {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--color-bg-light);
+}
+
+/* Skeleton loading state */
+.image-loader.is-loading {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-light) 0%,
+    rgba(255, 255, 255, 0.2) 50%,
+    var(--color-bg-light) 100%
+  );
+  background-size: 1000px 100%;
+  animation: skeleton-shimmer 1.8s infinite;
+}
+
+/* Cached image (already loaded before) */
+.image-loader.is-cached {
+  background: transparent;
+}
+
+/* Product card image container integration */
+.product-card__image-container {
+  width: 100%;
+  height: 100%;
+  min-height: 250px;
+}
+
+/* Image inside loader */
+.image-loader img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 12px;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.4s ease-in-out;
+}
+
+.image-loader img.is-loaded {
+  opacity: 1;
+  animation: fade-in 0.4s ease-in-out forwards;
+}
+
+/* Fast cached images skip fade animation */
+.image-loader.is-cached img.is-loaded {
+  animation: none;
+  opacity: 1;
+}
+
+/* Hero image container for category switching */
+.page-hero__bg {
+  animation: fade-in 0.5s ease-out;
+}
 .admin-order-detail__key-value--total {
   font-size: 1.1rem !important;
   color: var(--dlg-accent) !important;
@@ -25058,7 +25333,7 @@ td.admin-table__actions {
 
 /* Standard admin modals (Edit Product, plans, gift cards, etc.) */
 .admin-modal .modal__content {
-  overflow: hidden !important; /* clips the outer box */
+  overflow: auto !important; /* clips the outer box */
   max-height: calc(100dvh - 2rem) !important;
 }
 

@@ -32,9 +32,7 @@ const ORDER_STATUS_ALIASES = Object.freeze({
   ready: "order-ready-for-shipping",
   fulfilled: "completed",
   "pending-payment": "pending-payment-approval",
-  "ready-to-collect": "ready-to-collect-at-farm",
-  "ready-for-collection": "ready-to-collect-at-farm",
-  "ready-to-collect-from-farm": "ready-to-collect-at-farm",
+  "ready-to-collect-at-farm": "ready-to-collect-at-farm",
 });
 
 export const normalizeOrderStatus = (status = "") => {
@@ -43,8 +41,12 @@ export const normalizeOrderStatus = (status = "") => {
     .trim()
     .toLowerCase()
     .replace(/[_\s]+/g, "-");
+
   if (!normalized) return "order-placed";
-  return ORDER_STATUS_ALIASES[normalized] || normalized;
+
+  const resolved = ORDER_STATUS_ALIASES[normalized] || normalized;
+
+  return ORDER_STATUSES.includes(resolved) ? resolved : "order-placed";
 };
 
 export const formatOrderStatusLabel = (status = "") => {
@@ -61,5 +63,12 @@ export const isCollectionDeliveryMethod = (value = "") => {
     .trim()
     .toLowerCase()
     .replace(/[_\s]+/g, "-");
-  return ["collection", "pickup", "pick-up", "collect", "farm-collection", "farm-pickup"].includes(normalized);
+  return [
+    "collection",
+    "pickup",
+    "pick-up",
+    "collect",
+    "farm-collection",
+    "farm-pickup",
+  ].includes(normalized);
 };

@@ -29,6 +29,10 @@ export const normalizePaymentMethod = (value) => {
 };
 
 export const normalizePaymentApprovalStatus = (order = {}) => {
+  if (normalizePaymentMethod(order?.paymentMethod) !== PAYMENT_METHODS.EFT) {
+    return PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
+  }
+
   const direct = (
     order?.paymentApprovalStatus ||
     order?.paymentApproval?.decision ||
@@ -38,9 +42,7 @@ export const normalizePaymentApprovalStatus = (order = {}) => {
     .trim()
     .toLowerCase();
   if (Object.values(PAYMENT_APPROVAL_STATUSES).includes(direct)) return direct;
-  return normalizePaymentMethod(order?.paymentMethod) === PAYMENT_METHODS.EFT
-    ? PAYMENT_APPROVAL_STATUSES.PENDING
-    : PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
+  return PAYMENT_APPROVAL_STATUSES.PENDING;
 };
 
 export const buildOrderReference = (orderNumber) =>

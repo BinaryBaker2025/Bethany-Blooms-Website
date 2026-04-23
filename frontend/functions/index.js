@@ -7005,6 +7005,10 @@ function normalizePaymentMethod(value = "") {
 }
 
 function normalizePaymentApprovalDecision(order = {}) {
+  if (normalizePaymentMethod(order.paymentMethod) !== "eft") {
+    return "not-required";
+  }
+
   const direct = (
     order.paymentApprovalStatus ||
     order.paymentApproval?.decision ||
@@ -7013,7 +7017,7 @@ function normalizePaymentApprovalDecision(order = {}) {
   if (["not-required", "pending", "approved", "rejected"].includes(direct)) {
     return direct;
   }
-  return normalizePaymentMethod(order.paymentMethod) === "eft" ? "pending" : "not-required";
+  return "pending";
 }
 
 function normalizeOrderCreatedEmailTemplate(value = "") {

@@ -23,8 +23,19 @@ const slugifyCategoryValue = (value = "") =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 
+const normalizeCategoryStatus = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (normalized === "live" || normalized === "draft" || normalized === "archived") {
+    return normalized;
+  }
+  return "live";
+};
+
 const normalizeCategoryEntry = (category) => {
   if (!category || typeof category !== "object") return null;
+  if (category.hidden || category.isHidden || normalizeCategoryStatus(category.status) !== "live") {
+    return null;
+  }
   const name = (category.name || category.title || category.label || category.id || "").toString().trim();
   if (!name) return null;
   const slugSeed = (category.slug || category.id || name).toString().trim();
