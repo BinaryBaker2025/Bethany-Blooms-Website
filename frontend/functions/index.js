@@ -7781,6 +7781,42 @@ function formatDeliveryMethodLabel(deliveryMethod = "") {
   return "Delivery";
 }
 
+function normalizeTrackingLinkValue(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number") return value.toString().trim();
+  return "";
+}
+
+function resolveOrderTrackingLink(order = {}) {
+  const candidates = [
+    order?.trackingLink,
+    order?.tracking_link,
+    order?.trackingUrl,
+    order?.trackingURL,
+    order?.tracking_url,
+    order?.tracking?.link,
+    order?.tracking?.url,
+    order?.tracking?.trackingLink,
+    order?.shipping?.trackingLink,
+    order?.shipping?.tracking_link,
+    order?.shipping?.trackingUrl,
+    order?.shipping?.trackingURL,
+    order?.shipping?.tracking_url,
+    order?.delivery?.trackingLink,
+    order?.delivery?.tracking_link,
+    order?.delivery?.trackingUrl,
+    order?.delivery?.trackingURL,
+    order?.delivery?.tracking_url,
+    order?.deliveryDetails?.trackingLink,
+    order?.deliveryDetails?.trackingUrl,
+    order?.fulfillment?.trackingLink,
+    order?.fulfillment?.trackingUrl,
+    order?.courier?.trackingLink,
+    order?.courier?.trackingUrl,
+  ];
+  return candidates.map(normalizeTrackingLinkValue).find(Boolean) || "";
+}
+
 function buildOrderDeliveryUpdateEmailHtml(order = {}, orderId = "") {
   const customerName = escapeHtml(order?.customer?.fullName || "there");
   const orderLabel = Number.isFinite(Number(order?.orderNumber))
@@ -7791,7 +7827,7 @@ function buildOrderDeliveryUpdateEmailHtml(order = {}, orderId = "") {
     order?.shipping?.courierName || order?.courierName || "",
     160,
   );
-  const trackingLink = (order?.trackingLink || "").toString().trim();
+  const trackingLink = resolveOrderTrackingLink(order);
   const addressLines = formatOrderAddressLines(order).map((line) => escapeHtml(line));
   const addressMarkup = addressLines.length
     ? `<ul style="margin:8px 0 0;padding-left:18px;">${addressLines.map((line) => `<li>${line}</li>`).join("")}</ul>`
@@ -9598,6 +9634,13 @@ function readTrackedQuantity(record = {}) {
   return Math.max(0, Math.floor(quantity));
 }
 
+function sumAdjustmentQuantities(adjustments = []) {
+  return adjustments.reduce((sum, quantity) => {
+    const parsed = Number(quantity);
+    return sum + (Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0);
+  }, 0);
+}
+
 function isValidFirestoreDocumentId(value) {
   const id = (value || "").toString().trim();
   if (!id) return false;
@@ -9745,10 +9788,17 @@ async function applyProductInventoryForOrder(
       }
       const updatePayload = { updatedAt: FIELD_VALUE.serverTimestamp() };
       let adjusted = false;
+      const hasProductVariants = Array.isArray(product.variants) && product.variants.length > 0;
+      const variantAdjustmentQuantity = hasProductVariants
+        ? sumAdjustmentQuantities(Array.from(group.variants.values()))
+        : 0;
+      const parentAdjustmentQuantity = hasProductVariants
+        ? Math.max(0, group.totalQuantity - variantAdjustmentQuantity)
+        : group.totalQuantity;
 
       const currentProductQuantity = readTrackedQuantity(product);
-      if (currentProductQuantity !== null) {
-        const nextQuantity = Math.max(0, currentProductQuantity - group.totalQuantity);
+      if (currentProductQuantity !== null && parentAdjustmentQuantity > 0) {
+        const nextQuantity = Math.max(0, currentProductQuantity - parentAdjustmentQuantity);
         updatePayload.quantity = nextQuantity;
         updatePayload.stock_quantity = nextQuantity;
         if (Object.prototype.hasOwnProperty.call(product, "stockQuantity")) {
@@ -9757,7 +9807,7 @@ async function applyProductInventoryForOrder(
         adjusted = true;
       }
 
-      if (Array.isArray(product.variants) && group.variants.size > 0) {
+      if (hasProductVariants && group.variants.size > 0) {
         let variantsChanged = false;
         const nextVariants = product.variants.map((variant) => {
           if (!variant || typeof variant !== "object") return variant;
@@ -17767,7 +17817,7 @@ exports.adminUpdateOrderDeliveryDetails = onCall(async (request) => {
   const trackingLinkProvided = Object.prototype.hasOwnProperty.call(payload, "trackingLink");
   const trackingLink = trackingLinkProvided
     ? trimToLength(payload.trackingLink || "", 2000)
-    : trimToLength(order?.trackingLink || "", 2000);
+    : trimToLength(resolveOrderTrackingLink(order), 2000);
   const normalizedTrackingLink = trackingLink || null;
 
   const customer = {
@@ -17789,6 +17839,7 @@ exports.adminUpdateOrderDeliveryDetails = onCall(async (request) => {
             courierName: resolvedCourier?.name || null,
             courierPrice: shippingCost,
             province: shippingAddress.province || null,
+            trackingLink: normalizedTrackingLink,
           }
         : null,
     shippingCost,

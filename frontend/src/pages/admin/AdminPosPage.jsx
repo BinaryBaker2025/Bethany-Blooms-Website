@@ -32,7 +32,11 @@ import {
   normalizePosSaleStatus,
   parsePosDateValue,
 } from "../../lib/posSales.js";
-import { getStockStatus, getVariantStockStatus } from "../../lib/stockStatus.js";
+import {
+  getProductCardStockStatus,
+  getStockStatus,
+  getVariantStockStatus,
+} from "../../lib/stockStatus.js";
 
 const POS_TABS = [
   {
@@ -648,12 +652,7 @@ function AdminPosPage() {
           };
         })
         .filter(Boolean);
-      const stockStatus = getStockStatus({
-        quantity: product.stock_quantity ?? product.quantity,
-        forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
-        status: product.stock_status,
-        isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
-      });
+      const stockStatus = getProductCardStockStatus(product);
       const categoryId = (product.categoryId || "").toString().trim();
       const categoryName = (
         product.categoryName ||

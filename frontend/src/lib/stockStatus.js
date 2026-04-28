@@ -17,6 +17,38 @@ const hasUsableVariantIdentity = (variant) => {
   return Boolean(label || id);
 };
 
+const sumTrackedQuantities = (stockStatuses = []) => {
+  const trackedQuantities = stockStatuses
+    .map((stockStatus) => stockStatus?.quantity)
+    .filter((quantity) => Number.isFinite(Number(quantity)))
+    .map((quantity) => Math.max(0, Math.floor(Number(quantity))));
+  if (!trackedQuantities.length) return null;
+  return trackedQuantities.reduce((sum, quantity) => sum + quantity, 0);
+};
+
+const getVariantAggregateStockStatus = (variantStatuses = [], baseStatus = null) => {
+  const totalQuantity = sumTrackedQuantities(variantStatuses);
+  const withBase = (state, label, quantity = totalQuantity) => ({
+    ...(baseStatus || {}),
+    state,
+    label,
+    quantity,
+    isForced: false,
+    isEstimated: quantity === null,
+  });
+
+  if (variantStatuses.some((status) => status?.state === "in")) {
+    return withBase("in", "In stock");
+  }
+  if (variantStatuses.some((status) => status?.state === "low")) {
+    return withBase("low", "Low stock");
+  }
+  if (variantStatuses.some((status) => status?.state === "preorder")) {
+    return withBase("preorder", "Preorder");
+  }
+  return baseStatus;
+};
+
 export const getVariantStockStatus = (variant = {}, product = {}) => {
   const productStatus = normalizeStatus(product.stock_status || product.stockStatus);
   const explicitVariantStatus = normalizeStatus(variant.stock_status || variant.stockStatus);
@@ -81,6 +113,10 @@ export const getProductCardStockStatus = (product = {}) => {
   }
   if (!variants.length) return baseStatus;
 
+  const variantStatuses = variants.map((variant) =>
+    getVariantStockStatus(variant, product),
+  );
+
   const allVariantsQuantityZero = variants.every((variant) => {
     const quantity = normalizeQuantity(
       variant.stock_quantity ?? variant.stockQuantity ?? variant.quantity,
@@ -97,10 +133,13 @@ export const getProductCardStockStatus = (product = {}) => {
     };
   }
 
-  const allVariantsOutOfStock = variants.every(
-    (variant) => getVariantStockStatus(variant, product).state === "out",
+  const allVariantsOutOfStock = variantStatuses.every(
+    (stockStatus) => stockStatus?.state === "out",
   );
-  if (!allVariantsOutOfStock) return baseStatus;
+  if (!allVariantsOutOfStock) {
+    if (baseStatus.state === "preorder" || baseStatus.isForced) return baseStatus;
+    return getVariantAggregateStockStatus(variantStatuses, baseStatus);
+  }
 
   return {
     ...baseStatus,

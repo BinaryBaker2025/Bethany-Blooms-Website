@@ -67,7 +67,12 @@ import {
   normalizePaymentMethod as normalizeOrderPaymentMethod,
 } from "../lib/paymentMethods.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
-import { getStockStatus, STOCK_LOW_THRESHOLD } from "../lib/stockStatus.js";
+import {
+  getProductCardStockStatus,
+  getStockStatus,
+  getVariantStockStatus,
+  STOCK_LOW_THRESHOLD,
+} from "../lib/stockStatus.js";
 import {
   DEFAULT_SLOT_CAPACITY,
   AUTO_REPEAT_DAYS,
@@ -372,6 +377,9 @@ const bookingDateFormatter = new Intl.DateTimeFormat("en-ZA", {
   dateStyle: "medium",
   timeStyle: "short",
 });
+const bookingDateOnlyFormatter = new Intl.DateTimeFormat("en-ZA", {
+  dateStyle: "medium",
+});
 const timeOnlyFormatter = new Intl.DateTimeFormat("en-ZA", {
   timeStyle: "short",
 });
@@ -460,6 +468,44 @@ const resolveOrderSubtotalAmount = (order = {}) => {
       return sum + price * safeQuantity;
     },
     0,
+  );
+};
+
+const normalizeTrackingLinkValue = (value) => {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number") return value.toString().trim();
+  return "";
+};
+
+const resolveOrderTrackingLink = (order = {}) => {
+  const candidates = [
+    order?.trackingLink,
+    order?.tracking_link,
+    order?.trackingUrl,
+    order?.trackingURL,
+    order?.tracking_url,
+    order?.tracking?.link,
+    order?.tracking?.url,
+    order?.tracking?.trackingLink,
+    order?.shipping?.trackingLink,
+    order?.shipping?.tracking_link,
+    order?.shipping?.trackingUrl,
+    order?.shipping?.trackingURL,
+    order?.shipping?.tracking_url,
+    order?.delivery?.trackingLink,
+    order?.delivery?.tracking_link,
+    order?.delivery?.trackingUrl,
+    order?.delivery?.trackingURL,
+    order?.delivery?.tracking_url,
+    order?.deliveryDetails?.trackingLink,
+    order?.deliveryDetails?.trackingUrl,
+    order?.fulfillment?.trackingLink,
+    order?.fulfillment?.trackingUrl,
+    order?.courier?.trackingLink,
+    order?.courier?.trackingUrl,
+  ];
+  return (
+    candidates.map(normalizeTrackingLinkValue).find((value) => value) || ""
   );
 };
 
@@ -1194,24 +1240,24 @@ const getNextCycleMonthKey = (value = "") => {
   return `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
 };
 
-const isInJohannesburgPrebillWindow = (value = new Date()) => {
-  const nowParts = getJohannesburgDateParts(value);
-  if (
-    !nowParts.monthKey ||
-    !Number.isFinite(nowParts.day) ||
-    nowParts.day < 1
-  ) {
-    return false;
-  }
-  const daysInMonth = new Date(
-    Date.UTC(nowParts.year, nowParts.month, 0),
-  ).getUTCDate();
-  const windowStartDay = Math.max(
-    1,
-    daysInMonth - (SUBSCRIPTION_PREBILL_LEAD_DAYS - 1),
-  );
-  return nowParts.day >= windowStartDay;
-};
+// const isInJohannesburgPrebillWindow = (value = new Date()) => {
+//   const nowParts = getJohannesburgDateParts(value);
+//   if (
+//     !nowParts.monthKey ||
+//     !Number.isFinite(nowParts.day) ||
+//     nowParts.day < 1
+//   ) {
+//     return false;
+//   }
+//   const daysInMonth = new Date(
+//     Date.UTC(nowParts.year, nowParts.month, 0),
+//   ).getUTCDate();
+//   const windowStartDay = Math.max(
+//     1,
+//     daysInMonth - (SUBSCRIPTION_PREBILL_LEAD_DAYS - 1),
+//   );
+//   return nowParts.day >= windowStartDay;
+// };
 
 const getCurrentJohannesburgCycleMonth = (value = new Date()) => {
   const normalized = getJohannesburgDateParts(value).monthKey;
@@ -1716,6 +1762,68 @@ const normalizeProductCategoryStatus = (value = "") => {
     return normalized;
   }
   return "live";
+};
+
+const normalizeProductLifecycleStatus = (value = "") => {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (
+    normalized === "live" ||
+    normalized === "draft" ||
+    normalized === "archived"
+  ) {
+    return normalized;
+  }
+  return "live";
+};
+
+const formatProductLifecycleStatus = (value = "") => {
+  const normalized = normalizeProductLifecycleStatus(value);
+  if (normalized === "draft") return "Draft";
+  if (normalized === "archived") return "Archived";
+  return "Live";
+};
+
+const createProductBulkEditDraft = (product = {}) => {
+  const isGiftCardProduct = Boolean(product.isGiftCard || product.is_gift_card);
+  const hasVariants =
+    Array.isArray(product.variants) && product.variants.length > 0;
+  const priceValue =
+    product.price === undefined || product.price === null
+      ? ""
+      : String(product.price);
+  const stockQuantityValue =
+    product.stock_quantity === undefined || product.stock_quantity === null
+      ? product.stockQuantity === undefined || product.stockQuantity === null
+        ? product.quantity === undefined || product.quantity === null
+          ? ""
+          : String(product.quantity)
+        : String(product.stockQuantity)
+      : String(product.stock_quantity);
+
+  return {
+    price: priceValue,
+    stockQuantity: isGiftCardProduct || hasVariants ? "" : stockQuantityValue,
+    stockStatus: (isGiftCardProduct
+      ? "in_stock"
+      : product.stock_status ||
+        product.stockStatus ||
+        (product.forceOutOfStock ? "out_of_stock" : "in_stock")
+    ).toString(),
+    status: normalizeProductLifecycleStatus(product.status || "live"),
+  };
+};
+
+const hasProductBulkEditChanges = (product = {}, draft = null) => {
+  if (!draft || typeof draft !== "object") return false;
+  const baseline = createProductBulkEditDraft(product);
+  return (
+    (draft.price ?? baseline.price) !== baseline.price ||
+    (draft.stockQuantity ?? baseline.stockQuantity) !==
+      baseline.stockQuantity ||
+    (draft.stockStatus ?? baseline.stockStatus) !== baseline.stockStatus ||
+    normalizeProductLifecycleStatus(draft.status ?? baseline.status) !==
+      baseline.status
+  );
 };
 
 const normalizeCategoryMatchValue = (value = "") =>
@@ -2268,6 +2376,9 @@ export function AdminProductsView() {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [productSaving, setProductSaving] = useState(false);
   const [productPage, setProductPage] = useState(0);
+  const [bulkEditDrafts, setBulkEditDrafts] = useState({});
+  const [bulkEditSaving, setBulkEditSaving] = useState(false);
+  const [isBulkEditMode, setBulkEditMode] = useState(false);
   const productMainPreviewUrlRef = useRef(null);
   const productGalleryPreviewUrlRef = useRef([]);
   const productMainImageInputRef = useRef(null);
@@ -2535,6 +2646,60 @@ export function AdminProductsView() {
     const start = productPage * ADMIN_PAGE_SIZE;
     return managedProducts.slice(start, start + ADMIN_PAGE_SIZE);
   }, [managedProducts, productPage]);
+
+  const isBulkEditTable = activeTab === "products" && isBulkEditMode;
+  const bulkEditChangedCount = useMemo(
+    () =>
+      managedProducts.reduce((total, product) => {
+        const draft = bulkEditDrafts[product?.id];
+        return total + (hasProductBulkEditChanges(product, draft) ? 1 : 0);
+      }, 0),
+    [managedProducts, bulkEditDrafts],
+  );
+
+  useEffect(() => {
+    if (activeTab === "products") return;
+    setBulkEditMode(false);
+    setBulkEditDrafts({});
+    setBulkEditSaving(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (isBulkEditMode) return;
+    setBulkEditDrafts({});
+    setBulkEditSaving(false);
+  }, [isBulkEditMode]);
+
+  useEffect(() => {
+    if (!isBulkEditMode) return;
+    setBulkEditDrafts((previous) => {
+      const validProductIds = new Set(
+        managedProducts
+          .map((product) => product?.id)
+          .filter((value) => typeof value === "string" && value.trim()),
+      );
+      const next = {};
+      let changed = false;
+
+      Object.entries(previous).forEach(([id, draft]) => {
+        if (validProductIds.has(id)) {
+          next[id] = draft;
+        } else {
+          changed = true;
+        }
+      });
+
+      paginatedProducts.forEach((product) => {
+        if (!product?.id) return;
+        if (!next[product.id]) {
+          next[product.id] = createProductBulkEditDraft(product);
+          changed = true;
+        }
+      });
+
+      return changed ? next : previous;
+    });
+  }, [isBulkEditMode, managedProducts, paginatedProducts]);
 
   const openProductModal = () => {
     const initialForm = {
@@ -3205,6 +3370,170 @@ export function AdminProductsView() {
     if (!db || !inventoryEnabled) return;
     await deleteDoc(doc(db, "products", productId));
     setStatusMessage("Product removed");
+  };
+
+  const closeBulkEditMode = () => {
+    setBulkEditMode(false);
+    setBulkEditDrafts({});
+    setBulkEditSaving(false);
+  };
+
+  const handleBulkEditRowChange = (product, field, value) => {
+    if (!product?.id) return;
+    setBulkEditDrafts((previous) => ({
+      ...previous,
+      [product.id]: {
+        ...(previous[product.id] || createProductBulkEditDraft(product)),
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleToggleBulkEditMode = () => {
+    if (isBulkEditMode) {
+      closeBulkEditMode();
+      return;
+    }
+    setBulkEditMode(true);
+  };
+
+  const handleSaveBulkEditProducts = async () => {
+    if (!db || !inventoryEnabled) {
+      setStatusMessage("You do not have permission to update products.");
+      return;
+    }
+    if (bulkEditChangedCount === 0) {
+      setStatusMessage("No product changes to save.");
+      return;
+    }
+
+    const productUpdates = [];
+    const validationErrors = [];
+
+    managedProducts.forEach((product) => {
+      if (!product?.id) return;
+      const draft = bulkEditDrafts[product.id];
+      if (!hasProductBulkEditChanges(product, draft)) return;
+      const isGiftCardProduct = Boolean(
+        product.isGiftCard || product.is_gift_card,
+      );
+      const hasVariants =
+        Array.isArray(product.variants) && product.variants.length > 0;
+      const currentDraft = draft || createProductBulkEditDraft(product);
+      const patch = {
+        updatedAt: serverTimestamp(),
+      };
+
+      if (!isGiftCardProduct) {
+        const rawPrice = (currentDraft.price ?? "").toString().trim();
+        const priceNumber = Number(rawPrice);
+        if (!rawPrice || !Number.isFinite(priceNumber) || priceNumber < 0) {
+          validationErrors.push(
+            `Enter a valid price for ${product.title || product.name || "this product"}.`,
+          );
+          return;
+        }
+        const normalizedPrice = Number(priceNumber.toFixed(2));
+        const currentPrice = Number(product.price);
+        const normalizedCurrentPrice = Number.isFinite(currentPrice)
+          ? Number(currentPrice.toFixed(2))
+          : null;
+        if (normalizedPrice !== normalizedCurrentPrice) {
+          patch.price = normalizedPrice;
+        }
+
+        const nextStockStatus = (
+          currentDraft.stockStatus || "in_stock"
+        ).toString();
+        const currentStockStatus = (
+          product.stock_status ||
+          product.stockStatus ||
+          (product.forceOutOfStock ? "out_of_stock" : "in_stock") ||
+          "in_stock"
+        ).toString();
+        if (nextStockStatus !== currentStockStatus) {
+          patch.stock_status = nextStockStatus;
+          patch.forceOutOfStock = nextStockStatus === "out_of_stock";
+        }
+      }
+
+      if (!isGiftCardProduct && !hasVariants) {
+        const rawQuantity = (currentDraft.stockQuantity ?? "")
+          .toString()
+          .trim();
+        const nextQuantity =
+          rawQuantity === "" ? null : Number.parseInt(rawQuantity, 10);
+        if (
+          rawQuantity !== "" &&
+          (!Number.isFinite(nextQuantity) || nextQuantity < 0)
+        ) {
+          validationErrors.push(
+            `Enter a valid quantity for ${product.title || product.name || "this product"}.`,
+          );
+          return;
+        }
+        const normalizedQuantity =
+          rawQuantity === "" ? null : Math.max(0, nextQuantity);
+        const currentQuantitySource =
+          product.stock_quantity ?? product.stockQuantity ?? product.quantity;
+        const currentQuantity =
+          currentQuantitySource === undefined ||
+          currentQuantitySource === null ||
+          currentQuantitySource === ""
+            ? null
+            : Math.max(0, Number.parseInt(currentQuantitySource, 10) || 0);
+        if (normalizedQuantity !== currentQuantity) {
+          patch.stock_quantity = normalizedQuantity;
+          patch.quantity = normalizedQuantity;
+        }
+      }
+
+      const nextStatus = normalizeProductLifecycleStatus(currentDraft.status);
+      const currentStatus = normalizeProductLifecycleStatus(
+        product.status || "live",
+      );
+      if (nextStatus !== currentStatus) {
+        patch.status = nextStatus;
+      }
+
+      if (Object.keys(patch).length > 1) {
+        productUpdates.push({ id: product.id, patch });
+      }
+    });
+
+    if (validationErrors.length > 0) {
+      setStatusMessage(validationErrors[0]);
+      return;
+    }
+
+    if (productUpdates.length === 0) {
+      setStatusMessage("No product changes to save.");
+      return;
+    }
+
+    try {
+      setBulkEditSaving(true);
+      setStatusMessage(
+        `Saving ${productUpdates.length} product change${productUpdates.length === 1 ? "" : "s"}...`,
+      );
+
+      for (let index = 0; index < productUpdates.length; index += 400) {
+        const batch = writeBatch(db);
+        productUpdates.slice(index, index + 400).forEach(({ id, patch }) => {
+          batch.update(doc(db, "products", id), patch);
+        });
+        await batch.commit();
+      }
+
+      setStatusMessage(
+        `Saved ${productUpdates.length} product change${productUpdates.length === 1 ? "" : "s"}.`,
+      );
+      closeBulkEditMode();
+    } catch (error) {
+      setStatusMessage(error.message || "Bulk update failed.");
+    } finally {
+      setBulkEditSaving(false);
+    }
   };
 
   const handleProductImport = async (event) => {
@@ -4581,6 +4910,14 @@ export function AdminProductsView() {
                 Download template
               </button>
               <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={handleToggleBulkEditMode}
+                disabled={!inventoryEnabled || bulkEditSaving}
+              >
+                {isBulkEditMode ? "Close bulk edit" : "Bulk edit"}
+              </button>
+              <button
                 className="btn btn--primary"
                 type="button"
                 onClick={openProductModal}
@@ -4935,6 +5272,56 @@ export function AdminProductsView() {
 
       {(activeTab === "products" || activeTab === "subscriptions") && (
         <div className="admin-panel__content">
+          {isBulkEditTable && (
+            <div className="admin-products-bulk">
+              <div className="admin-products-bulk__header">
+                <div>
+                  <h3>Bulk edit</h3>
+                  <p className="modal__meta">
+                    Edit each product row directly, then save all changes in one
+                    pass.
+                  </p>
+                </div>
+                <div className="admin-products-bulk__summary">
+                  <span
+                    className={`badge ${
+                      bulkEditChangedCount > 0 ? "badge--live" : "badge--draft"
+                    }`}
+                  >
+                    {bulkEditChangedCount} changed
+                  </span>
+                  <button
+                    className="btn btn--secondary btn--small"
+                    type="button"
+                    onClick={closeBulkEditMode}
+                    disabled={bulkEditSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn--primary"
+                    type="button"
+                    onClick={handleSaveBulkEditProducts}
+                    disabled={
+                      bulkEditSaving ||
+                      bulkEditChangedCount === 0 ||
+                      !inventoryEnabled
+                    }
+                  >
+                    {bulkEditSaving
+                      ? "Saving..."
+                      : bulkEditChangedCount === 1
+                        ? "Save 1 change"
+                        : `Save ${bulkEditChangedCount} changes`}
+                  </button>
+                </div>
+              </div>
+              <p className="modal__meta">
+                Quantity only applies to simple products. Gift cards keep their
+                own price and stock rules.
+              </p>
+            </div>
+          )}
           <div className="admin-table__wrapper">
             {!categoryOptions.length && (
               <p className="admin-panel__notice">
@@ -4949,18 +5336,28 @@ export function AdminProductsView() {
                 </p>
               )}
             {managedProducts.length > 0 ? (
-              <table className="admin-table">
+              <table
+                className={`admin-table${
+                  isBulkEditTable ? " admin-products-bulk-table" : ""
+                }`}
+              >
                 <thead>
                   <tr>
                     <th scope="col">Item</th>
-                    <th scope="col">Category</th>
+                    {!isBulkEditTable && <th scope="col">Category</th>}
                     <th scope="col">Price</th>
-                    <th scope="col">Stock</th>
-                    <th scope="col">Featured</th>
-                    <th scope="col">Updated</th>
-                    <th scope="col" className="admin-table__actions">
-                      Actions
+                    {isBulkEditTable && <th scope="col">Quantity</th>}
+                    <th scope="col">
+                      {isBulkEditTable ? "Stock status" : "Stock"}
                     </th>
+                    <th scope="col">Status</th>
+                    {!isBulkEditTable && <th scope="col">Featured</th>}
+                    {!isBulkEditTable && <th scope="col">Updated</th>}
+                    {!isBulkEditTable && (
+                      <th scope="col" className="admin-table__actions">
+                        Actions
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -4971,14 +5368,10 @@ export function AdminProductsView() {
                     const isGiftCardProduct = Boolean(
                       product.isGiftCard || product.is_gift_card,
                     );
-                    const stockStatus = getStockStatus({
-                      quantity: product.stock_quantity ?? product.quantity,
-                      forceOutOfStock:
-                        product.forceOutOfStock ||
-                        product.stock_status === "out_of_stock",
-                      status: product.stock_status,
-                      isGiftCard: isGiftCardProduct,
-                    });
+                    const hasVariants =
+                      Array.isArray(product.variants) &&
+                      product.variants.length > 0;
+                    const stockStatus = getProductCardStockStatus(product);
                     const stockLabel =
                       stockStatus.state === "preorder"
                         ? "Preorder"
@@ -4987,7 +5380,9 @@ export function AdminProductsView() {
                           : stockStatus.label;
                     const stockQuantityLabel = isGiftCardProduct
                       ? "Unlimited"
-                      : (stockStatus.quantity ?? "-");
+                      : hasVariants
+                        ? "Variant-managed"
+                        : (stockStatus.quantity ?? "-");
                     const preorderSendMonth =
                       getProductPreorderSendMonth(product);
                     const preorderSendMonthLabel =
@@ -5040,8 +5435,53 @@ export function AdminProductsView() {
                       salePriceValue !== null &&
                       salePriceValue !== undefined &&
                       salePriceValue !== "";
+                    const productStatus = normalizeProductLifecycleStatus(
+                      product.status || "live",
+                    );
+                    const bulkDraft =
+                      bulkEditDrafts[product.id] ||
+                      createProductBulkEditDraft(product);
+                    const bulkRowChanged = hasProductBulkEditChanges(
+                      product,
+                      bulkDraft,
+                    );
                     return (
-                      <tr key={product.id}>
+                      <tr
+                        key={product.id}
+                        className={
+                          isBulkEditTable
+                            ? `admin-products-bulk-table__row${
+                                bulkRowChanged ? " is-dirty" : ""
+                              }`
+                            : `admin-table__row--clickable${
+                                editingProductId === product.id &&
+                                isProductModalOpen
+                                  ? " is-active"
+                                  : ""
+                              }`
+                        }
+                        onClick={
+                          isBulkEditTable
+                            ? undefined
+                            : () => handleEditProduct(product)
+                        }
+                        onKeyDown={
+                          isBulkEditTable
+                            ? undefined
+                            : (event) => {
+                                if (event.target !== event.currentTarget)
+                                  return;
+                                if (
+                                  event.key === "Enter" ||
+                                  event.key === " "
+                                ) {
+                                  event.preventDefault();
+                                  handleEditProduct(product);
+                                }
+                              }
+                        }
+                        tabIndex={isBulkEditTable ? undefined : 0}
+                      >
                         <td>
                           <div className="admin-table__product">
                             {image ? (
@@ -5059,22 +5499,47 @@ export function AdminProductsView() {
                             )}
                             <div>
                               <strong>{product.title || product.name}</strong>
-                              {descriptionText && (
+                              {isBulkEditTable && bulkRowChanged ? (
+                                <p className="modal__meta">Unsaved changes</p>
+                              ) : descriptionText ? (
                                 <p className="modal__meta">{descriptionText}</p>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         </td>
+                        {!isBulkEditTable && (
+                          <td>
+                            <span>{primaryCategory}</span>
+                            {extraCategoryCount > 0 && (
+                              <p className="modal__meta">
+                                +{extraCategoryCount} more
+                              </p>
+                            )}
+                          </td>
+                        )}
                         <td>
-                          <span>{primaryCategory}</span>
-                          {extraCategoryCount > 0 && (
-                            <p className="modal__meta">
-                              +{extraCategoryCount} more
-                            </p>
-                          )}
-                        </td>
-                        <td>
-                          {hasSalePrice ? (
+                          {isBulkEditTable ? (
+                            isGiftCardProduct ? (
+                              <span className="modal__meta">
+                                Gift card managed
+                              </span>
+                            ) : (
+                              <input
+                                className="input admin-products-bulk-table__input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={bulkDraft.price}
+                                onChange={(event) =>
+                                  handleBulkEditRowChange(
+                                    product,
+                                    "price",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            )
+                          ) : hasSalePrice ? (
                             <>
                               <strong>
                                 {formatPriceLabel(salePriceValue)}
@@ -5087,63 +5552,150 @@ export function AdminProductsView() {
                             formatPriceLabel(product.price)
                           )}
                         </td>
-                        <td>
-                          <span
-                            className={`admin-status admin-status--stock-${stockStatus.state}`}
-                          >
-                            {stockLabel}
-                          </span>
-                          <p className="modal__meta">
-                            Qty: {stockQuantityLabel}
-                          </p>
-                          {stockStatus.state === "preorder" &&
-                            preorderSendMonthLabel && (
-                              <p className="modal__meta">
-                                Send month: {preorderSendMonthLabel}
-                              </p>
+                        {isBulkEditTable && (
+                          <td>
+                            {isGiftCardProduct ? (
+                              <span className="modal__meta">Unlimited</span>
+                            ) : hasVariants ? (
+                              <span className="modal__meta">
+                                Managed by variants
+                              </span>
+                            ) : (
+                              <input
+                                className="input admin-products-bulk-table__input"
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={bulkDraft.stockQuantity}
+                                onChange={(event) =>
+                                  handleBulkEditRowChange(
+                                    product,
+                                    "stockQuantity",
+                                    event.target.value,
+                                  )
+                                }
+                              />
                             )}
+                          </td>
+                        )}
+                        <td>
+                          {isBulkEditTable ? (
+                            isGiftCardProduct ? (
+                              <span className="modal__meta">In stock</span>
+                            ) : (
+                              <select
+                                className="input admin-products-bulk-table__input"
+                                value={bulkDraft.stockStatus}
+                                onChange={(event) =>
+                                  handleBulkEditRowChange(
+                                    product,
+                                    "stockStatus",
+                                    event.target.value,
+                                  )
+                                }
+                              >
+                                <option value="in_stock">In stock</option>
+                                <option value="out_of_stock">
+                                  Out of stock
+                                </option>
+                                <option value="preorder">Preorder</option>
+                              </select>
+                            )
+                          ) : (
+                            <>
+                              <span
+                                className={`admin-status admin-status--stock-${stockStatus.state}`}
+                              >
+                                {stockLabel}
+                              </span>
+                              <p className="modal__meta">
+                                Qty: {stockQuantityLabel}
+                              </p>
+                              {preorderSendMonthLabel &&
+                                stockStatus.state === "preorder" && (
+                                  <p className="modal__meta">
+                                    Send month: {preorderSendMonthLabel}
+                                  </p>
+                                )}
+                            </>
+                          )}
                         </td>
                         <td>
-                          <button
-                            className={`icon-btn icon-btn--featured${
-                              product.featured ? " is-active" : ""
-                            }`}
-                            type="button"
-                            aria-pressed={product.featured ? "true" : "false"}
-                            onClick={() => handleToggleFeaturedProduct(product)}
-                            disabled={
-                              !inventoryEnabled ||
-                              featuredUpdatingId === product.id
-                            }
-                            title={
-                              product.featured
-                                ? "Remove from home page features"
-                                : "Feature on home page"
-                            }
-                          >
-                            <IconStar
-                              filled={Boolean(product.featured)}
-                              aria-hidden="true"
-                            />
-                          </button>
+                          {isBulkEditTable ? (
+                            <select
+                              className="input admin-products-bulk-table__input"
+                              value={bulkDraft.status}
+                              onChange={(event) =>
+                                handleBulkEditRowChange(
+                                  product,
+                                  "status",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              <option value="draft">Draft</option>
+                              <option value="live">Live</option>
+                              <option value="archived">Archived</option>
+                            </select>
+                          ) : (
+                            <span
+                              className={`admin-status admin-status--${productStatus}`}
+                            >
+                              {formatProductLifecycleStatus(productStatus)}
+                            </span>
+                          )}
                         </td>
-                        <td>{updatedAt}</td>
-                        <td className="admin-table__actions">
-                          <button
-                            className="icon-btn"
-                            type="button"
-                            onClick={() => handleEditProduct(product)}
+                        {!isBulkEditTable && (
+                          <td>
+                            <button
+                              className={`icon-btn icon-btn--featured${
+                                product.featured ? " is-active" : ""
+                              }`}
+                              type="button"
+                              aria-pressed={product.featured ? "true" : "false"}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleToggleFeaturedProduct(product);
+                              }}
+                              disabled={
+                                !inventoryEnabled ||
+                                featuredUpdatingId === product.id
+                              }
+                              title={
+                                product.featured
+                                  ? "Remove from home page features"
+                                  : "Feature on home page"
+                              }
+                            >
+                              <IconStar
+                                filled={Boolean(product.featured)}
+                                aria-hidden="true"
+                              />
+                            </button>
+                          </td>
+                        )}
+                        {!isBulkEditTable && <td>{updatedAt}</td>}
+                        {!isBulkEditTable && (
+                          <td
+                            className="admin-table__actions"
+                            onClick={(event) => event.stopPropagation()}
                           >
-                            <IconEdit aria-hidden="true" />
-                          </button>
-                          <button
-                            className="icon-btn icon-btn--danger"
-                            type="button"
-                            onClick={() => handleDeleteProduct(product.id)}
-                          >
-                            <IconTrash aria-hidden="true" />
-                          </button>
-                        </td>
+                            <button
+                              className="icon-btn"
+                              type="button"
+                              onClick={() => handleEditProduct(product)}
+                            >
+                              <IconEdit aria-hidden="true" />
+                            </button>
+                            <button
+                              className="icon-btn icon-btn--danger"
+                              type="button"
+                              onClick={() => handleDeleteProduct(product.id)}
+                            >
+                              <IconTrash aria-hidden="true" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -5185,9 +5737,6 @@ export function AdminProductsView() {
         role="dialog"
         aria-modal="true"
         aria-hidden={isProductModalOpen ? "false" : "true"}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) closeProductModal();
-        }}
       >
         <div className="modal__content admin-modal__content">
           <button
@@ -18327,14 +18876,23 @@ export function AdminCutFlowerBookingsView() {
             const selectionPriceLabel = Number.isFinite(selectionPriceValue)
               ? ` (est. ${moneyFormatter.format(selectionPriceValue)})`
               : "";
+            const displayPriceLabel = Number.isFinite(selectionPriceValue)
+              ? moneyFormatter.format(selectionPriceValue)
+              : "";
             return {
               key: `attendee-${booking.id}-${selectionIndex}-${selectionLabel}`,
+              attendeeLabel: `Attendee ${selectionIndex}`,
+              optionLabel: selectionLabel,
+              priceLabel: displayPriceLabel,
               text: `Attendee ${selectionIndex}: ${selectionLabel}${selectionPriceLabel}`,
             };
           })
         : [
             {
               key: `option-${booking.id}`,
+              attendeeLabel: "Option",
+              optionLabel: optionSummaryLabel.replace(/^Option:\s*/, ""),
+              priceLabel: "",
               text: optionSummaryLabel,
             },
           ];
@@ -18451,6 +19009,30 @@ export function AdminCutFlowerBookingsView() {
   const detailsStatusLabel = activeBooking?.status
     ? activeBooking.status.replace(/-/g, " ")
     : "new";
+  const detailsStatusClass = (activeBooking?.status || "new")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const detailsDateLabel = activeBooking?.eventDate
+    ? bookingDateOnlyFormatter.format(activeBooking.eventDate)
+    : "Date to be confirmed";
+  const detailsTimeLabel = activeBooking?.eventDate
+    ? timeOnlyFormatter.format(activeBooking.eventDate)
+    : "Time to be confirmed";
+  const detailsSessionLabel =
+    activeBooking?.sessionLabel || detailsTimeLabel || "Session to confirm";
+  const detailsAttendeeLabel =
+    Number.isFinite(detailsSummary?.attendeeCount) &&
+    detailsSummary.attendeeCount > 0
+      ? `${detailsSummary.attendeeCount}`
+      : "-";
+  const detailsEstimateLabel =
+    detailsSummary?.estimatedTotalLabel || "Estimate needed";
+  const detailsPhoneHref = activeBooking?.phone
+    ? `tel:${activeBooking.phone.toString().replace(/[^\d+]/g, "")}`
+    : "";
   const createdAtLabel = activeBooking?.createdAt?.toDate?.()
     ? bookingDateFormatter.format(activeBooking.createdAt.toDate())
     : null;
@@ -18983,7 +19565,7 @@ export function AdminCutFlowerBookingsView() {
       </div>
       {activeBooking && (
         <div
-          className={`modal admin-modal ${activeBooking ? "is-active" : ""}`}
+          className={`modal admin-modal admin-cut-flower-detail-modal ${activeBooking ? "is-active" : ""}`}
           role="dialog"
           aria-modal="true"
           aria-hidden={activeBooking ? "false" : "true"}
@@ -18991,7 +19573,7 @@ export function AdminCutFlowerBookingsView() {
             if (event.target === event.currentTarget) closeBookingDetails();
           }}
         >
-          <div className="modal__content admin-modal__content">
+          <div className="modal__content admin-modal__content admin-cut-flower-detail">
             <button
               className="modal__close"
               type="button"
@@ -19000,70 +19582,170 @@ export function AdminCutFlowerBookingsView() {
             >
               &times;
             </button>
-            <h3 className="modal__title">
-              {activeBooking.customerName || "Booking Details"}
-            </h3>
-            <div className="admin-detail-grid">
-              <div className="admin-detail-card">
-                <h4>Customer</h4>
-                <p className="modal__meta">
-                  {activeBooking.customerName || "-"}
+            <div className="admin-cut-flower-detail__header">
+              <div>
+                <p className="admin-cut-flower-detail__eyebrow">
+                  Cut flower booking
                 </p>
-                {activeBooking.email && (
-                  <p className="modal__meta">{activeBooking.email}</p>
-                )}
-                {activeBooking.phone && (
-                  <p className="modal__meta">{activeBooking.phone}</p>
-                )}
-                {activeBooking.occasion && (
-                  <p className="modal__meta">
-                    Occasion: {activeBooking.occasion}
-                  </p>
-                )}
-                {activeBooking.budget && (
-                  <p className="modal__meta">Budget: {activeBooking.budget}</p>
-                )}
+                <h3 className="modal__title admin-cut-flower-detail__title">
+                  {activeBooking.customerName || "Booking Details"}
+                </h3>
+                <p className="admin-cut-flower-detail__subtitle">
+                  {activeBooking.occasion || "No occasion captured"}
+                </p>
               </div>
-              <div className="admin-detail-card">
-                <h4>Event</h4>
-                <p className="modal__meta">{activeBooking.displayDate}</p>
-                {activeBooking.sessionLabel && (
-                  <p className="modal__meta">{activeBooking.sessionLabel}</p>
-                )}
-                {activeBooking.location && (
-                  <p className="modal__meta">{activeBooking.location}</p>
-                )}
+              <span
+                className={`badge admin-cut-flower-detail__status admin-cut-flower-detail__status--${detailsStatusClass}`}
+              >
+                {detailsStatusLabel}
+              </span>
+            </div>
+
+            <div className="admin-cut-flower-detail__summary">
+              <div className="admin-cut-flower-detail__summary-item">
+                <span>Date</span>
+                <strong>{detailsDateLabel}</strong>
               </div>
-              <div className="admin-detail-card">
-                <h4>Options</h4>
-                {Number.isFinite(detailsSummary.attendeeCount) &&
-                  detailsSummary.attendeeCount > 0 && (
-                    <p className="modal__meta">
-                      Attendees: {detailsSummary.attendeeCount}
-                    </p>
+              <div className="admin-cut-flower-detail__summary-item">
+                <span>Time</span>
+                <strong>{detailsSessionLabel}</strong>
+              </div>
+              <div className="admin-cut-flower-detail__summary-item">
+                <span>Attendees</span>
+                <strong>{detailsAttendeeLabel}</strong>
+              </div>
+              <div className="admin-cut-flower-detail__summary-item">
+                <span>Estimate</span>
+                <strong>{detailsEstimateLabel}</strong>
+              </div>
+            </div>
+
+            <div className="admin-cut-flower-detail__content">
+              <section className="admin-cut-flower-detail__section">
+                <div className="admin-cut-flower-detail__section-head">
+                  <h4>Customer</h4>
+                  <div className="admin-cut-flower-detail__quick-actions">
+                    {activeBooking.email && (
+                      <a
+                        className="btn btn--secondary"
+                        href={`mailto:${activeBooking.email}`}
+                      >
+                        Email
+                      </a>
+                    )}
+                    {activeBooking.phone && (
+                      <a className="btn btn--secondary" href={detailsPhoneHref}>
+                        Call
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div className="admin-cut-flower-detail__facts">
+                  <div className="admin-cut-flower-detail__fact">
+                    <span>Name</span>
+                    <strong>{activeBooking.customerName || "-"}</strong>
+                  </div>
+                  {activeBooking.email && (
+                    <div className="admin-cut-flower-detail__fact">
+                      <span>Email</span>
+                      <a href={`mailto:${activeBooking.email}`}>
+                        {activeBooking.email}
+                      </a>
+                    </div>
                   )}
-                {detailsSummary.optionLines.map((line) => (
-                  <p className="modal__meta" key={line.key}>
-                    {line.text}
-                  </p>
-                ))}
+                  {activeBooking.phone && (
+                    <div className="admin-cut-flower-detail__fact">
+                      <span>Phone</span>
+                      <a href={detailsPhoneHref}>{activeBooking.phone}</a>
+                    </div>
+                  )}
+                  {activeBooking.budget && (
+                    <div className="admin-cut-flower-detail__fact">
+                      <span>Budget</span>
+                      <strong>{activeBooking.budget}</strong>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="admin-cut-flower-detail__section">
+                <div className="admin-cut-flower-detail__section-head">
+                  <h4>Event</h4>
+                </div>
+                <div className="admin-cut-flower-detail__facts">
+                  <div className="admin-cut-flower-detail__fact">
+                    <span>Date and time</span>
+                    <strong>{activeBooking.displayDate}</strong>
+                  </div>
+                  {activeBooking.sessionLabel && (
+                    <div className="admin-cut-flower-detail__fact">
+                      <span>Session</span>
+                      <strong>{activeBooking.sessionLabel}</strong>
+                    </div>
+                  )}
+                  {activeBooking.location && (
+                    <div className="admin-cut-flower-detail__fact">
+                      <span>Location</span>
+                      <strong>{activeBooking.location}</strong>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="admin-cut-flower-detail__section admin-cut-flower-detail__section--wide">
+                <div className="admin-cut-flower-detail__section-head">
+                  <h4>Selections</h4>
+                  {detailsSummary.estimatedTotalLabel && (
+                    <span className="admin-cut-flower-detail__estimate-note">
+                      Estimate only
+                    </span>
+                  )}
+                </div>
+                <ul className="admin-cut-flower-detail__options-list">
+                  {detailsSummary.optionLines.map((line) => (
+                    <li key={line.key}>
+                      <span>{line.attendeeLabel}</span>
+                      <strong>{line.optionLabel}</strong>
+                      {line.priceLabel && <em>{line.priceLabel}</em>}
+                    </li>
+                  ))}
+                </ul>
                 {detailsSummary.estimatedTotalLabel && (
-                  <p className="modal__meta">
-                    Estimate: {detailsSummary.estimatedTotalLabel} (estimate
-                    only)
+                  <div className="admin-cut-flower-detail__total">
+                    <span>Estimated total</span>
+                    <strong>{detailsSummary.estimatedTotalLabel}</strong>
+                  </div>
+                )}
+              </section>
+
+              <section className="admin-cut-flower-detail__section">
+                <div className="admin-cut-flower-detail__section-head">
+                  <h4>Status</h4>
+                </div>
+                <div className="admin-cut-flower-detail__facts">
+                  <div className="admin-cut-flower-detail__fact">
+                    <span>Current status</span>
+                    <strong>{detailsStatusLabel}</strong>
+                  </div>
+                  {createdAtLabel && (
+                    <div className="admin-cut-flower-detail__fact">
+                      <span>Submitted</span>
+                      <strong>{createdAtLabel}</strong>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {activeBooking.notes && (
+                <section className="admin-cut-flower-detail__section admin-cut-flower-detail__section--wide">
+                  <div className="admin-cut-flower-detail__section-head">
+                    <h4>Notes</h4>
+                  </div>
+                  <p className="admin-cut-flower-detail__notes">
+                    {activeBooking.notes}
                   </p>
-                )}
-              </div>
-              <div className="admin-detail-card">
-                <h4>Status</h4>
-                <p className="modal__meta">Status: {detailsStatusLabel}</p>
-                {createdAtLabel && (
-                  <p className="modal__meta">Submitted: {createdAtLabel}</p>
-                )}
-                {activeBooking.notes && (
-                  <p className="modal__meta">Notes: {activeBooking.notes}</p>
-                )}
-              </div>
+                </section>
+              )}
             </div>
             <div className="admin-modal__actions">
               <button
@@ -19377,7 +20059,7 @@ export function AdminOrdersView() {
   };
 
   const normalizeDeliveryStatus = (order) => {
-    if (order.trackingLink) return "assigned";
+    if (resolveOrderTrackingLink(order)) return "assigned";
     return "not-assigned";
   };
 
@@ -19529,12 +20211,13 @@ export function AdminOrdersView() {
 
   const openOrderTrackingDialog = (order) => {
     if (!order?.id) return;
+    const trackingLink = resolveOrderTrackingLink(order);
     setPendingStatusUpdate({
       orderId: order.id,
       status: normalizeOrderStatus(order.status),
-      existingLink: order.trackingLink || "",
+      existingLink: trackingLink,
     });
-    setTrackingInput(order.trackingLink || "");
+    setTrackingInput(trackingLink);
   };
 
   const toggleOrderActionsMenu = (orderId, triggerElement) => {
@@ -19825,10 +20508,12 @@ export function AdminOrdersView() {
                   .toString()
                   .trim();
                 if (!label) return null;
+                const stockStatus = getVariantStockStatus(variant, product);
                 return {
                   id: variant.id || `${product.id}-variant-${index}`,
                   label,
                   price: parseNumber(variant.price, null),
+                  stockStatus,
                 };
               })
               .filter(Boolean)
@@ -19842,13 +20527,7 @@ export function AdminOrdersView() {
             ? numericPrice
             : null;
         const isGiftCard = Boolean(product.isGiftCard || product.is_gift_card);
-        const stockStatus = getStockStatus({
-          quantity: product.stock_quantity ?? product.quantity,
-          forceOutOfStock:
-            product.forceOutOfStock || product.stock_status === "out_of_stock",
-          status: product.stock_status,
-          isGiftCard,
-        });
+        const stockStatus = getProductCardStockStatus(product);
         const stockStatusKey = (
           isGiftCard
             ? "in_stock"
@@ -20067,11 +20746,14 @@ export function AdminOrdersView() {
       : "No products available in your catalog.";
 
   const handleAddCatalogProductToOrder = (product) => {
+    const variants = Array.isArray(product.variants) ? product.variants : [];
     const selectedVariantId = createOrderVariantSelections[product.id] || "";
+
     const selectedVariant =
-      product.variants.find((variant) => variant.id === selectedVariantId) ||
-      null;
-    if (product.variants.length > 0 && !selectedVariant) {
+      variants.find((variant) => variant.id === selectedVariantId) ||
+      (variants.length === 1 ? variants[0] : null);
+
+    if (variants.length > 1 && !selectedVariant) {
       setCreateOrderError(
         `Select a variant for ${product.name} before adding it.`,
       );
@@ -20126,9 +20808,11 @@ export function AdminOrdersView() {
             ...prev.items,
             {
               key: itemKey,
-              id: itemKey,
+              id: product.id,
               sourceId: product.id,
-              name: product.name,
+              name: selectedVariant?.label
+                ? `${product.name} - ${selectedVariant.label}`
+                : product.name,
               price: unitPrice,
               quantity: 1,
               metadata,
@@ -20190,6 +20874,8 @@ export function AdminOrdersView() {
       const name = (item.name || "").toString().trim();
       const quantity = Number.parseInt(item.quantity, 10);
       const price = parseNumber(item.price, null);
+      const productId =
+        item.sourceId || item.metadata?.productId || item.id || item.key || "";
       if (
         !name ||
         !Number.isFinite(quantity) ||
@@ -20200,15 +20886,19 @@ export function AdminOrdersView() {
         return acc;
       }
       acc.push({
-        id: item.id || item.key,
+        id: productId,
         key: item.key || item.id || "",
-        sourceId: item.sourceId || null,
+        sourceId: productId,
+        variantId: item.variantId || item.metadata?.variantId || null,
         name,
         quantity: Math.floor(quantity),
         price,
-        metadata: item.metadata || {
-          type: "product",
-          source: "admin-created-order",
+        metadata: {
+          ...(item.metadata || {}),
+          type: item.metadata?.type || "product",
+          source: item.metadata?.source || "admin-created-order",
+          productId,
+          variantId: item.variantId || item.metadata?.variantId || null,
         },
       });
       return acc;
@@ -20309,13 +20999,16 @@ export function AdminOrdersView() {
       const result = await createAdminEftOrder({
         customer,
         items: createOrderPricing.validItems.map((item) => ({
-          id: item.id,
+          id: item.sourceId || item.id,
+          sourceId: item.sourceId || item.id,
+          variantId: item.variantId || item.metadata?.variantId || null,
           name: item.name,
           quantity: item.quantity,
           price: item.price,
-          metadata: item.metadata || {
-            type: "product",
-            source: "admin-created-order",
+          metadata: {
+            ...(item.metadata || {}),
+            productId: item.sourceId || item.id,
+            variantId: item.variantId || item.metadata?.variantId || null,
           },
         })),
         subtotal: createOrderPricing.subtotal,
@@ -20463,9 +21156,11 @@ export function AdminOrdersView() {
       await Promise.all(
         eligible.map(async (order) => {
           try {
+            const trackingLink = resolveOrderTrackingLink(order);
             await updateDoc(doc(db, "orders", order.id), {
               status: "out-for-delivery",
               updatedAt: serverTimestamp(),
+              trackingLink: trackingLink || null,
             });
             if (functionsInstance && order.customer?.email) {
               const sendOrderStatusEmail = httpsCallable(
@@ -20475,7 +21170,7 @@ export function AdminOrdersView() {
               await sendOrderStatusEmail({
                 status: "Out For Delivery",
                 orderNumber: order.orderNumber ?? null,
-                trackingLink: order.trackingLink || "",
+                trackingLink,
                 customer: order.customer,
                 customerEmail: order.customer.email,
                 items: order.items || [],
@@ -20513,6 +21208,7 @@ export function AdminOrdersView() {
       return;
     }
 
+    const targetTrackingLink = resolveOrderTrackingLink(targetOrder);
     if (
       needsTrackingLink(normalizedNextStatus) &&
       trackingLinkOverride === null
@@ -20520,20 +21216,20 @@ export function AdminOrdersView() {
       setPendingStatusUpdate({
         orderId,
         status: normalizedNextStatus,
-        existingLink: targetOrder.trackingLink || "",
+        existingLink: targetTrackingLink,
       });
-      setTrackingInput(targetOrder.trackingLink || "");
+      setTrackingInput(targetTrackingLink);
       return;
     }
 
     const normalizedLink =
       typeof trackingLinkOverride === "string"
         ? trackingLinkOverride.trim()
-        : targetOrder.trackingLink || "";
-    const fallbackLink = normalizedLink || targetOrder.trackingLink || "";
+        : targetTrackingLink;
+    const fallbackLink = normalizedLink || targetTrackingLink;
     const finalTrackingLink = needsTrackingLink(normalizedNextStatus)
       ? fallbackLink || null
-      : targetOrder.trackingLink || null;
+      : targetTrackingLink || null;
 
     await updateDoc(doc(db, "orders", orderId), {
       status: normalizedNextStatus,
@@ -20583,39 +21279,41 @@ export function AdminOrdersView() {
 
   const handleEditOrderItemQuantity = (itemIndex, quantity) => {
     const items = [...editOrderForm.items];
-    items[itemIndex].quantity = Math.max(1, quantity);
+    const oldQuantity = Number(items[itemIndex].quantity) || 1;
+    const price = Number(items[itemIndex].price) || 0;
+    const newQuantity = Math.max(1, quantity);
+    items[itemIndex].quantity = newQuantity;
+    const delta = (newQuantity - oldQuantity) * price;
     setEditOrderForm((prev) => ({
       ...prev,
       items,
-      totalPrice: items.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0,
-      ),
+      totalPrice: prev.totalPrice + delta,
     }));
   };
 
   const handleEditOrderItemPrice = (itemIndex, price) => {
     const items = [...editOrderForm.items];
-    items[itemIndex].price = Math.max(0, price);
+    const oldPrice = Number(items[itemIndex].price) || 0;
+    const quantity = Number(items[itemIndex].quantity) || 1;
+    const newPrice = Math.max(0, price);
+    items[itemIndex].price = newPrice;
+    const delta = (newPrice - oldPrice) * quantity;
     setEditOrderForm((prev) => ({
       ...prev,
       items,
-      totalPrice: items.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0,
-      ),
+      totalPrice: prev.totalPrice + delta,
     }));
   };
 
   const handleRemoveEditOrderItem = (itemIndex) => {
+    const removedItem = editOrderForm.items[itemIndex];
+    const removedCost =
+      (Number(removedItem.price) || 0) * (Number(removedItem.quantity) || 1);
     const items = editOrderForm.items.filter((_, i) => i !== itemIndex);
     setEditOrderForm((prev) => ({
       ...prev,
       items,
-      totalPrice: items.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0,
-      ),
+      totalPrice: Math.max(0, prev.totalPrice - removedCost),
     }));
   };
 
@@ -20804,9 +21502,13 @@ export function AdminOrdersView() {
     : false;
   const selectedPayfast = selectedOrder?.payfast || {};
   const selectedShipping = selectedOrder?.shipping || {};
+  const selectedTrackingLink = resolveOrderTrackingLink(selectedOrder);
   const activeOrderActionsOrder = openOrderActions
     ? orders.find((order) => order.id === openOrderActions.orderId) || null
     : null;
+  const activeOrderActionsTrackingLink = resolveOrderTrackingLink(
+    activeOrderActionsOrder,
+  );
   const activeOrderActionsPaymentMethod = activeOrderActionsOrder
     ? normalizePaymentMethod(activeOrderActionsOrder)
     : PAYMENT_METHODS.PAYFAST;
@@ -21001,7 +21703,7 @@ export function AdminOrdersView() {
       } else {
         setDeliveryCourierId("");
       }
-      setTrackingInput(selectedOrder.trackingLink || "");
+      setTrackingInput(resolveOrderTrackingLink(selectedOrder));
       const fallbackMarchMonth = `${new Date().getFullYear()}-03`;
       setPreorderNoticeMonth(
         resolvePreorderSendMonthFromOrder(selectedOrder) || fallbackMarchMonth,
@@ -21235,6 +21937,7 @@ export function AdminOrdersView() {
                 const statusLocked = isEftBlocked(order);
                 const deliveryStatus = normalizeDeliveryStatus(order);
                 const deliveryLabel = deliveryStatus.replace(/-/g, " ");
+                const trackingLink = resolveOrderTrackingLink(order);
                 const isActionsMenuOpen =
                   openOrderActions?.orderId === order.id;
                 return (
@@ -21254,10 +21957,10 @@ export function AdminOrdersView() {
                       <p className="modal__meta admin-orders-table__ref">
                         Ref: {order.id}
                       </p>
-                      {order.trackingLink && (
+                      {trackingLink && (
                         <p className="modal__meta admin-orders-table__tracking">
                           <a
-                            href={order.trackingLink}
+                            href={trackingLink}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
@@ -21454,7 +22157,7 @@ export function AdminOrdersView() {
                 openOrderTrackingDialog(activeOrderActionsOrder);
               }}
             >
-              {activeOrderActionsOrder.trackingLink
+              {activeOrderActionsTrackingLink
                 ? "Update tracking"
                 : "Add tracking"}
             </button>
@@ -21823,19 +22526,25 @@ export function AdminOrdersView() {
                   {filteredCreateOrderProducts.map((product) => {
                     const selection =
                       createOrderVariantSelections[product.id] || "";
+                    const variants = Array.isArray(product.variants)
+                      ? product.variants
+                      : [];
                     const selectedVariant =
-                      product.variants.find(
-                        (variant) => variant.id === selection,
-                      ) || null;
+                      variants.find((variant) => variant.id === selection) ||
+                      (variants.length === 1 ? variants[0] : null);
                     const unitPrice = Number.isFinite(selectedVariant?.price)
                       ? selectedVariant.price
                       : product.numericPrice;
                     const priceLabel = Number.isFinite(unitPrice)
                       ? formatPriceLabel(unitPrice)
                       : "Price on request";
-                    const isOutOfStock = product.stockStatus?.state === "out";
-                    const requiresVariant = product.variants.length > 0;
+                    const requiresVariant = variants.length > 1;
                     const missingVariant = requiresVariant && !selection;
+                    const activeStockStatus =
+                      requiresVariant && selectedVariant
+                        ? selectedVariant.stockStatus
+                        : product.stockStatus;
+                    const isOutOfStock = activeStockStatus?.state === "out";
                     const addDisabled = isOutOfStock || missingVariant;
                     let disabledHint = null;
                     if (isOutOfStock) disabledHint = "Out of stock";
@@ -21890,14 +22599,14 @@ export function AdminOrdersView() {
                           {product.sku && (
                             <p className="modal__meta">SKU: {product.sku}</p>
                           )}
-                          {product.stockStatus && (
+                          {activeStockStatus && (
                             <span
-                              className={`badge badge--stock-${product.stockStatus.state}`}
+                              className={`badge badge--stock-${activeStockStatus.state}`}
                             >
-                              {product.stockStatus.label}
+                              {activeStockStatus.label}
                             </span>
                           )}
-                          {product.variants.length > 0 && (
+                          {variants.length > 0 && (
                             <label className="modal__meta pos-item-card__field">
                               Variant
                               <select
@@ -21912,7 +22621,7 @@ export function AdminOrdersView() {
                                 }
                               >
                                 <option value="">Select variant</option>
-                                {product.variants.map((variant) => (
+                                {variants.map((variant) => (
                                   <option key={variant.id} value={variant.id}>
                                     {variant.label}
                                     {Number.isFinite(variant.price)
@@ -22201,9 +22910,7 @@ export function AdminOrdersView() {
                 type="button"
                 onClick={() => openOrderTrackingDialog(selectedOrder)}
               >
-                {selectedOrder.trackingLink
-                  ? "Update Tracking"
-                  : "Add Tracking"}
+                {selectedTrackingLink ? "Update Tracking" : "Add Tracking"}
               </button>
               <button
                 className="btn btn--secondary"
@@ -22443,15 +23150,17 @@ export function AdminOrdersView() {
                         Province: {selectedShipping.province}
                       </p>
                     )}
-                    {selectedOrder.trackingLink ? (
-                      <a
-                        href={selectedOrder.trackingLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="modal__meta"
-                      >
-                        Tracking link
-                      </a>
+                    {selectedTrackingLink ? (
+                      <p className="modal__meta admin-order-detail__tracking-link">
+                        Tracking:{" "}
+                        <a
+                          href={selectedTrackingLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {selectedTrackingLink}
+                        </a>
+                      </p>
                     ) : (
                       <p className="modal__meta">No tracking link yet</p>
                     )}
@@ -22667,15 +23376,17 @@ export function AdminOrdersView() {
                         Province: {selectedShipping.province}
                       </p>
                     )}
-                    {selectedOrder.trackingLink ? (
-                      <a
-                        href={selectedOrder.trackingLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="modal__meta"
-                      >
-                        Tracking link
-                      </a>
+                    {selectedTrackingLink ? (
+                      <p className="modal__meta admin-order-detail__tracking-link">
+                        Tracking:{" "}
+                        <a
+                          href={selectedTrackingLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {selectedTrackingLink}
+                        </a>
+                      </p>
                     ) : (
                       <p className="modal__meta">No tracking link yet</p>
                     )}

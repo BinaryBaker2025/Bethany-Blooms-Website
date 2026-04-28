@@ -13,10 +13,7 @@ import {
   requiresFreshFlowerDeliveryContactForCartItem,
 } from "../lib/freshFlowerDelivery.js";
 import { buildWhatsAppLink } from "../lib/contactInfo.js";
-import {
-  EFT_BANK_DETAILS,
-  PAYMENT_METHODS,
-} from "../lib/paymentMethods.js";
+import { EFT_BANK_DETAILS, PAYMENT_METHODS } from "../lib/paymentMethods.js";
 import {
   clearPayfastPendingSession,
   setPayfastPendingSession,
@@ -32,7 +29,8 @@ import { getCustomerStockLabel, getStockStatus } from "../lib/stockStatus.js";
 const currency = (value) => `R${value.toFixed(2)}`;
 const CHECKOUT_REQUEST_TIMEOUT_MS = 20000;
 const CHECKOUT_MAX_ATTEMPTS = 2;
-const LOCAL_FUNCTIONS_URL_PATTERN = /^https?:\/\/(?:127\.0\.0\.1|localhost):5001\//i;
+const LOCAL_FUNCTIONS_URL_PATTERN =
+  /^https?:\/\/(?:127\.0\.0\.1|localhost):5001\//i;
 const PREORDER_MIXED_CART_MESSAGE =
   "Pre-order products need to be checked out separately from regular products. Please place one order for pre-order items and a separate order for regular products.";
 const STEP_ORDER = ["contact", "shipping", "payment", "review"];
@@ -54,8 +52,10 @@ const normalizeStockStatusValue = (value = "") =>
     .replace(/[\s-]+/g, "_");
 
 const isPreorderCartItem = (item, stockInfo = null) => {
-  if (!item || item?.metadata?.type !== "product" || isGiftCardCartItem(item)) return false;
-  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  if (!item || item?.metadata?.type !== "product" || isGiftCardCartItem(item))
+    return false;
+  const metadata =
+    item.metadata && typeof item.metadata === "object" ? item.metadata : {};
   const stockValues = [
     metadata.stockStatus,
     metadata.stock_status,
@@ -69,9 +69,11 @@ const isPreorderCartItem = (item, stockInfo = null) => {
   ];
   return Boolean(
     metadata.preorderSendMonth ||
-      metadata.preorder_send_month ||
-      metadata.preorderSendMonthLabel ||
-      stockValues.some((value) => normalizeStockStatusValue(value) === "preorder"),
+    metadata.preorder_send_month ||
+    metadata.preorderSendMonthLabel ||
+    stockValues.some(
+      (value) => normalizeStockStatusValue(value) === "preorder",
+    ),
   );
 };
 
@@ -85,18 +87,28 @@ function CartPage() {
   const navigate = useNavigate();
   usePageMetadata({
     title: "Your Cart | Bethany Blooms",
-    description: "Review your Bethany Blooms items, add your details, and complete checkout.",
+    description:
+      "Review your Bethany Blooms items, add your details, and complete checkout.",
     noIndex: true,
   });
 
-  const { items, removeItem, updateItemQuantity, clearCart, totalPrice, totalCount } = useCart();
+  const {
+    items,
+    removeItem,
+    updateItemQuantity,
+    clearCart,
+    totalPrice,
+    totalCount,
+  } = useCart();
   const { user } = useAuth();
-  const { profile: customerProfile, saveProfile: saveCustomerProfile } = useCustomerProfile();
-  const { items: courierOptions = [], status: courierStatus } = useFirestoreCollection("courierOptions", {
-    orderByField: "createdAt",
-    orderDirection: "desc",
-    fallback: [],
-  });
+  const { profile: customerProfile, saveProfile: saveCustomerProfile } =
+    useCustomerProfile();
+  const { items: courierOptions = [], status: courierStatus } =
+    useFirestoreCollection("courierOptions", {
+      orderByField: "createdAt",
+      orderDirection: "desc",
+      fallback: [],
+    });
   const { items: productInventory = [] } = useFirestoreCollection("products", {
     orderByField: "createdAt",
     orderDirection: "desc",
@@ -132,7 +144,9 @@ function CartPage() {
 
   const cartTypeLabel = useMemo(() => {
     if (!items.length) return null;
-    return items[0]?.metadata?.type === "workshop" ? "workshop bookings" : "products";
+    return items[0]?.metadata?.type === "workshop"
+      ? "workshop bookings"
+      : "products";
   }, [items]);
 
   const productLookup = useMemo(() => {
@@ -153,16 +167,47 @@ function CartPage() {
         quantity: null,
       };
     }
-    const productId = item.metadata?.productId || item.metadata?.productID || item.metadata?.product;
+    const productId =
+      item.metadata?.productId ||
+      item.metadata?.productID ||
+      item.metadata?.product;
     const product = productLookup.get(productId) || null;
     if (!product) return null;
     const variantId = (item.metadata?.variantId || "").toString().trim();
-    const hasVariants = Array.isArray(product.variants) && product.variants.length > 0;
+    const hasVariants =
+      Array.isArray(product.variants) && product.variants.length > 0;
     const variant =
       variantId && hasVariants
-        ? product.variants.find((entry) => (entry?.id || "").toString().trim() === variantId)
+        ? product.variants.find(
+            (entry) => (entry?.id || "").toString().trim() === variantId,
+          )
         : null;
     if (hasVariants && (!variantId || !variant)) {
+      const productStatusValue = (
+        product.stock_status ||
+        product.stockStatus ||
+        product.stockState ||
+        product.stock_state ||
+        ""
+      )
+        .toString()
+        .trim()
+        .toLowerCase();
+      const isProductPreorder =
+        normalizeStockStatusValue(productStatusValue) === "preorder" ||
+        Boolean(
+          product.preorderSendMonth ||
+          product.preorder_send_month ||
+          product.preorderSendMonthLabel,
+        );
+
+      if (isProductPreorder) {
+        return {
+          status: getStockStatus({ quantity: null, status: "preorder" }),
+          quantity: null,
+        };
+      }
+
       return {
         status: getStockStatus({
           quantity: 0,
@@ -172,16 +217,21 @@ function CartPage() {
         quantity: 0,
       };
     }
-    const rawQuantity =
-      hasVariants
-        ? variant?.stock_quantity ?? variant?.stockQuantity ?? variant?.quantity
-        : product.stock_quantity ?? product.stockQuantity ?? product.quantity;
-    const statusValue = (variant?.stock_status || variant?.stockStatus || product.stock_status || "")
+    const rawQuantity = hasVariants
+      ? (variant?.stock_quantity ?? variant?.stockQuantity ?? variant?.quantity)
+      : (product.stock_quantity ?? product.stockQuantity ?? product.quantity);
+    const statusValue = (
+      variant?.stock_status ||
+      variant?.stockStatus ||
+      product.stock_status ||
+      ""
+    )
       .toString()
       .trim()
       .toLowerCase();
     const isVariantQuantityMissing =
-      hasVariants && (rawQuantity === undefined || rawQuantity === null || rawQuantity === "");
+      hasVariants &&
+      (rawQuantity === undefined || rawQuantity === null || rawQuantity === "");
     const stockStatus = getStockStatus({
       quantity: rawQuantity,
       forceOutOfStock:
@@ -192,7 +242,9 @@ function CartPage() {
         (isVariantQuantityMissing && statusValue !== "preorder"),
       status: statusValue,
     });
-    const quantity = Number.isFinite(stockStatus.quantity) ? stockStatus.quantity : null;
+    const quantity = Number.isFinite(stockStatus.quantity)
+      ? stockStatus.quantity
+      : null;
     return {
       status: stockStatus,
       quantity,
@@ -224,16 +276,25 @@ function CartPage() {
     [items],
   );
   const cartHasGiftCards = useMemo(
-    () => items.some((item) => item?.metadata?.type === "product" && isGiftCardCartItem(item)),
+    () =>
+      items.some(
+        (item) =>
+          item?.metadata?.type === "product" && isGiftCardCartItem(item),
+      ),
     [items],
   );
   const cartHasPhysicalProducts = useMemo(
-    () => items.some((item) => item?.metadata?.type === "product" && !isGiftCardCartItem(item)),
+    () =>
+      items.some(
+        (item) =>
+          item?.metadata?.type === "product" && !isGiftCardCartItem(item),
+      ),
     [items],
   );
   const preorderCartMix = items.reduce(
     (summary, item) => {
-      if (item?.metadata?.type !== "product" || isGiftCardCartItem(item)) return summary;
+      if (item?.metadata?.type !== "product" || isGiftCardCartItem(item))
+        return summary;
       if (isPreorderCartItem(item, resolveStock(item))) {
         summary.preorderItems += 1;
       } else {
@@ -248,8 +309,17 @@ function CartPage() {
   const cartRequiresFreshFlowerDeliveryContact = useMemo(
     () =>
       items.some((item) => {
-        if (!item || item.metadata?.type !== "product" || isGiftCardCartItem(item)) return false;
-        const productId = item.metadata?.productId || item.metadata?.productID || item.metadata?.product || "";
+        if (
+          !item ||
+          item.metadata?.type !== "product" ||
+          isGiftCardCartItem(item)
+        )
+          return false;
+        const productId =
+          item.metadata?.productId ||
+          item.metadata?.productID ||
+          item.metadata?.product ||
+          "";
         const product = productLookup.get(productId) || null;
         return requiresFreshFlowerDeliveryContactForCartItem(item, product);
       }),
@@ -288,13 +358,18 @@ function CartPage() {
       });
     }
     return notices;
-  }, [cartTypeLabel, cartRequiresFreshFlowerDeliveryContact, hasMixedPreorderCart]);
+  }, [
+    cartTypeLabel,
+    cartRequiresFreshFlowerDeliveryContact,
+    hasMixedPreorderCart,
+  ]);
   const savedAddresses = useMemo(() => {
     if (!Array.isArray(customerProfile?.addresses)) return [];
     return customerProfile.addresses
       .map((entry) => ({
         id: (entry.id || "").toString().trim(),
-        label: (entry.label || "Saved address").toString().trim() || "Saved address",
+        label:
+          (entry.label || "Saved address").toString().trim() || "Saved address",
         street: (entry.street || "").toString().trim(),
         suburb: (entry.suburb || "").toString().trim(),
         city: (entry.city || "").toString().trim(),
@@ -311,38 +386,58 @@ function CartPage() {
           entry.postalCode,
       );
   }, [customerProfile?.addresses]);
-  const defaultSavedAddressId = (customerProfile?.defaultAddressId || "").toString().trim();
+  const defaultSavedAddressId = (customerProfile?.defaultAddressId || "")
+    .toString()
+    .trim();
   const accountEmail = (user?.email || "").toString().trim();
-  const workshopOnlyCart = hasItems && cartHasWorkshops && !cartHasPhysicalProducts && !cartHasGiftCards;
-  const giftCardOnlyCart = hasItems && cartHasGiftCards && !cartHasPhysicalProducts && !cartHasWorkshops;
+  const workshopOnlyCart =
+    hasItems &&
+    cartHasWorkshops &&
+    !cartHasPhysicalProducts &&
+    !cartHasGiftCards;
+  const giftCardOnlyCart =
+    hasItems &&
+    cartHasGiftCards &&
+    !cartHasPhysicalProducts &&
+    !cartHasWorkshops;
   const requiresShipping = cartHasPhysicalProducts;
   const workshopVenueLabel = useMemo(() => {
     if (!workshopOnlyCart) return "";
-    const firstWorkshopLocation = items.find((item) => item?.metadata?.type === "workshop")?.metadata?.location;
-    return (firstWorkshopLocation || "Bethany Blooms workshop studio").toString().trim();
+    const firstWorkshopLocation = items.find(
+      (item) => item?.metadata?.type === "workshop",
+    )?.metadata?.location;
+    return (firstWorkshopLocation || "Bethany Blooms workshop studio")
+      .toString()
+      .trim();
   }, [items, workshopOnlyCart]);
   const effectiveCheckoutEmail = accountEmail || contactDetails.email.trim();
   const stepLabels = useMemo(
     () => ({
       ...BASE_STEP_LABELS,
-      shipping: requiresShipping ? "Shipping" : workshopOnlyCart ? "Workshop" : "Delivery",
+      shipping: requiresShipping
+        ? "Shipping"
+        : workshopOnlyCart
+          ? "Workshop"
+          : "Delivery",
     }),
     [requiresShipping, workshopOnlyCart],
   );
   const isContactComplete = Boolean(
     contactDetails.fullName.trim() &&
-      effectiveCheckoutEmail &&
-      contactDetails.phone.trim(),
+    effectiveCheckoutEmail &&
+    contactDetails.phone.trim(),
   );
   const postalCodeValid = /^\d{4}$/.test(shippingAddress.postalCode.trim());
-  const isShippingComplete = !requiresShipping || Boolean(
-    shippingAddress.street.trim() &&
+  const isShippingComplete =
+    !requiresShipping ||
+    Boolean(
+      shippingAddress.street.trim() &&
       shippingAddress.suburb.trim() &&
       shippingAddress.city.trim() &&
       shippingAddress.province.trim() &&
       postalCodeValid &&
       selectedCourierId,
-  );
+    );
   const isPaymentComplete =
     paymentMethod === PAYMENT_METHODS.PAYFAST ? payfastConsent : true;
   const stepCompletion = {
@@ -357,7 +452,8 @@ function CartPage() {
     return courierOptions
       .filter((option) => option.isActive !== false)
       .map((option) => {
-        const provinceConfig = option.provinces?.[shippingAddress.province] || {};
+        const provinceConfig =
+          option.provinces?.[shippingAddress.province] || {};
         const price = Number(provinceConfig.price);
         return {
           id: option.id,
@@ -372,12 +468,16 @@ function CartPage() {
 
   const selectedCourier =
     availableCouriers.find((option) => option.id === selectedCourierId) || null;
-  const shippingCost = requiresShipping && selectedCourier ? selectedCourier.price : 0;
+  const shippingCost =
+    requiresShipping && selectedCourier ? selectedCourier.price : 0;
   const itemSubtotal = totalPrice;
   const orderTotal = itemSubtotal + shippingCost;
 
-  const firstIncompleteIndex = STEP_ORDER.findIndex((step) => !stepCompletion[step]);
-  const maxOpenIndex = firstIncompleteIndex === -1 ? STEP_ORDER.length - 1 : firstIncompleteIndex;
+  const firstIncompleteIndex = STEP_ORDER.findIndex(
+    (step) => !stepCompletion[step],
+  );
+  const maxOpenIndex =
+    firstIncompleteIndex === -1 ? STEP_ORDER.length - 1 : firstIncompleteIndex;
   const activeIndex = STEP_ORDER.indexOf(activeStep);
   const nextStep = STEP_ORDER[activeIndex + 1];
   const primaryActionLabel = (() => {
@@ -407,7 +507,8 @@ function CartPage() {
   useEffect(() => {
     if (!items.length) return;
     if (user?.uid) return;
-    const metadataCustomer = items.find((item) => item.metadata?.customer)?.metadata?.customer;
+    const metadataCustomer = items.find((item) => item.metadata?.customer)
+      ?.metadata?.customer;
     if (!metadataCustomer) return;
     setContactDetails((prev) => {
       const hasValues = Object.values(prev).some((value) => value?.trim());
@@ -432,7 +533,11 @@ function CartPage() {
   useEffect(() => {
     if (!accountEmail) return;
     setContactDetails((prev) => {
-      const nextFullName = prev.fullName.trim() || customerProfile?.fullName || user?.displayName || "";
+      const nextFullName =
+        prev.fullName.trim() ||
+        customerProfile?.fullName ||
+        user?.displayName ||
+        "";
       const nextPhone = prev.phone.trim() || customerProfile?.phone || "";
       if (
         prev.email === accountEmail &&
@@ -447,7 +552,12 @@ function CartPage() {
         phone: nextPhone,
       };
     });
-  }, [accountEmail, customerProfile?.fullName, customerProfile?.phone, user?.displayName]);
+  }, [
+    accountEmail,
+    customerProfile?.fullName,
+    customerProfile?.phone,
+    user?.displayName,
+  ]);
 
   useEffect(() => {
     if (!requiresShipping || savedAddresses.length === 0) {
@@ -455,8 +565,12 @@ function CartPage() {
       return;
     }
     setSelectedSavedAddressId((prev) => {
-      if (prev && savedAddresses.some((entry) => entry.id === prev)) return prev;
-      if (defaultSavedAddressId && savedAddresses.some((entry) => entry.id === defaultSavedAddressId)) {
+      if (prev && savedAddresses.some((entry) => entry.id === prev))
+        return prev;
+      if (
+        defaultSavedAddressId &&
+        savedAddresses.some((entry) => entry.id === defaultSavedAddressId)
+      ) {
         return defaultSavedAddressId;
       }
       return savedAddresses[0]?.id || "";
@@ -465,7 +579,9 @@ function CartPage() {
 
   useEffect(() => {
     if (!requiresShipping || !selectedSavedAddressId) return;
-    const selectedAddress = savedAddresses.find((entry) => entry.id === selectedSavedAddressId);
+    const selectedAddress = savedAddresses.find(
+      (entry) => entry.id === selectedSavedAddressId,
+    );
     if (!selectedAddress) return;
     setShippingAddress((prev) => ({
       ...prev,
@@ -498,10 +614,17 @@ function CartPage() {
       setSelectedCourierId("");
       return;
     }
-    const stillAvailable = availableCouriers.some((option) => option.id === selectedCourierId);
+    const stillAvailable = availableCouriers.some(
+      (option) => option.id === selectedCourierId,
+    );
     if (stillAvailable) return;
     setSelectedCourierId(availableCouriers[0]?.id || "");
-  }, [availableCouriers, requiresShipping, selectedCourierId, shippingAddress.province]);
+  }, [
+    availableCouriers,
+    requiresShipping,
+    selectedCourierId,
+    shippingAddress.province,
+  ]);
 
   useEffect(() => {
     if (!cartHasGiftCards || paymentMethod !== PAYMENT_METHODS.EFT) return;
@@ -547,10 +670,17 @@ function CartPage() {
       return { ok: false, message: PREORDER_MIXED_CART_MESSAGE };
     }
     if (step === "contact" && !isContactComplete) {
-      return { ok: false, message: "Please complete your contact details to continue." };
+      return {
+        ok: false,
+        message: "Please complete your contact details to continue.",
+      };
     }
     if (step === "shipping" && !isShippingComplete) {
-      return { ok: false, message: "Please complete your delivery address and courier selection to continue." };
+      return {
+        ok: false,
+        message:
+          "Please complete your delivery address and courier selection to continue.",
+      };
     }
     if (step === "payment" && !isPaymentComplete) {
       return {
@@ -641,7 +771,8 @@ function CartPage() {
           const data = await response.json().catch(() => null);
 
           if (!response.ok) {
-            const retryableStatus = response.status >= 500 || response.status === 429;
+            const retryableStatus =
+              response.status >= 500 || response.status === 429;
             const message =
               (data?.error || "").toString().trim() ||
               (retryableStatus
@@ -654,9 +785,11 @@ function CartPage() {
 
           return data;
         } catch (error) {
-          const isAbort = error?.name === "AbortError" || controller.signal.aborted;
+          const isAbort =
+            error?.name === "AbortError" || controller.signal.aborted;
           const isNetworkFailure = error instanceof TypeError;
-          const retryable = Boolean(error?.retryable) || isAbort || isNetworkFailure;
+          const retryable =
+            Boolean(error?.retryable) || isAbort || isNetworkFailure;
           lastError = isAbort
             ? new Error("Checkout request timed out. Please retry.")
             : error instanceof Error
@@ -688,9 +821,7 @@ function CartPage() {
       const isLocalEndpointNetworkFailure =
         LOCAL_FUNCTIONS_URL_PATTERN.test(url) && Boolean(error?.networkFailure);
       const canUseFallback =
-        fallbackUrl &&
-        fallbackUrl !== url &&
-        isLocalEndpointNetworkFailure;
+        fallbackUrl && fallbackUrl !== url && isLocalEndpointNetworkFailure;
       if (!canUseFallback) {
         throw error;
       }
@@ -708,12 +839,16 @@ function CartPage() {
 
     const incompleteStep = (() => {
       if (!isContactComplete) {
-        return { step: "contact", message: "Please complete your contact details before checkout." };
+        return {
+          step: "contact",
+          message: "Please complete your contact details before checkout.",
+        };
       }
       if (!isShippingComplete) {
         return {
           step: "shipping",
-          message: "Please complete your delivery address and courier selection before checkout.",
+          message:
+            "Please complete your delivery address and courier selection before checkout.",
         };
       }
       if (!isPaymentComplete) {
@@ -735,7 +870,8 @@ function CartPage() {
       return;
     }
 
-    const metadataCustomer = items.find((item) => item.metadata?.customer)?.metadata?.customer;
+    const metadataCustomer = items.find((item) => item.metadata?.customer)
+      ?.metadata?.customer;
     const normalizedShippingAddress = requiresShipping
       ? {
           street: shippingAddress.street.trim(),
@@ -745,24 +881,35 @@ function CartPage() {
           postalCode: shippingAddress.postalCode.trim(),
         }
       : null;
-    const formattedAddress = normalizedShippingAddress ? formatShippingAddress(normalizedShippingAddress) : "";
-    const digitalAddressFallback = giftCardOnlyCart ? "Digital gift card delivery via email" : "";
+    const formattedAddress = normalizedShippingAddress
+      ? formatShippingAddress(normalizedShippingAddress)
+      : "";
+    const digitalAddressFallback = giftCardOnlyCart
+      ? "Digital gift card delivery via email"
+      : "";
     const workshopAddressFallback = workshopOnlyCart ? workshopVenueLabel : "";
-    const checkoutEmail = accountEmail || contactDetails.email || metadataCustomer?.email || "";
+    const checkoutEmail =
+      accountEmail || contactDetails.email || metadataCustomer?.email || "";
     const customer = {
       fullName: contactDetails.fullName || metadataCustomer?.fullName || "",
       email: checkoutEmail,
       phone: contactDetails.phone || metadataCustomer?.phone || "",
       address:
-        (requiresShipping ? formattedAddress || metadataCustomer?.address : "") ||
+        (requiresShipping
+          ? formattedAddress || metadataCustomer?.address
+          : "") ||
         digitalAddressFallback ||
         workshopAddressFallback,
     };
 
-    const requiredFields = requiresShipping ? ["fullName", "email", "phone", "address"] : ["fullName", "email", "phone"];
+    const requiredFields = requiresShipping
+      ? ["fullName", "email", "phone", "address"]
+      : ["fullName", "email", "phone"];
     const missing = requiredFields.filter((field) => !customer[field]?.trim());
     if (missing.length) {
-      setOrderError("Please complete your contact and shipping details before placing the order.");
+      setOrderError(
+        "Please complete your contact and shipping details before placing the order.",
+      );
       return;
     }
 
@@ -778,9 +925,13 @@ function CartPage() {
     });
     if (stockIssue) {
       const stockInfo = resolveStock(stockIssue);
-      const variantLabel = stockIssue.metadata?.variantLabel ? ` (${stockIssue.metadata.variantLabel})` : "";
+      const variantLabel = stockIssue.metadata?.variantLabel
+        ? ` (${stockIssue.metadata.variantLabel})`
+        : "";
       if (stockInfo?.status?.state === "out") {
-        setOrderError(`${stockIssue.name}${variantLabel} is out of stock. Please remove it from your cart.`);
+        setOrderError(
+          `${stockIssue.name}${variantLabel} is out of stock. Please remove it from your cart.`,
+        );
       } else {
         setOrderError(
           `Only ${stockInfo?.quantity ?? 0} available for ${stockIssue.name}${variantLabel}. Please reduce quantity.`,
@@ -793,19 +944,26 @@ function CartPage() {
     setPlacingOrder(true);
 
     const orderItems = items.map((item) => {
-      const metadata = item?.metadata && typeof item.metadata === "object"
-        ? { ...item.metadata }
-        : null;
+      const metadata =
+        item?.metadata && typeof item.metadata === "object"
+          ? { ...item.metadata }
+          : null;
       if (metadata?.type === "product" && !isGiftCardCartItem(item)) {
-        const productId = metadata.productId || metadata.productID || metadata.product || "";
+        const productId =
+          metadata.productId || metadata.productID || metadata.product || "";
         const product = productLookup.get(productId) || null;
-        const categoryTokens = getCartItemFreshFlowerCategoryTokens(item, product);
+        const categoryTokens = getCartItemFreshFlowerCategoryTokens(
+          item,
+          product,
+        );
         const categoryLabel = (
           metadata.categoryLabel ||
           metadata.category ||
           product?.categoryName ||
           product?.category ||
-          (Array.isArray(product?.categoryLabels) ? product.categoryLabels[0] : "") ||
+          (Array.isArray(product?.categoryLabels)
+            ? product.categoryLabels[0]
+            : "") ||
           ""
         )
           .toString()
@@ -814,28 +972,38 @@ function CartPage() {
           metadata.categoryId ||
           product?.categoryId ||
           product?.categorySlug ||
-          (Array.isArray(product?.categoryKeys) ? product.categoryKeys[0] : "") ||
+          (Array.isArray(product?.categoryKeys)
+            ? product.categoryKeys[0]
+            : "") ||
           categoryTokens[0] ||
           ""
         )
           .toString()
           .trim();
         if (categoryTokens.length) metadata.categoryTokens = categoryTokens;
-        if (categoryId && !metadata.categoryId) metadata.categoryId = categoryId;
-        if (categoryLabel && !metadata.categoryLabel) metadata.categoryLabel = categoryLabel;
-        if (!metadata.productSlug && product?.slug) metadata.productSlug = product.slug;
-        metadata.deliveryContactCandidate = requiresFreshFlowerDeliveryContactForCartItem(item, product);
+        if (categoryId && !metadata.categoryId)
+          metadata.categoryId = categoryId;
+        if (categoryLabel && !metadata.categoryLabel)
+          metadata.categoryLabel = categoryLabel;
+        if (!metadata.productSlug && product?.slug)
+          metadata.productSlug = product.slug;
+        metadata.deliveryContactCandidate =
+          requiresFreshFlowerDeliveryContactForCartItem(item, product);
       }
       return {
         id: item.id,
         name: item.name,
         quantity: item.quantity,
-        price: typeof item.price === "number" ? item.price : Number(item.price) || 0,
+        price:
+          typeof item.price === "number" ? item.price : Number(item.price) || 0,
         metadata,
       };
     });
 
-    const orderTotal = orderItems.reduce((sum, entry) => sum + entry.price * entry.quantity, 0);
+    const orderTotal = orderItems.reduce(
+      (sum, entry) => sum + entry.price * entry.quantity,
+      0,
+    );
     const finalTotal = orderTotal + shippingCost;
 
     try {
@@ -850,14 +1018,15 @@ function CartPage() {
         subtotal: orderTotal,
         shippingCost: requiresShipping ? shippingCost : 0,
         shippingAddress: requiresShipping ? normalizedShippingAddress : null,
-        shipping: requiresShipping && selectedCourier
-          ? {
-              courierId: selectedCourier.id,
-              courierName: selectedCourier.name,
-              courierPrice: selectedCourier.price,
-              province: normalizedShippingAddress?.province || "",
-            }
-          : null,
+        shipping:
+          requiresShipping && selectedCourier
+            ? {
+                courierId: selectedCourier.id,
+                courierName: selectedCourier.name,
+                courierPrice: selectedCourier.price,
+                province: normalizedShippingAddress?.province || "",
+              }
+            : null,
         customerUid: user?.uid || null,
         totalPrice: finalTotal,
       };
@@ -872,7 +1041,9 @@ function CartPage() {
             : "";
           const existingAddress = normalizedAddressKey
             ? existingAddresses.find(
-                (entry) => formatShippingAddress(entry).toLowerCase() === normalizedAddressKey,
+                (entry) =>
+                  formatShippingAddress(entry).toLowerCase() ===
+                  normalizedAddressKey,
               )
             : null;
           const nextAddresses =
@@ -884,8 +1055,9 @@ function CartPage() {
                     {
                       id: selectedSavedAddressId || `addr-${Date.now()}`,
                       label: selectedSavedAddressId
-                        ? savedAddresses.find((entry) => entry.id === selectedSavedAddressId)?.label ||
-                          "Saved address"
+                        ? savedAddresses.find(
+                            (entry) => entry.id === selectedSavedAddressId,
+                          )?.label || "Saved address"
                         : "Saved address",
                       ...normalizedShippingAddress,
                     },
@@ -907,7 +1079,10 @@ function CartPage() {
             },
           });
         } catch (profileSaveError) {
-          console.warn("Unable to update customer profile from checkout", profileSaveError);
+          console.warn(
+            "Unable to update customer profile from checkout",
+            profileSaveError,
+          );
         }
       }
 
@@ -928,7 +1103,8 @@ function CartPage() {
         }
 
         const orderNumber = eftData.orderNumber || null;
-        const proofUploadToken = (eftData.proofUploadToken || "").toString().trim() || null;
+        const proofUploadToken =
+          (eftData.proofUploadToken || "").toString().trim() || null;
         const proofUploadExpiresAt =
           (eftData.proofUploadExpiresAt || "").toString().trim() || null;
         const orderQuery = new URLSearchParams();
@@ -936,10 +1112,16 @@ function CartPage() {
         if (Number.isFinite(Number(orderNumber))) {
           orderQuery.set("orderNumber", String(orderNumber));
         }
-        if (proofUploadToken) orderQuery.set("proofUploadToken", proofUploadToken);
-        if (proofUploadExpiresAt) orderQuery.set("proofUploadExpiresAt", proofUploadExpiresAt);
-        const orderSearch = orderQuery.toString() ? `?${orderQuery.toString()}` : "";
-        setOrderSuccess("EFT order placed. We will verify payment before delivery.");
+        if (proofUploadToken)
+          orderQuery.set("proofUploadToken", proofUploadToken);
+        if (proofUploadExpiresAt)
+          orderQuery.set("proofUploadExpiresAt", proofUploadExpiresAt);
+        const orderSearch = orderQuery.toString()
+          ? `?${orderQuery.toString()}`
+          : "";
+        setOrderSuccess(
+          "EFT order placed. We will verify payment before delivery.",
+        );
         clearCart();
         navigate(`/payment/eft-submitted${orderSearch}`, {
           state: {
@@ -986,7 +1168,9 @@ function CartPage() {
         submitPayfastForm(payfastData.url, payfastData.fields);
       }
     } catch (error) {
-      setOrderError(error?.message || "Unable to process checkout. Please try again.");
+      setOrderError(
+        error?.message || "Unable to process checkout. Please try again.",
+      );
     } finally {
       setPlacingOrder(false);
     }
@@ -998,7 +1182,9 @@ function CartPage() {
         <div className="cart-page__header">
           <span className="badge">Cart</span>
           <h1>Your cart</h1>
-          <p className="cart-page__subtitle">Review your items and complete your checkout when you are ready.</p>
+          <p className="cart-page__subtitle">
+            Review your items and complete your checkout when you are ready.
+          </p>
         </div>
         <div className="cart-page__grid">
           <div className="cart-page__panel cart-page__items">
@@ -1007,12 +1193,16 @@ function CartPage() {
             )}
             {cartHasGiftCards && (
               <p className="cart-page__notice">
-                Gift cards are digital and PayFast-only. EFT is disabled for this order.
+                Gift cards are digital and PayFast-only. EFT is disabled for
+                this order.
               </p>
             )}
             {items.length === 0 ? (
               <div className="empty-state cart-page__empty">
-                <p>Your cart is currently empty. Add a product or workshop booking to begin.</p>
+                <p>
+                  Your cart is currently empty. Add a product or workshop
+                  booking to begin.
+                </p>
                 <div className="cta-group">
                   <Link className="btn btn--primary" to="/products">
                     Shop products
@@ -1025,32 +1215,59 @@ function CartPage() {
             ) : (
               <ul className="modal__list cart-list">
                 {items.map((item) => {
-                  const unitPrice = typeof item.price === "number" ? item.price : Number(item.price) || 0;
+                  const unitPrice =
+                    typeof item.price === "number"
+                      ? item.price
+                      : Number(item.price) || 0;
                   const total = unitPrice * item.quantity;
                   const isProduct = item.metadata?.type === "product";
                   const isGiftCard = isProduct && isGiftCardCartItem(item);
-                  const giftCardMeta = isGiftCard ? item.metadata?.giftCard || {} : null;
-                  const giftCardOptions = Array.isArray(giftCardMeta?.selectedOptions)
+                  const giftCardMeta = isGiftCard
+                    ? item.metadata?.giftCard || {}
+                    : null;
+                  const giftCardOptions = Array.isArray(
+                    giftCardMeta?.selectedOptions,
+                  )
                     ? giftCardMeta.selectedOptions.filter(Boolean)
                     : [];
-                  const giftCardOptionCount = giftCardOptions.reduce((sum, option) => {
-                    return sum + normalizeGiftCardOptionQuantity(option?.quantity);
-                  }, 0);
+                  const giftCardOptionCount = giftCardOptions.reduce(
+                    (sum, option) => {
+                      return (
+                        sum + normalizeGiftCardOptionQuantity(option?.quantity)
+                      );
+                    },
+                    0,
+                  );
                   const stockInfo = resolveStock(item);
                   const stockLimit = stockInfo?.quantity;
-                  const stockLabel = stockInfo?.status ? getCustomerStockLabel(stockInfo.status) : "";
-                  const maxQuantity = Number.isFinite(stockLimit) ? Math.max(stockLimit, item.quantity) : 99;
-                  const canIncrease = Number.isFinite(stockLimit) ? item.quantity < stockLimit : true;
+                  const stockLabel = stockInfo?.status
+                    ? getCustomerStockLabel(stockInfo.status)
+                    : "";
+                  const maxQuantity = Number.isFinite(stockLimit)
+                    ? Math.max(stockLimit, item.quantity)
+                    : 99;
+                  const canIncrease = Number.isFinite(stockLimit)
+                    ? item.quantity < stockLimit
+                    : true;
                   const productId =
-                    item.metadata?.productId || item.metadata?.productID || item.metadata?.product || null;
+                    item.metadata?.productId ||
+                    item.metadata?.productID ||
+                    item.metadata?.product ||
+                    null;
                   const productRecord =
-                    isProduct && productId ? productLookup.get(productId) || null : null;
+                    isProduct && productId
+                      ? productLookup.get(productId) || null
+                      : null;
                   const rawCategoryValue =
                     productRecord?.category ||
                     productRecord?.categoryLabel ||
                     productRecord?.categoryName ||
-                    (Array.isArray(productRecord?.category_ids) ? productRecord.category_ids[0] : null) ||
-                    (Array.isArray(productRecord?.categoryIds) ? productRecord.categoryIds[0] : null) ||
+                    (Array.isArray(productRecord?.category_ids)
+                      ? productRecord.category_ids[0]
+                      : null) ||
+                    (Array.isArray(productRecord?.categoryIds)
+                      ? productRecord.categoryIds[0]
+                      : null) ||
                     productRecord?.categoryId ||
                     productRecord?.categorySlug ||
                     item.metadata?.category ||
@@ -1066,36 +1283,53 @@ function CartPage() {
                         .replace(/\s+/g, " ")
                         .replace(/\b\w/g, (char) => char.toUpperCase())
                     : "";
-                  const productInfoLabel =
-                    isGiftCard ? "Gift Card" : categoryLabel || item.metadata?.attribute || item.metadata?.color || "Product";
+                  const productInfoLabel = isGiftCard
+                    ? "Gift Card"
+                    : categoryLabel ||
+                      item.metadata?.attribute ||
+                      item.metadata?.color ||
+                      "Product";
                   const variantLabel = item.metadata?.variantLabel;
-                  const variantDisplay = isGiftCard ?
-                     `Gift card options: ${giftCardOptionCount || 0}`
-                    : variantLabel ? `Variant: ${variantLabel}` : "Variant: Standard";
+                  const variantDisplay = isGiftCard
+                    ? `Gift card options: ${giftCardOptionCount || 0}`
+                    : variantLabel
+                      ? `Variant: ${variantLabel}`
+                      : "Variant: Standard";
 
                   return (
-                    <li key={item.id} className={`cart-list__item ${isProduct ? "cart-list__item--row" : ""}`}>
+                    <li
+                      key={item.id}
+                      className={`cart-list__item ${isProduct ? "cart-list__item--row" : ""}`}
+                    >
                       {isProduct ? (
                         <>
                           <div className="cart-list__product">
-                            <span className="cart-list__title">{item.name}</span>
-                            <span className="cart-list__meta-subtle">{productInfoLabel}</span>
+                            <span className="cart-list__title">
+                              {item.name}
+                            </span>
+                            <span className="cart-list__meta-subtle">
+                              {productInfoLabel}
+                            </span>
                             {isGiftCard && (
                               <div className="cart-list__meta">
-                                {(giftCardMeta?.recipientName || giftCardMeta?.purchaserName) && (
+                                {(giftCardMeta?.recipientName ||
+                                  giftCardMeta?.purchaserName) && (
                                   <p>
                                     <strong>Recipient:</strong>{" "}
-                                    {giftCardMeta.recipientName || giftCardMeta.purchaserName}
+                                    {giftCardMeta.recipientName ||
+                                      giftCardMeta.purchaserName}
                                   </p>
                                 )}
                                 {giftCardMeta?.purchaserName && (
                                   <p>
-                                    <strong>Purchased by:</strong> {giftCardMeta.purchaserName}
+                                    <strong>Purchased by:</strong>{" "}
+                                    {giftCardMeta.purchaserName}
                                   </p>
                                 )}
                                 {giftCardMeta?.message && (
                                   <p>
-                                    <strong>Message:</strong> {giftCardMeta.message}
+                                    <strong>Message:</strong>{" "}
+                                    {giftCardMeta.message}
                                   </p>
                                 )}
                                 {giftCardOptions.length > 0 && (
@@ -1103,10 +1337,20 @@ function CartPage() {
                                     <strong>Selected options:</strong>{" "}
                                     {giftCardOptions
                                       .map((option) => {
-                                        const quantity = normalizeGiftCardOptionQuantity(option?.quantity);
-                                        const amount = Number(option?.amount || 0);
-                                        const amountLabel = Number.isFinite(amount) ? `R${amount.toFixed(2)}` : "R0.00";
-                                        if (quantity <= 1) return `${option.label} (${amountLabel})`;
+                                        const quantity =
+                                          normalizeGiftCardOptionQuantity(
+                                            option?.quantity,
+                                          );
+                                        const amount = Number(
+                                          option?.amount || 0,
+                                        );
+                                        const amountLabel = Number.isFinite(
+                                          amount,
+                                        )
+                                          ? `R${amount.toFixed(2)}`
+                                          : "R0.00";
+                                        if (quantity <= 1)
+                                          return `${option.label} (${amountLabel})`;
                                         return `${option.label} x${quantity} (${amountLabel} each)`;
                                       })
                                       .join(", ")}
@@ -1116,12 +1360,16 @@ function CartPage() {
                             )}
                           </div>
                           <div className="cart-list__quantity">
-                            <span className="cart-list__quantity-label">Qty</span>
+                            <span className="cart-list__quantity-label">
+                              Qty
+                            </span>
                             <div className="cart-list__stepper">
                               <button
                                 className="cart-list__stepper-btn"
                                 type="button"
-                                onClick={() => updateItemQuantity(item.id, item.quantity - 1)}
+                                onClick={() =>
+                                  updateItemQuantity(item.id, item.quantity - 1)
+                                }
                                 disabled={item.quantity <= 1}
                                 aria-label={`Decrease quantity of ${item.name}`}
                               >
@@ -1136,14 +1384,22 @@ function CartPage() {
                                 onChange={(event) => {
                                   const nextValue = Number(event.target.value);
                                   if (!Number.isFinite(nextValue)) return;
-                                  updateItemQuantity(item.id, Math.min(Math.max(nextValue, 1), maxQuantity));
+                                  updateItemQuantity(
+                                    item.id,
+                                    Math.min(
+                                      Math.max(nextValue, 1),
+                                      maxQuantity,
+                                    ),
+                                  );
                                 }}
                                 aria-label={`Quantity for ${item.name}`}
                               />
                               <button
                                 className="cart-list__stepper-btn"
                                 type="button"
-                                onClick={() => updateItemQuantity(item.id, item.quantity + 1)}
+                                onClick={() =>
+                                  updateItemQuantity(item.id, item.quantity + 1)
+                                }
                                 disabled={!canIncrease}
                                 aria-label={`Increase quantity of ${item.name}`}
                               >
@@ -1157,12 +1413,20 @@ function CartPage() {
                             )}
                           </div>
                           <div className="cart-list__variant">
-                            <span className="cart-list__variant-label">{variantDisplay}</span>
-                            <span className="cart-list__variant-price">{currency(unitPrice)}</span>
+                            <span className="cart-list__variant-label">
+                              {variantDisplay}
+                            </span>
+                            <span className="cart-list__variant-price">
+                              {currency(unitPrice)}
+                            </span>
                           </div>
                           <div className="cart-list__total">
-                            <span className="cart-list__total-label">Total</span>
-                            <span className="cart-list__total-price">{currency(total)}</span>
+                            <span className="cart-list__total-label">
+                              Total
+                            </span>
+                            <span className="cart-list__total-price">
+                              {currency(total)}
+                            </span>
                             <div className="cart-list__total-actions">
                               <button
                                 className="cart-remove-btn"
@@ -1178,32 +1442,46 @@ function CartPage() {
                       ) : (
                         <>
                           <div className="cart-list__header">
-                            <span className="cart-list__title">{item.name}</span>
+                            <span className="cart-list__title">
+                              {item.name}
+                            </span>
                           </div>
                           {item.metadata?.type === "workshop" && (
                             <div className="cart-list__meta">
                               {(() => {
                                 const isRequestedWorkshop =
-                                  item.metadata.sessionSource === "customer-requested";
+                                  item.metadata.sessionSource ===
+                                  "customer-requested";
                                 const workshopDateLabel =
                                   item.metadata.sessionDayLabel ||
                                   item.metadata.scheduledDateLabel ||
                                   item.metadata.sessionLabel ||
                                   "Date to be confirmed";
                                 const workshopTimeLabel =
-                                  item.metadata.sessionTimeRange || item.metadata.sessionTime || "";
+                                  item.metadata.sessionTimeRange ||
+                                  item.metadata.sessionTime ||
+                                  "";
                                 return (
                                   <>
                                     <p>
-                                      <strong>Workshop:</strong> {item.metadata.workshopTitle}
+                                      <strong>Workshop:</strong>{" "}
+                                      {item.metadata.workshopTitle}
                                     </p>
                                     <p>
-                                      <strong>{isRequestedWorkshop ? "Requested Date:" : "Day:"}</strong>{" "}
+                                      <strong>
+                                        {isRequestedWorkshop
+                                          ? "Requested Date:"
+                                          : "Day:"}
+                                      </strong>{" "}
                                       {workshopDateLabel}
                                     </p>
                                     {workshopTimeLabel && (
                                       <p>
-                                        <strong>{isRequestedWorkshop ? "Requested Time:" : "Time:"}</strong>{" "}
+                                        <strong>
+                                          {isRequestedWorkshop
+                                            ? "Requested Time:"
+                                            : "Time:"}
+                                        </strong>{" "}
                                         {workshopTimeLabel}
                                       </p>
                                     )}
@@ -1211,50 +1489,73 @@ function CartPage() {
                                 );
                               })()}
                               <p>
-                                <strong>Location:</strong> {item.metadata.location || "Vereeniging Studio"}
+                                <strong>Location:</strong>{" "}
+                                {item.metadata.location || "Vereeniging Studio"}
                               </p>
                               <p>
-                                <strong>Attendees:</strong> {item.metadata.attendeeCount}
+                                <strong>Attendees:</strong>{" "}
+                                {item.metadata.attendeeCount}
                               </p>
-                              {typeof item.metadata.sessionCapacity === "number" && (
+                              {typeof item.metadata.sessionCapacity ===
+                                "number" && (
                                 <p>
-                                  <strong>Session Capacity:</strong> {item.metadata.sessionCapacity}
+                                  <strong>Session Capacity:</strong>{" "}
+                                  {item.metadata.sessionCapacity}
                                 </p>
                               )}
-                              {typeof item.metadata.perAttendeePrice === "number" && (
+                              {typeof item.metadata.perAttendeePrice ===
+                                "number" && (
                                 <p>
-                                  <strong>Per Attendee:</strong> R{item.metadata.perAttendeePrice.toFixed(2)}
+                                  <strong>Per Attendee:</strong> R
+                                  {item.metadata.perAttendeePrice.toFixed(2)}
                                 </p>
                               )}
-                              {(item.metadata.optionLabel || item.metadata.framePreference) && (
+                              {(item.metadata.optionLabel ||
+                                item.metadata.framePreference) && (
                                 <p>
                                   <strong>Option:</strong>{" "}
-                                  {item.metadata.optionLabel || item.metadata.framePreference}
+                                  {item.metadata.optionLabel ||
+                                    item.metadata.framePreference}
                                 </p>
                               )}
-                              {Array.isArray(item.metadata.attendeeSelections) &&
-                                item.metadata.attendeeSelections.map((selection, index) => (
-                                  <p key={`cart-attendee-option-${item.id}-${selection?.attendee || index + 1}`}>
-                                    <strong>Attendee {selection?.attendee || index + 1}:</strong>{" "}
-                                    {selection?.optionLabel || selection?.optionValue || "Option"}
-                                  </p>
-                                ))}
+                              {Array.isArray(
+                                item.metadata.attendeeSelections,
+                              ) &&
+                                item.metadata.attendeeSelections.map(
+                                  (selection, index) => (
+                                    <p
+                                      key={`cart-attendee-option-${item.id}-${selection?.attendee || index + 1}`}
+                                    >
+                                      <strong>
+                                        Attendee{" "}
+                                        {selection?.attendee || index + 1}:
+                                      </strong>{" "}
+                                      {selection?.optionLabel ||
+                                        selection?.optionValue ||
+                                        "Option"}
+                                    </p>
+                                  ),
+                                )}
                               {item.metadata.notes && (
                                 <p>
                                   <strong>Notes:</strong> {item.metadata.notes}
                                 </p>
                               )}
                               <p>
-                                <strong>Booked by:</strong> {item.metadata.customer?.fullName} ({item.metadata.customer?.email})
+                                <strong>Booked by:</strong>{" "}
+                                {item.metadata.customer?.fullName} (
+                                {item.metadata.customer?.email})
                               </p>
                               {item.metadata.customer?.phone && (
                                 <p>
-                                  <strong>Phone:</strong> {item.metadata.customer.phone}
+                                  <strong>Phone:</strong>{" "}
+                                  {item.metadata.customer.phone}
                                 </p>
                               )}
                               {item.metadata.customer?.address && (
                                 <p>
-                                  <strong>Address:</strong> {item.metadata.customer.address}
+                                  <strong>Address:</strong>{" "}
+                                  {item.metadata.customer.address}
                                 </p>
                               )}
                             </div>
@@ -1281,411 +1582,503 @@ function CartPage() {
               <div className="checkout-accordion__header">
                 <h2>Checkout</h2>
                 <p className="modal__meta">
-                  Complete each step in order. The next section opens when the previous one is complete.
+                  Complete each step in order. The next section opens when the
+                  previous one is complete.
                 </p>
               </div>
               {!hasItems && (
-                <p className="cart-page__notice">Add items to start the checkout flow.</p>
+                <p className="cart-page__notice">
+                  Add items to start the checkout flow.
+                </p>
               )}
-              {(activeStep === "review" ? STEP_ORDER : [activeStep]).map((step) => {
-                const index = STEP_ORDER.indexOf(step);
-                const isActive = activeStep === step;
-                const isComplete = stepCompletion[step];
-                const isLocked = !hasItems || index > maxOpenIndex;
-                const statusLabel = isComplete ? "Complete" : isLocked ? "Locked" : "In progress";
-                return (
-                  <section
-                    key={step}
-                    ref={
-                      step === "contact"
-                        ? contactRef
-                        : step === "shipping"
-                          ? shippingRef
-                          : step === "payment"
-                            ? paymentRef
-                            : reviewRef
-                    }
-                    className={`checkout-step ${isActive ? "is-active" : ""} ${isComplete ? "is-complete" : ""} ${
-                      isLocked ? "is-locked" : ""
-                    }`}
-                  >
-                    <button
-                      className="checkout-step__trigger"
-                      type="button"
-                      onClick={() => openStep(step)}
-                      aria-expanded={activeStep === "review" ? true : isActive}
-                      aria-controls={`checkout-${step}`}
-                      disabled={isLocked}
+              {(activeStep === "review" ? STEP_ORDER : [activeStep]).map(
+                (step) => {
+                  const index = STEP_ORDER.indexOf(step);
+                  const isActive = activeStep === step;
+                  const isComplete = stepCompletion[step];
+                  const isLocked = !hasItems || index > maxOpenIndex;
+                  const statusLabel = isComplete
+                    ? "Complete"
+                    : isLocked
+                      ? "Locked"
+                      : "In progress";
+                  return (
+                    <section
+                      key={step}
+                      ref={
+                        step === "contact"
+                          ? contactRef
+                          : step === "shipping"
+                            ? shippingRef
+                            : step === "payment"
+                              ? paymentRef
+                              : reviewRef
+                      }
+                      className={`checkout-step ${isActive ? "is-active" : ""} ${isComplete ? "is-complete" : ""} ${
+                        isLocked ? "is-locked" : ""
+                      }`}
                     >
-                      <span className="checkout-step__index">{index + 1}</span>
-                      <span className="checkout-step__title">{stepLabels[step]}</span>
-                      <span className="checkout-step__status">{statusLabel}</span>
-                    </button>
-                    <div
-                      id={`checkout-${step}`}
-                      className="checkout-step__content"
-                      hidden={activeStep !== "review" && !isActive}
-                    >
-                      {step === "contact" && (
-                        <div className="checkout-step__fields">
-                          <p className="modal__meta">
-                            {accountEmail
-                              ? `Signed in as ${accountEmail}. Your account details are prefilled below.`
-                              : "Guest checkout is the default. We'll send confirmation updates to your email."}
-                          </p>
-                          <label>
-                            Full Name
-                            <input
-                              className="input"
-                              type="text"
-                              autoComplete="name"
-                              ref={contactFirstFieldRef}
-                              value={contactDetails.fullName}
-                              onChange={handleContactChange("fullName")}
-                              placeholder="Full name"
-                              required
-                            />
-                          </label>
-                          <label>
-                            Email
-                            <input
-                              className="input"
-                              type="email"
-                              autoComplete="email"
-                              value={accountEmail || contactDetails.email}
-                              onChange={handleContactChange("email")}
-                              placeholder="Email address"
-                              readOnly={Boolean(accountEmail)}
-                              required
-                            />
-                          </label>
-                          <label>
-                            Phone
-                            <input
-                              className="input"
-                              type="tel"
-                              autoComplete="tel"
-                              value={contactDetails.phone}
-                              onChange={handleContactChange("phone")}
-                              placeholder="Phone number"
-                              required
-                            />
-                          </label>
-                        </div>
-                      )}
-
-                      {step === "shipping" && (
-                        <div className="checkout-step__fields">
-                          {requiresShipping ? (
-                            <>
-                          <p className="modal__meta">
-                            Add your delivery or collection address so we can confirm fulfillment details.
-                          </p>
-                          {accountEmail && savedAddresses.length > 0 && (
-                            <>
-                              <label>
-                                Saved addresses
-                                <select
-                                  className="input"
-                                  value={selectedSavedAddressId}
-                                  onChange={(event) => setSelectedSavedAddressId(event.target.value)}
-                                >
-                                  <option value="">Enter a new address manually</option>
-                                  {savedAddresses.map((address) => (
-                                    <option key={address.id} value={address.id}>
-                                      {address.label} - {formatShippingAddress(address)}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <p className="modal__meta">
-                                Manage saved addresses from your <Link to="/account">Account</Link> page.
-                              </p>
-                            </>
-                          )}
-                          <label>
-                            Street Address
-                            <input
-                              className="input"
-                              type="text"
-                              autoComplete="street-address"
-                              value={shippingAddress.street}
-                              onChange={handleAddressChange("street")}
-                              placeholder="Street address"
-                              required
-                            />
-                          </label>
-                          <div className="checkout-address-grid">
+                      <button
+                        className="checkout-step__trigger"
+                        type="button"
+                        onClick={() => openStep(step)}
+                        aria-expanded={
+                          activeStep === "review" ? true : isActive
+                        }
+                        aria-controls={`checkout-${step}`}
+                        disabled={isLocked}
+                      >
+                        <span className="checkout-step__index">
+                          {index + 1}
+                        </span>
+                        <span className="checkout-step__title">
+                          {stepLabels[step]}
+                        </span>
+                        <span className="checkout-step__status">
+                          {statusLabel}
+                        </span>
+                      </button>
+                      <div
+                        id={`checkout-${step}`}
+                        className="checkout-step__content"
+                        hidden={activeStep !== "review" && !isActive}
+                      >
+                        {step === "contact" && (
+                          <div className="checkout-step__fields">
+                            <p className="modal__meta">
+                              {accountEmail
+                                ? `Signed in as ${accountEmail}. Your account details are prefilled below.`
+                                : "Guest checkout is the default. We'll send confirmation updates to your email."}
+                            </p>
                             <label>
-                              Suburb
+                              Full Name
                               <input
                                 className="input"
                                 type="text"
-                                autoComplete="address-level3"
-                                value={shippingAddress.suburb}
-                                onChange={handleAddressChange("suburb")}
-                                placeholder="Suburb"
+                                autoComplete="name"
+                                ref={contactFirstFieldRef}
+                                value={contactDetails.fullName}
+                                onChange={handleContactChange("fullName")}
+                                placeholder="Full name"
                                 required
                               />
                             </label>
                             <label>
-                              City
+                              Email
                               <input
                                 className="input"
-                                type="text"
-                                autoComplete="address-level2"
-                                value={shippingAddress.city}
-                                onChange={handleAddressChange("city")}
-                                placeholder="City"
+                                type="email"
+                                autoComplete="email"
+                                value={accountEmail || contactDetails.email}
+                                onChange={handleContactChange("email")}
+                                placeholder="Email address"
+                                readOnly={Boolean(accountEmail)}
                                 required
                               />
                             </label>
                             <label>
-                              Province
-                              <select
-                                className="input"
-                                autoComplete="address-level1"
-                                value={shippingAddress.province}
-                                onChange={handleAddressChange("province")}
-                                required
-                              >
-                                <option value="">Select province</option>
-                                {SA_PROVINCES.map((province) => (
-                                  <option key={province.value} value={province.value}>
-                                    {province.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Postal Code
+                              Phone
                               <input
                                 className="input"
-                                type="text"
-                                autoComplete="postal-code"
-                                value={shippingAddress.postalCode}
-                                onChange={handleAddressChange("postalCode")}
-                                placeholder="0000"
-                                pattern="\\d{4}"
+                                type="tel"
+                                autoComplete="tel"
+                                value={contactDetails.phone}
+                                onChange={handleContactChange("phone")}
+                                placeholder="Phone number"
                                 required
                               />
                             </label>
                           </div>
-                          {!postalCodeValid && shippingAddress.postalCode && (
-                            <p className="admin-panel__error">Postal code should be 4 digits.</p>
-                          )}
-                          <div className="checkout-courier">
-                            <h4>Courier options</h4>
-                            {!shippingAddress.province && (
-                              <p className="modal__meta">Select a province to view available couriers.</p>
+                        )}
+
+                        {step === "shipping" && (
+                          <div className="checkout-step__fields">
+                            {requiresShipping ? (
+                              <>
+                                <p className="modal__meta">
+                                  Add your delivery or collection address so we
+                                  can confirm fulfillment details.
+                                </p>
+                                {accountEmail && savedAddresses.length > 0 && (
+                                  <>
+                                    <label>
+                                      Saved addresses
+                                      <select
+                                        className="input"
+                                        value={selectedSavedAddressId}
+                                        onChange={(event) =>
+                                          setSelectedSavedAddressId(
+                                            event.target.value,
+                                          )
+                                        }
+                                      >
+                                        <option value="">
+                                          Enter a new address manually
+                                        </option>
+                                        {savedAddresses.map((address) => (
+                                          <option
+                                            key={address.id}
+                                            value={address.id}
+                                          >
+                                            {address.label} -{" "}
+                                            {formatShippingAddress(address)}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <p className="modal__meta">
+                                      Manage saved addresses from your{" "}
+                                      <Link to="/account">Account</Link> page.
+                                    </p>
+                                  </>
+                                )}
+                                <label>
+                                  Street Address
+                                  <input
+                                    className="input"
+                                    type="text"
+                                    autoComplete="street-address"
+                                    value={shippingAddress.street}
+                                    onChange={handleAddressChange("street")}
+                                    placeholder="Street address"
+                                    required
+                                  />
+                                </label>
+                                <div className="checkout-address-grid">
+                                  <label>
+                                    Suburb
+                                    <input
+                                      className="input"
+                                      type="text"
+                                      autoComplete="address-level3"
+                                      value={shippingAddress.suburb}
+                                      onChange={handleAddressChange("suburb")}
+                                      placeholder="Suburb"
+                                      required
+                                    />
+                                  </label>
+                                  <label>
+                                    City
+                                    <input
+                                      className="input"
+                                      type="text"
+                                      autoComplete="address-level2"
+                                      value={shippingAddress.city}
+                                      onChange={handleAddressChange("city")}
+                                      placeholder="City"
+                                      required
+                                    />
+                                  </label>
+                                  <label>
+                                    Province
+                                    <select
+                                      className="input"
+                                      autoComplete="address-level1"
+                                      value={shippingAddress.province}
+                                      onChange={handleAddressChange("province")}
+                                      required
+                                    >
+                                      <option value="">Select province</option>
+                                      {SA_PROVINCES.map((province) => (
+                                        <option
+                                          key={province.value}
+                                          value={province.value}
+                                        >
+                                          {province.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label>
+                                    Postal Code
+                                    <input
+                                      className="input"
+                                      type="text"
+                                      autoComplete="postal-code"
+                                      value={shippingAddress.postalCode}
+                                      onChange={handleAddressChange(
+                                        "postalCode",
+                                      )}
+                                      placeholder="0000"
+                                      pattern="\\d{4}"
+                                      required
+                                    />
+                                  </label>
+                                </div>
+                                {!postalCodeValid &&
+                                  shippingAddress.postalCode && (
+                                    <p className="admin-panel__error">
+                                      Postal code should be 4 digits.
+                                    </p>
+                                  )}
+                                <div className="checkout-courier">
+                                  <h4>Courier options</h4>
+                                  {!shippingAddress.province && (
+                                    <p className="modal__meta">
+                                      Select a province to view available
+                                      couriers.
+                                    </p>
+                                  )}
+                                  {shippingAddress.province &&
+                                    courierStatus === "loading" && (
+                                      <p className="modal__meta">
+                                        Loading courier options...
+                                      </p>
+                                    )}
+                                  {shippingAddress.province &&
+                                    courierStatus !== "loading" &&
+                                    availableCouriers.length === 0 && (
+                                      <p className="admin-panel__error">
+                                        No courier options are available for{" "}
+                                        {shippingAddress.province}.
+                                      </p>
+                                    )}
+                                  {availableCouriers.length > 0 && (
+                                    <div className="checkout-courier-options">
+                                      {availableCouriers.map((option) => (
+                                        <label
+                                          key={option.id}
+                                          className={`checkout-courier__option ${
+                                            selectedCourierId === option.id
+                                              ? "is-selected"
+                                              : ""
+                                          }`}
+                                        >
+                                          <input
+                                            type="radio"
+                                            name="courier"
+                                            value={option.id}
+                                            checked={
+                                              selectedCourierId === option.id
+                                            }
+                                            onChange={(event) =>
+                                              setSelectedCourierId(
+                                                event.target.value,
+                                              )
+                                            }
+                                          />
+                                          <span>{option.name}</span>
+                                          <strong>
+                                            {currency(option.price)}
+                                          </strong>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <p className="modal__meta">
+                                  We will confirm delivery details after
+                                  checkout.
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                {workshopOnlyCart ? (
+                                  <>
+                                    <p className="modal__meta">
+                                      This booking takes place at our studio, so
+                                      no delivery address is required.
+                                    </p>
+                                    <p className="modal__meta">
+                                      Venue: {workshopVenueLabel}
+                                    </p>
+                                  </>
+                                ) : (
+                                  <>
+                                    <p className="modal__meta">
+                                      This order contains digital gift cards
+                                      only. Delivery is by email and no shipping
+                                      address is required.
+                                    </p>
+                                    <p className="modal__meta">
+                                      Gift cards will be sent to the checkout
+                                      email after successful PayFast payment.
+                                    </p>
+                                  </>
+                                )}
+                              </>
                             )}
-                            {shippingAddress.province && courierStatus === "loading" && (
-                              <p className="modal__meta">Loading courier options...</p>
-                            )}
-                            {shippingAddress.province &&
-                              courierStatus !== "loading" &&
-                              availableCouriers.length === 0 && (
-                              <p className="admin-panel__error">
-                                No courier options are available for {shippingAddress.province}.
+                          </div>
+                        )}
+
+                        {step === "payment" && (
+                          <div className="checkout-step__fields">
+                            <p className="modal__meta">
+                              Choose how you want to pay for this order.
+                            </p>
+                            <div className="checkout-payment-methods">
+                              <label
+                                className={`checkout-payment-method ${
+                                  paymentMethod === PAYMENT_METHODS.PAYFAST
+                                    ? "is-selected"
+                                    : ""
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name="payment-method"
+                                  value={PAYMENT_METHODS.PAYFAST}
+                                  checked={
+                                    paymentMethod === PAYMENT_METHODS.PAYFAST
+                                  }
+                                  onChange={() => {
+                                    setPaymentMethod(PAYMENT_METHODS.PAYFAST);
+                                    setOrderError(null);
+                                  }}
+                                />
+                                <span>PayFast (Card / Instant EFT)</span>
+                              </label>
+                              <label
+                                className={`checkout-payment-method ${
+                                  paymentMethod === PAYMENT_METHODS.EFT
+                                    ? "is-selected"
+                                    : ""
+                                } ${cartHasGiftCards ? "is-disabled" : ""}`}
+                              >
+                                <input
+                                  type="radio"
+                                  name="payment-method"
+                                  value={PAYMENT_METHODS.EFT}
+                                  checked={
+                                    paymentMethod === PAYMENT_METHODS.EFT
+                                  }
+                                  disabled={cartHasGiftCards}
+                                  onChange={() => {
+                                    if (cartHasGiftCards) {
+                                      setOrderError(
+                                        "Gift cards can only be paid with PayFast.",
+                                      );
+                                      return;
+                                    }
+                                    setPaymentMethod(PAYMENT_METHODS.EFT);
+                                    setPayfastConsent(false);
+                                    setOrderError(null);
+                                  }}
+                                />
+                                <span>
+                                  EFT bank transfer (admin confirms payment)
+                                  {cartHasGiftCards
+                                    ? " - unavailable for gift cards"
+                                    : ""}
+                                </span>
+                              </label>
+                            </div>
+
+                            {cartHasGiftCards && (
+                              <p className="modal__meta">
+                                Gift cards must be paid with PayFast. EFT is
+                                disabled for orders that include gift cards.
                               </p>
                             )}
-                            {availableCouriers.length > 0 && (
-                              <div className="checkout-courier-options">
-                                {availableCouriers.map((option) => (
-                                  <label
-                                    key={option.id}
-                                    className={`checkout-courier__option ${
-                                      selectedCourierId === option.id ? "is-selected" : ""
-                                    }`}
-                                  >
-                                    <input
-                                      type="radio"
-                                      name="courier"
-                                      value={option.id}
-                                      checked={selectedCourierId === option.id}
-                                      onChange={(event) => setSelectedCourierId(event.target.value)}
-                                    />
-                                    <span>{option.name}</span>
-                                    <strong>{currency(option.price)}</strong>
-                                  </label>
-                                ))}
+
+                            {paymentMethod === PAYMENT_METHODS.PAYFAST && (
+                              <>
+                                <p className="modal__meta">
+                                  Payments are securely processed by PayFast.
+                                  You&apos;ll be redirected to complete payment.
+                                </p>
+                                <label className="checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={payfastConsent}
+                                    onChange={(event) =>
+                                      setPayfastConsent(event.target.checked)
+                                    }
+                                  />
+                                  <span>
+                                    I understand I will be redirected to PayFast
+                                    to complete payment.
+                                  </span>
+                                </label>
+                                <p className="modal__meta">
+                                  Supported cards and instant EFT options will
+                                  appear on the PayFast screen.
+                                </p>
+                              </>
+                            )}
+
+                            {paymentMethod === PAYMENT_METHODS.EFT && (
+                              <div className="checkout-eft">
+                                <p className="modal__meta">
+                                  We verify EFT payment before we prepare or
+                                  deliver your order.
+                                </p>
+                                <p className="modal__meta">
+                                  Banking details and your exact order reference
+                                  appear right after you place the order.
+                                </p>
                               </div>
                             )}
                           </div>
-                          <p className="modal__meta">We will confirm delivery details after checkout.</p>
-                            </>
-                          ) : (
-                            <>
-                              {workshopOnlyCart ? (
-                                <>
-                                  <p className="modal__meta">
-                                    This booking takes place at our studio, so no delivery address is required.
-                                  </p>
-                                  <p className="modal__meta">
-                                    Venue: {workshopVenueLabel}
-                                  </p>
-                                </>
-                              ) : (
-                                <>
-                                  <p className="modal__meta">
-                                    This order contains digital gift cards only. Delivery is by email and no shipping
-                                    address is required.
-                                  </p>
-                                  <p className="modal__meta">
-                                    Gift cards will be sent to the checkout email after successful PayFast payment.
-                                  </p>
-                                </>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      )}
+                        )}
 
-                      {step === "payment" && (
-                        <div className="checkout-step__fields">
-                          <p className="modal__meta">Choose how you want to pay for this order.</p>
-                          <div className="checkout-payment-methods">
-                            <label
-                              className={`checkout-payment-method ${
-                                paymentMethod === PAYMENT_METHODS.PAYFAST ? "is-selected" : ""
-                              }`}
-                            >
-                              <input
-                                type="radio"
-                                name="payment-method"
-                                value={PAYMENT_METHODS.PAYFAST}
-                                checked={paymentMethod === PAYMENT_METHODS.PAYFAST}
-                                onChange={() => {
-                                  setPaymentMethod(PAYMENT_METHODS.PAYFAST);
-                                  setOrderError(null);
-                                }}
-                              />
-                              <span>PayFast (Card / Instant EFT)</span>
-                            </label>
-                            <label
-                              className={`checkout-payment-method ${
-                                paymentMethod === PAYMENT_METHODS.EFT ? "is-selected" : ""
-                              } ${cartHasGiftCards ? "is-disabled" : ""}`}
-                            >
-                              <input
-                                type="radio"
-                                name="payment-method"
-                                value={PAYMENT_METHODS.EFT}
-                                checked={paymentMethod === PAYMENT_METHODS.EFT}
-                                disabled={cartHasGiftCards}
-                                onChange={() => {
-                                  if (cartHasGiftCards) {
-                                    setOrderError("Gift cards can only be paid with PayFast.");
-                                    return;
-                                  }
-                                  setPaymentMethod(PAYMENT_METHODS.EFT);
-                                  setPayfastConsent(false);
-                                  setOrderError(null);
-                                }}
-                              />
-                              <span>
-                                EFT bank transfer (admin confirms payment)
-                                {cartHasGiftCards ? " - unavailable for gift cards" : ""}
-                              </span>
-                            </label>
-                          </div>
-
-                          {cartHasGiftCards && (
+                        {step === "review" && (
+                          <div className="checkout-step__fields">
                             <p className="modal__meta">
-                              Gift cards must be paid with PayFast. EFT is disabled for orders that include gift cards.
+                              Confirm your details before placing the order.
+                              Your items are listed above.
                             </p>
-                          )}
-
-                          {paymentMethod === PAYMENT_METHODS.PAYFAST && (
-                            <>
-                              <p className="modal__meta">
-                                Payments are securely processed by PayFast. You&apos;ll be redirected to complete
-                                payment.
-                              </p>
-                              <label className="checkbox">
-                                <input
-                                  type="checkbox"
-                                  checked={payfastConsent}
-                                  onChange={(event) => setPayfastConsent(event.target.checked)}
-                                />
-                                <span>I understand I will be redirected to PayFast to complete payment.</span>
-                              </label>
-                              <p className="modal__meta">
-                                Supported cards and instant EFT options will appear on the PayFast screen.
-                              </p>
-                            </>
-                          )}
-
-                          {paymentMethod === PAYMENT_METHODS.EFT && (
-                            <div className="checkout-eft">
-                              <p className="modal__meta">
-                                We verify EFT payment before we prepare or deliver your order.
-                              </p>
-                              <p className="modal__meta">
-                                Banking details and your exact order reference appear right after you place the order.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {step === "review" && (
-                        <div className="checkout-step__fields">
-                          <p className="modal__meta">
-                            Confirm your details before placing the order. Your items are listed above.
-                          </p>
-                          <div className="checkout-review__grid">
-                            <div className="checkout-review__card">
-                              <h3>Contact</h3>
-                              <p>{contactDetails.fullName || "Add contact details"}</p>
-                              <p className="modal__meta">
-                                {accountEmail || contactDetails.email || "Email address"}
-                                {contactDetails.phone ? ` - ${contactDetails.phone}` : ""}
-                              </p>
-                            </div>
-                            <div className="checkout-review__card">
-                              <h3>{stepLabels.shipping}</h3>
-                              <p>
-                                {requiresShipping
-                                  ? formatShippingAddress(shippingAddress) || "Add a delivery address"
-                                  : workshopOnlyCart
-                                    ? workshopVenueLabel
-                                    : "Digital delivery by email"}
-                              </p>
-                              <p className="modal__meta">
-                                {requiresShipping
-                                  ? selectedCourier
-                                    ? `${selectedCourier.name} - ${currency(selectedCourier.price)}`
-                                    : "Select a courier option"
-                                  : workshopOnlyCart
-                                    ? "No courier required for workshop bookings"
-                                    : "No courier required"}
-                              </p>
-                            </div>
-                            <div className="checkout-review__card">
-                              <h3>Payment</h3>
-                              <p>
-                                {paymentMethod === PAYMENT_METHODS.EFT
-                                  ? "EFT bank transfer"
-                                  : payfastConsent
-                                    ? "PayFast redirect confirmed"
-                                    : "Confirm PayFast step"}
-                              </p>
-                              <p className="modal__meta">
-                                {cartHasGiftCards
-                                  ? "Gift cards are PayFast only."
-                                  : paymentMethod === PAYMENT_METHODS.EFT
-                                  ? "After placing your order, we show your EFT transfer details and reference."
-                                  : "Secure checkout through PayFast."}
-                              </p>
+                            <div className="checkout-review__grid">
+                              <div className="checkout-review__card">
+                                <h3>Contact</h3>
+                                <p>
+                                  {contactDetails.fullName ||
+                                    "Add contact details"}
+                                </p>
+                                <p className="modal__meta">
+                                  {accountEmail ||
+                                    contactDetails.email ||
+                                    "Email address"}
+                                  {contactDetails.phone
+                                    ? ` - ${contactDetails.phone}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <div className="checkout-review__card">
+                                <h3>{stepLabels.shipping}</h3>
+                                <p>
+                                  {requiresShipping
+                                    ? formatShippingAddress(shippingAddress) ||
+                                      "Add a delivery address"
+                                    : workshopOnlyCart
+                                      ? workshopVenueLabel
+                                      : "Digital delivery by email"}
+                                </p>
+                                <p className="modal__meta">
+                                  {requiresShipping
+                                    ? selectedCourier
+                                      ? `${selectedCourier.name} - ${currency(selectedCourier.price)}`
+                                      : "Select a courier option"
+                                    : workshopOnlyCart
+                                      ? "No courier required for workshop bookings"
+                                      : "No courier required"}
+                                </p>
+                              </div>
+                              <div className="checkout-review__card">
+                                <h3>Payment</h3>
+                                <p>
+                                  {paymentMethod === PAYMENT_METHODS.EFT
+                                    ? "EFT bank transfer"
+                                    : payfastConsent
+                                      ? "PayFast redirect confirmed"
+                                      : "Confirm PayFast step"}
+                                </p>
+                                <p className="modal__meta">
+                                  {cartHasGiftCards
+                                    ? "Gift cards are PayFast only."
+                                    : paymentMethod === PAYMENT_METHODS.EFT
+                                      ? "After placing your order, we show your EFT transfer details and reference."
+                                      : "Secure checkout through PayFast."}
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-                );
-              })}
+                        )}
+                      </div>
+                    </section>
+                  );
+                },
+              )}
             </div>
           </div>
 
@@ -1735,7 +2128,9 @@ function CartPage() {
                     : "This order contains digital gift cards, so no shipping fee applies."}
               </p>
               {orderError && <p className="admin-panel__error">{orderError}</p>}
-              {orderSuccess && <p className="admin-save-indicator">{orderSuccess}</p>}
+              {orderSuccess && (
+                <p className="admin-save-indicator">{orderSuccess}</p>
+              )}
               <div className="cart-page__sticky-bar">
                 <div className="cart-page__sticky-row">
                   <span>Total</span>

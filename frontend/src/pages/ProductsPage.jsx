@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
 import ImageLoader from "../components/ImageLoader.jsx";
+import ProductCardActions from "../components/ProductCardActions.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
@@ -774,28 +775,33 @@ function ProductsPage() {
 
               return (
                 <Reveal
-                  as={Link}
-                  to={productUrl}
-                  className="card product-card product-card--link"
+                  as="article"
+                  className="card product-card"
                   key={product.id}
                   delay={index * 90}
                 >
                   <span className="product-card__category">{categoryLabel}</span>
-                  <div className="product-card__media" aria-hidden="true">
-                    <ImageLoader
-                      src={product.image}
-                      alt=""
-                      className="product-card__image"
-                      containerClassName="product-card__image-container"
-                      fetchPriority={index < 4 ? "high" : "low"}
-                    />
-                    {product.stockBadgeLabel && (
-                      <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
-                        {product.stockBadgeLabel}
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="card__title">{product.title}</h3>
+                  <Link className="product-card__media-link" to={productUrl} aria-label={`View more about ${product.title}`}>
+                    <div className="product-card__media" aria-hidden="true">
+                      <ImageLoader
+                        src={product.image}
+                        alt=""
+                        className="product-card__image"
+                        containerClassName="product-card__image-container"
+                        fetchPriority={index < 4 ? "high" : "low"}
+                      />
+                      {product.stockBadgeLabel && (
+                        <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
+                          {product.stockBadgeLabel}
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                  <h3 className="card__title">
+                    <Link className="product-card__title-link" to={productUrl}>
+                      {product.title}
+                    </Link>
+                  </h3>
                   <p className="product-card__description">{product.description}</p>
                   {product.stockStatus?.state === "preorder" && product.preorderSendMonthLabel && (
                     <p className="modal__meta">Ships from {product.preorderSendMonthLabel}</p>
@@ -808,9 +814,7 @@ function ProductsPage() {
                       )}
                     </span>
                   </p>
-                  <span className="btn btn--secondary">
-                    {product.isSubscriptionPlan ? "Choose plan" : product.isOutOfStock ? "Out of stock" : "View details"}
-                  </span>
+                  <ProductCardActions product={product} productUrl={productUrl} />
                 </Reveal>
               );
             })}

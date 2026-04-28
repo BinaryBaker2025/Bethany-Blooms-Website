@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
+import ProductCardActions from "../components/ProductCardActions.jsx";
 import { useCart } from "../context/CartContext.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
@@ -169,6 +170,21 @@ const buildProductCard = (product, index = 0) => {
   const originalPrice = hasSale && Number.isFinite(priceNumber) ? `R${priceNumber}` : null;
   const stockStatus = getProductCardStockStatus(product);
   const stockBadgeLabel = getStockBadgeLabel(stockStatus);
+  const variants = Array.isArray(product.variants)
+    ? product.variants
+        .map((variant) => {
+          const label = (variant.label || variant.name || "").toString().trim();
+          if (!label && !variant.id) return null;
+          const priceValue =
+            typeof variant.price === "number" ? variant.price : Number(variant.price);
+          return {
+            id: (variant.id || label).toString(),
+            label,
+            price: Number.isFinite(priceValue) ? priceValue : null,
+          };
+        })
+        .filter(Boolean)
+    : [];
   const imageCandidates = [
     product.main_image,
     ...(Array.isArray(product.gallery_images) ? product.gallery_images : []),
@@ -179,16 +195,38 @@ const buildProductCard = (product, index = 0) => {
     .filter(Boolean);
   const images = Array.from(new Set(imageCandidates)).slice(0, 6);
   const slug = (product.slug || product.id || `product-${index}`).toString();
+  const categoryLabels = Array.isArray(product.categoryLabels)
+    ? product.categoryLabels
+    : [product.categoryName, product.category].filter(Boolean);
+  const description = stripHtml(
+    product.summaryText ||
+      product.shortDescription ||
+      product.short_description ||
+      product.description ||
+      product.long_description ||
+      product.longDescription ||
+      "",
+  );
   return {
+    ...product,
     id: product.id || `product-${index}`,
     slug,
     title: product.title || product.name || "Bethany Blooms Product",
+    name: product.name || product.title || "Bethany Blooms Product",
     image: images[0] || heroBackground,
+    images,
     displayPrice,
     originalPrice,
+    numericPrice: Number.isFinite(basePrice) ? basePrice : null,
+    categoryLabels,
+    description,
+    shortDescription: description,
+    isPurchasable: Number.isFinite(basePrice),
     stockStatus,
     stockBadgeLabel,
     isOutOfStock: stockStatus?.state === "out",
+    variants,
+    isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
   };
 };
 
@@ -1232,27 +1270,38 @@ function ProductDetailPage() {
                       const description = item.summaryText || item.shortDescription || item.description || "";
                       const productUrl = `/products/${encodeURIComponent(item.slug)}`;
                       return (
-                        <Link
-                          className="card product-card product-card--link product-related-card"
-                          to={productUrl}
+                        <article
+                          className="card product-card product-related-card"
                           key={item.id}
                         >
                           <span className="product-card__category">{categoryLabel}</span>
-                          <div className="product-card__media" aria-hidden="true">
-                            <img
-                              className="product-card__image"
-                              src={item.image}
-                              alt=""
-                              loading="lazy" decoding="async"/>
-                            {item.stockBadgeLabel && (
-                              <span
-                                className={`badge badge--stock-${item.stockStatus?.state || "in"} product-card__badge`}
-                              >
-                                {item.stockBadgeLabel}
-                              </span>
-                            )}
-                          </div>
-                          <h3 className="card__title">{item.title}</h3>
+                          <Link
+                            className="product-card__media-link"
+                            to={productUrl}
+                            aria-label={`View more about ${item.title}`}
+                          >
+                            <div className="product-card__media" aria-hidden="true">
+                              <img
+                                className="product-card__image"
+                                src={item.image}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                              />
+                              {item.stockBadgeLabel && (
+                                <span
+                                  className={`badge badge--stock-${item.stockStatus?.state || "in"} product-card__badge`}
+                                >
+                                  {item.stockBadgeLabel}
+                                </span>
+                              )}
+                            </div>
+                          </Link>
+                          <h3 className="card__title">
+                            <Link className="product-card__title-link" to={productUrl}>
+                              {item.title}
+                            </Link>
+                          </h3>
                           <p className="product-card__description">{description}</p>
                           <p className="card__price">
                             <span className="price-stack">
@@ -1262,10 +1311,8 @@ function ProductDetailPage() {
                               )}
                             </span>
                           </p>
-                          <span className="btn btn--secondary">
-                            {item.isOutOfStock ? "Out of stock" : "View details"}
-                          </span>
-                        </Link>
+                          <ProductCardActions product={item} productUrl={productUrl} />
+                        </article>
                       );
                     })}
                   </div>
