@@ -22593,18 +22593,24 @@ export function AdminOrdersView() {
                             : `Add ${product.name} to order`
                         }
                       >
-                        <div>
-                          <h4>{product.name}</h4>
-                          <p className="modal__meta">{priceLabel}</p>
+                        <div className="admin-order-create-product-info">
+                          <div className="admin-order-create-product-heading">
+                            <h4>{product.name}</h4>
+                            {activeStockStatus && (
+                              <span
+                                className={`badge badge--stock-${activeStockStatus.state}`}
+                              >
+                                {activeStockStatus.label}
+                              </span>
+                            )}
+                          </div>
+                          <p className="admin-order-create-product-price">
+                            {priceLabel}
+                          </p>
                           {product.sku && (
-                            <p className="modal__meta">SKU: {product.sku}</p>
-                          )}
-                          {activeStockStatus && (
-                            <span
-                              className={`badge badge--stock-${activeStockStatus.state}`}
-                            >
-                              {activeStockStatus.label}
-                            </span>
+                            <p className="admin-order-create-product-sku">
+                              SKU: {product.sku}
+                            </p>
                           )}
                           {variants.length > 0 && (
                             <label className="modal__meta pos-item-card__field">

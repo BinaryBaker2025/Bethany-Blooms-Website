@@ -1633,6 +1633,7 @@ function AdminPosPage() {
               : entry.linePrice;
           return {
             id: entry.id,
+            sourceId: entry.sourceId,
             type: "product",
             department: "products",
             serviceType: null,
@@ -1660,6 +1661,7 @@ function AdminPosPage() {
             : entry.linePrice;
           return {
             id: entry.id,
+            sourceId: entry.sourceId,
             type: "pos-product",
             department: "pos-products",
             serviceType: null,
@@ -1698,6 +1700,7 @@ function AdminPosPage() {
               : entry.linePrice;
           return {
             id: entry.id,
+            sourceId: entry.sourceId,
             type: "workshop",
             department: "services",
             serviceType: "workshop",
@@ -1737,6 +1740,7 @@ function AdminPosPage() {
               : entry.linePrice;
           return {
             id: entry.id,
+            sourceId: entry.sourceId,
             type: "class",
             department: "services",
             serviceType: "class",
@@ -1764,6 +1768,7 @@ function AdminPosPage() {
         const priceValue = Number.isFinite(event?.numericPrice) ? event.numericPrice : entry.linePrice;
         return {
           id: entry.id,
+          sourceId: entry.sourceId,
           type: "event",
           department: "services",
           serviceType: "event",
