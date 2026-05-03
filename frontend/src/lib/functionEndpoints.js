@@ -106,3 +106,7 @@ export const EFT_ORDER_FUNCTION_FALLBACK_ENDPOINT = getFunctionEndpointFallback(
 export const SUBSCRIPTION_PAYFAST_PAYMENT_FUNCTION_ENDPOINT = getFunctionEndpoint(
   "createSubscriptionPayfastPaymentHttp",
 );
+export const ATTACH_EFT_PROOF_FUNCTION_ENDPOINT = getFunctionEndpoint("attachEftPaymentProofHttp");
+export const ATTACH_EFT_PROOF_FUNCTION_FALLBACK_ENDPOINT = getFunctionEndpointFallback(
+  "attachEftPaymentProofHttp",
+);

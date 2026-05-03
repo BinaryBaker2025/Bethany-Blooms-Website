@@ -22,17 +22,21 @@ import {
   EFT_ORDER_FUNCTION_FALLBACK_ENDPOINT,
   EFT_ORDER_FUNCTION_ENDPOINT,
   PAYFAST_PAYMENT_FUNCTION_ENDPOINT,
+  PAYFAST_PAYMENT_FUNCTION_FALLBACK_ENDPOINT,
 } from "../lib/functionEndpoints.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
 import { getCustomerStockLabel, getStockStatus } from "../lib/stockStatus.js";
+import {
+  isPreorderCartLineForMixedRules,
+  PREORDER_MIXED_CART_GUIDANCE,
+} from "../lib/cartCatalogSync.js";
 
 const currency = (value) => `R${value.toFixed(2)}`;
 const CHECKOUT_REQUEST_TIMEOUT_MS = 20000;
 const CHECKOUT_MAX_ATTEMPTS = 2;
 const LOCAL_FUNCTIONS_URL_PATTERN =
   /^https?:\/\/(?:127\.0\.0\.1|localhost):5001\//i;
-const PREORDER_MIXED_CART_MESSAGE =
-  "Pre-order products need to be checked out separately from regular products. Please place one order for pre-order items and a separate order for regular products.";
+const PREORDER_MIXED_CART_MESSAGE = PREORDER_MIXED_CART_GUIDANCE;
 const STEP_ORDER = ["contact", "shipping", "payment", "review"];
 const BASE_STEP_LABELS = {
   contact: "Contact",
@@ -50,32 +54,6 @@ const normalizeStockStatusValue = (value = "") =>
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
-
-const isPreorderCartItem = (item, stockInfo = null) => {
-  if (!item || item?.metadata?.type !== "product" || isGiftCardCartItem(item))
-    return false;
-  const metadata =
-    item.metadata && typeof item.metadata === "object" ? item.metadata : {};
-  const stockValues = [
-    metadata.stockStatus,
-    metadata.stock_status,
-    metadata.stockState,
-    metadata.stock_state,
-    item.stockStatus,
-    item.stock_status,
-    item.stockState,
-    item.stock_state,
-    stockInfo?.status?.state,
-  ];
-  return Boolean(
-    metadata.preorderSendMonth ||
-    metadata.preorder_send_month ||
-    metadata.preorderSendMonthLabel ||
-    stockValues.some(
-      (value) => normalizeStockStatusValue(value) === "preorder",
-    ),
-  );
-};
 
 const normalizeGiftCardOptionQuantity = (value) => {
   const parsed = Number.parseInt(value, 10);
@@ -97,6 +75,7 @@ function CartPage() {
     removeItem,
     updateItemQuantity,
     clearCart,
+    hydrateProductLinesFromCatalog,
     totalPrice,
     totalCount,
   } = useCart();
@@ -134,13 +113,22 @@ function CartPage() {
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderError, setOrderError] = useState(null);
   const [orderSuccess, setOrderSuccess] = useState(null);
+  const [profileSaveNotice, setProfileSaveNotice] = useState(null);
+  const [liveCheckoutMessage, setLiveCheckoutMessage] = useState("");
+  const [checkoutStepFlash, setCheckoutStepFlash] = useState("");
+  const [mixedCartSpotlightId, setMixedCartSpotlightId] = useState("");
+  const [mixedRecheckNonce, setMixedRecheckNonce] = useState(0);
 
   const contactRef = useRef(null);
   const shippingRef = useRef(null);
   const paymentRef = useRef(null);
   const reviewRef = useRef(null);
+  const checkoutAccordionRef = useRef(null);
+  const stickyCheckoutRef = useRef(null);
+  const summaryMessageRef = useRef(null);
   const contactFirstFieldRef = useRef(null);
   const checkoutAbortRef = useRef(null);
+  const prevOrderErrorRef = useRef(null);
 
   const cartTypeLabel = useMemo(() => {
     if (!items.length) return null;
@@ -291,18 +279,22 @@ function CartPage() {
       ),
     [items],
   );
-  const preorderCartMix = items.reduce(
-    (summary, item) => {
-      if (item?.metadata?.type !== "product" || isGiftCardCartItem(item))
-        return summary;
-      if (isPreorderCartItem(item, resolveStock(item))) {
-        summary.preorderItems += 1;
-      } else {
-        summary.regularItems += 1;
-      }
-      return summary;
-    },
-    { preorderItems: 0, regularItems: 0 },
+  const preorderCartMix = useMemo(
+    () =>
+      items.reduce(
+        (summary, item) => {
+          if (item?.metadata?.type !== "product" || isGiftCardCartItem(item))
+            return summary;
+          if (isPreorderCartLineForMixedRules(item, productLookup)) {
+            summary.preorderItems += 1;
+          } else {
+            summary.regularItems += 1;
+          }
+          return summary;
+        },
+        { preorderItems: 0, regularItems: 0 },
+      ),
+    [items, productLookup],
   );
   const hasMixedPreorderCart =
     preorderCartMix.preorderItems > 0 && preorderCartMix.regularItems > 0;
@@ -601,6 +593,80 @@ function CartPage() {
     return () => clearTimeout(timeout);
   }, [orderSuccess]);
 
+  useEffect(() => {
+    const next = [orderError, orderSuccess, profileSaveNotice]
+      .filter(Boolean)
+      .join(" ");
+    setLiveCheckoutMessage(next.trim());
+  }, [orderError, orderSuccess, profileSaveNotice]);
+
+  useEffect(() => {
+    if (orderError && orderError !== prevOrderErrorRef.current) {
+      prevOrderErrorRef.current = orderError;
+      requestAnimationFrame(() => {
+        stickyCheckoutRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+        summaryMessageRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      });
+    }
+    if (!orderError) {
+      prevOrderErrorRef.current = null;
+    }
+  }, [orderError]);
+
+  useEffect(() => {
+    if (!checkoutStepFlash) return undefined;
+    const t = window.setTimeout(() => setCheckoutStepFlash(""), 2200);
+    return () => clearTimeout(t);
+  }, [checkoutStepFlash]);
+
+  useEffect(() => {
+    if (!mixedRecheckNonce) return;
+    requestAnimationFrame(() => {
+      const firstPreorderLine = items.find(
+        (line) =>
+          line?.metadata?.type === "product" &&
+          !isGiftCardCartItem(line) &&
+          isPreorderCartLineForMixedRules(line, productLookup),
+      );
+      if (hasMixedPreorderCart) {
+        setLiveCheckoutMessage(
+          `${PREORDER_MIXED_CART_MESSAGE} We refreshed lines from the latest product catalogue—see the tags under each item.`,
+        );
+        if (firstPreorderLine) {
+          setMixedCartSpotlightId(firstPreorderLine.id);
+          document
+            .getElementById(`cart-line-${firstPreorderLine.id}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      } else {
+        setLiveCheckoutMessage(
+          "Cart matches the latest catalogue. You can continue checkout.",
+        );
+        setMixedCartSpotlightId("");
+        checkoutAccordionRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+        setCheckoutStepFlash((prev) => prev || "contact");
+        setActiveStep("contact");
+      }
+    });
+    // mixedRecheckNonce batches with hydrated items in the same render tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read latest items after catalogue sync
+  }, [mixedRecheckNonce]);
+
+  useEffect(() => {
+    if (!mixedCartSpotlightId) return undefined;
+    const t = window.setTimeout(() => setMixedCartSpotlightId(""), 3200);
+    return () => clearTimeout(t);
+  }, [mixedCartSpotlightId]);
+
   useEffect(
     () => () => {
       checkoutAbortRef.current?.abort();
@@ -694,9 +760,31 @@ function CartPage() {
     return { ok: true };
   };
 
+  const spotlightMixedPreorderStarter = () => {
+    const preorderLine = items.find(
+      (line) =>
+        line?.metadata?.type === "product" &&
+        !isGiftCardCartItem(line) &&
+        isPreorderCartLineForMixedRules(line, productLookup),
+    );
+    if (!preorderLine?.id) return;
+    setMixedCartSpotlightId(preorderLine.id);
+    requestAnimationFrame(() =>
+      document
+        .getElementById(`cart-line-${preorderLine.id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    );
+  };
+
+  const handlePreorderCatalogRecheck = () => {
+    hydrateProductLinesFromCatalog(productInventory);
+    setMixedRecheckNonce((tick) => tick + 1);
+  };
+
   const handlePrimaryAction = () => {
     if (hasMixedPreorderCart) {
       setOrderError(PREORDER_MIXED_CART_MESSAGE);
+      spotlightMixedPreorderStarter();
       return;
     }
     if (activeStep === "review") {
@@ -718,6 +806,11 @@ function CartPage() {
     setOrderError(null);
     if (nextStep) {
       setActiveStep(nextStep);
+      setCheckoutStepFlash(nextStep);
+      checkoutAccordionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
       scrollToStep(nextStep);
     }
   };
@@ -747,7 +840,8 @@ function CartPage() {
     fallbackErrorMessage,
     options = {},
   ) => {
-    const { fallbackUrl = null } = options;
+    const { fallbackUrl = null, requestTimeoutMs = CHECKOUT_REQUEST_TIMEOUT_MS } =
+      options;
 
     const requestWithRetries = async (targetUrl) => {
       let lastError = null;
@@ -756,7 +850,7 @@ function CartPage() {
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => {
           controller.abort();
-        }, CHECKOUT_REQUEST_TIMEOUT_MS);
+        }, requestTimeoutMs);
         checkoutAbortRef.current = controller;
 
         try {
@@ -834,6 +928,7 @@ function CartPage() {
     if (!hasItems) return;
     if (hasMixedPreorderCart) {
       setOrderError(PREORDER_MIXED_CART_MESSAGE);
+      spotlightMixedPreorderStarter();
       return;
     }
 
@@ -941,6 +1036,7 @@ function CartPage() {
     }
 
     setOrderError(null);
+    setProfileSaveNotice(null);
     setPlacingOrder(true);
 
     const orderItems = items.map((item) => {
@@ -1005,6 +1101,19 @@ function CartPage() {
       0,
     );
     const finalTotal = orderTotal + shippingCost;
+
+    const coarseMobile =
+      typeof window !== "undefined" &&
+      ("ontouchstart" in window ||
+        (navigator.maxTouchPoints || 0) > 1 ||
+        window.matchMedia("(max-width: 768px)").matches);
+    const lineCountHeavy = Math.max(0, orderItems.length - 8);
+    const checkoutRequestTimeoutMs = Math.min(
+      55000,
+      CHECKOUT_REQUEST_TIMEOUT_MS +
+        (coarseMobile ? 12000 : 0) +
+        Math.min(18000, lineCountHeavy * 1200),
+    );
 
     try {
       const checkoutPayload = {
@@ -1083,6 +1192,9 @@ function CartPage() {
             "Unable to update customer profile from checkout",
             profileSaveError,
           );
+          setProfileSaveNotice(
+            "We could not save this address to your profile yet. Your order can still proceed—please update your Account page later.",
+          );
         }
       }
 
@@ -1096,6 +1208,7 @@ function CartPage() {
           "Unable to create EFT order.",
           {
             fallbackUrl: EFT_ORDER_FUNCTION_FALLBACK_ENDPOINT,
+            requestTimeoutMs: checkoutRequestTimeoutMs,
           },
         );
         if (!eftData?.ok) {
@@ -1145,6 +1258,10 @@ function CartPage() {
             cancelUrl: `${window.location.origin}/payment/cancel`,
           },
           "Unable to reach PayFast gateway.",
+          {
+            fallbackUrl: PAYFAST_PAYMENT_FUNCTION_FALLBACK_ENDPOINT,
+            requestTimeoutMs: checkoutRequestTimeoutMs,
+          },
         );
 
         if (!payfastData?.url || !payfastData?.fields) {
@@ -1189,7 +1306,16 @@ function CartPage() {
         <div className="cart-page__grid">
           <div className="cart-page__panel cart-page__items">
             {hasMixedPreorderCart && (
-              <p className="cart-page__notice">{PREORDER_MIXED_CART_MESSAGE}</p>
+              <div className="cart-page__preorder-panel">
+                <p className="cart-page__notice">{PREORDER_MIXED_CART_MESSAGE}</p>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={handlePreorderCatalogRecheck}
+                >
+                  Recheck cart against catalogue
+                </button>
+              </div>
             )}
             {cartHasGiftCards && (
               <p className="cart-page__notice">
@@ -1295,11 +1421,17 @@ function CartPage() {
                     : variantLabel
                       ? `Variant: ${variantLabel}`
                       : "Variant: Standard";
+                  const preorderMixedLine =
+                    hasMixedPreorderCart &&
+                    isProduct &&
+                    !isGiftCard &&
+                    isPreorderCartLineForMixedRules(item, productLookup);
 
                   return (
                     <li
                       key={item.id}
-                      className={`cart-list__item ${isProduct ? "cart-list__item--row" : ""}`}
+                      id={`cart-line-${item.id}`}
+                      className={`cart-list__item ${isProduct ? "cart-list__item--row" : ""}${mixedCartSpotlightId === item.id ? " cart-list__item--spotlight" : ""}`}
                     >
                       {isProduct ? (
                         <>
@@ -1357,6 +1489,13 @@ function CartPage() {
                                   </p>
                                 )}
                               </div>
+                            )}
+                            {hasMixedPreorderCart && !isGiftCard && (
+                              <p className="cart-line-mixed-hint" role="status">
+                                {preorderMixedLine
+                                  ? "Pre-order dispatch line — finish every pre-order item in one checkout, separately from anything in-stock."
+                                  : "In-stock line — remove these items from this basket (or check them out first), then place a separate order for pre-order items."}
+                              </p>
                             )}
                           </div>
                           <div className="cart-list__quantity">
@@ -1578,7 +1717,7 @@ function CartPage() {
               </ul>
             )}
 
-            <div className="checkout-accordion">
+            <div className="checkout-accordion" ref={checkoutAccordionRef}>
               <div className="checkout-accordion__header">
                 <h2>Checkout</h2>
                 <p className="modal__meta">
@@ -1616,10 +1755,10 @@ function CartPage() {
                       }
                       className={`checkout-step ${isActive ? "is-active" : ""} ${isComplete ? "is-complete" : ""} ${
                         isLocked ? "is-locked" : ""
-                      }`}
+                      }${checkoutStepFlash === step ? " checkout-step--flash" : ""}`}
                     >
                       <button
-                        className="checkout-step__trigger"
+                        className={`checkout-step__trigger${checkoutStepFlash === step ? " checkout-step__trigger--flash" : ""}`}
                         type="button"
                         onClick={() => openStep(step)}
                         aria-expanded={
@@ -1830,7 +1969,11 @@ function CartPage() {
                                     availableCouriers.length === 0 && (
                                       <p className="admin-panel__error">
                                         No courier options are available for{" "}
-                                        {shippingAddress.province}.
+                                        {shippingAddress.province}. Need help selecting delivery?{" "}
+                                        <a href={buildWhatsAppLink("Hi, I can't see courier options at checkout.")}>
+                                          Message us on WhatsApp
+                                        </a>
+                                        .
                                       </p>
                                     )}
                                   {availableCouriers.length > 0 && (
@@ -2127,15 +2270,37 @@ function CartPage() {
                     ? "Workshop bookings take place at the studio, so no shipping fee applies."
                     : "This order contains digital gift cards, so no shipping fee applies."}
               </p>
-              {orderError && <p className="admin-panel__error">{orderError}</p>}
-              {orderSuccess && (
-                <p className="admin-save-indicator">{orderSuccess}</p>
-              )}
-              <div className="cart-page__sticky-bar">
+              <span className="visually-hidden" aria-live="polite" aria-atomic="true">
+                {liveCheckoutMessage}
+              </span>
+              <div ref={summaryMessageRef} className="cart-page__checkout-feedback">
+                {orderError && <p className="admin-panel__error">{orderError}</p>}
+                {orderSuccess && (
+                  <p className="admin-save-indicator">{orderSuccess}</p>
+                )}
+                {profileSaveNotice && (
+                  <p className="cart-page__notice">{profileSaveNotice}</p>
+                )}
+              </div>
+              <div ref={stickyCheckoutRef} className="cart-page__sticky-bar">
                 <div className="cart-page__sticky-row">
                   <span>Total</span>
                   <strong>{currency(orderTotal)}</strong>
                 </div>
+                {(orderError || profileSaveNotice) && (
+                  <div className="cart-page__sticky-alerts">
+                    {orderError && (
+                      <p className="admin-panel__error" role="status">
+                        {orderError}
+                      </p>
+                    )}
+                    {profileSaveNotice && (
+                      <p className="cart-page__notice" role="status">
+                        {profileSaveNotice}
+                      </p>
+                    )}
+                  </div>
+                )}
                 <button
                   className="btn btn--primary"
                   type="button"

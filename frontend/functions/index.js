@@ -6673,7 +6673,7 @@ function normalizeStockStatusValue(value = "") {
 }
 
 const PREORDER_MIXED_ORDER_ERROR =
-  "Pre-order products need to be checked out separately from regular products. Please place one order for pre-order items and a separate order for regular products.";
+  "Pre-order dispatch items must be checked out separately from in-stock items. Finish one basket, place the order, then start a fresh cart for the other group—or remove the lines that clash.";
 
 function getItemPreorderDetails(item = {}) {
   const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
@@ -9961,6 +9961,208 @@ function validatePaymentProofMetadata(input) {
   };
 }
 
+const PENDING_PAYFAST_ORDER_DOC_BYTE_LIMIT = 950 * 1024;
+
+function estimateJsonUtf8ByteLength(value) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
+  } catch (error) {
+    functions.logger.warn("estimateJsonUtf8ByteLength failed", error);
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
+function assertFirestorePendingWriteWithinLimit(pendingWrite = {}, contextLabel = "pending-order") {
+  const approx = estimateJsonUtf8ByteLength(pendingWrite);
+  if (approx > PENDING_PAYFAST_ORDER_DOC_BYTE_LIMIT) {
+    throw new Error(
+      `Your order is too large to complete online (${Math.round(approx / 1024)}KB). Please split it into two carts or contact Bethany Blooms for help placing a large order.`,
+    );
+  }
+  if (approx > 700 * 1024) {
+    functions.logger.warn("Large pending PayFast write payload", {
+      contextLabel,
+      approxBytes: approx,
+    });
+  }
+}
+
+function buildPreorderCatalogSnapshot(productDoc = {}) {
+  const monthCanon = normalizePreorderSendMonth(
+    productDoc.preorderSendMonth || productDoc.preorder_send_month || "",
+  );
+  return {
+    state: "preorder",
+    preorderMonth: monthCanon,
+    label:
+      formatPreorderSendMonth(monthCanon) ||
+      (productDoc.preorderSendMonthLabel || "").toString().trim() ||
+      "",
+  };
+}
+
+function deriveServerCatalogStockSnapshot(productDoc = {}, variantIdRaw = "") {
+  const variants = Array.isArray(productDoc?.variants) ? productDoc.variants : [];
+  const variantId = variantIdRaw.toString().trim();
+  const hasVariants = variants.length > 0;
+  const variant =
+    variantId && hasVariants
+      ? variants.find((entry) => (entry?.id || "").toString().trim() === variantId)
+      : null;
+
+  const productStatusPlain = (
+    productDoc.stock_status ||
+      productDoc.stockStatus ||
+      productDoc.stock_state ||
+      productDoc.stockState ||
+      ""
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+
+  if (hasVariants && variantId && variant) {
+    const statusValue = (
+      variant.stock_status ||
+      variant.stockStatus ||
+      productDoc.stock_status ||
+      ""
+    )
+      .toString()
+      .trim()
+      .toLowerCase();
+    const rawQuantity = variant.stock_quantity ?? variant.stockQuantity ?? variant.quantity;
+    const isVariantQuantityMissing =
+      rawQuantity === undefined || rawQuantity === null || rawQuantity === "";
+    const forceOut =
+      productDoc.forceOutOfStock ||
+      productStatusPlain === "out_of_stock" ||
+      variant.forceOutOfStock ||
+      variant.stock_status === "out_of_stock" ||
+      (isVariantQuantityMissing && statusValue !== "preorder");
+    if (statusValue === "preorder") {
+      return buildPreorderCatalogSnapshot(productDoc);
+    }
+    if (forceOut) {
+      return { state: "out_of_stock", preorderMonth: "", label: "" };
+    }
+    return { state: statusValue || "in_stock", preorderMonth: "", label: "" };
+  }
+
+  if (hasVariants && (!variantId || !variant)) {
+    const isProductPreorder =
+      normalizeStockStatusValue(productStatusPlain) === "preorder" ||
+      Boolean(
+        productDoc.preorderSendMonth ||
+          productDoc.preorder_send_month ||
+          productDoc.preorderSendMonthLabel,
+      );
+    if (isProductPreorder) {
+      return buildPreorderCatalogSnapshot(productDoc);
+    }
+    return { state: "out_of_stock", preorderMonth: "", label: "" };
+  }
+
+  if (normalizeStockStatusValue(productStatusPlain) === "preorder") {
+    return buildPreorderCatalogSnapshot(productDoc);
+  }
+  if (productDoc.forceOutOfStock || productStatusPlain === "out_of_stock") {
+    return { state: "out_of_stock", preorderMonth: "", label: "" };
+  }
+  return { state: productStatusPlain || "in_stock", preorderMonth: "", label: "" };
+}
+
+function applyServerCatalogSnapshotToLineMetadata(metadata = {}, snapshot = {}) {
+  const next = metadata && typeof metadata === "object" ? { ...metadata } : {};
+  const state = (snapshot.state || "").toString().trim();
+  next.stockStatus = state;
+  next.stock_status = state;
+  if (state === "preorder") {
+    next.preorderSendMonth = snapshot.preorderMonth || null;
+    next.preorder_send_month = snapshot.preorderMonth || null;
+    next.preorderSendMonthLabel = snapshot.label || "";
+  } else {
+    next.preorderSendMonth = null;
+    next.preorder_send_month = null;
+    next.preorderSendMonthLabel = "";
+  }
+  return next;
+}
+
+async function enrichOrderItemsUsingProductCatalog(itemsRaw = []) {
+  const items = Array.isArray(itemsRaw)
+    ? itemsRaw.map((entry) =>
+        typeof structuredClone !== "undefined"
+          ? structuredClone(entry)
+          : JSON.parse(JSON.stringify(entry)),
+      )
+    : [];
+  const productIds = [
+    ...new Set(
+      items
+        .filter(
+          (entry) => entry?.metadata?.type === "product" && !isGiftCardOrderItem(entry),
+        )
+        .map((entry) =>
+          (
+            entry.metadata?.productId ||
+            entry.metadata?.productID ||
+            entry.metadata?.product ||
+            ""
+          )
+            .toString()
+            .trim(),
+        )
+        .filter(Boolean),
+    ),
+  ];
+  if (!productIds.length) {
+    return items;
+  }
+
+  const productSnaps = await Promise.all(
+    productIds.map((id) => db.collection("products").doc(id).get()),
+  );
+  const productDocs = new Map();
+  productIds.forEach((id, idx) => {
+    if (productSnaps[idx].exists) {
+      productDocs.set(id, productSnaps[idx].data() || {});
+    }
+  });
+
+  return items.map((entry) => {
+    if (entry?.metadata?.type !== "product" || isGiftCardOrderItem(entry)) return entry;
+    const pid = (
+      entry.metadata?.productId ||
+      entry.metadata?.productID ||
+      entry.metadata?.product ||
+      ""
+    )
+      .toString()
+      .trim();
+    const productDoc = pid ? productDocs.get(pid) : null;
+    if (!productDoc) return entry;
+
+    const variantId = (entry.metadata?.variantId || "").toString().trim();
+    const snapshot = deriveServerCatalogStockSnapshot(productDoc, variantId);
+    return {
+      ...entry,
+      metadata: applyServerCatalogSnapshotToLineMetadata(entry.metadata || {}, snapshot),
+    };
+  });
+}
+
+async function normalizeOrderPayloadWithCatalog(dataInput = {}) {
+  const cloned =
+    typeof structuredClone !== "undefined"
+      ? structuredClone(dataInput ?? {})
+      : JSON.parse(JSON.stringify(dataInput ?? {}));
+  cloned.items = await enrichOrderItemsUsingProductCatalog(
+    Array.isArray(cloned.items) ? cloned.items : [],
+  );
+  return validateOrderPayload(cloned);
+}
+
 function validateOrderPayload(dataInput = {}) {
   const data = dataInput ?? {};
   const requestCustomer = data?.customer || {};
@@ -11405,7 +11607,7 @@ exports.adminVoidPosSale = onCall(async (request) => {
 async function buildPayfastPaymentPayload(dataInput = {}) {
   const payfastConfig = getPayfastConfig();
 
-  const normalizedPayload = validateOrderPayload(dataInput);
+  const normalizedPayload = await normalizeOrderPayloadWithCatalog(dataInput);
   const {
     data,
     customerUid,
@@ -11438,6 +11640,38 @@ async function buildPayfastPaymentPayload(dataInput = {}) {
 
   const pendingRef = db.collection(PENDING_COLLECTION).doc();
   const paymentReference = pendingRef.id;
+  assertFirestorePendingWriteWithinLimit(
+    {
+      customerUid,
+      customer,
+      items,
+      totalPrice,
+      subtotal,
+      shippingCost,
+      shipping: shipping || null,
+      shippingAddress,
+      paymentMethod: "payfast",
+      status: "pending",
+      paymentReference,
+      payfastMode: modeResolution.mode,
+      payfastHost: resolvedCredentials.host,
+      payfastMerchantIdUsed: resolvedCredentials.merchantId || null,
+      returnUrl: returnUrl || null,
+      cancelUrl: cancelUrl || null,
+      isLocalDevCheckout: modeResolution.isLocalDevCheckout,
+      payfast: {
+        mode: modeResolution.mode,
+        host: resolvedCredentials.host,
+      },
+      fulfillment: {
+        deliveryFollowUpRequired: requiresFreshFlowerDeliveryContact,
+        deliveryFollowUpReason: requiresFreshFlowerDeliveryContact
+          ? FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON
+          : null,
+      },
+    },
+    "createPayfast.pending",
+  );
   await pendingRef.set({
     customerUid,
     customer,
@@ -16481,7 +16715,7 @@ exports.createEftOrderHttp = onRequest((req, res) => {
         throw new Error("Invalid payment method for EFT checkout.");
       }
 
-      const normalizedPayload = validateOrderPayload(data);
+      const normalizedPayload = await normalizeOrderPayloadWithCatalog(data);
       const {
         customerUid,
         customer,
@@ -16548,6 +16782,34 @@ exports.createEftOrderHttp = onRequest((req, res) => {
         createdAt: FIELD_VALUE.serverTimestamp(),
         updatedAt: FIELD_VALUE.serverTimestamp(),
       };
+      assertFirestorePendingWriteWithinLimit(
+        {
+          customerUid,
+          customer,
+          items,
+          subtotal,
+          shippingCost,
+          shipping: shipping || null,
+          shippingAddress,
+          totalPrice,
+          status: orderPayload.status,
+          paymentStatus: orderPayload.paymentStatus,
+          paymentMethod: orderPayload.paymentMethod,
+          paymentApprovalStatus: orderPayload.paymentApprovalStatus,
+          paymentApproval,
+          paymentProof: null,
+          fulfillment: orderPayload.fulfillment,
+          paymentProofUpload: {
+            tokenHash: hashEftProofUploadToken(proofUploadToken),
+            expiresAt: proofUploadExpiresAtDate.toISOString(),
+            usedAt: null,
+          },
+          orderNumber,
+          invoiceNumber: orderPayload.invoiceNumber,
+          trackingLink: null,
+        },
+        "createEftOrder.order",
+      );
       await orderRef.set(orderPayload);
       await upsertCustomerProfileOrder({
         customerUid,
@@ -17000,14 +17262,18 @@ exports.payfastItn = onRequest(async (req, res) => {
     });
     if (subscriptionItn.handled) {
       if (subscriptionItn.retryRequired) {
-        res.status(503).send("Validation retry required");
-      } else {
-        res.status(200).send("OK");
+        functions.logger.warn("PayFast ITN subscription acknowledged with validation retry hints", {
+          orderId,
+        });
       }
+      res.status(200).send("OK");
       return;
     }
-    functions.logger.warn("PayFast ITN for unknown pending order", { orderId, params });
-    res.status(404).send("Pending order not found");
+    functions.logger.warn("PayFast ITN for unknown pending order — acknowledging to avoid retry storms", {
+      orderId,
+      params,
+    });
+    res.status(200).send("OK");
     return;
   }
 
@@ -17247,8 +17513,10 @@ exports.payfastItn = onRequest(async (req, res) => {
   await pendingRef.set(pendingUpdate, { merge: true });
 
   if (paymentComplete && !checksPassed && (gatewayValidation.retryable || sourceIpValidation.retryable)) {
-    res.status(503).send("Validation retry required");
-    return;
+    functions.logger.warn("PayFast ITN cart acknowledged; validation incomplete but retries may be unreliable", {
+      orderId,
+      validationFailures,
+    });
   }
 
   res.status(200).send("OK");
@@ -17505,7 +17773,7 @@ exports.reconcilePaidOrderProductInventory = onCall(
 exports.createAdminEftOrder = onCall(async (request) => {
   await assertAdminRequest(request);
   const payload = request.data || {};
-  const normalizedPayload = validateOrderPayload(payload);
+  const normalizedPayload = await normalizeOrderPayloadWithCatalog(payload);
   const {
     customerUid,
     customer,
@@ -17575,6 +17843,34 @@ exports.createAdminEftOrder = onCall(async (request) => {
     createdAt: FIELD_VALUE.serverTimestamp(),
     updatedAt: FIELD_VALUE.serverTimestamp(),
   };
+  assertFirestorePendingWriteWithinLimit(
+    {
+      customerUid,
+      customer,
+      items,
+      subtotal,
+      shippingCost,
+      shipping: shipping || null,
+      shippingAddress: shippingAddress || null,
+      totalPrice,
+      status: orderPayload.status,
+      paymentStatus: orderPayload.paymentStatus,
+      paymentMethod: orderPayload.paymentMethod,
+      paymentApprovalStatus: orderPayload.paymentApprovalStatus,
+      paymentApproval,
+      paymentProof: null,
+      fulfillment: orderPayload.fulfillment,
+      orderNumber,
+      invoiceNumber: orderPayload.invoiceNumber,
+      trackingLink: null,
+      createdByAdmin: {
+        uid: adminUid,
+        email: adminEmail,
+        createdAt: new Date().toISOString(),
+      },
+    },
+    "createAdminEftOrder.order",
+  );
   await orderRef.set(orderPayload);
   await upsertCustomerProfileOrder({
     customerUid,

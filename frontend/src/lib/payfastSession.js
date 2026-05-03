@@ -5,6 +5,7 @@ export function setPayfastPendingSession(payload = {}) {
   try {
     const nextPayload = {
       paymentReference: (payload.paymentReference || "").toString().trim() || null,
+      containsGiftCards: Boolean(payload.containsGiftCards),
       createdAt: payload.createdAt || new Date().toISOString(),
     };
     window.sessionStorage.setItem(PAYFAST_PENDING_KEY, JSON.stringify(nextPayload));

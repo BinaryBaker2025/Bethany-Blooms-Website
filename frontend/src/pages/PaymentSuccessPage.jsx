@@ -22,16 +22,39 @@ function PaymentSuccessPage() {
 
   useEffect(() => {
     const pendingSession = getPayfastPendingSession();
-    if (!pendingSession) return;
-    if (pendingSession.containsGiftCards) {
+    const searchParams = new URLSearchParams(location.search);
+
+    const paymentStatus = (searchParams.get("payment_status") || "").toString().trim().toUpperCase();
+    const pfPaymentId = (searchParams.get("pf_payment_id") || "").toString().trim();
+    const merchantPaymentRef =
+      (searchParams.get("m_payment_id") || searchParams.get("custom_str1") || "").toString().trim();
+
+    const looksExplicitlyCancelled =
+      /FAILED|CANCEL(?:LED)?/i.test(paymentStatus || "") &&
+      paymentStatus !== "COMPLETE";
+
+    if (pendingSession?.containsGiftCards) {
       setContainsGiftCards(true);
     }
-    if (pendingSession.paymentReference) {
+    if (merchantPaymentRef) {
+      setPaymentReference((prev) => prev || merchantPaymentRef);
+    } else if (pendingSession?.paymentReference) {
       setPaymentReference((pendingSession.paymentReference || "").toString().trim());
     }
-    const searchParams = new URLSearchParams(location.search);
-    const paymentStatus = (searchParams.get("payment_status") || "").toString().trim().toUpperCase();
-    if (paymentStatus !== "COMPLETE") return;
+
+    if (looksExplicitlyCancelled) return;
+
+    let shouldClearCart = paymentStatus === "COMPLETE";
+
+    if (!shouldClearCart && pendingSession?.paymentReference && pfPaymentId) {
+      const expectedRef = (pendingSession.paymentReference || "").toString().trim();
+      shouldClearCart =
+        Boolean(expectedRef) &&
+        (!merchantPaymentRef || merchantPaymentRef === expectedRef);
+    }
+
+    if (!shouldClearCart) return;
+
     clearCartRef.current();
     clearPayfastPendingSession();
   }, [location.search]);

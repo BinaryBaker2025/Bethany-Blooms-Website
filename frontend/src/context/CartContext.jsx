@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useState } from "react";
+import { hydrateCartProductLinesFromCatalog } from "../lib/cartCatalogSync.js";
 
 const CartContext = createContext(null);
 const STORAGE_KEY = "bethany-blooms-cart";
@@ -153,6 +154,10 @@ export function CartProvider({ children }) {
     setItems([]);
   };
 
+  const hydrateProductLinesFromCatalog = useCallback((catalogProducts) => {
+    setItems((prev) => hydrateCartProductLinesFromCatalog(prev, catalogProducts || []));
+  }, []);
+
   const value = useMemo(() => {
     const totalCount = items.reduce((count, item) => count + item.quantity, 0);
     const totalPrice = items.reduce((total, item) => {
@@ -165,10 +170,11 @@ export function CartProvider({ children }) {
       removeItem,
       updateItemQuantity,
       clearCart,
+      hydrateProductLinesFromCatalog,
       totalCount,
       totalPrice,
     };
-  }, [items]);
+  }, [items, hydrateProductLinesFromCatalog]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

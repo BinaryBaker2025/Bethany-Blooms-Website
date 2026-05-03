@@ -4,14 +4,35 @@ import { Link, useLocation } from "react-router-dom";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { getFirebaseStorage } from "../lib/firebase.js";
 import {
+  ATTACH_EFT_PROOF_FUNCTION_ENDPOINT,
+  ATTACH_EFT_PROOF_FUNCTION_FALLBACK_ENDPOINT,
+} from "../lib/functionEndpoints.js";
+import {
   EFT_BANK_DETAILS,
   EFT_PROOF_ACCEPT,
   EFT_PROOF_MAX_SIZE_BYTES,
   buildOrderReference,
 } from "../lib/paymentMethods.js";
 
-const ATTACH_EFT_PROOF_URL =
-  "https://us-central1-bethanyblooms-89dcc.cloudfunctions.net/attachEftPaymentProofHttp";
+const LOCAL_FUNCTIONS_URL_PATTERN =
+  /^https?:\/\/(?:127\.0\.0\.1|localhost):5001\//i;
+
+async function postAttachEftProof(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) {
+    const message = payload?.error || "Unable to attach proof of payment.";
+    const networkish = response.status >= 500 || response.status === 429 || response.status === 0;
+    const err = new Error(message);
+    err.networkish = networkish;
+    throw err;
+  }
+  return payload;
+}
 
 function EftSubmittedPage() {
   usePageMetadata({
@@ -98,21 +119,18 @@ function EftSubmittedPage() {
         size: proofFile.size,
       };
 
-      const response = await fetch(ATTACH_EFT_PROOF_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orderId,
-          proofUploadToken,
-          paymentProof,
-        }),
-      });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || "Unable to attach proof of payment.");
+      const body = { orderId, proofUploadToken, paymentProof };
+      try {
+        await postAttachEftProof(ATTACH_EFT_PROOF_FUNCTION_ENDPOINT, body);
+      } catch (firstErr) {
+        const fallbackUrl = ATTACH_EFT_PROOF_FUNCTION_FALLBACK_ENDPOINT;
+        const isLocalEndpointNetworkFailure =
+          LOCAL_FUNCTIONS_URL_PATTERN.test(ATTACH_EFT_PROOF_FUNCTION_ENDPOINT) &&
+          (firstErr instanceof TypeError || firstErr?.networkish);
+        if (!fallbackUrl || fallbackUrl === ATTACH_EFT_PROOF_FUNCTION_ENDPOINT || !isLocalEndpointNetworkFailure) {
+          throw firstErr;
+        }
+        await postAttachEftProof(fallbackUrl, body);
       }
 
       setProofSuccess(`Proof uploaded successfully: ${paymentProof.fileName}`);
