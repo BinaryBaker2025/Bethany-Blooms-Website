@@ -10089,6 +10089,184 @@ function applyServerCatalogSnapshotToLineMetadata(metadata = {}, snapshot = {}) 
   return next;
 }
 
+const MONEY_MATCH_TOLERANCE = 0.009;
+const DEFAULT_WORKSHOP_PRICE_OPTIONS = Object.freeze([
+  { value: "A5", label: "A5 - R350", price: 350 },
+  { value: "A4", label: "A4 - R550", price: 550 },
+  { value: "A3", label: "A3 - R650", price: 650 },
+]);
+
+function moneyValuesMatch(actual, expected) {
+  const actualMoney = roundMoney(actual);
+  const expectedMoney = roundMoney(expected);
+  return Math.abs(actualMoney - expectedMoney) <= MONEY_MATCH_TOLERANCE;
+}
+
+function assertMoneyValuesMatch(actual, expected, message) {
+  if (!moneyValuesMatch(actual, expected)) {
+    throw new Error(message);
+  }
+}
+
+function getOrderItemProductId(item = {}) {
+  const metadata = item?.metadata || {};
+  const fallbackId =
+    typeof item?.id === "string" && item.id.includes(":")
+      ? item.id.split(":")[0]
+      : item?.id;
+  return (
+    metadata.productId ||
+    metadata.productID ||
+    metadata.product ||
+    fallbackId ||
+    ""
+  )
+    .toString()
+    .trim();
+}
+
+function resolveServerProductUnitPrice(productDoc = {}, variantIdRaw = "") {
+  const variants = Array.isArray(productDoc?.variants) ? productDoc.variants : [];
+  const variantId = (variantIdRaw || "").toString().trim();
+  const productPrice =
+    toPositiveMoneyAmount(productDoc?.sale_price) ||
+    toPositiveMoneyAmount(productDoc?.salePrice) ||
+    toPositiveMoneyAmount(productDoc?.price);
+
+  if (!variants.length) return productPrice;
+  if (!variantId) return null;
+
+  const variant =
+    variants.find((entry) => (entry?.id || "").toString().trim() === variantId) ||
+    variants.find((entry) => (entry?.label || entry?.name || "").toString().trim() === variantId) ||
+    null;
+  if (!variant) return null;
+
+  return (
+    toPositiveMoneyAmount(variant?.sale_price) ||
+    toPositiveMoneyAmount(variant?.salePrice) ||
+    toPositiveMoneyAmount(variant?.price) ||
+    productPrice
+  );
+}
+
+function normalizeCheckoutOption(option = {}, index = 0) {
+  if (!option || typeof option !== "object") return null;
+  const value = (option.value ?? option.id ?? option.label ?? `option-${index}`).toString().trim();
+  const label = (option.label ?? option.name ?? value).toString().trim();
+  const price = Number(option.price ?? option.amount ?? option.unitPrice);
+  if (!value || !Number.isFinite(price) || price <= 0) return null;
+  return { value, label, price: roundMoney(price) };
+}
+
+function buildWorkshopCheckoutOptions(workshopDoc = {}) {
+  const rawOptions = Array.isArray(workshopDoc?.options) ? workshopDoc.options : [];
+  const options = rawOptions
+    .map((option, index) => normalizeCheckoutOption(option, index))
+    .filter(Boolean);
+  if (options.length) return options;
+
+  const rawFrameOptions = Array.isArray(workshopDoc?.frameOptions) ? workshopDoc.frameOptions : [];
+  const frameOptions = rawFrameOptions
+    .map((option, index) => {
+      const normalized = normalizeCheckoutOption(
+        {
+          value: option?.value ?? option?.size ?? option?.id ?? option?.label,
+          label: option?.label ?? option?.name ?? option?.size,
+          price: option?.price,
+        },
+        index,
+      );
+      return normalized;
+    })
+    .filter(Boolean);
+  if (frameOptions.length) return frameOptions;
+
+  return DEFAULT_WORKSHOP_PRICE_OPTIONS.map((option) => ({ ...option }));
+}
+
+function normalizeWorkshopOptionKey(value = "") {
+  return value.toString().trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function findWorkshopCheckoutOption(options = [], ...candidates) {
+  const candidateKeys = candidates
+    .map((value) => normalizeWorkshopOptionKey(value || ""))
+    .filter(Boolean);
+  if (!candidateKeys.length) return null;
+  return (
+    options.find((option) => {
+      const optionKeys = [
+        normalizeWorkshopOptionKey(option.value),
+        normalizeWorkshopOptionKey(option.label),
+      ].filter(Boolean);
+      return candidateKeys.some((key) => optionKeys.includes(key));
+    }) || null
+  );
+}
+
+function resolveServerWorkshopLinePrice(item = {}, workshopDoc = {}) {
+  const metadata = item?.metadata || {};
+  const options = buildWorkshopCheckoutOptions(workshopDoc);
+  const fallbackPrice = toPositiveMoneyAmount(workshopDoc?.unitPrice ?? workshopDoc?.price);
+  const attendeeSelections = Array.isArray(metadata.attendeeSelections)
+    ? metadata.attendeeSelections
+    : [];
+
+  if (attendeeSelections.length) {
+    const total = attendeeSelections.reduce((sum, selection) => {
+      const option = findWorkshopCheckoutOption(
+        options,
+        selection?.optionValue,
+        selection?.value,
+        selection?.optionId,
+        selection?.optionLabel,
+        selection?.label,
+      );
+      const price = Number.isFinite(option?.price) ? option.price : fallbackPrice;
+      if (!Number.isFinite(price) || price <= 0) {
+        throw new Error("Selected workshop option is no longer available.");
+      }
+      return sum + price;
+    }, 0);
+    return roundMoney(total);
+  }
+
+  const attendeeCount = parsePositiveInteger(metadata.attendeeCount, 1);
+  const option = findWorkshopCheckoutOption(
+    options,
+    metadata.optionValue,
+    metadata.optionId,
+    metadata.framePreference,
+    metadata.optionLabel,
+  );
+  const unitPrice = Number.isFinite(option?.price) ? option.price : fallbackPrice;
+  return Number.isFinite(unitPrice) && unitPrice > 0
+    ? roundMoney(unitPrice * attendeeCount)
+    : null;
+}
+
+function normalizeGiftCardCheckoutLine(item = {}, index = 0) {
+  const giftCardMetadata = item?.metadata?.giftCard || {};
+  const giftCardValue = buildGiftCardOptionsTotal(giftCardMetadata.selectedOptions);
+  if (!Number.isFinite(giftCardValue) || giftCardValue <= 0) {
+    throw new Error(`Gift card line ${index + 1} has invalid selected options.`);
+  }
+
+  const submittedPrice = Number(item?.price);
+  assertMoneyValuesMatch(
+    submittedPrice,
+    giftCardValue,
+    "Gift card total does not match the selected options. Please remove and re-add the gift card.",
+  );
+
+  return {
+    ...item,
+    quantity: parsePositiveInteger(item?.quantity, 1),
+    price: roundMoney(giftCardValue),
+  };
+}
+
 async function enrichOrderItemsUsingProductCatalog(itemsRaw = []) {
   const items = Array.isArray(itemsRaw)
     ? itemsRaw.map((entry) =>
@@ -10103,50 +10281,104 @@ async function enrichOrderItemsUsingProductCatalog(itemsRaw = []) {
         .filter(
           (entry) => entry?.metadata?.type === "product" && !isGiftCardOrderItem(entry),
         )
+        .map((entry) => getOrderItemProductId(entry))
+        .filter(Boolean),
+    ),
+  ];
+  const workshopIds = [
+    ...new Set(
+      items
+        .filter((entry) => entry?.metadata?.type === "workshop")
         .map((entry) =>
-          (
-            entry.metadata?.productId ||
-            entry.metadata?.productID ||
-            entry.metadata?.product ||
-            ""
-          )
+          (entry.metadata?.workshopId || entry.metadata?.workshop || entry.id || "")
             .toString()
             .trim(),
         )
         .filter(Boolean),
     ),
   ];
-  if (!productIds.length) {
+  if (!productIds.length && !workshopIds.length) {
     return items;
   }
+  const invalidProductId = productIds.find((id) => !isValidFirestoreDocumentId(id));
+  if (invalidProductId) {
+    throw new Error("A product in your cart is invalid. Please remove it and add it again.");
+  }
+  const invalidWorkshopId = workshopIds.find((id) => !isValidFirestoreDocumentId(id));
+  if (invalidWorkshopId) {
+    throw new Error("A workshop in your cart is invalid. Please remove it and add it again.");
+  }
 
-  const productSnaps = await Promise.all(
-    productIds.map((id) => db.collection("products").doc(id).get()),
-  );
+  const [productSnaps, workshopSnaps] = await Promise.all([
+    Promise.all(productIds.map((id) => db.collection("products").doc(id).get())),
+    Promise.all(workshopIds.map((id) => db.collection("workshops").doc(id).get())),
+  ]);
   const productDocs = new Map();
   productIds.forEach((id, idx) => {
     if (productSnaps[idx].exists) {
       productDocs.set(id, productSnaps[idx].data() || {});
     }
   });
+  const workshopDocs = new Map();
+  workshopIds.forEach((id, idx) => {
+    if (workshopSnaps[idx].exists) {
+      workshopDocs.set(id, workshopSnaps[idx].data() || {});
+    }
+  });
 
   return items.map((entry) => {
-    if (entry?.metadata?.type !== "product" || isGiftCardOrderItem(entry)) return entry;
-    const pid = (
-      entry.metadata?.productId ||
-      entry.metadata?.productID ||
-      entry.metadata?.product ||
-      ""
-    )
-      .toString()
-      .trim();
+    if (isGiftCardOrderItem(entry)) return entry;
+    if (entry?.metadata?.type === "workshop") {
+      const workshopId = (
+        entry.metadata?.workshopId ||
+        entry.metadata?.workshop ||
+        entry.id ||
+        ""
+      )
+        .toString()
+        .trim();
+      const workshopDoc = workshopId ? workshopDocs.get(workshopId) : null;
+      if (!workshopDoc) {
+        throw new Error(`Workshop "${entry?.name || workshopId || "item"}" is no longer available.`);
+      }
+      const expectedLinePrice = resolveServerWorkshopLinePrice(entry, workshopDoc);
+      if (!Number.isFinite(expectedLinePrice) || expectedLinePrice <= 0) {
+        throw new Error(`Workshop "${entry?.name || workshopId}" is not available for online checkout.`);
+      }
+      assertMoneyValuesMatch(
+        entry.price,
+        expectedLinePrice,
+        `Price for ${entry?.name || "a workshop"} has changed. Please remove it from your cart and add it again.`,
+      );
+      return {
+        ...entry,
+        quantity: 1,
+        price: roundMoney(expectedLinePrice),
+      };
+    }
+
+    if (entry?.metadata?.type !== "product") return entry;
+    const pid = getOrderItemProductId(entry);
     const productDoc = pid ? productDocs.get(pid) : null;
-    if (!productDoc) return entry;
+    if (!productDoc) {
+      throw new Error(`Product "${entry?.name || pid || "item"}" is no longer available.`);
+    }
 
     const variantId = (entry.metadata?.variantId || "").toString().trim();
     const snapshot = deriveServerCatalogStockSnapshot(productDoc, variantId);
+    const expectedUnitPrice = resolveServerProductUnitPrice(productDoc, variantId);
+    if (!Number.isFinite(expectedUnitPrice) || expectedUnitPrice <= 0) {
+      throw new Error(`Product "${entry?.name || pid}" is not available for online checkout.`);
+    }
+    assertMoneyValuesMatch(
+      entry.price,
+      expectedUnitPrice,
+      `Price for ${entry?.name || "a product"} has changed. Please remove it from your cart and add it again.`,
+    );
     return {
       ...entry,
+      quantity: parsePositiveInteger(entry.quantity, 1),
+      price: roundMoney(expectedUnitPrice),
       metadata: applyServerCatalogSnapshotToLineMetadata(entry.metadata || {}, snapshot),
     };
   });
@@ -10182,7 +10414,21 @@ function validateOrderPayload(dataInput = {}) {
     address: (requestCustomer.address || fallback.address || "").toString().trim(),
   };
 
-  const items = Array.isArray(data?.items) ? data.items : [];
+  const itemsRaw = Array.isArray(data?.items) ? data.items : [];
+  const items = itemsRaw.map((item, index) => {
+    if (isGiftCardOrderItem(item)) {
+      return normalizeGiftCardCheckoutLine(item, index);
+    }
+    const price = Number(item?.price);
+    if (!Number.isFinite(price) || price < 0) {
+      throw new Error(`Order item ${index + 1} has an invalid price.`);
+    }
+    return {
+      ...item,
+      quantity: parsePositiveInteger(item?.quantity, 1),
+      price: roundMoney(price),
+    };
+  });
   if (!items.length) {
     throw new Error("Order items are required.");
   }
@@ -10248,11 +10494,6 @@ function validateOrderPayload(dataInput = {}) {
     return sum + price * (Number.isFinite(quantity) ? quantity : 1);
   }, 0);
 
-  const totalPrice = Number(data?.totalPrice ?? 0);
-  if (!Number.isFinite(totalPrice) || totalPrice <= 0) {
-    throw new Error("Order total must be greater than zero.");
-  }
-
   const shippingCostRaw = Number(data?.shippingCost ?? data?.shipping?.courierPrice ?? 0);
   const shippingCost =
     giftCardOnly
@@ -10261,7 +10502,25 @@ function validateOrderPayload(dataInput = {}) {
         ? shippingCostRaw
         : 0;
   const subtotalInput = Number(data?.subtotal ?? computedSubtotal);
-  const subtotal = Number.isFinite(subtotalInput) ? subtotalInput : computedSubtotal;
+  if (Number.isFinite(subtotalInput)) {
+    assertMoneyValuesMatch(
+      subtotalInput,
+      computedSubtotal,
+      "Order subtotal does not match the selected items. Please refresh your cart and try again.",
+    );
+  }
+  const subtotal = roundMoney(computedSubtotal);
+  const expectedTotalPrice = roundMoney(subtotal + shippingCost);
+  const submittedTotalPrice = Number(data?.totalPrice ?? 0);
+  if (!Number.isFinite(submittedTotalPrice) || submittedTotalPrice <= 0) {
+    throw new Error("Order total must be greater than zero.");
+  }
+  assertMoneyValuesMatch(
+    submittedTotalPrice,
+    expectedTotalPrice,
+    "Order total does not match the selected items. Please refresh your cart and try again.",
+  );
+  const totalPrice = expectedTotalPrice;
   const shipping = requiresShipping && data?.shipping
     ? {
         courierId: (data.shipping.courierId || "").toString().trim() || null,
