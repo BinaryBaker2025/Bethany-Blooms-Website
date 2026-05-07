@@ -10300,6 +10300,14 @@ async function enrichOrderItemsUsingProductCatalog(itemsRaw = []) {
   if (!productIds.length && !workshopIds.length) {
     return items;
   }
+  const invalidProductId = productIds.find((id) => !isValidFirestoreDocumentId(id));
+  if (invalidProductId) {
+    throw new Error("A product in your cart is invalid. Please remove it and add it again.");
+  }
+  const invalidWorkshopId = workshopIds.find((id) => !isValidFirestoreDocumentId(id));
+  if (invalidWorkshopId) {
+    throw new Error("A workshop in your cart is invalid. Please remove it and add it again.");
+  }
 
   const [productSnaps, workshopSnaps] = await Promise.all([
     Promise.all(productIds.map((id) => db.collection("products").doc(id).get())),
