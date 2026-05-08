@@ -835,9 +835,13 @@ async function loadDynamicSitemapEntries() {
 function buildRobotsTxt() {
   const sitemapBaseUrl = buildCanonicalAbsoluteUrl("/").replace(/\/+$/, "");
   const sitemapUrl = `${sitemapBaseUrl}/sitemap.xml`;
+  const llmsUrl = `${sitemapBaseUrl}/llms.txt`;
+  const llmsFullUrl = `${sitemapBaseUrl}/llms-full.txt`;
   return [
     "User-agent: *",
     "Allow: /",
+    "Allow: /llms.txt",
+    "Allow: /llms-full.txt",
     "Disallow: /admin",
     "Disallow: /account",
     "Disallow: /payment",
@@ -845,6 +849,9 @@ function buildRobotsTxt() {
     "Disallow: /cart",
     "Disallow: /design",
     `Sitemap: ${sitemapUrl}`,
+    `# AI discovery`,
+    `# ${llmsUrl}`,
+    `# ${llmsFullUrl}`,
     "",
   ].join("\n");
 }

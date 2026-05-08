@@ -17,6 +17,7 @@ import workshopGuestsSmiling from "../assets/photos/workshop-guests-smiling.jpg"
 import dahliaTuberbethanyGrown from "../assets/1776890371243-_CWP9544.jpg";
 import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
 import { testimonials } from "../data/testimonials.js";
+import { buildCanonicalUrl } from "../lib/seo.js";
 
 const FALLBACK_PRODUCTS = [
   {
@@ -68,10 +69,69 @@ const stripHtml = (value = "") =>
     .trim();
 
 function HomePage() {
+  const localBusinessSchema = {
+    "@type": "Florist",
+    name: "Bethany Blooms",
+    url: buildCanonicalUrl("/"),
+    image: [buildCanonicalUrl("/bradb-favicon.png")],
+    email: "admin@bethanyblooms.co.za",
+    telephone: "+27 74 455 5590",
+    address: {
+      "@type": "PostalAddress",
+      addressLocality: "Vereeniging",
+      addressCountry: "ZA",
+    },
+    areaServed: [
+      {
+        "@type": "City",
+        name: "Vereeniging",
+      },
+      {
+        "@type": "Country",
+        name: "South Africa",
+      },
+    ],
+    sameAs: [
+      "https://www.instagram.com/bethany_bl.0oms?igsh=Mmp0bWZzNmlsY2dt",
+      "https://www.facebook.com/share/1PnGmuhZoJ/",
+    ],
+    openingHoursSpecification: [
+      {
+        "@type": "OpeningHoursSpecification",
+        dayOfWeek: ["Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+        opens: "09:00",
+        closes: "16:00",
+      },
+    ],
+    makesOffer: [
+      { "@type": "Offer", name: "Fresh Cut Flowers" },
+      { "@type": "Offer", name: "Pressed Flower Workshops" },
+      { "@type": "Offer", name: "Custom Pressed Floral Art" },
+      { "@type": "Offer", name: "Floral Gifting" },
+    ],
+  };
+
+  const websiteSchema = {
+    "@type": "WebSite",
+    name: "Bethany Blooms",
+    url: buildCanonicalUrl("/"),
+    inLanguage: "en-ZA",
+    potentialAction: {
+      "@type": "ViewAction",
+      target: [
+        buildCanonicalUrl("/products"),
+        buildCanonicalUrl("/workshops"),
+        buildCanonicalUrl("/contact"),
+      ],
+    },
+  };
+
   usePageMetadata({
     title: "Bethany Blooms | Cut & Pressed Flowers, Made Beautifully Simple",
     description:
       "Bethany Blooms offers fresh cut flowers, artisanal pressed flower workshops, DIY kits, and custom floral art from Vereeniging, South Africa.",
+    structuredData: [localBusinessSchema, websiteSchema],
+    structuredDataId: "home-business-graph",
   });
 
   const { items: remoteProducts, status: productsStatus } =

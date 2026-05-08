@@ -61,6 +61,28 @@ function upsertCanonicalLink(href) {
   document.head.appendChild(element);
 }
 
+function upsertJsonLdScript(scriptId, data) {
+  if (!scriptId) return;
+  const selector = `script[data-seo-jsonld="${scriptId}"]`;
+  const existing = document.querySelector(selector);
+  const normalizedJson = JSON.stringify(data);
+  if (!normalizedJson || normalizedJson === "null") {
+    if (existing) existing.remove();
+    return;
+  }
+
+  if (existing) {
+    existing.textContent = normalizedJson;
+    return;
+  }
+
+  const element = document.createElement("script");
+  element.setAttribute("type", "application/ld+json");
+  element.setAttribute("data-seo-jsonld", scriptId);
+  element.textContent = normalizedJson;
+  document.head.appendChild(element);
+}
+
 export function usePageMetadata({
   title,
   description,
@@ -77,6 +99,8 @@ export function usePageMetadata({
   twitterTitle,
   twitterDescription,
   twitterImage,
+  structuredData,
+  structuredDataId,
   noIndex,
 } = {}) {
   const location = useLocation();
@@ -158,6 +182,16 @@ export function usePageMetadata({
     upsertMetaByName("twitter:image", resolvedTwitterImage);
 
     upsertCanonicalLink(resolvedCanonical);
+
+    if (structuredData) {
+      const payload = Array.isArray(structuredData)
+        ? { "@context": "https://schema.org", "@graph": structuredData }
+        : structuredData;
+      upsertJsonLdScript(
+        normalizeMetaValue(structuredDataId) || "page-structured-data",
+        payload,
+      );
+    }
   }, [
     location?.pathname,
     title,
@@ -175,6 +209,8 @@ export function usePageMetadata({
     twitterTitle,
     twitterDescription,
     twitterImage,
+    structuredData,
+    structuredDataId,
     noIndex,
   ]);
 }

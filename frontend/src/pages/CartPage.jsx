@@ -61,6 +61,9 @@ const normalizeGiftCardOptionQuantity = (value) => {
   return Math.min(200, parsed);
 };
 
+const normalizeCheckoutPostalCode = (value) =>
+  String(value ?? "").replace(/\D/g, "").slice(0, 4);
+
 function CartPage() {
   const navigate = useNavigate();
   usePageMetadata({
@@ -366,7 +369,7 @@ function CartPage() {
         suburb: (entry.suburb || "").toString().trim(),
         city: (entry.city || "").toString().trim(),
         province: (entry.province || "").toString().trim(),
-        postalCode: (entry.postalCode || "").toString().trim(),
+        postalCode: normalizeCheckoutPostalCode(entry.postalCode || ""),
       }))
       .filter(
         (entry) =>
@@ -581,7 +584,7 @@ function CartPage() {
       suburb: selectedAddress.suburb,
       city: selectedAddress.city,
       province: selectedAddress.province,
-      postalCode: selectedAddress.postalCode,
+      postalCode: normalizeCheckoutPostalCode(selectedAddress.postalCode),
     }));
   }, [requiresShipping, savedAddresses, selectedSavedAddressId]);
 
@@ -704,7 +707,11 @@ function CartPage() {
   };
 
   const handleAddressChange = (field) => (event) => {
-    const value = event.target.value;
+    const raw = event.target.value;
+    const value =
+      field === "postalCode"
+        ? normalizeCheckoutPostalCode(raw)
+        : raw;
     setShippingAddress((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -1933,13 +1940,15 @@ function CartPage() {
                                     <input
                                       className="input"
                                       type="text"
+                                      inputMode="numeric"
                                       autoComplete="postal-code"
                                       value={shippingAddress.postalCode}
                                       onChange={handleAddressChange(
                                         "postalCode",
                                       )}
                                       placeholder="0000"
-                                      pattern="\\d{4}"
+                                      pattern="[0-9]{4}"
+                                      maxLength={4}
                                       required
                                     />
                                   </label>
