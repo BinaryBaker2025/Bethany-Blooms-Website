@@ -5,6 +5,10 @@ import { usePageMetadata } from "../../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../../hooks/useFirestoreCollection.js";
 import { getFirebaseDb, getFirebaseFunctions } from "../../lib/firebase.js";
 import { SA_PROVINCES, formatShippingAddress } from "../../lib/shipping.js";
+import {
+  isSubscriptionInvoiceSettled,
+  normalizeSubscriptionInvoiceStatus,
+} from "../../lib/subscriptionInvoiceStatus.js";
 
 const EMPTY_ADDRESS = Object.freeze({
   label: "",
@@ -46,24 +50,6 @@ const PAYMENT_STATUS = {
 
 const normalizeSubscriptionStatus = (value = "") =>
   (value || "").toString().trim().toLowerCase() || "active";
-
-const normalizeSubscriptionInvoiceStatus = (value = "") => {
-  const normalized = (value || "")
-    .toString()
-    .trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, "-");
-  if (normalized === "paid" || normalized === "complete" || normalized === "completed") {
-    return "paid";
-  }
-  if (normalized === "cancelled" || normalized === "canceled") {
-    return "cancelled";
-  }
-  if (normalized === "overdue") {
-    return "overdue";
-  }
-  return "pending-payment";
-};
 
 const normalizePaymentMethod = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
@@ -206,7 +192,12 @@ const formatSubscriptionPlanLabel = (subscription) => {
 const formatPaidDate = (invoice) => {
   if (!invoice) return null;
   // Check various possible paid date fields
-  const paidAt = invoice?.paidAt || invoice?.paymentReceivedAt || invoice?.paidDate || invoice?.completedAt;
+  const paidAt =
+    invoice?.paidAt ||
+    invoice?.paymentReceivedAt ||
+    invoice?.paidDate ||
+    invoice?.completedAt ||
+    invoice?.paymentApproval?.decidedAt;
   if (!paidAt) return null;
   
   let date = null;
@@ -236,10 +227,26 @@ const getLastPaymentDate = (invoices = [], subscriptionId) => {
   );
   
   const paidInvoices = subscriptionInvoices
-    .filter(inv => normalizeSubscriptionInvoiceStatus(inv?.status) === "paid")
+    .filter(inv => isSubscriptionInvoiceSettled(inv))
     .sort((a, b) => {
-      const dateA = formatPaidDate(a)?.getTime?.() || new Date(a?.paidAt || a?.paymentReceivedAt || a?.paidDate || a?.completedAt || 0).getTime() || 0;
-      const dateB = formatPaidDate(b)?.getTime?.() || new Date(b?.paidAt || b?.paymentReceivedAt || b?.paidDate || b?.completedAt || 0).getTime() || 0;
+      const dateA =
+        new Date(
+          a?.paidAt ||
+            a?.paymentReceivedAt ||
+            a?.paidDate ||
+            a?.completedAt ||
+            a?.paymentApproval?.decidedAt ||
+            0,
+        ).getTime() || 0;
+      const dateB =
+        new Date(
+          b?.paidAt ||
+            b?.paymentReceivedAt ||
+            b?.paidDate ||
+            b?.completedAt ||
+            b?.paymentApproval?.decidedAt ||
+            0,
+        ).getTime() || 0;
       return dateB - dateA;
     });
   
@@ -569,7 +576,7 @@ export function AdminUsersView() {
       // Get latest paid invoice for payment info
       const latestInvoice = sortedInvoices[0];
       const latestPaidInvoice = sortedInvoices.find(inv => 
-        normalizeSubscriptionInvoiceStatus(inv.status) === "paid"
+        isSubscriptionInvoiceSettled(inv)
       );
       
       return {

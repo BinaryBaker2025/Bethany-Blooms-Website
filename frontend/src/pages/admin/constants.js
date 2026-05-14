@@ -6,6 +6,7 @@ const createTimeSlot = () => ({
   time: "",
   label: "",
   capacity: String(DEFAULT_SLOT_CAPACITY),
+  originalCapacity: String(DEFAULT_SLOT_CAPACITY),
 });
 
 const createDateGroup = () => ({

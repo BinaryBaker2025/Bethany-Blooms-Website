@@ -356,7 +356,11 @@ function PosCatalogBrowser({
     const priceLabel = Number.isFinite(optionPrice)
       ? formatCurrency(optionPrice)
       : workshop.displayPrice;
-    const canAdd = workshop.options.length === 0 || Boolean(selectedOption);
+    const selectedSessionFull =
+      typeof selectedSession?.capacity === "number" && selectedSession.capacity <= 0;
+    const canAdd =
+      (workshop.sessions.length === 0 || (Boolean(selectedSession) && !selectedSessionFull)) &&
+      (workshop.options.length === 0 || Boolean(selectedOption));
 
     return (
       <article
@@ -397,8 +401,17 @@ function PosCatalogBrowser({
                   }
                 >
                   {workshop.sessions.map((session) => (
-                    <option key={session.id} value={session.id}>
+                    <option
+                      key={session.id}
+                      value={session.id}
+                      disabled={typeof session.capacity === "number" && session.capacity <= 0}
+                    >
                       {session.label}
+                      {typeof session.capacity === "number"
+                        ? session.capacity > 0
+                          ? ` - ${session.capacity} seat${session.capacity === 1 ? "" : "s"}`
+                          : " - fully booked"
+                        : ""}
                     </option>
                   ))}
                 </select>

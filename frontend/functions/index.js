@@ -9566,8 +9566,10 @@ function buildBookingData(item, customer = {}, orderId) {
     "no-reply@bethanyblooms.co.za";
 
   return {
+    fullName: bookingName,
     name: bookingName,
     email: bookingEmail,
+    phone: item.metadata?.customer?.phone || customer.phone || null,
     frame: frameValue,
     optionLabel: item.metadata?.optionLabel || null,
     optionValue: item.metadata?.optionValue || item.metadata?.optionId || item.metadata?.framePreference || null,
@@ -9599,6 +9601,138 @@ function buildBookingData(item, customer = {}, orderId) {
   };
 }
 
+function getBookingSeatCount(booking = {}) {
+  return Math.max(1, Number.parseInt(booking.attendeeCount, 10) || 1);
+}
+
+function buildWorkshopSeatReservationGroups(bookings = []) {
+  const workshopGroups = new Map();
+
+  bookings.forEach((booking) => {
+    const sessionSource = (booking?.sessionSource || "").toString().trim().toLowerCase();
+    const workshopId = (booking?.workshopId || "").toString().trim();
+    const sessionId = (booking?.sessionId || "").toString().trim();
+
+    if (!workshopId || !sessionId || sessionSource === "customer-requested") {
+      return;
+    }
+
+    if (!workshopGroups.has(workshopId)) {
+      workshopGroups.set(workshopId, new Map());
+    }
+    const sessionGroups = workshopGroups.get(workshopId);
+    sessionGroups.set(sessionId, (sessionGroups.get(sessionId) || 0) + getBookingSeatCount(booking));
+  });
+
+  return workshopGroups;
+}
+
+async function decrementWorkshopSessionSeatsForBookings(transaction, bookings = []) {
+  const workshopGroups = buildWorkshopSeatReservationGroups(bookings);
+  if (!workshopGroups.size) return;
+
+  const workshopSnapshots = [];
+  for (const [workshopId, sessionGroups] of workshopGroups.entries()) {
+    const workshopRef = db.collection("workshops").doc(workshopId);
+    const workshopSnap = await transaction.get(workshopRef);
+    workshopSnapshots.push({ workshopId, sessionGroups, workshopRef, workshopSnap });
+  }
+
+  for (const { workshopId, sessionGroups, workshopRef, workshopSnap } of workshopSnapshots) {
+    if (!workshopSnap.exists) {
+      throw new Error("Selected workshop could not be found.");
+    }
+
+    const workshop = workshopSnap.data() || {};
+    const sessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
+    let changed = false;
+    const nextSessions = sessions.map((session, index) => {
+      const sessionId = (session?.id || `session-${index}-${workshopId}`).toString().trim();
+      const requestedSeats = sessionGroups.get(sessionId) || 0;
+      if (!requestedSeats) return session;
+
+      const currentCapacity = Number(session?.capacity);
+      if (!Number.isFinite(currentCapacity)) {
+        return session;
+      }
+      if (currentCapacity < requestedSeats) {
+        const title = workshop.title || workshop.name || "Workshop";
+        const label = session?.label || session?.timeRangeLabel || session?.date || "selected session";
+        throw new Error(
+          `${title} ${label} only has ${Math.max(0, currentCapacity)} seat${currentCapacity === 1 ? "" : "s"} left.`,
+        );
+      }
+
+      const originalCapacity = Number(
+        session?.originalCapacity ??
+          session?.initialCapacity ??
+          session?.capacityOriginal ??
+          session?.totalCapacity,
+      );
+      const nextSession = {
+        ...session,
+        capacity: currentCapacity - requestedSeats,
+        originalCapacitySource: "capacity-decrement",
+      };
+      if (!Number.isFinite(originalCapacity)) {
+        nextSession.originalCapacity = currentCapacity;
+      }
+
+      changed = true;
+      return nextSession;
+    });
+
+    if (changed) {
+      transaction.set(
+        workshopRef,
+        {
+          sessions: nextSessions,
+          updatedAt: FIELD_VALUE.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+  }
+}
+
+async function sendWorkshopBookingConfirmationForVerifiedPayment(booking = {}) {
+  if (!booking?.email || !(booking?.fullName || booking?.name)) {
+    return { skipped: true, reason: "missing-recipient" };
+  }
+
+  const payload = {
+    ...booking,
+    type: "workshop",
+    fullName: booking.fullName || booking.name || "Guest",
+  };
+  const fullName = payload.fullName;
+  const adminSendResult = await sendEmail({
+    to: getAdminEmail(),
+    subject: `New Workshop booking - ${fullName}`,
+    html: buildWorkshopAdminEmailHtml(payload),
+  });
+  const customerSendResult = await sendEmail({
+    to: payload.email,
+    subject: "Bethany Blooms - Workshop booking received",
+    html: buildWorkshopCustomerHtml(payload),
+  });
+
+  try {
+    await persistWorkshopBookingEmailAudit(payload, {
+      adminSendResult,
+      customerSendResult,
+    });
+  } catch (error) {
+    functions.logger.error("Unable to persist verified workshop booking email audit", error);
+  }
+
+  return {
+    skipped: false,
+    adminSendResult,
+    customerSendResult,
+  };
+}
+
 async function createBookingsForOrder(items, customer, orderId) {
   if (!orderId) return;
   const bookings = items
@@ -9607,21 +9741,42 @@ async function createBookingsForOrder(items, customer, orderId) {
 
   if (!bookings.length) return;
 
-  const existingSnap = await db
-    .collection("bookings")
-    .where("orderId", "==", orderId)
-    .limit(1)
-    .get();
-  if (!existingSnap.empty) {
-    return;
-  }
+  const createdBookings = await db.runTransaction(async (transaction) => {
+    const existingQuery = db
+      .collection("bookings")
+      .where("orderId", "==", orderId)
+      .limit(1);
+    const existingSnap = await transaction.get(existingQuery);
+    if (!existingSnap.empty) {
+      return [];
+    }
 
-  const batch = db.batch();
-  bookings.forEach((booking) => {
-    const docRef = db.collection("bookings").doc();
-    batch.set(docRef, booking);
+    await decrementWorkshopSessionSeatsForBookings(transaction, bookings);
+
+    bookings.forEach((booking) => {
+      const docRef = db.collection("bookings").doc();
+      transaction.set(docRef, booking);
+    });
+
+    return bookings;
   });
-  await batch.commit();
+
+  if (!createdBookings.length) return;
+
+  await Promise.all(
+    createdBookings.map(async (booking) => {
+      try {
+        return await sendWorkshopBookingConfirmationForVerifiedPayment(booking);
+      } catch (error) {
+        functions.logger.error("Verified workshop booking email failed", {
+          orderId,
+          email: booking?.email || null,
+          error: error?.message || error,
+        });
+        return { skipped: true, reason: "send-failed" };
+      }
+    }),
+  );
 }
 
 function parsePositiveInteger(value, fallback = 1) {
@@ -11872,10 +12027,51 @@ function normalizeSubscriptionStatus(value = "") {
 }
 
 function normalizeSubscriptionInvoiceStatus(value = "") {
-  const normalized = (value || "").toString().trim().toLowerCase();
-  if (normalized === SUBSCRIPTION_INVOICE_STATUSES.PAID) return SUBSCRIPTION_INVOICE_STATUSES.PAID;
-  if (normalized === SUBSCRIPTION_INVOICE_STATUSES.CANCELLED) return SUBSCRIPTION_INVOICE_STATUSES.CANCELLED;
+  const normalized = (value || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+  if (
+    normalized === SUBSCRIPTION_INVOICE_STATUSES.PAID ||
+    normalized === "complete" ||
+    normalized === "completed"
+  ) {
+    return SUBSCRIPTION_INVOICE_STATUSES.PAID;
+  }
+  if (
+    normalized === SUBSCRIPTION_INVOICE_STATUSES.CANCELLED ||
+    normalized === "canceled"
+  ) {
+    return SUBSCRIPTION_INVOICE_STATUSES.CANCELLED;
+  }
   return SUBSCRIPTION_INVOICE_STATUSES.PENDING;
+}
+
+function resolveCanonicalSubscriptionInvoiceStatus(value = "") {
+  const rawStatus = (value || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+  return {
+    rawStatus,
+    canonicalStatus: normalizeSubscriptionInvoiceStatus(rawStatus),
+  };
+}
+
+function resolveSubscriptionInvoicePaidAtBackfill(invoice = {}) {
+  const candidates = [
+    invoice?.paidAt,
+    invoice?.paymentReceivedAt,
+    invoice?.paidDate,
+    invoice?.completedAt,
+  ];
+  for (const candidate of candidates) {
+    const normalizedDate = coerceTimestampToDate(candidate);
+    if (normalizedDate) return normalizedDate;
+  }
+  return null;
 }
 
 function normalizeSubscriptionPaymentMethod(value = "") {
@@ -11900,6 +12096,37 @@ function normalizeSubscriptionPaymentApprovalStatus(value = "", paymentMethod = 
   return normalizedMethod === SUBSCRIPTION_PAYMENT_METHODS.EFT
     ? SUBSCRIPTION_PAYMENT_APPROVAL_STATUSES.PENDING
     : SUBSCRIPTION_PAYMENT_APPROVAL_STATUSES.NOT_REQUIRED;
+}
+
+function isSubscriptionInvoiceSettled(invoice = {}, fallbackPaymentMethod = "") {
+  const normalizedInvoiceStatus = normalizeSubscriptionInvoiceStatus(invoice?.status || "");
+  if (normalizedInvoiceStatus === SUBSCRIPTION_INVOICE_STATUSES.PAID) {
+    return true;
+  }
+  if (normalizedInvoiceStatus === SUBSCRIPTION_INVOICE_STATUSES.CANCELLED) {
+    return false;
+  }
+
+  const normalizedPaymentMethod = normalizeSubscriptionPaymentMethod(
+    fallbackPaymentMethod || invoice?.paymentMethod || "",
+  );
+  if (normalizedPaymentMethod !== SUBSCRIPTION_PAYMENT_METHODS.EFT) {
+    return false;
+  }
+
+  const normalizedPaymentApprovalStatus = normalizeSubscriptionPaymentApprovalStatus(
+    invoice?.paymentApprovalStatus || invoice?.paymentApproval?.decision || "",
+    normalizedPaymentMethod,
+  );
+  return normalizedPaymentApprovalStatus === SUBSCRIPTION_PAYMENT_APPROVAL_STATUSES.APPROVED;
+}
+
+function isSubscriptionInvoicePendingActionable(invoice = {}, fallbackPaymentMethod = "") {
+  return (
+    normalizeSubscriptionInvoiceStatus(invoice?.status || "") ===
+      SUBSCRIPTION_INVOICE_STATUSES.PENDING &&
+    !isSubscriptionInvoiceSettled(invoice, fallbackPaymentMethod)
+  );
 }
 
 function buildSubscriptionPaymentApprovalState({
@@ -12506,14 +12733,18 @@ function getLatestPendingTopUpInvoice(cycleInvoices = []) {
   return rows
     .filter((invoice) =>
       normalizeSubscriptionInvoiceType(invoice?.invoiceType || "") === SUBSCRIPTION_INVOICE_TYPES.TOPUP &&
-      normalizeSubscriptionInvoiceStatus(invoice?.status || "") === SUBSCRIPTION_INVOICE_STATUSES.PENDING,
+      isSubscriptionInvoicePendingActionable(invoice),
     )
     .sort(sortSubscriptionInvoicesNewestFirst)[0] || null;
 }
 
 async function loadLatestPendingSubscriptionInvoice(subscriptionId = "") {
   const invoices = await loadSubscriptionInvoices(subscriptionId);
-  return invoices.find((invoice) => normalizeSubscriptionInvoiceStatus(invoice.status) === SUBSCRIPTION_INVOICE_STATUSES.PENDING) || null;
+  return (
+    invoices.find((invoice) =>
+      isSubscriptionInvoicePendingActionable(invoice),
+    ) || null
+  );
 }
 
 async function supersedePendingSubscriptionPayfastSessionsForInvoice(
@@ -14551,7 +14782,7 @@ exports.updateCustomerSubscriptionStatus = onCall(async (request) => {
     const batch = db.batch();
     let changeCount = 0;
     invoiceRows.forEach((invoice) => {
-      if (normalizeSubscriptionInvoiceStatus(invoice.status) !== SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
+      if (!isSubscriptionInvoicePendingActionable(invoice, subscription?.paymentMethod || "")) {
         return;
       }
       batch.set(
@@ -14602,6 +14833,9 @@ async function sendSubscriptionInvoiceEmailNowForResolvedInvoice({
     paymentMethod: normalizedPaymentMethod,
     paymentApprovalStatus: normalizedPaymentApprovalStatus,
   };
+  if (isSubscriptionInvoiceSettled(invoice, normalizedPaymentMethod)) {
+    throw new HttpsError("failed-precondition", "This subscription invoice is already settled.");
+  }
   if (normalizedInvoiceStatus !== SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
     throw new HttpsError("failed-precondition", "No pending invoice is available for this subscription.");
   }
@@ -15168,8 +15402,12 @@ exports.sendMonthlySubscriptionInvoices = onSchedule(
         });
 
         const invoice = invoiceResult.invoice || {};
-        const invoiceStatus = normalizeSubscriptionInvoiceStatus(invoice.status);
-        if (invoiceStatus !== SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
+        if (
+          !isSubscriptionInvoicePendingActionable(
+            invoice,
+            normalizeSubscriptionPaymentMethod(subscription?.paymentMethod),
+          )
+        ) {
           skipped += 1;
           continue;
         }
@@ -15636,6 +15874,10 @@ exports.adminUpdateSubscriptionPlanAssignment = onCall(async (request) => {
 
     if (baseInvoice && baseInvoiceId) {
       const baseInvoiceStatus = normalizeSubscriptionInvoiceStatus(baseInvoice?.status || "");
+      const baseInvoiceSettled = isSubscriptionInvoiceSettled(
+        baseInvoice,
+        nextSubscriptionPatch?.paymentMethod || nextSubscription?.paymentMethod || "",
+      );
       const baseInvoiceFinancials = resolveSubscriptionInvoiceFinancialSnapshot(baseInvoice);
       const newBaseAmount = computeCycleBaseAmount({
         tier: nextSubscriptionPatch.tier,
@@ -15643,7 +15885,7 @@ exports.adminUpdateSubscriptionPlanAssignment = onCall(async (request) => {
         deliverySchedule: baseInvoice?.deliverySchedule || null,
       });
 
-      if (baseInvoiceStatus === SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
+      if (!baseInvoiceSettled && baseInvoiceStatus === SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
         const result = await applySubscriptionInvoiceFinancialUpdate({
           invoiceRef: cycleContext.baseInvoiceRef,
           invoiceId: baseInvoiceId,
@@ -15671,7 +15913,7 @@ exports.adminUpdateSubscriptionPlanAssignment = onCall(async (request) => {
         affectedInvoiceType = SUBSCRIPTION_INVOICE_TYPES.CYCLE;
         invoiceAmount = roundMoney(Number(result?.invoice?.amount || 0));
         targetInvoiceForEmail = { id: baseInvoiceId, ...(result?.invoice || {}) };
-      } else if (baseInvoiceStatus === SUBSCRIPTION_INVOICE_STATUSES.PAID) {
+      } else if (baseInvoiceSettled) {
         const difference = roundMoney(newBaseAmount - baseInvoiceFinancials.baseAmount);
         if (difference > 0) {
           const topupContext = await ensurePendingCycleTopUpInvoice({
@@ -15880,8 +16122,12 @@ exports.adminAddSubscriptionInvoiceCharge = onCall(async (request) => {
   let targetInvoiceRef = baseContext.baseInvoiceRef;
   let targetInvoiceType = SUBSCRIPTION_INVOICE_TYPES.CYCLE;
   const baseInvoiceStatus = normalizeSubscriptionInvoiceStatus(targetInvoice?.status || "");
+  const baseInvoiceSettled = isSubscriptionInvoiceSettled(
+    targetInvoice,
+    workingSubscription?.paymentMethod || "",
+  );
 
-  if (baseInvoiceStatus === SUBSCRIPTION_INVOICE_STATUSES.PAID) {
+  if (baseInvoiceSettled) {
     const topupContext = await ensurePendingCycleTopUpInvoice({
       subscriptionId,
       subscription: workingSubscription,
@@ -16082,7 +16328,7 @@ exports.adminRemoveSubscriptionRecurringCharge = onCall(async (request) => {
     for (const cycleInvoice of cycleInvoices) {
       const cycleInvoiceId = (cycleInvoice?.id || cycleInvoice?.invoiceId || "").toString().trim();
       if (!cycleInvoiceId) continue;
-      if (normalizeSubscriptionInvoiceStatus(cycleInvoice?.status || "") !== SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
+      if (!isSubscriptionInvoicePendingActionable(cycleInvoice, subscription?.paymentMethod || "")) {
         continue;
       }
       const currentFinancials = resolveSubscriptionInvoiceFinancialSnapshot(cycleInvoice);
@@ -16173,7 +16419,12 @@ exports.attachSubscriptionEftPaymentProof = onCall(async (request) => {
   } = await resolveSubscriptionInvoiceForUser(request.data?.invoiceId, request.auth);
 
   const invoiceStatus = normalizeSubscriptionInvoiceStatus(invoice?.status || "");
-  if (invoiceStatus !== SUBSCRIPTION_INVOICE_STATUSES.PENDING) {
+  if (
+    !isSubscriptionInvoicePendingActionable(
+      invoice,
+      invoice?.paymentMethod || subscription?.paymentMethod || "",
+    )
+  ) {
     throw new HttpsError(
       "failed-precondition",
       "Proof upload is only available while invoice payment is pending.",
@@ -16705,6 +16956,109 @@ exports.adminUpsertSubscriptionInvoiceStatus = onCall(async (request) => {
     invoiceCreated,
     invoiceNumber: normalizeInvoiceSequenceNumber(refreshedInvoice.invoiceNumber),
     amount: Number(refreshedInvoice.amount || 0),
+  };
+});
+
+exports.adminNormalizeSubscriptionInvoiceStatuses = onCall(async (request) => {
+  await assertAdminRequest(request);
+
+  const actorUid = (request.auth?.uid || "").toString().trim();
+  const actorEmail = (request.auth?.token?.email || "").toString().trim().toLowerCase();
+  const rewriteableLegacyStatuses = new Set(["complete", "completed", "canceled"]);
+  const pageSize = 400;
+
+  let lastDocSnapshot = null;
+  let scannedCount = 0;
+  let changedCount = 0;
+  let skippedCount = 0;
+  let paidBackfilledCount = 0;
+  let changedToPaidCount = 0;
+  let changedToCancelledCount = 0;
+
+  while (true) {
+    let queryRef = db
+      .collection(SUBSCRIPTION_INVOICES_COLLECTION)
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(pageSize);
+    if (lastDocSnapshot) {
+      queryRef = queryRef.startAfter(lastDocSnapshot);
+    }
+
+    const snapshot = await queryRef.get();
+    if (snapshot.empty) break;
+
+    const batch = db.batch();
+    let batchChangeCount = 0;
+
+    snapshot.docs.forEach((docSnapshot) => {
+      scannedCount += 1;
+      const invoice = docSnapshot.data() || {};
+      const { rawStatus, canonicalStatus } = resolveCanonicalSubscriptionInvoiceStatus(
+        invoice?.status || "",
+      );
+
+      if (!rewriteableLegacyStatuses.has(rawStatus)) {
+        skippedCount += 1;
+        return;
+      }
+
+      const updatePayload = {
+        status: canonicalStatus,
+        updatedAt: FIELD_VALUE.serverTimestamp(),
+      };
+
+      if (
+        canonicalStatus === SUBSCRIPTION_INVOICE_STATUSES.PAID &&
+        !invoice?.paidAt
+      ) {
+        const paidAtBackfill = resolveSubscriptionInvoicePaidAtBackfill(invoice);
+        if (paidAtBackfill) {
+          updatePayload.paidAt = paidAtBackfill;
+          paidBackfilledCount += 1;
+        }
+      }
+
+      batch.set(docSnapshot.ref, updatePayload, { merge: true });
+      batchChangeCount += 1;
+      changedCount += 1;
+      if (canonicalStatus === SUBSCRIPTION_INVOICE_STATUSES.PAID) {
+        changedToPaidCount += 1;
+      } else if (canonicalStatus === SUBSCRIPTION_INVOICE_STATUSES.CANCELLED) {
+        changedToCancelledCount += 1;
+      }
+    });
+
+    if (batchChangeCount > 0) {
+      await batch.commit();
+    }
+
+    lastDocSnapshot = snapshot.docs[snapshot.docs.length - 1];
+    if (snapshot.size < pageSize) break;
+  }
+
+  await writeSubscriptionAdminAuditLog({
+    actionType: "normalize-subscription-invoice-statuses",
+    actorUid,
+    actorEmail,
+    reason: "Canonicalized legacy subscription invoice status values.",
+    meta: {
+      scannedCount,
+      changedCount,
+      skippedCount,
+      paidBackfilledCount,
+      changedToPaidCount,
+      changedToCancelledCount,
+    },
+  });
+
+  return {
+    ok: true,
+    scannedCount,
+    changedCount,
+    skippedCount,
+    paidBackfilledCount,
+    changedToPaidCount,
+    changedToCancelledCount,
   };
 });
 
@@ -17422,7 +17776,22 @@ exports.payfastItn = onRequest(async (req, res) => {
       orderData: orderPayload,
       reason: "payfast-complete",
     });
-    await createBookingsForOrder(pending.items || [], pending.customer || {}, newOrderRef.id);
+    try {
+      await createBookingsForOrder(pending.items || [], pending.customer || {}, newOrderRef.id);
+    } catch (error) {
+      functions.logger.error("Unable to create paid workshop booking after PayFast verification", {
+        orderId: newOrderRef.id,
+        error: error?.message || error,
+      });
+      await newOrderRef.set(
+        {
+          workshopBookingStatus: "capacity-review-required",
+          workshopBookingError: error?.message || "Unable to reserve workshop seats.",
+          updatedAt: FIELD_VALUE.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
     await pendingRef.set(
       {
         status: "completed",
@@ -17606,7 +17975,22 @@ exports.reviewEftPayment = onCall(async (request) => {
       orderRef,
       reason: "eft-approved",
     });
-    await createBookingsForOrder(order.items || [], order.customer || {}, orderId);
+    try {
+      await createBookingsForOrder(order.items || [], order.customer || {}, orderId);
+    } catch (error) {
+      functions.logger.error("Unable to create paid workshop booking after EFT approval", {
+        orderId,
+        error: error?.message || error,
+      });
+      await orderRef.set(
+        {
+          workshopBookingStatus: "capacity-review-required",
+          workshopBookingError: error?.message || "Unable to reserve workshop seats.",
+          updatedAt: FIELD_VALUE.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
     await issueGiftCardsForOrder({
       orderRef,
       orderId,
@@ -18495,6 +18879,13 @@ exports.sendBookingEmail = onCall(async (request) => {
     throw new HttpsError(
       "invalid-argument",
       "Customer name and email are required.",
+    );
+  }
+
+  if (bookingType !== "cut-flower") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Workshop booking emails are sent only after payment is verified.",
     );
   }
 

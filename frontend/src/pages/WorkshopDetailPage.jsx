@@ -76,6 +76,9 @@ function parseDateValue(value) {
   return null;
 }
 
+const isWorkshopSessionFull = (session) =>
+  typeof session?.capacity === "number" && session.capacity <= 0;
+
 function formatDateInput(date) {
   return date.toISOString().slice(0, 10);
 }
@@ -222,7 +225,7 @@ function WorkshopDetailPage() {
               date: dateValue || formatDateInput(startDate),
               time: timeValue || formatTimeInput(startDate),
               timeRangeLabel,
-              capacity: Number.isFinite(capacityNumber) && capacityNumber > 0 ? capacityNumber : null,
+              capacity: Number.isFinite(capacityNumber) && capacityNumber >= 0 ? capacityNumber : null,
               isPast: startDate.getTime() < now,
             };
           })
@@ -322,17 +325,21 @@ function WorkshopDetailPage() {
       return;
     }
 
-    const hasActive = sessionList.some((session) => !session.isPast);
+    const hasActive = sessionList.some(
+      (session) => !session.isPast && !isWorkshopSessionFull(session),
+    );
     let nextSessionId = selectedSessionId;
     if (!nextSessionId || !sessionList.some((session) => session.id === nextSessionId)) {
       if (workshop.primarySessionId) {
         const primary = sessionList.find((session) => session.id === workshop.primarySessionId) ?? null;
-        if (primary && (!primary.isPast || !hasActive)) {
+        if (primary && ((!primary.isPast && !isWorkshopSessionFull(primary)) || !hasActive)) {
           nextSessionId = primary.id;
         }
       }
       if (!nextSessionId) {
-        const upcoming = sessionList.find((session) => !session.isPast);
+        const upcoming = sessionList.find(
+          (session) => !session.isPast && !isWorkshopSessionFull(session),
+        );
         nextSessionId = (upcoming ?? sessionList[0]).id;
       }
     }
@@ -352,6 +359,12 @@ function WorkshopDetailPage() {
     [workshop],
   );
   const isByRequest = sessions.length === 0;
+  const isFullyBooked = useMemo(() => {
+    if (isByRequest) return false;
+    const upcomingSessions = sessions.filter((session) => !session.isPast);
+    if (upcomingSessions.length === 0) return false;
+    return upcomingSessions.every((session) => isWorkshopSessionFull(session));
+  }, [isByRequest, sessions]);
 
   const sessionDays = useMemo(() => {
     if (!sessions.length) return [];
@@ -393,7 +406,9 @@ function WorkshopDetailPage() {
     () => selectedDayData?.sessions ?? [],
     [selectedDayData],
   );
-  const dayHasActiveSlots = selectedDaySlots.some((slot) => !slot.isPast);
+  const dayHasActiveSlots = selectedDaySlots.some(
+    (slot) => !slot.isPast && !isWorkshopSessionFull(slot),
+  );
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? selectedDaySlots[0] ?? null;
   const selectedDayLabel = selectedDayData?.label ?? null;
 
@@ -407,7 +422,9 @@ function WorkshopDetailPage() {
       setSelectedSessionId(null);
       return;
     }
-    const firstAvailable = selectedDaySlots.find((slot) => !slot.isPast) ?? selectedDaySlots[0];
+    const firstAvailable =
+      selectedDaySlots.find((slot) => !slot.isPast && !isWorkshopSessionFull(slot)) ??
+      selectedDaySlots[0];
     setSelectedSessionId(firstAvailable?.id ?? null);
   }, [selectedDayData, selectedDaySlots, selectedSession]);
 
@@ -427,7 +444,9 @@ function WorkshopDetailPage() {
 
   const capacityText =
     !isByRequest && typeof selectedSession?.capacity === "number"
-      ? `${selectedSession.capacity} seat${selectedSession.capacity === 1 ? "" : "s"} available`
+      ? selectedSession.capacity > 0
+        ? `${selectedSession.capacity} seat${selectedSession.capacity === 1 ? "" : "s"} available`
+        : "Fully booked"
       : null;
 
   const requestModeNote = `Choose any Monday to Saturday from tomorrow onward. Available windows: ${WORKSHOP_REQUEST_WINDOWS.join(
@@ -461,7 +480,8 @@ function WorkshopDetailPage() {
   const bookingSectionDescription = isByRequest
     ? "Pick your workshop option first. After that you can request your preferred date and start window in the booking form."
     : "Work through the session details below, choose the option that suits you, and then reserve your place.";
-  const bookingButtonDisabled = !isByRequest && !selectedSession;
+  const bookingButtonDisabled =
+    !isByRequest && (!selectedSession || isWorkshopSessionFull(selectedSession));
   const detailSections = sections.filter(({ key }) => Boolean(workshop?.[key]));
   const heroSummary =
     workshop?.description?.trim() ||
@@ -471,7 +491,9 @@ function WorkshopDetailPage() {
       ? "This workshop is booked by request. Choose your option, then submit the date and start window that suits you best."
       : "Use the booking planner to choose your date, time, and workshop option before reserving your place.");
   const heroImage = workshop?.image || heroBackground;
-  const anyFutureSessionDay = sessionDays.some((entry) => entry.sessions.some((slot) => !slot.isPast));
+  const anyFutureSessionDay = sessionDays.some((entry) =>
+    entry.sessions.some((slot) => !slot.isPast && !isWorkshopSessionFull(slot)),
+  );
 
   const handleSelectDay = (date) => {
     setSelectedDay(date);
@@ -628,7 +650,9 @@ function WorkshopDetailPage() {
 
           <div className="workshop-booking-section workshop-planner">
             <Reveal as="aside" className="workshop-planner__summary">
-              <span className="badge">{isByRequest ? "By Request" : "Reserve A Seat"}</span>
+              <span className={`badge ${isFullyBooked ? "badge--stock-out" : ""}`}>
+                {isFullyBooked ? "Fully booked" : isByRequest ? "By Request" : "Reserve A Seat"}
+              </span>
               <h3>{workshop.title}</h3>
               <p className="workshop-planner__summary-copy">{summaryCopy}</p>
 
@@ -676,12 +700,14 @@ function WorkshopDetailPage() {
                   <div className="session-picker__grid session-picker__grid--dates">
                     {sessionDays.map((day) => {
                       const isActive = day.date === selectedDay;
-                      const allPast = day.sessions.every((slot) => slot.isPast);
+                      const allUnavailable = day.sessions.every(
+                        (slot) => slot.isPast || isWorkshopSessionFull(slot),
+                      );
                       return (
                         <label
                           key={day.date}
                           className={`session-day-chip ${isActive ? "session-day-chip--active" : ""} ${
-                            allPast ? "session-day-chip--disabled" : ""
+                            allUnavailable ? "session-day-chip--disabled" : ""
                           }`}
                         >
                           <input
@@ -690,15 +716,15 @@ function WorkshopDetailPage() {
                             value={day.date}
                             checked={isActive}
                             onChange={() => handleSelectDay(day.date)}
-                            disabled={allPast && anyFutureSessionDay}
+                            disabled={allUnavailable && anyFutureSessionDay}
                           />
                           <span className="session-day-chip__label">{day.label}</span>
                           <span className="session-day-chip__meta">
                             {day.sessions.length} slot{day.sessions.length === 1 ? "" : "s"} available
                           </span>
-                          {allPast && (
+                          {allUnavailable && (
                             <span className="session-day-chip__meta session-day-chip__meta--warning">
-                              Past day
+                              {day.sessions.every((slot) => isWorkshopSessionFull(slot)) ? "Full" : "Unavailable"}
                             </span>
                           )}
                         </label>
@@ -716,7 +742,8 @@ function WorkshopDetailPage() {
                   </p>
                   <div className="session-slot-picker__grid">
                     {selectedDaySlots.map((slot) => {
-                      const disabled = slot.isPast && dayHasActiveSlots;
+                      const full = isWorkshopSessionFull(slot);
+                      const disabled = full || (slot.isPast && dayHasActiveSlots);
                       return (
                         <label
                           key={slot.id}
@@ -734,10 +761,17 @@ function WorkshopDetailPage() {
                           />
                           <span className="session-chip__label">{slot.timeRangeLabel || slot.formatted}</span>
                           <span className="session-chip__meta">
-                            {slot.capacity
-                              ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
+                            {typeof slot.capacity === "number"
+                              ? slot.capacity > 0
+                                ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
+                                : "Fully booked"
                               : "Open booking"}
                           </span>
+                          {full && (
+                            <span className="session-chip__meta session-chip__meta--warning">
+                              Full
+                            </span>
+                          )}
                           {slot.isPast && (
                             <span className="session-chip__meta session-chip__meta--warning">
                               Past session

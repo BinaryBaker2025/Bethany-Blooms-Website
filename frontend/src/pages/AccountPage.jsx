@@ -17,6 +17,10 @@ import {
 } from "../lib/paymentMethods.js";
 import { formatOrderStatusLabel } from "../lib/orderStatus.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
+import {
+  isSubscriptionInvoiceSettled,
+  normalizeSubscriptionInvoiceStatus,
+} from "../lib/subscriptionInvoiceStatus.js";
 import logo from "../assets/BethanyBloomsLogo.png";
 
 const emptyAddressDraft = {
@@ -53,21 +57,6 @@ const SUBSCRIPTION_INVOICE_STATUS_LABELS = {
 const SUBSCRIPTION_INVOICE_TYPES = {
   cycle: "cycle",
   topup: "topup",
-};
-
-const normalizeSubscriptionInvoiceStatus = (value = "") => {
-  const normalized = (value || "")
-    .toString()
-    .trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, "-");
-  if (normalized === "paid" || normalized === "complete" || normalized === "completed") {
-    return "paid";
-  }
-  if (normalized === "cancelled" || normalized === "canceled") {
-    return "cancelled";
-  }
-  return "pending-payment";
 };
 
 const normalizeSubscriptionInvoiceType = (value = "") => {
@@ -161,7 +150,12 @@ const getPaymentMethodDisplay = (paymentMethod) => {
 
 const formatPaidDate = (invoice) => {
   // Check various possible paid date fields
-  const paidAt = invoice?.paidAt || invoice?.paymentReceivedAt || invoice?.paidDate || invoice?.completedAt;
+  const paidAt =
+    invoice?.paidAt ||
+    invoice?.paymentReceivedAt ||
+    invoice?.paidDate ||
+    invoice?.completedAt ||
+    invoice?.paymentApproval?.decidedAt;
   if (!paidAt) return null;
   
   const date = toDate(paidAt);
@@ -191,10 +185,24 @@ const getPayFastTransactionId = (invoice) => {
 const getLastPaymentDate = (invoices = []) => {
   // Find the most recent paid invoice
   const paidInvoices = invoices
-    .filter((inv) => normalizeSubscriptionInvoiceStatus(inv?.status) === "paid")
+    .filter((inv) => isSubscriptionInvoiceSettled(inv))
     .sort((a, b) => {
-      const dateA = toDate(a?.paidAt || a?.paymentReceivedAt || a?.paidDate || a?.completedAt)?.getTime() || 0;
-      const dateB = toDate(b?.paidAt || b?.paymentReceivedAt || b?.paidDate || b?.completedAt)?.getTime() || 0;
+      const dateA =
+        toDate(
+          a?.paidAt ||
+            a?.paymentReceivedAt ||
+            a?.paidDate ||
+            a?.completedAt ||
+            a?.paymentApproval?.decidedAt,
+        )?.getTime() || 0;
+      const dateB =
+        toDate(
+          b?.paidAt ||
+            b?.paymentReceivedAt ||
+            b?.paidDate ||
+            b?.completedAt ||
+            b?.paymentApproval?.decidedAt,
+        )?.getTime() || 0;
       return dateB - dateA;
     });
   
@@ -214,6 +222,7 @@ const getTopUpStats = (invoices = [], subscriptionId) => {
   );
   
   const pendingTopUps = topUps.filter((inv) => 
+    !isSubscriptionInvoiceSettled(inv) &&
     normalizeSubscriptionInvoiceStatus(inv?.status) === "pending-payment"
   );
   
@@ -1510,6 +1519,7 @@ function AccountPage() {
     subscriptionInvoices.forEach((invoice) => {
       const subscriptionId = (invoice.subscriptionId || "").toString().trim();
       if (!subscriptionId) return;
+      if (isSubscriptionInvoiceSettled(invoice)) return;
       if (normalizeSubscriptionInvoiceStatus(invoice?.status) !== "pending-payment") return;
       pendingCount.set(subscriptionId, (pendingCount.get(subscriptionId) || 0) + 1);
       const current = latestPending.get(subscriptionId);
@@ -2032,11 +2042,16 @@ function AccountPage() {
                         : "last 5 days of the month";
                       const nextBillingCycleLabel = formatBillingMonthLabel(nextBillingMonth);
                       const latestInvoiceStatus = normalizeSubscriptionInvoiceStatus(latestInvoice?.status);
+                      const latestInvoiceSettled = latestInvoice
+                        ? isSubscriptionInvoiceSettled(latestInvoice)
+                        : false;
                       const latestInvoiceTypeLabel = formatSubscriptionInvoiceTypeLabel(
                         latestInvoiceFinancials?.invoiceType || "",
                       );
                       const latestInvoiceStatusLabel =
-                        SUBSCRIPTION_INVOICE_STATUS_LABELS[latestInvoiceStatus] ||
+                        (latestInvoiceSettled
+                          ? SUBSCRIPTION_INVOICE_STATUS_LABELS.paid
+                          : SUBSCRIPTION_INVOICE_STATUS_LABELS[latestInvoiceStatus]) ||
                         "Pending payment";
                       const pendingInvoiceAmount = Number(pendingInvoice?.amount || 0);
                       const amountDueNow =
@@ -2057,9 +2072,9 @@ function AccountPage() {
                           : `Pending ${pendingInvoiceTypeLabel.toLowerCase()} PayFast invoice ${pendingInvoice?.cycleMonth || "current cycle"}.`
                         : payLinkBlockedUntilBillingMonth
                           ? `No invoice payable right now. Next invoice window: ${nextInvoiceWindowLabel}.`
-                          : latestInvoice
-                            ? `Latest invoice is ${latestInvoiceStatusLabel.toLowerCase()}.`
-                            : "No invoice due right now.";
+                        : latestInvoice
+                          ? `Latest invoice is ${latestInvoiceStatusLabel.toLowerCase()}.`
+                          : "No invoice due right now.";
                       const amountDueExtraMeta = isPendingInvoice && pendingInvoiceCount > 1
                         ? `${pendingInvoiceCount} unpaid invoices on this subscription.`
                         : "";
@@ -2079,7 +2094,7 @@ function AccountPage() {
                         effectivePaymentMethod,
                         pendingInvoice?.paymentApprovalStatus || pendingInvoice?.paymentApproval?.decision || latestInvoice?.paymentApprovalStatus || latestInvoice?.paymentApproval?.decision,
                       );
-                      const paidDate = latestInvoice ? formatPaidDate(latestInvoice) : null;
+                      const paidDate = latestInvoiceSettled ? formatPaidDate(latestInvoice) : null;
                       const payFastTransactionId = latestInvoice ? getPayFastTransactionId(latestInvoice) : "";
                       const topUpStats = getTopUpStats(subscriptionInvoices, subscription.id);
                       const lastPaymentDate = getLastPaymentDate(subscriptionInvoices);

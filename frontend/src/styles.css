@@ -1402,7 +1402,8 @@ main {
 }
 
 .cut-flower-card__badge,
-.cut-flower-card__price-tag {
+.cut-flower-card__price-tag,
+.cut-flower-card__status-badge {
   position: absolute;
   z-index: 1;
   border-radius: 999px;
@@ -1425,6 +1426,15 @@ main {
   bottom: 1rem;
   background: rgba(85, 107, 47, 0.9);
   color: #fdfbf4;
+  box-shadow: 0 16px 28px -20px rgba(47, 54, 36, 0.65);
+}
+
+.cut-flower-card__status-badge {
+  top: 1rem;
+  right: 1rem;
+  background: rgba(178, 69, 59, 0.92);
+  color: #fffaf1;
+  border: 1px solid rgba(255, 250, 241, 0.45);
   box-shadow: 0 16px 28px -20px rgba(47, 54, 36, 0.65);
 }
 

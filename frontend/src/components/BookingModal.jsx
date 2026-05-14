@@ -33,7 +33,9 @@ const parseMinAttendees = (option, label) => {
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
   if (!label) return null;
   const normalized = label.toLowerCase();
-  const match = normalized.match(/(\d+)\s*\+|(\d+)\s*(?:or|and)\s*more|minimum\s*(\d+)/);
+  const match = normalized.match(
+    /(\d+)\s*\+|(\d+)\s*(?:or|and)\s*more|minimum\s*(\d+)/,
+  );
   if (!match) return null;
   const parsed = Number(match[1] || match[2] || match[3]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -45,7 +47,12 @@ const parseIsExtra = (option, label) => {
   return /extra|add[- ]?on|addon/.test(label.toLowerCase());
 };
 
-const buildAttendeeSelections = (count, selections, optionValues, fallbackValue) => {
+const buildAttendeeSelections = (
+  count,
+  selections,
+  optionValues,
+  fallbackValue,
+) => {
   const normalized = [];
   for (let i = 0; i < count; i += 1) {
     const value = selections?.[i];
@@ -75,7 +82,11 @@ const normalizeAttendeeSelectionValues = (selections) => {
 };
 
 const selectionsMatch = (left = [], right = []) =>
-  left.length === right.length && left.every((value, index) => value === right[index]);
+  left.length === right.length &&
+  left.every((value, index) => value === right[index]);
+
+const isWorkshopSessionFull = (session) =>
+  typeof session?.capacity === "number" && session.capacity <= 0;
 
 const INITIAL_BOOKING_FORM = {
   fullName: "",
@@ -115,7 +126,11 @@ const REQUIRED_FIELD_LABELS = {
 const parseDateInputValue = (value) => {
   if (typeof value !== "string" || !value.trim()) return null;
   const [year, month, day] = value.split("-").map(Number);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
     return null;
   }
   const parsed = new Date(year, month - 1, day);
@@ -167,7 +182,8 @@ const buildWorkshopRequestSessionStart = (dateValue, timeValue) => {
 };
 
 function BookingModal() {
-  const { isBookingOpen, closeBooking, notifyCart, bookingContext } = useModal();
+  const { isBookingOpen, closeBooking, notifyCart, bookingContext } =
+    useModal();
   const { addItem } = useCart();
   const closeButtonRef = useRef(null);
   const [formState, setFormState] = useState(INITIAL_BOOKING_FORM);
@@ -203,9 +219,12 @@ function BookingModal() {
       ? {
           heading: "Reserve Your Cut Flower Session",
           nounLower: "class",
-          detailsUnavailable: "Class details unavailable. Close the dialog and try again.",
-          unavailable: "This class is not currently accepting bookings. Please check back soon.",
-          selectSession: "Please choose a class day and time slot before continuing.",
+          detailsUnavailable:
+            "Class details unavailable. Close the dialog and try again.",
+          unavailable:
+            "This class is not currently accepting bookings. Please check back soon.",
+          selectSession:
+            "Please choose a class day and time slot before continuing.",
           addLabel: "Reserve Spot",
           itemLabel: "Cut Flower Session",
           daySelectorLabel: "Class Day",
@@ -215,40 +234,51 @@ function BookingModal() {
       : {
           heading: "Secure Your Workshop Seat",
           nounLower: "workshop",
-          detailsUnavailable: "Workshop details unavailable. Close the dialog and try again.",
-          unavailable: "This workshop is not currently accepting bookings. Please check back soon.",
-          selectSession: "Please choose a workshop day and time slot before continuing.",
+          detailsUnavailable:
+            "Workshop details unavailable. Close the dialog and try again.",
+          unavailable:
+            "This workshop is not currently accepting bookings. Please check back soon.",
+          selectSession:
+            "Please choose a workshop day and time slot before continuing.",
           addLabel: "Make Booking",
           itemLabel: "Workshop",
           daySelectorLabel: "Workshop Day",
           noSessionsCta: "No Sessions Available",
-          optionLabel: "Frame Selection",
+          optionLabel: "Selection",
         };
   const sessions = useMemo(
     () => (Array.isArray(workshop?.sessions) ? workshop.sessions : []),
     [workshop],
   );
-  const hasActiveSession = sessions.some((session) => !session.isPast);
+  const hasActiveSession = sessions.some(
+    (session) => !session.isPast && !isWorkshopSessionFull(session),
+  );
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
 
   const sessionDays = useMemo(() => {
     if (!sessions.length) return [];
-    const dayFormatter = new Intl.DateTimeFormat("en-ZA", { dateStyle: "long" });
+    const dayFormatter = new Intl.DateTimeFormat("en-ZA", {
+      dateStyle: "long",
+    });
     const map = new Map();
     sessions.forEach((session) => {
-      const dateKey = session.date || (typeof session.start === "string" ? session.start.slice(0, 10) : "");
+      const dateKey =
+        session.date ||
+        (typeof session.start === "string" ? session.start.slice(0, 10) : "");
       if (!dateKey) return;
       if (!map.has(dateKey)) {
         const startDate =
-          session.startDate instanceof Date && !Number.isNaN(session.startDate.getTime())
+          session.startDate instanceof Date &&
+          !Number.isNaN(session.startDate.getTime())
             ? session.startDate
             : typeof session.start === "string"
               ? new Date(session.start)
               : null;
-        const label = startDate instanceof Date && !Number.isNaN(startDate.getTime())
-          ? dayFormatter.format(startDate)
-          : dateKey;
+        const label =
+          startDate instanceof Date && !Number.isNaN(startDate.getTime())
+            ? dayFormatter.format(startDate)
+            : dateKey;
         map.set(dateKey, { date: dateKey, label, sessions: [] });
       }
       map.get(dateKey).sessions.push(session);
@@ -256,14 +286,26 @@ function BookingModal() {
     const grouped = Array.from(map.values()).map((group) => ({
       ...group,
       sessions: group.sessions.sort((a, b) => {
-        const aTime = typeof a.start === "string" ? new Date(a.start).getTime() : Number.POSITIVE_INFINITY;
-        const bTime = typeof b.start === "string" ? new Date(b.start).getTime() : Number.POSITIVE_INFINITY;
+        const aTime =
+          typeof a.start === "string"
+            ? new Date(a.start).getTime()
+            : Number.POSITIVE_INFINITY;
+        const bTime =
+          typeof b.start === "string"
+            ? new Date(b.start).getTime()
+            : Number.POSITIVE_INFINITY;
         return aTime - bTime;
       }),
     }));
     grouped.sort((a, b) => {
-      const aTime = typeof a.sessions[0]?.start === "string" ? new Date(a.sessions[0].start).getTime() : Number.POSITIVE_INFINITY;
-      const bTime = typeof b.sessions[0]?.start === "string" ? new Date(b.sessions[0].start).getTime() : Number.POSITIVE_INFINITY;
+      const aTime =
+        typeof a.sessions[0]?.start === "string"
+          ? new Date(a.sessions[0].start).getTime()
+          : Number.POSITIVE_INFINITY;
+      const bTime =
+        typeof b.sessions[0]?.start === "string"
+          ? new Date(b.sessions[0].start).getTime()
+          : Number.POSITIVE_INFINITY;
       return aTime - bTime;
     });
     return grouped;
@@ -274,20 +316,29 @@ function BookingModal() {
     [],
   );
   const selectedRequestSlot =
-    WORKSHOP_REQUEST_TIME_SLOTS.find((slot) => slot.value === requestedSlotValue) ?? null;
+    WORKSHOP_REQUEST_TIME_SLOTS.find(
+      (slot) => slot.value === requestedSlotValue,
+    ) ?? null;
   const requestedDateLabel = useMemo(
     () => formatWorkshopRequestDateLabel(requestedDate),
     [requestedDate],
   );
   const requestDateValidationMessage =
-    isWorkshopRequestMode && requestedDate ? getWorkshopRequestDateError(requestedDate) : "";
+    isWorkshopRequestMode && requestedDate
+      ? getWorkshopRequestDateError(requestedDate)
+      : "";
 
-  const selectedDayData = sessionDays.find((day) => day.date === selectedDay) ?? sessionDays[0] ?? null;
+  const selectedDayData =
+    sessionDays.find((day) => day.date === selectedDay) ??
+    sessionDays[0] ??
+    null;
   const selectedDaySlots = useMemo(
     () => selectedDayData?.sessions ?? [],
     [selectedDayData],
   );
-  const dayHasActiveSlots = selectedDaySlots.some((slot) => !slot.isPast);
+  const dayHasActiveSlots = selectedDaySlots.some(
+    (slot) => !slot.isPast && !isWorkshopSessionFull(slot),
+  );
   const selectedDayLabel = selectedDayData?.label ?? null;
 
   useEffect(() => {
@@ -298,7 +349,13 @@ function BookingModal() {
       return;
     }
     if (!selectedDayData) {
-      setSelectedDay(sessionDays[0].date);
+      const firstBookableDay =
+        sessionDays.find((day) =>
+          day.sessions.some(
+            (slot) => !slot.isPast && !isWorkshopSessionFull(slot),
+          ),
+        ) ?? sessionDays[0];
+      setSelectedDay(firstBookableDay.date);
       return;
     }
     const slots = selectedDaySlots;
@@ -307,18 +364,28 @@ function BookingModal() {
       return;
     }
     if (!selectedSession || selectedSession.date !== selectedDayData.date) {
-      const nextSlot = slots.find((slot) => !slot.isPast) ?? slots[0];
+      const nextSlot =
+        slots.find((slot) => !slot.isPast && !isWorkshopSessionFull(slot)) ??
+        slots[0];
       setSelectedSessionId(nextSlot?.id ?? null);
     }
-  }, [isBookingOpen, selectedDayData, selectedDaySlots, selectedSession, sessionDays]);
+  }, [
+    isBookingOpen,
+    selectedDayData,
+    selectedDaySlots,
+    selectedSession,
+    sessionDays,
+  ]);
 
   const selectionOptions = useMemo(() => {
     const rawOptions = Array.isArray(workshop?.options) ? workshop.options : [];
     const normalizedOptions = rawOptions
       .map((option, index) => {
         if (typeof option !== "object" || option === null) return null;
-        const value = option.value ?? option.id ?? option.label ?? `option-${index}`;
-        const label = option.label ?? option.name ?? option.value ?? `Option ${index + 1}`;
+        const value =
+          option.value ?? option.id ?? option.label ?? `option-${index}`;
+        const label =
+          option.label ?? option.name ?? option.value ?? `Option ${index + 1}`;
         const price = parseOptionalNumber(option.price ?? option.amount);
         return {
           value,
@@ -339,7 +406,9 @@ function BookingModal() {
       if (normalizedOptions.length > 0) {
         return normalizedOptions;
       }
-      const rawFallbackPrice = parseOptionalNumber(workshop?.unitPrice ?? workshop?.price);
+      const rawFallbackPrice = parseOptionalNumber(
+        workshop?.unitPrice ?? workshop?.price,
+      );
       return [
         {
           value: "standard",
@@ -356,11 +425,15 @@ function BookingModal() {
       return normalizedOptions;
     }
 
-    if (Array.isArray(workshop?.frameOptions) && workshop.frameOptions.length > 0) {
+    if (
+      Array.isArray(workshop?.frameOptions) &&
+      workshop.frameOptions.length > 0
+    ) {
       return workshop.frameOptions
         .map((option, index) => {
           if (typeof option !== "object" || option === null) return null;
-          const value = option.value ?? option.size ?? option.label ?? `frame-${index}`;
+          const value =
+            option.value ?? option.size ?? option.label ?? `frame-${index}`;
           const label = option.label ?? option.name ?? value;
           const price = parseOptionalNumber(option.price);
           return {
@@ -385,7 +458,9 @@ function BookingModal() {
   const sessionSeatLimit = useMemo(() => {
     if (isCutFlower || isWorkshopRequestMode) return null;
     const capacityValue = Number(selectedSession?.capacity);
-    return Number.isFinite(capacityValue) && capacityValue > 0 ? capacityValue : null;
+    return Number.isFinite(capacityValue) && capacityValue > 0
+      ? capacityValue
+      : null;
   }, [isCutFlower, isWorkshopRequestMode, selectedSession?.capacity]);
   const attendeeCountNumber = useMemo(() => {
     if (sessionSeatLimit === null) return requestedAttendeeCountNumber;
@@ -410,20 +485,34 @@ function BookingModal() {
   const visibleCutFlowerOptions = useMemo(() => {
     if (!isCutFlower) return selectionOptions;
     return showExtraOptions ? selectionOptions : cutFlowerOptionGroups.base;
-  }, [cutFlowerOptionGroups.base, isCutFlower, selectionOptions, showExtraOptions]);
+  }, [
+    cutFlowerOptionGroups.base,
+    isCutFlower,
+    selectionOptions,
+    showExtraOptions,
+  ]);
   const restrictedCutFlowerOptions = useMemo(() => {
     if (!isCutFlower) return [];
     return visibleCutFlowerOptions.filter(
-      (option) => option.minAttendees && option.minAttendees > attendeeCountNumber,
+      (option) =>
+        option.minAttendees && option.minAttendees > attendeeCountNumber,
     );
   }, [attendeeCountNumber, isCutFlower, visibleCutFlowerOptions]);
   const availableCutFlowerOptions = useMemo(() => {
     if (!isCutFlower) return selectionOptions;
     return visibleCutFlowerOptions.filter(
-      (option) => !option.minAttendees || option.minAttendees <= attendeeCountNumber,
+      (option) =>
+        !option.minAttendees || option.minAttendees <= attendeeCountNumber,
     );
-  }, [attendeeCountNumber, isCutFlower, selectionOptions, visibleCutFlowerOptions]);
-  const availableSelectionOptions = isCutFlower ? availableCutFlowerOptions : selectionOptions;
+  }, [
+    attendeeCountNumber,
+    isCutFlower,
+    selectionOptions,
+    visibleCutFlowerOptions,
+  ]);
+  const availableSelectionOptions = isCutFlower
+    ? availableCutFlowerOptions
+    : selectionOptions;
   const restrictedOptionsNote = useMemo(() => {
     if (!isCutFlower || restrictedCutFlowerOptions.length === 0) return "";
     const labels = restrictedCutFlowerOptions
@@ -444,12 +533,16 @@ function BookingModal() {
     return `Options requiring ${minText} are hidden${labelText}`;
   }, [isCutFlower, restrictedCutFlowerOptions]);
   const normalizedAttendeeSelections = useMemo(() => {
-    const optionValues = new Set(availableSelectionOptions.map((option) => option.value));
+    const optionValues = new Set(
+      availableSelectionOptions.map((option) => option.value),
+    );
     if (optionValues.size === 0 && selectionOptions[0]) {
       optionValues.add(selectionOptions[0].value);
     }
     const fallbackValue =
-      availableSelectionOptions[0]?.value ?? selectionOptions[0]?.value ?? defaultSelectionValue;
+      availableSelectionOptions[0]?.value ??
+      selectionOptions[0]?.value ??
+      defaultSelectionValue;
     return buildAttendeeSelections(
       attendeeCountNumber,
       formState.attendeeSelections,
@@ -474,7 +567,10 @@ function BookingModal() {
     if (!isBookingOpen) return;
     setFormState((prev) => {
       if (
-        selectionsMatch(prev.attendeeSelections, normalizedAttendeeSelections) &&
+        selectionsMatch(
+          prev.attendeeSelections,
+          normalizedAttendeeSelections,
+        ) &&
         (!sessionSeatLimit || requestedAttendeeCountNumber <= sessionSeatLimit)
       ) {
         return prev;
@@ -488,7 +584,12 @@ function BookingModal() {
         attendeeSelections: normalizedAttendeeSelections,
       };
     });
-  }, [isBookingOpen, normalizedAttendeeSelections, requestedAttendeeCountNumber, sessionSeatLimit]);
+  }, [
+    isBookingOpen,
+    normalizedAttendeeSelections,
+    requestedAttendeeCountNumber,
+    sessionSeatLimit,
+  ]);
 
   useEffect(() => {
     if (!isBookingOpen) {
@@ -516,12 +617,20 @@ function BookingModal() {
       bookingContext?.framePreference ??
       INITIAL_BOOKING_FORM.framePreference;
     const defaultSelectionValue =
-      selectionOptions.find((option) => option.value === preferredSelection)?.value ??
+      selectionOptions.find((option) => option.value === preferredSelection)
+        ?.value ??
       selectionOptions[0]?.value ??
       INITIAL_BOOKING_FORM.framePreference;
-    const optionValues = new Set(selectionOptions.map((option) => option.value));
-    const normalizedAttendeeCount = Math.max(1, Number.parseInt(attendeeCount, 10) || 1);
-    const initialAttendeeSelections = normalizeAttendeeSelectionValues(bookingContext?.attendeeSelections);
+    const optionValues = new Set(
+      selectionOptions.map((option) => option.value),
+    );
+    const normalizedAttendeeCount = Math.max(
+      1,
+      Number.parseInt(attendeeCount, 10) || 1,
+    );
+    const initialAttendeeSelections = normalizeAttendeeSelectionValues(
+      bookingContext?.attendeeSelections,
+    );
     const attendeeSelections = buildAttendeeSelections(
       normalizedAttendeeCount,
       initialAttendeeSelections,
@@ -535,13 +644,27 @@ function BookingModal() {
       workshop?.primarySessionId,
     ].filter((value) => typeof value === "string" && value.length > 0);
     const resolvedPreferredId =
-      preferredSessionIds.find((sessionId) => sessions.some((session) => session.id === sessionId)) ?? null;
-    const hasAnyActive = sessions.some((session) => !session.isPast);
-    const preferredSession =
-      resolvedPreferredId ? sessions.find((session) => session.id === resolvedPreferredId) : null;
+      preferredSessionIds.find((sessionId) =>
+        sessions.some((session) => session.id === sessionId),
+      ) ?? null;
+    const hasAnyActive = sessions.some(
+      (session) => !session.isPast && !isWorkshopSessionFull(session),
+    );
+    const preferredSession = resolvedPreferredId
+      ? sessions.find((session) => session.id === resolvedPreferredId)
+      : null;
     const normalizedPreferred =
-      preferredSession && (!preferredSession.isPast || !hasAnyActive) ? preferredSession : null;
-    const fallbackSession = sessions.find((session) => !session.isPast) ?? sessions[0] ?? null;
+      preferredSession &&
+      ((!preferredSession.isPast && !isWorkshopSessionFull(preferredSession)) ||
+        !hasAnyActive)
+        ? preferredSession
+        : null;
+    const fallbackSession =
+      sessions.find(
+        (session) => !session.isPast && !isWorkshopSessionFull(session),
+      ) ??
+      sessions[0] ??
+      null;
 
     setFormState({
       fullName: customer.fullName ?? "",
@@ -555,16 +678,16 @@ function BookingModal() {
     });
     if (isCutFlower) {
       const hasExtraSelection = attendeeSelections.some((value) =>
-        selectionOptions.some((option) => option.value === value && option.isExtra),
+        selectionOptions.some(
+          (option) => option.value === value && option.isExtra,
+        ),
       );
       setShowExtraOptions(hasExtraSelection);
     } else {
       setShowExtraOptions(false);
     }
     const preferredRequestedDate =
-      bookingContext?.requestedDate ??
-      bookingContext?.sessionDate ??
-      "";
+      bookingContext?.requestedDate ?? bookingContext?.sessionDate ?? "";
     const preferredRequestedSlot =
       bookingContext?.requestedSlotValue ??
       bookingContext?.sessionTimeRange ??
@@ -574,7 +697,9 @@ function BookingModal() {
       typeof preferredRequestedDate === "string" ? preferredRequestedDate : "",
     );
     setRequestedSlotValue(
-      WORKSHOP_REQUEST_TIME_SLOTS.some((slot) => slot.value === preferredRequestedSlot)
+      WORKSHOP_REQUEST_TIME_SLOTS.some(
+        (slot) => slot.value === preferredRequestedSlot,
+      )
         ? preferredRequestedSlot
         : "",
     );
@@ -583,7 +708,14 @@ function BookingModal() {
     setSelectedDay(initialSession?.date ?? sessions[0]?.date ?? null);
     setFormStatus("idle");
     setSubmitError(null);
-  }, [isBookingOpen, bookingContext, isCutFlower, selectionOptions, sessions, workshop]);
+  }, [
+    isBookingOpen,
+    bookingContext,
+    isCutFlower,
+    selectionOptions,
+    sessions,
+    workshop,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -597,7 +729,9 @@ function BookingModal() {
 
   const handleFieldChange = (field) => (event) => {
     const value = event.target.value;
-    setMissingFields((prev) => prev.filter((missingField) => missingField !== field));
+    setMissingFields((prev) =>
+      prev.filter((missingField) => missingField !== field),
+    );
     setFormState((prev) => ({
       ...prev,
       [field]: field === "attendeeCount" ? value.replace(/[^\d]/g, "") : value,
@@ -618,16 +752,21 @@ function BookingModal() {
   };
 
   const pricingSummary = useMemo(() => {
-    const rawFallbackPrice = parseOptionalNumber(workshop?.unitPrice ?? workshop?.price);
+    const rawFallbackPrice = parseOptionalNumber(
+      workshop?.unitPrice ?? workshop?.price,
+    );
     const fallbackPrice = rawFallbackPrice ?? 0;
-    const optionLookup = new Map(selectionOptions.map((option) => [option.value, option]));
+    const optionLookup = new Map(
+      selectionOptions.map((option) => [option.value, option]),
+    );
     const attendeeItems = normalizedAttendeeSelections.map((value, index) => {
       const option = optionLookup.get(value) ?? selectionOptions[0];
       const price =
         option?.price !== undefined && Number.isFinite(option.price)
           ? option.price
           : fallbackPrice;
-      const label = option?.label ?? option?.displayLabel ?? value ?? `Option ${index + 1}`;
+      const label =
+        option?.label ?? option?.displayLabel ?? value ?? `Option ${index + 1}`;
       const displayLabel = option?.displayLabel ?? label;
       return {
         index: index + 1,
@@ -682,7 +821,17 @@ function BookingModal() {
 
       if (selectedSession.isPast) {
         setFormStatus("error");
-        setSubmitError("This session has already passed. Please choose another available date.");
+        setSubmitError(
+          "This session has already passed. Please choose another available date.",
+        );
+        return;
+      }
+
+      if (isWorkshopSessionFull(selectedSession)) {
+        setFormStatus("error");
+        setSubmitError(
+          "This session is fully booked. Please choose another available time.",
+        );
         return;
       }
     } else {
@@ -695,7 +844,9 @@ function BookingModal() {
 
       if (!selectedRequestSlot) {
         setFormStatus("error");
-        setSubmitError("Please choose a preferred workshop start window before continuing.");
+        setSubmitError(
+          "Please choose a preferred workshop start window before continuing.",
+        );
         return;
       }
     }
@@ -739,19 +890,25 @@ function BookingModal() {
         ? selectionLabel
         : isCutFlower
           ? "Multiple options"
-          : "Multiple frame selections";
+          : "Multiple selections";
     const summarySelectionValue = selectionValue;
     const workshopSchedule = isWorkshopRequestMode
       ? {
           sessionSource: "customer-requested",
           scheduledFor: selectedRequestSlot
-            ? buildWorkshopRequestSessionStart(requestedDate, selectedRequestSlot.startTime)
+            ? buildWorkshopRequestSessionStart(
+                requestedDate,
+                selectedRequestSlot.startTime,
+              )
             : null,
           scheduledDateLabel: requestedDateLabel || null,
           sessionId: null,
           sessionLabel: selectedRequestSlot?.label ?? null,
           sessionStart: selectedRequestSlot
-            ? buildWorkshopRequestSessionStart(requestedDate, selectedRequestSlot.startTime)
+            ? buildWorkshopRequestSessionStart(
+                requestedDate,
+                selectedRequestSlot.startTime,
+              )
             : null,
           sessionDate: requestedDate || null,
           sessionTime: selectedRequestSlot?.startTime ?? null,
@@ -766,20 +923,25 @@ function BookingModal() {
           sessionSource: "admin-session",
           scheduledFor: selectedSession?.start ?? workshop.scheduledFor ?? null,
           scheduledDateLabel:
-            summaryLabel || selectedSession?.formatted || workshop.scheduledDateLabel || null,
+            summaryLabel ||
+            selectedSession?.formatted ||
+            workshop.scheduledDateLabel ||
+            null,
           sessionId: selectedSession?.id ?? null,
-          sessionLabel: selectedSession?.label ?? selectedSession?.formatted ?? null,
+          sessionLabel:
+            selectedSession?.label ?? selectedSession?.formatted ?? null,
           sessionStart: selectedSession?.start ?? null,
           sessionDate: selectedSession?.date ?? null,
           sessionTime: selectedSession?.time ?? null,
           sessionTimeRange: selectedSession?.timeRangeLabel ?? null,
           sessionCapacity:
-            typeof selectedSession?.capacity === "number" ? selectedSession.capacity : null,
+            typeof selectedSession?.capacity === "number"
+              ? selectedSession.capacity
+              : null,
           sessionDay: selectedDay ?? null,
           sessionDayLabel: selectedDayLabel ?? null,
-          session:
-            selectedSession ?
-              {
+          session: selectedSession
+            ? {
                 id: selectedSession.id,
                 label: selectedSession.label ?? null,
                 formatted: selectedSession.formatted,
@@ -798,7 +960,9 @@ function BookingModal() {
     if (isCutFlower) {
       if (!db) {
         setFormStatus("error");
-        setSubmitError("Booking is unavailable right now. Please try again shortly.");
+        setSubmitError(
+          "Booking is unavailable right now. Please try again shortly.",
+        );
         return;
       }
 
@@ -821,7 +985,9 @@ function BookingModal() {
       const attendeeSelectionsSummary = attendeeItems.length
         ? attendeeItems
             .map((item) => {
-              const priceLabel = Number.isFinite(item.price) ? ` R${item.price.toFixed(2)}` : "";
+              const priceLabel = Number.isFinite(item.price)
+                ? ` R${item.price.toFixed(2)}`
+                : "";
               return `Attendee ${item.index}: ${item.label}${priceLabel}`;
             })
             .join("; ")
@@ -830,7 +996,9 @@ function BookingModal() {
         workshop.title ? `Class: ${workshop.title}` : null,
         sessionLabel ? `Session: ${sessionLabel}` : null,
         `Attendees: ${attendeeCountNumber}`,
-        attendeeSelectionsSummary ? `Options: ${attendeeSelectionsSummary}` : null,
+        attendeeSelectionsSummary
+          ? `Options: ${attendeeSelectionsSummary}`
+          : null,
         `Estimate: R${totalPrice.toFixed(2)} (estimate only)`,
         trimmed.notes || null,
       ].filter(Boolean);
@@ -866,7 +1034,10 @@ function BookingModal() {
         await addDoc(collection(db, "cutFlowerBookings"), bookingPayload);
         if (functionsInstance) {
           try {
-            const sendBookingEmail = httpsCallable(functionsInstance, "sendBookingEmail");
+            const sendBookingEmail = httpsCallable(
+              functionsInstance,
+              "sendBookingEmail",
+            );
             await sendBookingEmail({
               type: "cut-flower",
               fullName: trimmed.fullName,
@@ -890,7 +1061,9 @@ function BookingModal() {
         closeBooking();
       } catch (error) {
         setFormStatus("error");
-        setSubmitError(error?.message || "We couldn't save your booking. Please try again.");
+        setSubmitError(
+          error?.message || "We couldn't save your booking. Please try again.",
+        );
       }
       return;
     }
@@ -946,38 +1119,6 @@ function BookingModal() {
       },
     });
 
-    if (functionsInstance) {
-      try {
-        const sendBookingEmail = httpsCallable(functionsInstance, "sendBookingEmail");
-        await sendBookingEmail({
-          type: bookingType,
-          fullName: trimmed.fullName,
-          email: trimmed.email,
-          phone: trimmed.phone,
-          workshopTitle: workshop.title,
-          sessionSource: workshopSchedule.sessionSource,
-          scheduledDateLabel: workshopSchedule.scheduledDateLabel,
-          sessionDayLabel: workshopSchedule.sessionDayLabel,
-          sessionDate: workshopSchedule.sessionDate,
-          sessionDateLabel:
-            workshopSchedule.sessionDayLabel || workshopSchedule.scheduledDateLabel,
-          sessionLabel: workshopSchedule.sessionLabel,
-          sessionTime: workshopSchedule.sessionTime,
-          sessionTimeRange: workshopSchedule.sessionTimeRange,
-          requestedDurationHours: workshopSchedule.requestedDurationHours,
-          attendeeCount: attendeeCountNumber,
-          optionLabel: summarySelectionLabel || null,
-          optionId: summarySelectionValue,
-          optionValue: summarySelectionValue,
-          framePreference: isCutFlower ? null : selectionValue,
-          notes: trimmed.notes,
-          totalPrice,
-        });
-      } catch (error) {
-        console.warn("Unable to send booking email", error);
-      }
-    }
-
     setFormStatus("success");
     setFormState(INITIAL_BOOKING_FORM);
     closeBooking();
@@ -995,11 +1136,15 @@ function BookingModal() {
       return "Choose your preferred date and start window";
     }
     if (selectedDayLabel && selectedSession) {
-      const timeLabel = selectedSession.timeRangeLabel || selectedSession.formatted;
-      return timeLabel ? `${selectedDayLabel} · ${timeLabel}` : selectedDayLabel;
+      const timeLabel =
+        selectedSession.timeRangeLabel || selectedSession.formatted;
+      return timeLabel
+        ? `${selectedDayLabel} · ${timeLabel}`
+        : selectedDayLabel;
     }
     if (selectedDayLabel) return selectedDayLabel;
-    if (selectedSession) return selectedSession.timeRangeLabel || selectedSession.formatted;
+    if (selectedSession)
+      return selectedSession.timeRangeLabel || selectedSession.formatted;
     return workshop.scheduledDateLabel || "Date to be confirmed";
   })();
 
@@ -1008,13 +1153,18 @@ function BookingModal() {
     isSubmitting ||
     !workshop ||
     (isWorkshopRequestMode
-      ? !requestedDate || !selectedRequestSlot || Boolean(requestDateValidationMessage)
+      ? !requestedDate ||
+        !selectedRequestSlot ||
+        Boolean(requestDateValidationMessage)
       : sessionDays.length === 0 ||
         !selectedDay ||
         !selectedSession ||
         (selectedSession.isPast && hasActiveSession));
   const submitLabel = (() => {
-    if (isSubmitting) return bookingType === "cut-flower" ? "Reserving..." : "Adding to cart...";
+    if (isSubmitting)
+      return bookingType === "cut-flower"
+        ? "Reserving..."
+        : "Adding to cart...";
     if (!workshop) return bookingCopy.addLabel;
     if (isWorkshopRequestMode) {
       if (!requestedDate) return "Select Requested Date";
@@ -1025,7 +1175,8 @@ function BookingModal() {
     if (sessionDays.length === 0) return bookingCopy.noSessionsCta;
     if (!selectedDay) return "Select a Day";
     if (!selectedSession) return "Select Time Slot";
-    if (selectedSession.isPast && hasActiveSession) return "Select Available Session";
+    if (selectedSession.isPast && hasActiveSession)
+      return "Select Available Session";
     return bookingCopy.addLabel;
   })();
   const hasExtraSelections =
@@ -1064,20 +1215,25 @@ function BookingModal() {
               {summaryLabel || "Date to be confirmed"}
               {workshop.location ? ` · ${workshop.location}` : ""}
             </p>
-            {!isWorkshopRequestMode && selectedSession?.capacity && (
-              <p className="modal__meta">
-                {selectedSession.capacity} seat{selectedSession.capacity === 1 ? "" : "s"} available
-              </p>
-            )}
+            {!isWorkshopRequestMode &&
+              typeof selectedSession?.capacity === "number" && (
+                <p className="modal__meta">
+                  {selectedSession.capacity > 0
+                    ? `${selectedSession.capacity} seat${selectedSession.capacity === 1 ? "" : "s"} available`
+                    : "Fully booked"}
+                </p>
+              )}
             {isWorkshopRequestMode && (
               <p className="booking-summary__warning">
-                This workshop is booked by request. Choose a Monday to Saturday date from tomorrow onward, then pick a
-                3-hour start window below.
+                This workshop is booked by request. Choose a Monday to Saturday
+                date from tomorrow onward, then pick a 3-hour start window
+                below.
               </p>
             )}
             {!isWorkshopRequestMode && sessionDays.length === 0 && (
               <p className="booking-summary__warning">
-                No upcoming sessions have been scheduled yet. Please contact the studio for availability.
+                No upcoming sessions have been scheduled yet. Please contact the
+                studio for availability.
               </p>
             )}
             {!hasActiveSession && sessions.length > 0 && (
@@ -1093,7 +1249,10 @@ function BookingModal() {
           {isWorkshopRequestMode && (
             <>
               <div className="booking-grid__full booking-day-picker">
-                <label className="booking-picker__label" htmlFor="requested-workshop-date">
+                <label
+                  className="booking-picker__label"
+                  htmlFor="requested-workshop-date"
+                >
                   Requested Date
                 </label>
                 <input
@@ -1108,7 +1267,8 @@ function BookingModal() {
                   }}
                 />
                 <p className="modal__meta">
-                  Available from tomorrow onward. Requests are accepted Monday to Saturday only.
+                  Available from tomorrow onward. Requests are accepted Monday
+                  to Saturday only.
                 </p>
                 {requestedDate && requestDateValidationMessage && (
                   <p className="form-feedback__message form-feedback__message--warning">
@@ -1117,14 +1277,18 @@ function BookingModal() {
                 )}
               </div>
               <div className="booking-grid__full booking-slot-picker">
-                <span className="booking-picker__label">Preferred Start Window</span>
+                <span className="booking-picker__label">
+                  Preferred Start Window
+                </span>
                 <div className="booking-slot-picker__grid">
                   {WORKSHOP_REQUEST_TIME_SLOTS.map((slot) => (
                     <button
                       key={slot.value}
                       type="button"
                       className={`booking-slot-chip ${
-                        requestedSlotValue === slot.value ? "booking-slot-chip--active" : ""
+                        requestedSlotValue === slot.value
+                          ? "booking-slot-chip--active"
+                          : ""
                       }`}
                       onClick={() => {
                         setRequestedSlotValue(slot.value);
@@ -1132,8 +1296,12 @@ function BookingModal() {
                       }}
                       aria-pressed={requestedSlotValue === slot.value}
                     >
-                      <span className="booking-slot-chip__label">{slot.label}</span>
-                      <span className="booking-slot-chip__meta">3-hour workshop window</span>
+                      <span className="booking-slot-chip__label">
+                        {slot.label}
+                      </span>
+                      <span className="booking-slot-chip__meta">
+                        3-hour workshop window
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1142,29 +1310,46 @@ function BookingModal() {
           )}
           {!isWorkshopRequestMode && sessionDays.length > 0 && (
             <div className="booking-grid__full booking-day-picker">
-              <span className="booking-picker__label">{bookingCopy.daySelectorLabel}</span>
+              <span className="booking-picker__label">
+                {bookingCopy.daySelectorLabel}
+              </span>
               <div className="booking-day-picker__grid">
                 {sessionDays.map((day) => {
                   const isActive = day.date === selectedDay;
-                  const allPast = day.sessions.every((slot) => slot.isPast);
-                  const anyFutureDay = sessionDays.some((entry) => entry.sessions.some((slot) => !slot.isPast));
+                  const allUnavailable = day.sessions.every(
+                    (slot) => slot.isPast || isWorkshopSessionFull(slot),
+                  );
+                  const anyFutureDay = sessionDays.some((entry) =>
+                    entry.sessions.some(
+                      (slot) => !slot.isPast && !isWorkshopSessionFull(slot),
+                    ),
+                  );
                   return (
                     <button
                       key={day.date}
                       type="button"
                       className={`booking-day-chip ${isActive ? "booking-day-chip--active" : ""} ${
-                        allPast ? "booking-day-chip--disabled" : ""
+                        allUnavailable ? "booking-day-chip--disabled" : ""
                       }`}
                       onClick={() => setSelectedDay(day.date)}
-                      disabled={allPast && anyFutureDay}
+                      disabled={allUnavailable && anyFutureDay}
                       aria-pressed={isActive}
                     >
-                      <span className="booking-day-chip__label">{day.label}</span>
-                      <span className="booking-day-chip__meta">
-                        {day.sessions.length} {daySlotLabel}{day.sessions.length === 1 ? "" : "s"}
+                      <span className="booking-day-chip__label">
+                        {day.label}
                       </span>
-                      {allPast && (
-                        <span className="booking-day-chip__meta booking-day-chip__meta--warning">Past day</span>
+                      <span className="booking-day-chip__meta">
+                        {day.sessions.length} {daySlotLabel}
+                        {day.sessions.length === 1 ? "" : "s"}
+                      </span>
+                      {allUnavailable && (
+                        <span className="booking-day-chip__meta booking-day-chip__meta--warning">
+                          {day.sessions.every((slot) =>
+                            isWorkshopSessionFull(slot),
+                          )
+                            ? "Full"
+                            : "Unavailable"}
+                        </span>
                       )}
                     </button>
                   );
@@ -1177,26 +1362,40 @@ function BookingModal() {
               <span className="booking-picker__label">Time Slot</span>
               <div className="booking-slot-picker__grid">
                 {selectedDaySlots.map((slot) => {
-                  const disabled = slot.isPast && dayHasActiveSlots;
+                  const full = isWorkshopSessionFull(slot);
+                  const disabled = full || (slot.isPast && dayHasActiveSlots);
                   return (
                     <button
                       key={slot.id}
                       type="button"
                       className={`booking-slot-chip ${
-                        selectedSessionId === slot.id ? "booking-slot-chip--active" : ""
+                        selectedSessionId === slot.id
+                          ? "booking-slot-chip--active"
+                          : ""
                       } ${disabled ? "booking-slot-chip--disabled" : ""}`}
                       onClick={() => setSelectedSessionId(slot.id)}
                       disabled={disabled}
                       aria-pressed={selectedSessionId === slot.id}
                     >
-                      <span className="booking-slot-chip__label">{slot.timeRangeLabel || slot.formatted}</span>
+                      <span className="booking-slot-chip__label">
+                        {slot.timeRangeLabel || slot.formatted}
+                      </span>
                       <span className="booking-slot-chip__meta">
-                        {slot.capacity
-                          ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
+                        {typeof slot.capacity === "number"
+                          ? slot.capacity > 0
+                            ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
+                            : "Fully booked"
                           : "Open booking"}
                       </span>
+                      {full && (
+                        <span className="booking-slot-chip__meta booking-slot-chip__meta--warning">
+                          Full
+                        </span>
+                      )}
                       {slot.isPast && (
-                        <span className="booking-slot-chip__meta booking-slot-chip__meta--warning">Past session</span>
+                        <span className="booking-slot-chip__meta booking-slot-chip__meta--warning">
+                          Past session
+                        </span>
                       )}
                     </button>
                   );
@@ -1204,7 +1403,8 @@ function BookingModal() {
               </div>
               {selectedSession?.isPast && (
                 <p className="form-feedback__message form-feedback__message--warning">
-                  This session has already passed. Please choose another available time.
+                  This session has already passed. Please choose another
+                  available time.
                 </p>
               )}
             </div>
@@ -1214,12 +1414,17 @@ function BookingModal() {
               Booking isn't available until new dates are scheduled.
             </p>
           )}
-          {!isWorkshopRequestMode && sessionDays.length > 0 && selectedDaySlots.length === 0 && (
-            <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
-              No time slots remain for the selected day. Please choose another date.
-            </p>
-          )}
-          <div className={`booking-field${missingFields.includes("fullName") ? " booking-field--error" : ""}`}>
+          {!isWorkshopRequestMode &&
+            sessionDays.length > 0 &&
+            selectedDaySlots.length === 0 && (
+              <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
+                No time slots remain for the selected day. Please choose another
+                date.
+              </p>
+            )}
+          <div
+            className={`booking-field${missingFields.includes("fullName") ? " booking-field--error" : ""}`}
+          >
             <label htmlFor="guest-fullName">Full Name</label>
             <input
               className="input"
@@ -1229,12 +1434,18 @@ function BookingModal() {
               placeholder="Full name"
               value={formState.fullName}
               onChange={handleFieldChange("fullName")}
-              aria-invalid={missingFields.includes("fullName") ? "true" : "false"}
+              aria-invalid={
+                missingFields.includes("fullName") ? "true" : "false"
+              }
               required
             />
-            {missingFields.includes("fullName") && <p className="booking-field__error">Full name is required.</p>}
+            {missingFields.includes("fullName") && (
+              <p className="booking-field__error">Full name is required.</p>
+            )}
           </div>
-          <div className={`booking-field${missingFields.includes("email") ? " booking-field--error" : ""}`}>
+          <div
+            className={`booking-field${missingFields.includes("email") ? " booking-field--error" : ""}`}
+          >
             <label htmlFor="guest-email">Email</label>
             <input
               className="input"
@@ -1247,9 +1458,13 @@ function BookingModal() {
               aria-invalid={missingFields.includes("email") ? "true" : "false"}
               required
             />
-            {missingFields.includes("email") && <p className="booking-field__error">Email is required.</p>}
+            {missingFields.includes("email") && (
+              <p className="booking-field__error">Email is required.</p>
+            )}
           </div>
-          <div className={`booking-field${missingFields.includes("phone") ? " booking-field--error" : ""}`}>
+          <div
+            className={`booking-field${missingFields.includes("phone") ? " booking-field--error" : ""}`}
+          >
             <label htmlFor="guest-phone">Phone</label>
             <input
               className="input"
@@ -1262,7 +1477,9 @@ function BookingModal() {
               aria-invalid={missingFields.includes("phone") ? "true" : "false"}
               required
             />
-            {missingFields.includes("phone") && <p className="booking-field__error">Phone is required.</p>}
+            {missingFields.includes("phone") && (
+              <p className="booking-field__error">Phone is required.</p>
+            )}
           </div>
           <div>
             <label htmlFor="guest-attendees">Number of Attendees</label>
@@ -1278,24 +1495,32 @@ function BookingModal() {
               onChange={handleFieldChange("attendeeCount")}
               required
             />
-            {attendeeCountLimitMessage && <p className="modal__meta">{attendeeCountLimitMessage}</p>}
+            {attendeeCountLimitMessage && (
+              <p className="modal__meta">{attendeeCountLimitMessage}</p>
+            )}
           </div>
           <div className="booking-grid__full booking-attendee-options">
             <div className="booking-attendee-options__header">
-              <span className="booking-attendee-options__title">{bookingCopy.optionLabel}</span>
+              <span className="booking-attendee-options__title">
+                {bookingCopy.optionLabel}
+              </span>
               {hasExtraOptions && (
                 <label className="booking-attendee-options__toggle">
                   <input
                     type="checkbox"
                     checked={showExtraOptions}
-                    onChange={(event) => setShowExtraOptions(event.target.checked)}
+                    onChange={(event) =>
+                      setShowExtraOptions(event.target.checked)
+                    }
                   />
                   <span>Show extra add-ons</span>
                 </label>
               )}
             </div>
             <p className="modal__meta">
-              {isCutFlower ? "Choose the option for each person." : "Choose the frame for each attendee."}
+              {isCutFlower
+                ? "Choose the option for each person."
+                : "Choose an option for each attendee."}
             </p>
             {hasExtraOptions && !showExtraOptions && (
               <p className="modal__meta booking-attendee-options__note">
@@ -1315,9 +1540,14 @@ function BookingModal() {
             <div className="booking-attendee-options__grid">
               {normalizedAttendeeSelections.map((selection, index) => {
                 const selectedOption =
-                  selectionOptions.find((option) => option.value === selection) ?? null;
+                  selectionOptions.find(
+                    (option) => option.value === selection,
+                  ) ?? null;
                 return (
-                  <div className="booking-attendee-options__row" key={`attendee-option-${index + 1}`}>
+                  <div
+                    className="booking-attendee-options__row"
+                    key={`attendee-option-${index + 1}`}
+                  >
                     <label htmlFor={`attendee-option-${index}`}>
                       Attendee {index + 1}
                     </label>
@@ -1358,33 +1588,51 @@ function BookingModal() {
           </div>
           <div className="booking-grid__full booking-summary">
             <p>
-              <strong>Estimated Total:</strong> R{pricingSummary.total.toFixed(2)}
+              <strong>Estimated Total:</strong> R
+              {pricingSummary.total.toFixed(2)}
             </p>
             {isCutFlower ? (
               <>
                 <p className="modal__meta booking-summary__note">
-                  Estimate only. Final total may change if extra stems are chosen on the day.
+                  Estimate only. Final total may change if extra stems are
+                  chosen on the day.
                 </p>
                 {pricingSummary.attendeeItems.map((item) => (
-                  <p className="modal__meta booking-summary__line" key={`estimate-${item.index}`}>
-                    Attendee {item.index}: {item.label} (R{item.price.toFixed(2)})
+                  <p
+                    className="modal__meta booking-summary__line"
+                    key={`estimate-${item.index}`}
+                  >
+                    Attendee {item.index}: {item.label} (R
+                    {item.price.toFixed(2)})
                   </p>
                 ))}
               </>
             ) : (
               pricingSummary.attendeeItems.map((item) => (
-                <p className="modal__meta booking-summary__line" key={`estimate-${item.index}`}>
+                <p
+                  className="modal__meta booking-summary__line"
+                  key={`estimate-${item.index}`}
+                >
                   Attendee {item.index}: {item.label} (R{item.price.toFixed(2)})
                 </p>
               ))
             )}
           </div>
           {submitError && (
-            <div className="booking-grid__full form-feedback" aria-live="assertive">
-              <p className="form-feedback__message form-feedback__message--error">{submitError}</p>
+            <div
+              className="booking-grid__full form-feedback"
+              aria-live="assertive"
+            >
+              <p className="form-feedback__message form-feedback__message--error">
+                {submitError}
+              </p>
             </div>
           )}
-          <button className="btn btn--primary booking-grid__full" type="submit" disabled={isAddDisabled}>
+          <button
+            className="btn btn--primary booking-grid__full"
+            type="submit"
+            disabled={isAddDisabled}
+          >
             {submitLabel}
           </button>
         </form>

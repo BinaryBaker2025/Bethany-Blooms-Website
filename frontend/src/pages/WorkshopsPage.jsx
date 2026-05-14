@@ -103,7 +103,7 @@ function normalizeWorkshopForModal(workshop, sessionFormatter) {
         date: dateValue || formatDateInput(startDate),
         time: timeValue || formatTimeInput(startDate),
         timeRangeLabel,
-        capacity: Number.isFinite(capacityNumber) && capacityNumber > 0 ? capacityNumber : null,
+        capacity: Number.isFinite(capacityNumber) && capacityNumber >= 0 ? capacityNumber : null,
         isPast: startDate.getTime() < now,
       };
     })
@@ -168,6 +168,21 @@ function resolveWorkshopDate(workshop = {}) {
   return candidateDates.find((date) => date.getTime() >= now) ?? candidateDates[candidateDates.length - 1];
 }
 
+function isWorkshopFullyBooked(workshop = {}) {
+  const sessions = Array.isArray(workshop?.sessions) ? workshop.sessions : [];
+  if (sessions.length === 0) return false;
+  const now = Date.now();
+  const upcomingSessions = sessions.filter((session) => {
+    const startDate = resolveWorkshopSessionStart(session);
+    return startDate instanceof Date && !Number.isNaN(startDate.getTime()) && startDate.getTime() >= now;
+  });
+  if (upcomingSessions.length === 0) return false;
+  return upcomingSessions.every((session) => {
+    const capacity = Number(session?.capacity);
+    return Number.isFinite(capacity) && capacity <= 0;
+  });
+}
+
 function buildWorkshopCardSummary(workshop = {}) {
   const contentCandidates = [
     workshop.description,
@@ -212,6 +227,7 @@ function WorkshopsPage() {
       const hasValidDate = parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime());
       const rawSessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
       const isByRequest = !hasValidDate && rawSessions.length === 0;
+      const isFullyBooked = !isByRequest && isWorkshopFullyBooked(workshop);
       const displayDate = isByRequest ? "By request" : hasValidDate ? eventFormatter.format(parsedDate) : "Date to be confirmed";
       const priceNumber = typeof workshop.price === "number" ? workshop.price : Number(workshop.price);
       const options = Array.isArray(workshop.options) ? workshop.options : [];
@@ -229,6 +245,7 @@ function WorkshopsPage() {
         scheduledFor: workshop.scheduledFor ?? null,
         formattedDate: displayDate,
         isByRequest,
+        isFullyBooked,
         priceDisplay:
           minOptionPrice !== null
             ? `From R${minOptionPrice}`
@@ -249,9 +266,10 @@ function WorkshopsPage() {
       });
     });
 
-  const firstWorkshop = normalizedWorkshops[0];
+  const firstBookableWorkshop = normalizedWorkshops.find((workshop) => !workshop.isFullyBooked) ?? null;
 
   const handleBookWorkshop = (workshop) => {
+    if (!workshop || workshop.isFullyBooked) return;
     const normalized = normalizeWorkshopForModal(workshop, eventFormatter);
     const firstOption = normalized.options.length > 0 ? normalized.options[0] : null;
     const isByRequest = normalized.sessions.length === 0;
@@ -294,11 +312,11 @@ function WorkshopsPage() {
               techniques, and share a peaceful table with fellow creatives.
             </p>
             <div className="cta-group">
-              {firstWorkshop ? (
+              {firstBookableWorkshop ? (
                 <button
                   className="btn btn--primary"
                   type="button"
-                  onClick={() => handleBookWorkshop(firstWorkshop)}
+                  onClick={() => handleBookWorkshop(firstBookableWorkshop)}
                 >
                   Book Now
                 </button>
@@ -335,6 +353,9 @@ function WorkshopsPage() {
                     decoding="async"
                   />
                   <span className="cut-flower-card__badge">{workshop.formattedDate}</span>
+                  {workshop.isFullyBooked && (
+                    <span className="cut-flower-card__status-badge">Fully booked</span>
+                  )}
                   {workshop.priceDisplay && (
                     <span className="cut-flower-card__price-tag">{workshop.priceDisplay}</span>
                   )}
@@ -378,8 +399,9 @@ function WorkshopsPage() {
                       className="btn btn--primary"
                       type="button"
                       onClick={() => handleBookWorkshop(workshop)}
+                      disabled={workshop.isFullyBooked}
                     >
-                      Book Now
+                      {workshop.isFullyBooked ? "Fully booked" : "Book Now"}
                     </button>
                   </div>
                 </div>

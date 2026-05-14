@@ -119,6 +119,81 @@ const clampQuantity = (value) => {
 const getTrackedQuantity = (value = {}) =>
   clampQuantity(value?.stock_quantity ?? value?.stockQuantity ?? value?.quantity);
 
+const getPosWorkshopSeatCount = (item = {}) =>
+  Math.max(
+    1,
+    Number.parseInt(item.metadata?.attendeeCount, 10) ||
+      Number.parseInt(item.quantity, 10) ||
+      1,
+  );
+
+const buildPosWorkshopSeatReservationGroups = (items = []) => {
+  const groups = new Map();
+  items
+    .filter((item) => item?.type === "workshop")
+    .forEach((item) => {
+      const sessionSource = (item.metadata?.sessionSource || "").toString().trim().toLowerCase();
+      const workshopId = (item.sourceId || item.metadata?.workshopId || "").toString().trim();
+      const sessionId = (item.metadata?.sessionId || "").toString().trim();
+      if (!workshopId || !sessionId || sessionSource === "customer-requested") return;
+      if (!groups.has(workshopId)) groups.set(workshopId, new Map());
+      const sessionGroups = groups.get(workshopId);
+      sessionGroups.set(sessionId, (sessionGroups.get(sessionId) || 0) + getPosWorkshopSeatCount(item));
+    });
+  return groups;
+};
+
+const preparePosWorkshopSeatUpdates = async (transaction, db, reservationGroups) => {
+  const reads = [];
+  for (const [workshopId, sessionGroups] of reservationGroups.entries()) {
+    const workshopRef = doc(db, "workshops", workshopId);
+    const workshopSnap = await transaction.get(workshopRef);
+    reads.push({ workshopId, sessionGroups, workshopRef, workshopSnap });
+  }
+
+  return reads
+    .map(({ workshopId, sessionGroups, workshopRef, workshopSnap }) => {
+      if (!workshopSnap.exists()) {
+        throw new Error("Selected workshop could not be found.");
+      }
+      const workshop = workshopSnap.data() || {};
+      const sessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
+      let changed = false;
+      const nextSessions = sessions.map((session, index) => {
+        const sessionId = (session?.id || `session-${index}-${workshopId}`).toString().trim();
+        const requestedSeats = sessionGroups.get(sessionId) || 0;
+        if (!requestedSeats) return session;
+        const currentCapacity = Number(session?.capacity);
+        if (!Number.isFinite(currentCapacity)) return session;
+        if (currentCapacity < requestedSeats) {
+          const title = workshop.title || workshop.name || "Workshop";
+          const label = session?.label || session?.timeRangeLabel || session?.date || "selected session";
+          throw new Error(
+            `${title} ${label} only has ${Math.max(0, currentCapacity)} seat${currentCapacity === 1 ? "" : "s"} left.`,
+          );
+        }
+        const originalCapacity = Number(
+          session?.originalCapacity ??
+            session?.initialCapacity ??
+            session?.capacityOriginal ??
+            session?.totalCapacity,
+        );
+        const nextSession = {
+          ...session,
+          capacity: currentCapacity - requestedSeats,
+          originalCapacitySource: "capacity-decrement",
+        };
+        if (!Number.isFinite(originalCapacity)) {
+          nextSession.originalCapacity = currentCapacity;
+        }
+        changed = true;
+        return nextSession;
+      });
+      return changed ? { workshopRef, sessions: nextSessions } : null;
+    })
+    .filter(Boolean);
+};
+
 const formatCurrency = (value) => {
   const amount = parseNumber(value, 0);
   return moneyFormatter.format(amount);
@@ -348,6 +423,7 @@ const normalizeWorkshopSessions = (workshop, sessionFormatter) => {
       const endTimeValue = typeof session?.endTime === "string" ? session.endTime.trim() : "";
       const timeRangeLabel =
         formatTimeRange(timeValue || formatTimeInput(startDate), endTimeValue) || formatTimeValue(startDate);
+      const capacityNumber = Number(session?.capacity);
       const label =
         customLabel && customLabel.toLowerCase() !== formatted.toLowerCase()
           ? `${formatted} · ${customLabel}`
@@ -361,6 +437,7 @@ const normalizeWorkshopSessions = (workshop, sessionFormatter) => {
         timeRangeLabel,
         start: startDate.toISOString(),
         startDate,
+        capacity: Number.isFinite(capacityNumber) && capacityNumber >= 0 ? capacityNumber : null,
         isPast: startDate.getTime() < now,
       };
     })
@@ -3280,6 +3357,7 @@ function AdminPosPage() {
     try {
       const redeemedByUid = (user?.uid || "").toString().trim() || null;
       const redeemedByEmail = (user?.email || "").toString().trim() || null;
+      const workshopSeatReservationGroups = buildPosWorkshopSeatReservationGroups(cartItems);
       await runTransaction(db, async (transaction) => {
         const nowMs = Date.now();
         const giftCardRefs = [];
@@ -3305,7 +3383,24 @@ function AdminPosPage() {
           giftCardRefs.push({ ref: giftCardRef, match });
         }
 
+        const workshopSeatUpdates = await preparePosWorkshopSeatUpdates(
+          transaction,
+          db,
+          workshopSeatReservationGroups,
+        );
+
         transaction.set(saleRef, salePayload);
+
+        workshopSeatUpdates.forEach(({ workshopRef, sessions }) => {
+          transaction.set(
+            workshopRef,
+            {
+              sessions,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        });
 
         giftCardRefs.forEach(({ ref, match }) => {
           transaction.set(

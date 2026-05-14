@@ -68,6 +68,10 @@ import {
 } from "../lib/paymentMethods.js";
 import { SA_PROVINCES, formatShippingAddress } from "../lib/shipping.js";
 import {
+  isSubscriptionInvoiceSettled,
+  normalizeSubscriptionInvoiceStatus as normalizeSharedSubscriptionInvoiceStatus,
+} from "../lib/subscriptionInvoiceStatus.js";
+import {
   getProductCardStockStatus,
   getStockStatus,
   getVariantStockStatus,
@@ -524,6 +528,27 @@ const IconPlus = ({ title = "Add", ...props }) => (
   >
     <title>{title}</title>
     <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
+const IconRefresh = ({ title = "Refresh", ...props }) => (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <title>{title}</title>
+    <path d="M20 11a8 8 0 0 0-13.5-5.8L4 7.5" />
+    <path d="M4 4v3.5h3.5" />
+    <path d="M4 13a8 8 0 0 0 13.5 5.8L20 16.5" />
+    <path d="M20 20v-3.5h-3.5" />
   </svg>
 );
 
@@ -1109,10 +1134,7 @@ const normalizeSubscriptionOpsStatus = (value = "") => {
 };
 
 const normalizeSubscriptionOpsInvoiceStatus = (value = "") => {
-  const normalized = (value || "").toString().trim().toLowerCase();
-  return SUBSCRIPTION_INVOICE_STATUS_OPTIONS.includes(normalized)
-    ? normalized
-    : "pending-payment";
+  return normalizeSharedSubscriptionInvoiceStatus(value);
 };
 
 const normalizeSubscriptionInvoiceType = (value = "") => {
@@ -1326,6 +1348,7 @@ const resolveSubscriptionInvoicePaidDate = (invoice = {}) => {
     invoice?.paymentReceivedAt,
     invoice?.paidDate,
     invoice?.completedAt,
+    invoice?.paymentApproval?.decidedAt,
     invoice?.payfast?.updatedAt,
   ];
   for (const candidate of dateCandidates) {
@@ -1950,6 +1973,108 @@ const getSessionLabel = (session) => {
   if (!dateTime) return session.time || "Session";
   return bookingDateFormatter.format(dateTime);
 };
+
+const parseWorkshopSeatValue = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.floor(parsed));
+};
+
+const getWorkshopBookingSeatCount = (booking) => {
+  const parsed = Number.parseInt(booking?.attendeeCount, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+};
+
+const isActiveWorkshopBooking = (booking) => {
+  const status = (booking?.status || booking?.paymentStatus || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+  return !["cancelled", "canceled", "rejected", "refunded"].includes(status);
+};
+
+const getWorkshopSessionBookedSeats = (bookings, workshopId, session) => {
+  const normalizedWorkshopId = (workshopId || "").toString().trim();
+  const normalizedSessionId = (session?.id || "").toString().trim();
+  if (!normalizedWorkshopId || !normalizedSessionId) return 0;
+
+  return (Array.isArray(bookings) ? bookings : []).reduce((total, booking) => {
+    const bookingWorkshopId = (booking?.workshopId || "").toString().trim();
+    const bookingSessionId = (booking?.sessionId || "").toString().trim();
+    const sessionSource = (booking?.sessionSource || "")
+      .toString()
+      .trim()
+      .toLowerCase();
+    if (
+      bookingWorkshopId !== normalizedWorkshopId ||
+      bookingSessionId !== normalizedSessionId ||
+      sessionSource === "customer-requested" ||
+      !isActiveWorkshopBooking(booking)
+    ) {
+      return total;
+    }
+    return total + getWorkshopBookingSeatCount(booking);
+  }, 0);
+};
+
+const getWorkshopOriginalCapacitySource = (session) =>
+  (
+    session?.originalCapacitySource ||
+    session?.capacitySource ||
+    ""
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+
+const isWorkshopCapacityAlreadyAdjusted = (session) =>
+  ["capacity-decrement", "legacy-booking-backfill"].includes(
+    getWorkshopOriginalCapacitySource(session),
+  );
+
+const getWorkshopSessionSeatSummary = (session, workshop, bookings) => {
+  if (!session) {
+    return { originalSeats: null, seatsLeft: null };
+  }
+
+  const seatsLeft = parseWorkshopSeatValue(session.capacity);
+  const storedOriginalSeats = parseWorkshopSeatValue(
+    session.originalCapacity ??
+      session.initialCapacity ??
+      session.capacityOriginal ??
+      session.totalCapacity,
+  );
+  const hasAdjustedCapacity = isWorkshopCapacityAlreadyAdjusted(session);
+  const shouldTrustStoredOriginal =
+    storedOriginalSeats !== null &&
+    (hasAdjustedCapacity ||
+      seatsLeft === null ||
+      storedOriginalSeats <= seatsLeft);
+  const originalSeats = shouldTrustStoredOriginal
+    ? storedOriginalSeats
+    : seatsLeft;
+  const bookedSeats = hasAdjustedCapacity
+    ? 0
+    : getWorkshopSessionBookedSeats(bookings, workshop?.id, session);
+  const computedSeatsLeft =
+    hasAdjustedCapacity || originalSeats === null
+      ? seatsLeft
+      : Math.max(0, originalSeats - bookedSeats);
+
+  return {
+    originalSeats:
+      originalSeats === null || computedSeatsLeft === null
+        ? originalSeats
+        : Math.max(originalSeats, computedSeatsLeft),
+    seatsLeft: computedSeatsLeft,
+    bookedSeats,
+    hasAdjustedCapacity,
+  };
+};
+
+const formatWorkshopSeatCount = (value) =>
+  Number.isFinite(value) ? String(value) : "-";
 
 const isCustomerRequestedWorkshopBooking = (booking) =>
   (booking?.sessionSource || "").toString().trim().toLowerCase() ===
@@ -7653,9 +7778,21 @@ export function AdminSubscriptionOpsView() {
           .toString()
           .trim();
         if (!subscriptionId) return;
+        const invoicePaymentMethod = normalizeSubscriptionOpsPaymentMethod(
+          invoice?.paymentMethod || PAYMENT_METHODS.PAYFAST,
+        );
+        const invoicePaymentApprovalStatus =
+          normalizeSubscriptionOpsPaymentApprovalStatus(
+            invoice?.paymentApprovalStatus ||
+              invoice?.paymentApproval?.decision ||
+              "",
+            invoicePaymentMethod,
+          );
         if (
-          normalizeSubscriptionOpsInvoiceStatus(invoice?.status || "") !==
-          "paid"
+          !isSubscriptionInvoiceSettled(invoice, {
+            paymentMethod: invoicePaymentMethod,
+            paymentApprovalStatus: invoicePaymentApprovalStatus,
+          })
         )
           return;
         const existing = map.get(subscriptionId);
@@ -7707,12 +7844,6 @@ export function AdminSubscriptionOpsView() {
         const subscriptionStatus = normalizeSubscriptionOpsStatus(
           subscription?.status,
         );
-        const invoiceStatus = invoice
-          ? normalizeSubscriptionOpsInvoiceStatus(invoice?.status)
-          : "missing";
-        const cyclePaymentStatusLabel = invoice
-          ? formatSubscriptionInvoiceStatusLabel(invoiceStatus)
-          : "Missing invoice";
         const invoiceType = invoice
           ? normalizeSubscriptionInvoiceType(invoice?.invoiceType || "")
           : "missing";
@@ -7730,6 +7861,22 @@ export function AdminSubscriptionOpsView() {
               "",
             paymentMethod,
           );
+        const isCyclePaymentSettled = invoice
+          ? isSubscriptionInvoiceSettled(invoice, {
+              paymentMethod,
+              paymentApprovalStatus,
+            })
+          : false;
+        const invoiceStatus = invoice
+          ? isCyclePaymentSettled
+            ? "paid"
+            : normalizeSubscriptionOpsInvoiceStatus(invoice?.status)
+          : "missing";
+        const cyclePaymentStatusLabel = invoice
+          ? isCyclePaymentSettled
+            ? "Paid"
+            : formatSubscriptionInvoiceStatusLabel(invoiceStatus)
+          : "Missing invoice";
         const tier = normalizeSubscriptionPlanTierValue(
           subscription?.tier || subscription?.subscriptionPlan?.tier,
         );
@@ -7758,20 +7905,45 @@ export function AdminSubscriptionOpsView() {
         );
         const invoiceAdjustmentsTotal = Number(invoice?.adjustmentsTotal || 0);
         const cyclePaidAmount =
-          invoice && invoiceStatus === "paid"
+          invoice && isCyclePaymentSettled
             ? resolveSubscriptionInvoicePaidAmount(invoice)
             : null;
         const cyclePaidAt =
-          invoice && invoiceStatus === "paid"
+          invoice && isCyclePaymentSettled
             ? resolveSubscriptionInvoicePaidDate(invoice)
             : null;
         const latestInvoice =
           latestInvoiceBySubscription.get(subscriptionId) || null;
+        const latestInvoicePaymentMethod =
+          normalizeSubscriptionOpsPaymentMethod(
+            latestInvoice?.paymentMethod ||
+              subscription?.paymentMethod ||
+              PAYMENT_METHODS.PAYFAST,
+          );
+        const latestInvoicePaymentApprovalStatus =
+          normalizeSubscriptionOpsPaymentApprovalStatus(
+            latestInvoice?.paymentApprovalStatus ||
+              latestInvoice?.paymentApproval?.decision ||
+              subscription?.paymentApprovalStatus ||
+              subscription?.paymentApproval?.decision ||
+              "",
+            latestInvoicePaymentMethod,
+          );
+        const isLatestInvoiceSettled = latestInvoice
+          ? isSubscriptionInvoiceSettled(latestInvoice, {
+              paymentMethod: latestInvoicePaymentMethod,
+              paymentApprovalStatus: latestInvoicePaymentApprovalStatus,
+            })
+          : false;
         const latestInvoiceStatus = latestInvoice
-          ? normalizeSubscriptionOpsInvoiceStatus(latestInvoice?.status || "")
+          ? isLatestInvoiceSettled
+            ? "paid"
+            : normalizeSubscriptionOpsInvoiceStatus(latestInvoice?.status || "")
           : "missing";
         const latestInvoiceStatusLabel = latestInvoice
-          ? formatSubscriptionInvoiceStatusLabel(latestInvoiceStatus)
+          ? isLatestInvoiceSettled
+            ? "Paid"
+            : formatSubscriptionInvoiceStatusLabel(latestInvoiceStatus)
           : "No invoices yet";
         const latestInvoiceAmount = latestInvoice
           ? Number(latestInvoice?.amount || latestInvoice?.cycleAmount || 0)
@@ -7802,21 +7974,6 @@ export function AdminSubscriptionOpsView() {
         const latestInvoiceCycleMonth = normalizeCycleMonthValue(
           latestInvoice?.cycleMonth || "",
         );
-        const latestInvoicePaymentMethod =
-          normalizeSubscriptionOpsPaymentMethod(
-            latestInvoice?.paymentMethod ||
-              subscription?.paymentMethod ||
-              PAYMENT_METHODS.PAYFAST,
-          );
-        const latestInvoicePaymentApprovalStatus =
-          normalizeSubscriptionOpsPaymentApprovalStatus(
-            latestInvoice?.paymentApprovalStatus ||
-              latestInvoice?.paymentApproval?.decision ||
-              subscription?.paymentApprovalStatus ||
-              subscription?.paymentApproval?.decision ||
-              "",
-            latestInvoicePaymentMethod,
-          );
         const latestPaidInvoice =
           latestPaidInvoiceBySubscription.get(subscriptionId) || null;
         const lastPaidAmount = latestPaidInvoice
@@ -7835,6 +7992,28 @@ export function AdminSubscriptionOpsView() {
           .toString()
           .trim();
         const topupPendingAmount = topupInvoices.reduce((sum, topupInvoice) => {
+          const topupPaymentMethod = normalizeSubscriptionOpsPaymentMethod(
+            topupInvoice?.paymentMethod ||
+              subscription?.paymentMethod ||
+              PAYMENT_METHODS.PAYFAST,
+          );
+          const topupPaymentApprovalStatus =
+            normalizeSubscriptionOpsPaymentApprovalStatus(
+              topupInvoice?.paymentApprovalStatus ||
+                topupInvoice?.paymentApproval?.decision ||
+                subscription?.paymentApprovalStatus ||
+                subscription?.paymentApproval?.decision ||
+                "",
+              topupPaymentMethod,
+            );
+          if (
+            isSubscriptionInvoiceSettled(topupInvoice, {
+              paymentMethod: topupPaymentMethod,
+              paymentApprovalStatus: topupPaymentApprovalStatus,
+            })
+          ) {
+            return sum;
+          }
           const topupStatus = normalizeSubscriptionOpsInvoiceStatus(
             topupInvoice?.status || "",
           );
@@ -7861,7 +8040,7 @@ export function AdminSubscriptionOpsView() {
         const lastPaymentAt = subscriptionLastPaymentAt;
         const paidAt = cyclePaidAt;
         const readyToSend =
-          subscriptionStatus === "active" && invoiceStatus === "paid";
+          subscriptionStatus === "active" && isCyclePaymentSettled;
         const mondaySlots = normalizeSubscriptionMondaySlotsForTier(
           tier,
           invoice?.deliverySchedule?.slots ||
@@ -7973,12 +8152,14 @@ export function AdminSubscriptionOpsView() {
           invoiceId,
           invoiceNumber,
           invoiceStatus,
+          isCyclePaymentSettled,
           cyclePaymentStatusLabel,
           paymentMethod,
           paymentApprovalStatus,
           latestInvoice,
           latestInvoiceId,
           latestInvoiceStatus,
+          isLatestInvoiceSettled,
           latestInvoiceStatusLabel,
           latestInvoiceNumber,
           latestInvoiceCycleMonth,
@@ -8092,8 +8273,7 @@ export function AdminSubscriptionOpsView() {
       }
       if (
         deliveryReadinessFilter === "payment-required" &&
-        row.invoiceStatus !== "pending-payment" &&
-        row.invoiceStatus !== "missing"
+        row.readyToSend
       ) {
         return false;
       }
@@ -8159,12 +8339,13 @@ export function AdminSubscriptionOpsView() {
       (row) => row.subscriptionStatus === "active",
     ).length;
     const paidThisCycle = allRows.filter(
-      (row) => row.invoiceStatus === "paid",
+      (row) => row.isCyclePaymentSettled,
     ).length;
     const pendingOrUnpaid = allRows.filter(
       (row) =>
-        row.invoiceStatus === "pending-payment" ||
-        row.invoiceStatus === "missing",
+        !row.isCyclePaymentSettled &&
+        (row.invoiceStatus === "pending-payment" ||
+          row.invoiceStatus === "missing"),
     ).length;
     const readyToSend = allRows.filter((row) => row.readyToSend).length;
     return [
@@ -8314,8 +8495,8 @@ export function AdminSubscriptionOpsView() {
         ].join("\n"),
         status: [
           row.readyToSend ? "Ready to send" : "Not ready",
-          `Paid: ${row.invoiceStatus === "paid" ? "Yes" : "No"}`,
-          `Paid for ${selectedCycleLabel}: ${row.invoiceStatus === "paid" ? "Yes" : "No"}`,
+          `Paid: ${row.isCyclePaymentSettled ? "Yes" : "No"}`,
+          `Paid for ${selectedCycleLabel}: ${row.isCyclePaymentSettled ? "Yes" : "No"}`,
         ].join("\n"),
       };
     });
@@ -8382,7 +8563,7 @@ export function AdminSubscriptionOpsView() {
         row.paymentMethod,
       ),
       row.cyclePaymentStatusLabel || "Missing invoice",
-      row.invoiceStatus === "paid" ? "Yes" : "No",
+      row.isCyclePaymentSettled ? "Yes" : "No",
       row.readyToSend ? "Yes" : "No",
       row.invoiceNumber ? `INV-${row.invoiceNumber}` : "",
       row.invoice ? Number(row.invoiceAmount || 0).toFixed(2) : "",
@@ -9815,11 +9996,11 @@ export function AdminSubscriptionOpsView() {
                           {row.readyToSend ? "Ready to send" : "Not ready"}
                         </span>
                         <span
-                          className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`}
+                          className={`badge badge--stock-${row.isCyclePaymentSettled ? "in" : "out"}`}
                           style={{ marginBottom: "0.45rem" }}
                         >
                           Paid for {selectedCycleLabel}:{" "}
-                          {row.invoiceStatus === "paid" ? "Yes" : "No"}
+                          {row.isCyclePaymentSettled ? "Yes" : "No"}
                         </span>
                         <p className="modal__meta">
                           Subscription:{" "}
@@ -9874,9 +10055,9 @@ export function AdminSubscriptionOpsView() {
                           {row.readyToSend ? "Ready" : "Not ready"}
                         </span>
                         <span
-                          className={`badge badge--stock-${row.invoiceStatus === "paid" ? "in" : "out"}`}
+                          className={`badge badge--stock-${row.isCyclePaymentSettled ? "in" : "out"}`}
                         >
-                          {row.invoiceStatus === "paid" ? "Paid" : "Unpaid"}
+                          {row.isCyclePaymentSettled ? "Paid" : "Unpaid"}
                         </span>
                       </div>
                     </div>
@@ -9903,7 +10084,7 @@ export function AdminSubscriptionOpsView() {
                         </strong>
                         <p className="modal__meta">
                           Paid for {selectedCycleLabel}:{" "}
-                          {row.invoiceStatus === "paid" ? "Yes" : "No"}
+                          {row.isCyclePaymentSettled ? "Yes" : "No"}
                         </p>
                       </div>
                     </div>
@@ -9974,10 +10155,10 @@ export function AdminSubscriptionOpsView() {
                         {manageRow.readyToSend ? "Ready to send" : "Not ready"}
                       </span>
                       <span
-                        className={`badge badge--stock-${manageRow.invoiceStatus === "paid" ? "in" : "out"}`}
+                        className={`badge badge--stock-${manageRow.isCyclePaymentSettled ? "in" : "out"}`}
                       >
                         Paid for {selectedCycleLabel}:{" "}
-                        {manageRow.invoiceStatus === "paid" ? "Yes" : "No"}
+                        {manageRow.isCyclePaymentSettled ? "Yes" : "No"}
                       </span>
                       <span className="badge badge--stock-in">
                         {formatSubscriptionPaymentMethodLabel(
@@ -11086,6 +11267,8 @@ function AdminWorkshopsPage({ view = "workshops" }) {
   const [workshopImageFile, setWorkshopImageFile] = useState(null);
   const [workshopImagePreview, setWorkshopImagePreview] = useState("");
   const [workshopSaving, setWorkshopSaving] = useState(false);
+  const [workshopSeatBackfilling, setWorkshopSeatBackfilling] =
+    useState(false);
   const [workshopError, setWorkshopError] = useState(null);
   const workshopPreviewUrlRef = useRef(null);
   const [workshopPage, setWorkshopPage] = useState(0);
@@ -11502,14 +11685,24 @@ function AdminWorkshopsPage({ view = "workshops" }) {
             session.date || (startDate ? formatDateInput(startDate) : "");
           const timeValue =
             session.time || (startDate ? formatTimeInput(startDate) : "");
+          const seatSummary = getWorkshopSessionSeatSummary(
+            session,
+            workshop,
+            bookings,
+          );
           const slot = {
             id: session.id || `session-${index}-${workshop.id}`,
             time: timeValue,
             label: session.label || session.name || "",
             capacity:
-              session.capacity === undefined || session.capacity === null
+              seatSummary.seatsLeft === null
                 ? String(DEFAULT_SLOT_CAPACITY)
-                : String(session.capacity),
+                : String(seatSummary.seatsLeft),
+            originalCapacity:
+              seatSummary.originalSeats === null
+                ? String(DEFAULT_SLOT_CAPACITY)
+                : String(seatSummary.originalSeats),
+            originalCapacitySource: session.originalCapacitySource || "",
           };
           const dateKey = dateValue || `unscheduled-${index}`;
           if (!grouped.has(dateKey)) {
@@ -11543,6 +11736,97 @@ function AdminWorkshopsPage({ view = "workshops" }) {
     if (!db || !inventoryEnabled) return;
     await deleteDoc(doc(db, "workshops", workshopId));
     setStatusMessage("Workshop removed");
+  };
+
+  const handleBackfillWorkshopSeats = async () => {
+    if (!db || !inventoryEnabled || workshopSeatBackfilling) return;
+
+    const updates = [];
+    workshops.forEach((workshop) => {
+      const sessions = Array.isArray(workshop.sessions)
+        ? workshop.sessions
+        : [];
+      if (sessions.length === 0) return;
+
+      let changed = false;
+      const nextSessions = sessions.map((session) => {
+        const seatSummary = getWorkshopSessionSeatSummary(
+          session,
+          workshop,
+          bookings,
+        );
+        if (
+          !session ||
+          seatSummary.hasAdjustedCapacity ||
+          !Number.isFinite(seatSummary.originalSeats) ||
+          !Number.isFinite(seatSummary.seatsLeft) ||
+          seatSummary.bookedSeats <= 0
+        ) {
+          return session;
+        }
+
+        const currentCapacity = parseWorkshopSeatValue(session.capacity);
+        if (
+          currentCapacity === seatSummary.seatsLeft &&
+          parseWorkshopSeatValue(session.originalCapacity) ===
+            seatSummary.originalSeats &&
+          getWorkshopOriginalCapacitySource(session) ===
+            "legacy-booking-backfill"
+        ) {
+          return session;
+        }
+
+        changed = true;
+        return {
+          ...session,
+          capacity: seatSummary.seatsLeft,
+          originalCapacity: seatSummary.originalSeats,
+          originalCapacitySource: "legacy-booking-backfill",
+        };
+      });
+
+      if (changed) {
+        updates.push({
+          ref: doc(db, "workshops", workshop.id),
+          sessions: nextSessions,
+        });
+      }
+    });
+
+    if (updates.length === 0) {
+      setStatusMessage("No workshop seats needed backfilling.");
+      return;
+    }
+
+    try {
+      setWorkshopSeatBackfilling(true);
+      setStatusMessage("Backfilling workshop seats...");
+      for (let index = 0; index < updates.length; index += 450) {
+        const batch = writeBatch(db);
+        updates.slice(index, index + 450).forEach((update) => {
+          batch.set(
+            update.ref,
+            {
+              sessions: update.sessions,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        });
+        await batch.commit();
+      }
+      setStatusMessage(
+        `Backfilled seats left for ${updates.length} workshop${
+          updates.length === 1 ? "" : "s"
+        }.`,
+      );
+    } catch (error) {
+      setWorkshopError(
+        error?.message || "Could not backfill workshop seats left.",
+      );
+    } finally {
+      setWorkshopSeatBackfilling(false);
+    }
   };
 
   const handleDeleteBooking = async (bookingId) => {
@@ -11594,7 +11878,12 @@ function AdminWorkshopsPage({ view = "workshops" }) {
       return;
     }
 
-    const addSessionFromSlot = (collection, dateValue, slot) => {
+    const addSessionFromSlot = (
+      collection,
+      dateValue,
+      slot,
+      { preserveSlotId = true } = {},
+    ) => {
       const trimmedDate = dateValue.trim();
       const trimmedTime = slot.time.trim();
       if (!trimmedDate || !trimmedTime) {
@@ -11603,20 +11892,34 @@ function AdminWorkshopsPage({ view = "workshops" }) {
       const combinedDate = combineDateAndTime(trimmedDate, trimmedTime);
       if (!combinedDate) return;
       const capacityNumber = Number(slot.capacity || DEFAULT_SLOT_CAPACITY);
+      const capacity =
+        Number.isFinite(capacityNumber) && capacityNumber > 0
+          ? capacityNumber
+          : DEFAULT_SLOT_CAPACITY;
+      const originalCapacityNumber = Number(
+        slot.originalCapacity || capacity,
+      );
+      const originalCapacity =
+        Number.isFinite(originalCapacityNumber) && originalCapacityNumber > 0
+          ? Math.max(Math.floor(originalCapacityNumber), Math.floor(capacity))
+          : Math.floor(capacity);
+      const sessionId =
+        preserveSlotId && slot.id
+          ? slot.id
+          : `session-${trimmedDate}-${trimmedTime}-${Math.random()
+              .toString(16)
+              .slice(2, 8)}`;
       collection.push({
-        id:
-          slot.id ||
-          `session-${trimmedDate}-${trimmedTime}-${Math.random()
-            .toString(16)
-            .slice(2, 8)}`,
+        id: sessionId,
         start: combinedDate.toISOString(),
         date: trimmedDate,
         time: trimmedTime,
         label: slot.label.trim() || bookingDateFormatter.format(combinedDate),
-        capacity:
-          Number.isFinite(capacityNumber) && capacityNumber > 0
-            ? capacityNumber
-            : DEFAULT_SLOT_CAPACITY,
+        capacity,
+        originalCapacity,
+        ...(slot.originalCapacitySource
+          ? { originalCapacitySource: slot.originalCapacitySource }
+          : {}),
       });
     };
 
@@ -11692,7 +11995,9 @@ function AdminWorkshopsPage({ view = "workshops" }) {
           if (manualDates.has(isoDate)) continue;
           manualDates.add(isoDate);
           templateGroup.times.forEach((slot) =>
-            addSessionFromSlot(sanitizedSessions, isoDate, slot),
+            addSessionFromSlot(sanitizedSessions, isoDate, slot, {
+              preserveSlotId: false,
+            }),
           );
         }
       }
@@ -11793,6 +12098,21 @@ function AdminWorkshopsPage({ view = "workshops" }) {
         {showWorkshopManagement && (
           <div className="admin-panel__header-actions">
             <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={handleBackfillWorkshopSeats}
+              disabled={
+                !inventoryEnabled ||
+                workshopSeatBackfilling ||
+                workshops.length === 0
+              }
+            >
+              <IconRefresh className="btn__icon" aria-hidden="true" />
+              {workshopSeatBackfilling
+                ? "Backfilling..."
+                : "Backfill Seats Left"}
+            </button>
+            <button
               className="btn btn--primary"
               type="button"
               onClick={openWorkshopModal}
@@ -11821,6 +12141,8 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                     <tr>
                       <th scope="col">Listing</th>
                       <th scope="col">Next Session</th>
+                      <th scope="col">Original Seats</th>
+                      <th scope="col">Seats Left</th>
                       <th scope="col">Price</th>
                       <th scope="col" className="admin-table__actions">
                         Actions
@@ -11831,6 +12153,12 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                     {paginatedWorkshops.map((workshop) => {
                       const primarySession = getPrimarySession(workshop);
                       const sessionLabel = getSessionLabel(primarySession);
+                      const seatSummary =
+                        getWorkshopSessionSeatSummary(
+                          primarySession,
+                          workshop,
+                          bookings,
+                        );
                       return (
                         <tr key={workshop.id}>
                           <td>
@@ -11865,6 +12193,14 @@ function AdminWorkshopsPage({ view = "workshops" }) {
                                 {primarySession.time}
                               </p>
                             )}
+                          </td>
+                          <td>
+                            {formatWorkshopSeatCount(
+                              seatSummary.originalSeats,
+                            )}
+                          </td>
+                          <td>
+                            {formatWorkshopSeatCount(seatSummary.seatsLeft)}
                           </td>
                           <td>{formatPriceLabel(workshop.price)}</td>
                           <td className="admin-table__actions">
