@@ -536,13 +536,7 @@ function WorkshopDetailPage() {
   };
 
   if (status === "loading") {
-    return (
-      <section className="section section--tight">
-        <div className="section__inner">
-          <p className="empty-state">Loading workshop information...</p>
-        </div>
-      </section>
-    );
+    return null;
   }
 
   if (status === "error") {

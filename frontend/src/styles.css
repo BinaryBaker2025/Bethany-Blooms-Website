@@ -8463,6 +8463,13 @@ main {
   align-self: stretch;
   height: 100%;
   position: relative;
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.cart-page__items {
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .cart-page__summary-inner {
@@ -8564,12 +8571,18 @@ main {
   }
 
   .cart-page__summary {
-    order: -1;
     position: sticky;
     top: calc(var(--site-header-height, 96px) + 0.75rem);
     align-self: stretch;
     height: auto;
     z-index: 10;
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .cart-page__items {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .cart-page__summary-inner {

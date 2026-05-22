@@ -96,13 +96,7 @@ const AdminPosCashUpPage = lazy(() => import("./pages/admin/AdminPosCashUpPage.j
 const AdminReportsPage = lazy(() => import("./pages/admin/AdminReportsPage.jsx"));
 
 function RouteFallback() {
-  return (
-    <section className="section section--tight">
-      <div className="section__inner">
-        <p className="empty-state">Loading page...</p>
-      </div>
-    </section>
-  );
+  return null;
 }
 
 function App() {

@@ -893,13 +893,7 @@ function SubscriptionCheckoutPage() {
   };
 
   if (authLoading) {
-    return (
-      <section className="section section--tight">
-        <div className="section__inner">
-          <p className="empty-state">Loading subscription checkout...</p>
-        </div>
-      </section>
-    );
+    return null;
   }
 
   return (

@@ -31,7 +31,9 @@ function Layout() {
       </a>
       <Header />
       <main id="main-content" tabIndex="-1">
-        <Outlet />
+        <Suspense fallback={null}>
+          <Outlet />
+        </Suspense>
       </main>
       <Footer />
       {cartNotice && (

@@ -220,13 +220,7 @@ function AccountOrderDetailPage() {
   }, [authLoading, db, orderId, user]);
 
   if (authLoading || orderLoading) {
-    return (
-      <section className="section section--tight account-order-page">
-        <div className="section__inner">
-          <p className="modal__meta">Loading order details...</p>
-        </div>
-      </section>
-    );
+    return null;
   }
 
   if (!user) {

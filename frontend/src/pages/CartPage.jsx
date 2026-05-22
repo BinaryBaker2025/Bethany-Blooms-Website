@@ -1311,6 +1311,93 @@ function CartPage() {
           </p>
         </div>
         <div className="cart-page__grid">
+          <aside className="cart-page__summary">
+            <div className="cart-page__panel cart-page__summary-inner">
+              <h2>Order summary</h2>
+              {orderSummaryNotices.map((notice) => (
+                <p key={notice.key} className="cart-page__notice">
+                  {notice.content}
+                </p>
+              ))}
+              <div className="cart-page__totals">
+                <div className="cart-page__total-row">
+                  <span>Items</span>
+                  <strong>{totalCount}</strong>
+                </div>
+                <div className="cart-page__total-row">
+                  <span>Subtotal</span>
+                  <strong>{currency(itemSubtotal)}</strong>
+                </div>
+                <div className="cart-page__total-row cart-page__total-row--muted">
+                  <span>Shipping</span>
+                  <span>
+                    {requiresShipping
+                      ? selectedCourier
+                        ? currency(shippingCost)
+                        : "Select a courier"
+                      : workshopOnlyCart
+                        ? "No courier required"
+                        : "Digital delivery"}
+                  </span>
+                </div>
+                <div className="cart-page__total-row cart-page__total-row--muted">
+                  <span>Taxes</span>
+                  <span>Included where applicable</span>
+                </div>
+                <div className="cart-page__total-row cart-page__grand-total">
+                  <span>Total</span>
+                  <strong>{currency(orderTotal)}</strong>
+                </div>
+              </div>
+              <p className="cart-page__summary-note">
+                {requiresShipping
+                  ? "Shipping is calculated based on the selected courier and province."
+                  : workshopOnlyCart
+                    ? "Workshop bookings take place at the studio, so no shipping fee applies."
+                    : "This order contains digital gift cards, so no shipping fee applies."}
+              </p>
+              <span className="visually-hidden" aria-live="polite" aria-atomic="true">
+                {liveCheckoutMessage}
+              </span>
+              <div ref={summaryMessageRef} className="cart-page__checkout-feedback">
+                {orderError && <p className="admin-panel__error">{orderError}</p>}
+                {orderSuccess && (
+                  <p className="admin-save-indicator">{orderSuccess}</p>
+                )}
+                {profileSaveNotice && (
+                  <p className="cart-page__notice">{profileSaveNotice}</p>
+                )}
+              </div>
+              <div ref={stickyCheckoutRef} className="cart-page__sticky-bar">
+                <div className="cart-page__sticky-row">
+                  <span>Total</span>
+                  <strong>{currency(orderTotal)}</strong>
+                </div>
+                {(orderError || profileSaveNotice) && (
+                  <div className="cart-page__sticky-alerts">
+                    {orderError && (
+                      <p className="admin-panel__error" role="status">
+                        {orderError}
+                      </p>
+                    )}
+                    {profileSaveNotice && (
+                      <p className="cart-page__notice" role="status">
+                        {profileSaveNotice}
+                      </p>
+                    )}
+                  </div>
+                )}
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={handlePrimaryAction}
+                  disabled={placingOrder || !hasItems}
+                >
+                  {primaryActionLabel}
+                </button>
+              </div>
+            </div>
+          </aside>
           <div className="cart-page__panel cart-page__items">
             {hasMixedPreorderCart && (
               <div className="cart-page__preorder-panel">
@@ -2234,93 +2321,6 @@ function CartPage() {
             </div>
           </div>
 
-          <aside className="cart-page__summary">
-            <div className="cart-page__panel cart-page__summary-inner">
-              <h2>Order summary</h2>
-              {orderSummaryNotices.map((notice) => (
-                <p key={notice.key} className="cart-page__notice">
-                  {notice.content}
-                </p>
-              ))}
-              <div className="cart-page__totals">
-                <div className="cart-page__total-row">
-                  <span>Items</span>
-                  <strong>{totalCount}</strong>
-                </div>
-                <div className="cart-page__total-row">
-                  <span>Subtotal</span>
-                  <strong>{currency(itemSubtotal)}</strong>
-                </div>
-                <div className="cart-page__total-row cart-page__total-row--muted">
-                  <span>Shipping</span>
-                  <span>
-                    {requiresShipping
-                      ? selectedCourier
-                        ? currency(shippingCost)
-                        : "Select a courier"
-                      : workshopOnlyCart
-                        ? "No courier required"
-                        : "Digital delivery"}
-                  </span>
-                </div>
-                <div className="cart-page__total-row cart-page__total-row--muted">
-                  <span>Taxes</span>
-                  <span>Included where applicable</span>
-                </div>
-                <div className="cart-page__total-row cart-page__grand-total">
-                  <span>Total</span>
-                  <strong>{currency(orderTotal)}</strong>
-                </div>
-              </div>
-              <p className="cart-page__summary-note">
-                {requiresShipping
-                  ? "Shipping is calculated based on the selected courier and province."
-                  : workshopOnlyCart
-                    ? "Workshop bookings take place at the studio, so no shipping fee applies."
-                    : "This order contains digital gift cards, so no shipping fee applies."}
-              </p>
-              <span className="visually-hidden" aria-live="polite" aria-atomic="true">
-                {liveCheckoutMessage}
-              </span>
-              <div ref={summaryMessageRef} className="cart-page__checkout-feedback">
-                {orderError && <p className="admin-panel__error">{orderError}</p>}
-                {orderSuccess && (
-                  <p className="admin-save-indicator">{orderSuccess}</p>
-                )}
-                {profileSaveNotice && (
-                  <p className="cart-page__notice">{profileSaveNotice}</p>
-                )}
-              </div>
-              <div ref={stickyCheckoutRef} className="cart-page__sticky-bar">
-                <div className="cart-page__sticky-row">
-                  <span>Total</span>
-                  <strong>{currency(orderTotal)}</strong>
-                </div>
-                {(orderError || profileSaveNotice) && (
-                  <div className="cart-page__sticky-alerts">
-                    {orderError && (
-                      <p className="admin-panel__error" role="status">
-                        {orderError}
-                      </p>
-                    )}
-                    {profileSaveNotice && (
-                      <p className="cart-page__notice" role="status">
-                        {profileSaveNotice}
-                      </p>
-                    )}
-                  </div>
-                )}
-                <button
-                  className="btn btn--primary"
-                  type="button"
-                  onClick={handlePrimaryAction}
-                  disabled={placingOrder || !hasItems}
-                >
-                  {primaryActionLabel}
-                </button>
-              </div>
-            </div>
-          </aside>
         </div>
       </div>
     </section>
