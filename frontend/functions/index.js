@@ -295,6 +295,7 @@ const GIFT_CARD_ISSUE_SOURCE_ADMIN_ISSUED = "admin-issued";
 const GIFT_CARD_CATALOG_KIND_PRODUCT = "product";
 const GIFT_CARD_CATALOG_KIND_WORKSHOP = "workshop";
 const GIFT_CARD_CATALOG_KIND_CUT_FLOWER_CLASS = "cut-flower-class";
+const GIFT_CARD_CATALOG_KIND_CUSTOM_VALUE = "custom-value";
 const FRESH_FLOWER_DELIVERY_FOLLOW_UP_REASON = "fresh-flower-blooming-stems";
 const FRESH_FLOWER_DELIVERY_NOTE =
   "A Bethany Blooms team member will contact you after checkout to confirm delivery details for fresh flowers and blooming stems.";
@@ -4165,6 +4166,9 @@ function buildCatalogGiftCardDefaultTerms({
   title = "selected item",
 } = {}) {
   const safeTitle = truncateText(title || "selected item", 160);
+  if (kind === GIFT_CARD_CATALOG_KIND_CUSTOM_VALUE) {
+    return `This gift card is redeemable for any Bethany Blooms product or service before its expiry date and is not exchangeable for cash.`;
+  }
   if (kind === GIFT_CARD_CATALOG_KIND_PRODUCT) {
     return `This gift card is redeemable for ${safeTitle} before its expiry date and is not exchangeable for cash.`;
   }
@@ -4631,7 +4635,28 @@ async function resolveAdminMultiItemGiftCardInput(payload = {}) {
   let primaryItemRef = null;
   for (let i = 0; i < lineItems.length; i++) {
     const item = lineItems[i];
-    const itemType = normalizeCatalogGiftCardItemType(item?.type || item?.kind || "");
+    const rawType = (item?.type || item?.kind || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    if (rawType === GIFT_CARD_CATALOG_KIND_CUSTOM_VALUE) {
+      const customAmount = normalizeGiftCardAmount(item?.value, null);
+      if (!Number.isFinite(customAmount) || customAmount <= 0) throw new Error(`Item ${i + 1}: custom value must be greater than zero.`);
+      const customTitle = truncateText((item?.title || "Gift Voucher").toString().trim() || "Gift Voucher", 160);
+      const quantity = sanitizeGiftCardCatalogQuantity(item?.quantity, 1);
+      const option = {
+        id: `custom-value:${i}:base`,
+        label: customTitle,
+        amount: customAmount,
+        quantity,
+        lineTotal: Number((customAmount * quantity).toFixed(2)),
+        unitPriceSnapshot: customAmount,
+        sourceKind: GIFT_CARD_CATALOG_KIND_CUSTOM_VALUE,
+      };
+      selectedOptions.push(option);
+      if (i === 0) {
+        primaryItemRef = { kind: GIFT_CARD_CATALOG_KIND_CUSTOM_VALUE, sourceId: "", titleSnapshot: customTitle, unitPriceSnapshot: customAmount, quantity, fulfillmentMode: "none" };
+      }
+      continue;
+    }
+    const itemType = normalizeCatalogGiftCardItemType(rawType);
     if (!itemType) throw new Error(`Item ${i + 1}: item type is required.`);
     const sourceId = (item?.sourceId || "").toString().trim();
     if (!sourceId) throw new Error(`Item ${i + 1}: source ID is required.`);

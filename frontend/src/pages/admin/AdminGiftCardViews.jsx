@@ -26,6 +26,7 @@ const ADMIN_GIFT_CARD_MODE_MULTI_ITEM = "multi-item";
 const ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT = "product";
 const ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP = "workshop";
 const ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS = "cut-flower-class";
+const ADMIN_GIFT_CARD_ITEM_TYPE_CUSTOM_VALUE = "custom-value";
 const ADMIN_GIFT_CARD_DEFAULT_EXPIRY_DAYS = "365";
 const ADMIN_GIFT_CARD_REDEMPTION_SCOPE_OPTIONS = Object.freeze([
   { value: "both", label: "In-store & Online" },
@@ -45,6 +46,7 @@ const ADMIN_GIFT_CARD_ITEM_TYPE_OPTIONS = Object.freeze([
   { value: ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT, label: "Products" },
   { value: ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP, label: "Workshops" },
   { value: ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS, label: "Classes" },
+  { value: ADMIN_GIFT_CARD_ITEM_TYPE_CUSTOM_VALUE, label: "Custom value" },
 ]);
 
 const GIFT_CARD_STUDIO_CALLABLE_HELP_MESSAGE =
@@ -223,6 +225,13 @@ const isLivePublicCatalogItem = (entry = {}) => {
   return true;
 };
 
+const isNotArchivedCatalogItem = (entry = {}) => {
+  const status = (entry?.status || "").toString().trim().toLowerCase();
+  if (entry?.archived || entry?.isArchived) return false;
+  if (["archived", "deleted"].includes(status)) return false;
+  return true;
+};
+
 function useAdminCatalogGiftCardInventory({
   products = [],
   workshops = [],
@@ -270,16 +279,7 @@ function useAdminCatalogGiftCardInventory({
       .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }));
 
     const workshopItems = (Array.isArray(workshops) ? workshops : [])
-      .filter((workshop) => {
-        if (!isLivePublicCatalogItem(workshop)) return false;
-        const basePrice = resolveAdminCatalogGiftCardWorkshopBasePrice(workshop);
-        if (basePrice !== null) return true;
-        const options = Array.isArray(workshop?.options) ? workshop.options : [];
-        return options.some((opt) => {
-          const p = parseNumber(opt?.price, null);
-          return Number.isFinite(p) && p > 0;
-        });
-      })
+      .filter((workshop) => isNotArchivedCatalogItem(workshop))
       .map((workshop) => ({
         id: (workshop?.id || "").toString().trim(),
         title: (workshop?.title || workshop?.name || "Workshop").toString().trim(),
@@ -302,16 +302,7 @@ function useAdminCatalogGiftCardInventory({
       .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base" }));
 
     const classItems = (Array.isArray(cutFlowerClasses) ? cutFlowerClasses : [])
-      .filter((classDoc) => {
-        if (!isLivePublicCatalogItem(classDoc)) return false;
-        const basePrice = resolveAdminCatalogGiftCardClassBasePrice(classDoc);
-        const options = Array.isArray(classDoc?.options) ? classDoc.options : [];
-        const hasPositiveOption = options.some((option) => {
-          const price = parseNumber(option?.price ?? option?.amount, null);
-          return Number.isFinite(price) && price > 0;
-        });
-        return hasPositiveOption || (Number.isFinite(basePrice) && basePrice > 0);
-      })
+      .filter((classDoc) => isNotArchivedCatalogItem(classDoc))
       .map((classDoc) => ({
         id: (classDoc?.id || "").toString().trim(),
         title: (classDoc?.title || classDoc?.name || "Class").toString().trim(),
@@ -349,7 +340,34 @@ const resolveAdminCatalogGiftCardSelection = ({
   variantId = "",
   optionId = "",
   quantity = "",
+  customValue = "",
+  customTitle = "",
 } = {}) => {
+  if (itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUSTOM_VALUE) {
+    const parsedValue = parseNumber(customValue, null);
+    const quantityValue = normalizeGiftCardOptionQuantity(quantity, 0);
+    const unitPrice = Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : null;
+    const safeTitle = (customTitle || "").toString().trim() || "Gift Voucher";
+    let errorMessage = "";
+    if (!unitPrice) {
+      errorMessage = "Enter a value greater than zero.";
+    } else if (quantityValue <= 0) {
+      errorMessage = "Enter a valid quantity.";
+    }
+    const total = unitPrice && quantityValue > 0 ? Number((unitPrice * quantityValue).toFixed(2)) : 0;
+    return {
+      items: [],
+      selectedItem: unitPrice ? { title: safeTitle } : null,
+      selectedVariant: null,
+      selectedOption: null,
+      quantityValue,
+      quantityLabel: "Quantity",
+      unitPrice,
+      total,
+      canSubmit: !errorMessage,
+      errorMessage,
+    };
+  }
   const items = Array.isArray(catalogItemsByType?.[itemType]) ? catalogItemsByType[itemType] : [];
   const selectedItem = items.find((item) => item.id === sourceId) || null;
   const selectedVariant =
@@ -452,6 +470,8 @@ const createInitialCatalogGiftCardForm = () => ({
   variantId: "",
   optionId: "",
   quantity: "1",
+  customValue: "",
+  customTitle: "",
   recipientName: "",
   purchaserName: "",
   message: "",
@@ -660,6 +680,7 @@ function AdminCatalogGiftCardControls({
   selection,
   idPrefix = "giftcard-catalog",
 }) {
+  const isCustomValue = formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUSTOM_VALUE;
   const hasItemsForType = selection.items.length > 0;
   const selectedItem = selection.selectedItem;
 
@@ -678,6 +699,8 @@ function AdminCatalogGiftCardControls({
                 sourceId: "",
                 variantId: "",
                 optionId: "",
+                customValue: "",
+                customTitle: "",
               })
             }
           >
@@ -688,72 +711,103 @@ function AdminCatalogGiftCardControls({
             ))}
           </select>
         </label>
-        <label className="admin-form__field" htmlFor={`${idPrefix}-item`}>
-          <span>Item</span>
-          <select
-            className="input"
-            id={`${idPrefix}-item`}
-            value={formState.sourceId}
-            onChange={(event) =>
-              onFieldChange({
-                sourceId: event.target.value,
-                variantId: "",
-                optionId: "",
-              })
-            }
-            disabled={!hasItemsForType}
-          >
-            {!hasItemsForType && <option value="">No eligible items found</option>}
-            {selection.items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-                {item.metaLabel ? ` | ${item.metaLabel}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT && selectedItem?.variants?.length > 0 && (
-          <label className="admin-form__field" htmlFor={`${idPrefix}-variant`}>
-            <span>Variant</span>
-            <select
-              className="input"
-              id={`${idPrefix}-variant`}
-              value={formState.variantId}
-              onChange={(event) => onFieldChange({ variantId: event.target.value })}
-            >
-              <option value="">Select variant</option>
-              {selectedItem.variants.map((variant) => (
-                <option key={variant.id} value={variant.id}>
-                  {variant.label} - {formatPriceLabel(variant.price)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {(formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS ||
-          formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP) &&
-          selectedItem?.options?.length > 0 && (
-            <label className="admin-form__field" htmlFor={`${idPrefix}-option`}>
-              <span>
-                {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP
-                  ? "Workshop option"
-                  : "Class option"}
-              </span>
+        {isCustomValue ? (
+          <>
+            <label className="admin-form__field" htmlFor={`${idPrefix}-custom-value`}>
+              <span>Value (R)</span>
+              <input
+                className="input"
+                id={`${idPrefix}-custom-value`}
+                type="number"
+                min="1"
+                step="1"
+                value={formState.customValue}
+                onChange={(event) => onFieldChange({ customValue: event.target.value })}
+                placeholder="e.g. 500"
+              />
+            </label>
+            <label className="admin-form__field" htmlFor={`${idPrefix}-custom-title`}>
+              <span>Description (optional)</span>
+              <input
+                className="input"
+                id={`${idPrefix}-custom-title`}
+                type="text"
+                value={formState.customTitle}
+                onChange={(event) => onFieldChange({ customTitle: event.target.value })}
+                placeholder="Gift Voucher"
+              />
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="admin-form__field" htmlFor={`${idPrefix}-item`}>
+              <span>Item</span>
               <select
                 className="input"
-                id={`${idPrefix}-option`}
-                value={formState.optionId}
-                onChange={(event) => onFieldChange({ optionId: event.target.value })}
+                id={`${idPrefix}-item`}
+                value={formState.sourceId}
+                onChange={(event) =>
+                  onFieldChange({
+                    sourceId: event.target.value,
+                    variantId: "",
+                    optionId: "",
+                  })
+                }
+                disabled={!hasItemsForType}
               >
-                <option value="">Select option</option>
-                {selectedItem.options.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label} - {formatPriceLabel(option.price)}
+                {!hasItemsForType && <option value="">No eligible items found</option>}
+                {selection.items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                    {item.metaLabel ? ` | ${item.metaLabel}` : ""}
                   </option>
                 ))}
               </select>
             </label>
-          )}
+            {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_PRODUCT && selectedItem?.variants?.length > 0 && (
+              <label className="admin-form__field" htmlFor={`${idPrefix}-variant`}>
+                <span>Variant</span>
+                <select
+                  className="input"
+                  id={`${idPrefix}-variant`}
+                  value={formState.variantId}
+                  onChange={(event) => onFieldChange({ variantId: event.target.value })}
+                >
+                  <option value="">Select variant</option>
+                  {selectedItem.variants.map((variant) => (
+                    <option key={variant.id} value={variant.id}>
+                      {variant.label} - {formatPriceLabel(variant.price)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {(formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUT_FLOWER_CLASS ||
+              formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP) &&
+              selectedItem?.options?.length > 0 && (
+                <label className="admin-form__field" htmlFor={`${idPrefix}-option`}>
+                  <span>
+                    {formState.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_WORKSHOP
+                      ? "Workshop option"
+                      : "Class option"}
+                  </span>
+                  <select
+                    className="input"
+                    id={`${idPrefix}-option`}
+                    value={formState.optionId}
+                    onChange={(event) => onFieldChange({ optionId: event.target.value })}
+                  >
+                    <option value="">Select option</option>
+                    {selectedItem.options.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label} - {formatPriceLabel(option.price)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+          </>
+        )}
         <label className="admin-form__field" htmlFor={`${idPrefix}-quantity`}>
           <span>{selection.quantityLabel}</span>
           <input
@@ -1260,12 +1314,25 @@ export function AdminGiftCardGenerateManageExperience() {
         variantId: quickCatalogForm.variantId,
         optionId: quickCatalogForm.optionId,
         quantity: quickCatalogForm.quantity,
+        customValue: quickCatalogForm.customValue,
+        customTitle: quickCatalogForm.customTitle,
       }),
     [catalogItemsByType, quickCatalogForm],
   );
   const quickCatalogSelection = useMemo(
     () =>
       quickLineItems.map((item) => {
+        if (item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUSTOM_VALUE) {
+          const unitPrice = Number(item.customValue) || 0;
+          return {
+            ...item,
+            title: (item.customTitle || "").trim() || "Gift Voucher",
+            typeLabel: "Custom value",
+            subtitle: "",
+            unitPrice,
+            lineTotal: Number((unitPrice * item.quantity).toFixed(2)),
+          };
+        }
         const items = catalogItemsByType?.[item.type] || [];
         const selectedItem = items.find((entry) => entry.id === item.sourceId) || null;
         const selectedVariant =
@@ -1546,6 +1613,9 @@ export function AdminGiftCardGenerateManageExperience() {
         variantId: quickCatalogForm.variantId,
         optionId: quickCatalogForm.optionId,
         quantity: quickAddSelection.quantityValue,
+        ...(quickCatalogForm.itemType === ADMIN_GIFT_CARD_ITEM_TYPE_CUSTOM_VALUE
+          ? { customValue: quickAddSelection.unitPrice, customTitle: quickCatalogForm.customTitle.trim() || "Gift Voucher" }
+          : {}),
       },
     ]);
     setQuickCatalogForm((previous) => ({
@@ -1592,6 +1662,9 @@ export function AdminGiftCardGenerateManageExperience() {
           quantity: normalizeGiftCardOptionQuantity(item.quantity, 1),
           ...(item.variantId ? { variantId: item.variantId } : {}),
           ...(item.optionId ? { optionId: item.optionId } : {}),
+          ...(item.type === ADMIN_GIFT_CARD_ITEM_TYPE_CUSTOM_VALUE
+            ? { value: item.customValue, title: item.customTitle || "Gift Voucher" }
+            : {}),
         })),
         recipientName: quickRecipientName.toString().trim(),
         purchaserName: quickPurchaserName.toString().trim(),
