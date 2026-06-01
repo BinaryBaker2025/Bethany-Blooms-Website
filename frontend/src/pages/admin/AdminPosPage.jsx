@@ -667,6 +667,8 @@ function AdminPosPage() {
   const [posItemsOpen, setPosItemsOpen] = useState(false);
 
   const [variantSelections, setVariantSelections] = useState({});
+  const [posVariantPickerProduct, setPosVariantPickerProduct] = useState(null);
+  const [posVariantPickerSelectedId, setPosVariantPickerSelectedId] = useState("");
   const [workshopSelections, setWorkshopSelections] = useState({});
   const [workshopOptionSelections, setWorkshopOptionSelections] = useState({});
   const [classSelections, setClassSelections] = useState({});
@@ -702,6 +704,39 @@ function AdminPosPage() {
       setGiftCardLookupError(null);
       setCartItems((prev) => prev.filter((item) => !isGiftCardLinkedLineItem(item)));
     }
+  };
+
+  const handleOpenPosVariantPicker = (product) => {
+    setPosVariantPickerProduct(product);
+    setPosVariantPickerSelectedId("");
+  };
+
+  const handleClosePosVariantPicker = () => {
+    setPosVariantPickerProduct(null);
+    setPosVariantPickerSelectedId("");
+  };
+
+  const handleConfirmPosVariantPicker = () => {
+    if (!posVariantPickerProduct) return;
+    const product = posVariantPickerProduct;
+    const variant = product.variants.find((v) => v.id === posVariantPickerSelectedId) || null;
+    const variantPrice = Number.isFinite(variant?.price) ? variant.price : product.numericPrice;
+    const finalPrice = Number.isFinite(variantPrice) ? variantPrice : 0;
+    handleAddToCart({
+      key: buildCartKey({ type: "product", sourceId: product.id, variantId: variant?.id }),
+      sourceId: product.id,
+      type: "product",
+      name: product.name,
+      price: finalPrice,
+      quantity: 1,
+      metadata: {
+        type: "product",
+        productId: product.id,
+        variantId: variant?.id || null,
+        variantLabel: variant?.label || null,
+      },
+    });
+    handleClosePosVariantPicker();
   };
 
   const normalizedProducts = useMemo(() => {
@@ -4304,6 +4339,63 @@ function AdminPosPage() {
         onVoided={handleVoidCompleted}
       />
 
+      {posVariantPickerProduct && (
+        <div
+          className="modal variant-picker-modal is-active"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Choose variant for ${posVariantPickerProduct.name}`}
+          onClick={(e) => { if (e.target === e.currentTarget) handleClosePosVariantPicker(); }}
+        >
+          <div className="modal__content variant-picker-modal__content">
+            <button
+              className="modal__close"
+              type="button"
+              aria-label="Close"
+              onClick={handleClosePosVariantPicker}
+            >
+              &times;
+            </button>
+            <h3 className="modal__title">{posVariantPickerProduct.name}</h3>
+            <p className="modal__meta variant-picker-modal__lead">Choose a variant to add to the cart.</p>
+            <div className="variant-picker-modal__options">
+              {posVariantPickerProduct.variants.map((variant) => {
+                const isSelected = posVariantPickerSelectedId === variant.id;
+                const isOut = variant.stockStatus?.state === "out";
+                return (
+                  <button
+                    key={variant.id}
+                    type="button"
+                    disabled={isOut}
+                    className={`variant-picker-modal__option${isSelected ? " is-selected" : ""}${isOut ? " is-out" : ""}`}
+                    onClick={() => setPosVariantPickerSelectedId(variant.id)}
+                  >
+                    <span className="variant-picker-modal__option-label">{variant.label}</span>
+                    {Number.isFinite(variant.price) && (
+                      <span className="variant-picker-modal__option-price">{formatCurrency(variant.price)}</span>
+                    )}
+                    {isOut && <span className="variant-picker-modal__option-stock">Out of stock</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="modal__actions variant-picker-modal__actions">
+              <button className="btn btn--secondary" type="button" onClick={handleClosePosVariantPicker}>
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                disabled={!posVariantPickerSelectedId}
+                onClick={handleConfirmPosVariantPicker}
+              >
+                Add to cart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {posItemsOpen && (
         <div
           className="modal is-active admin-modal"
@@ -4705,14 +4797,12 @@ function AdminPosPage() {
           {activeTab === "products" && (
             <div className="pos-grid">
               {filteredProducts.map((product) => {
-                const selection = variantSelections[product.id] || "";
-                const variant = product.variants.find((entry) => entry.id === selection) || null;
-                const variantPrice = Number.isFinite(variant?.price) ? variant.price : product.numericPrice;
-                const priceLabel = Number.isFinite(variantPrice) ? formatCurrency(variantPrice) : "Price on request";
-                const canAdd =
-                  product.variants.length > 0
-                    ? Boolean(variant) && variant.stockStatus?.state !== "out"
-                    : product.stockStatus?.state !== "out";
+                const hasVariants = product.variants.length > 1;
+                const singleVariant = product.variants.length === 1 ? product.variants[0] : null;
+                const isOutOfStock = product.stockStatus?.state === "out";
+                const priceLabel = Number.isFinite(product.numericPrice)
+                  ? formatCurrency(product.numericPrice)
+                  : "Price on request";
                 return (
                   <article className="pos-item-card" key={product.id}>
                     <div>
@@ -4723,58 +4813,42 @@ function AdminPosPage() {
                           {product.stockStatus.label}
                         </span>
                       )}
-                      {product.variants.length > 0 && (
-                        <label className="modal__meta pos-item-card__field">
-                          Variant
-                          <select
-                            className="input"
-                            value={selection}
-                            onChange={(event) =>
-                              setVariantSelections((prev) => ({
-                                ...prev,
-                                [product.id]: event.target.value,
-                              }))
-                            }
-                          >
-                            <option value="">Select variant</option>
-                            {product.variants.map((variantOption) => (
-                              <option key={variantOption.id} value={variantOption.id}>
-                                {variantOption.label}
-                                {Number.isFinite(variantOption.price) ? ` - ${formatCurrency(variantOption.price)}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                      {hasVariants && (
+                        <p className="modal__meta" style={{ marginTop: "0.25rem", opacity: 0.65 }}>
+                          {product.variants.length} variants
+                        </p>
                       )}
                     </div>
                     <button
                       className="btn btn--secondary"
                       type="button"
-                      disabled={!canAdd || (product.variants.length > 0 && !selection)}
+                      disabled={isOutOfStock}
                       onClick={() => {
-                        const finalPrice = Number.isFinite(variantPrice) ? variantPrice : 0;
-                        const metadata = {
-                          type: "product",
-                          productId: product.id,
-                          variantId: variant?.id || null,
-                          variantLabel: variant?.label || null,
-                        };
-                        handleAddToCart({
-                          key: buildCartKey({
-                            type: "product",
+                        if (hasVariants) {
+                          handleOpenPosVariantPicker(product);
+                        } else {
+                          const variant = singleVariant;
+                          const finalPrice = Number.isFinite(variant?.price)
+                            ? variant.price
+                            : Number.isFinite(product.numericPrice) ? product.numericPrice : 0;
+                          handleAddToCart({
+                            key: buildCartKey({ type: "product", sourceId: product.id, variantId: variant?.id }),
                             sourceId: product.id,
-                            variantId: variant?.id,
-                          }),
-                          sourceId: product.id,
-                          type: "product",
-                          name: product.name,
-                          price: finalPrice,
-                          quantity: 1,
-                          metadata,
-                        });
+                            type: "product",
+                            name: product.name,
+                            price: finalPrice,
+                            quantity: 1,
+                            metadata: {
+                              type: "product",
+                              productId: product.id,
+                              variantId: variant?.id || null,
+                              variantLabel: variant?.label || null,
+                            },
+                          });
+                        }
                       }}
                     >
-                      Add
+                      {hasVariants ? "Add…" : "Add"}
                     </button>
                   </article>
                 );

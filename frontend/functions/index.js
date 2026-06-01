@@ -3215,6 +3215,10 @@ async function createOrderInvoicePdfBytes({
   const subtotal = Number.isFinite(subtotalValue) ? subtotalValue : computedSubtotal;
   const shippingRaw = Number(order?.shippingCost ?? order?.shipping?.courierPrice ?? 0);
   const shippingCost = Number.isFinite(shippingRaw) ? shippingRaw : 0;
+  const discountAmountRaw = Number(order?.discount?.amount ?? 0);
+  const discountAmount = Number.isFinite(discountAmountRaw) && discountAmountRaw > 0 ? discountAmountRaw : 0;
+  const discountType = (order?.discount?.type || "none").toString().trim().toLowerCase();
+  const discountValueRaw = Number(order?.discount?.value ?? 0);
   const totalRaw = Number(order?.totalPrice);
   const total = Number.isFinite(totalRaw) ? totalRaw : subtotal + shippingCost;
   const invoiceNumber = buildOrderInvoiceNumber({ order, orderId });
@@ -3574,28 +3578,34 @@ async function createOrderInvoicePdfBytes({
   }
 
   let totalsY = cursorY - 20;
+  const discountLabel = discountAmount > 0 && discountType === "percent" && Number.isFinite(discountValueRaw)
+    ? `Discount (${discountValueRaw}%)`
+    : "Discount";
   const totalsRows = [
     ["Subtotal", formatCurrency(subtotal)],
     ["Shipping", formatCurrency(shippingCost)],
+    ...(discountAmount > 0 ? [[discountLabel, `-${formatCurrency(discountAmount)}`]] : []),
     ["Amount due", formatCurrency(total)],
   ];
   totalsRows.forEach(([label, value], index) => {
+    const isLast = index === totalsRows.length - 1;
+    const isDiscount = !isLast && discountAmount > 0 && index === totalsRows.length - 2;
     page.drawText(label, {
       x: marginX + contentWidth * 0.6,
       y: totalsY,
-      size: index === totalsRows.length - 1 ? 11.4 : 10.8,
-      font: index === totalsRows.length - 1 ? fontBold : fontRegular,
+      size: isLast ? 11.4 : 10.8,
+      font: isLast ? fontBold : fontRegular,
       color: palette.text,
     });
-    const valueFont = index === totalsRows.length - 1 ? fontBold : fontRegular;
-    const valueSize = index === totalsRows.length - 1 ? 11.4 : 10.8;
+    const valueFont = isLast ? fontBold : fontRegular;
+    const valueSize = isLast ? 11.4 : 10.8;
     const valueWidth = valueFont.widthOfTextAtSize(value, valueSize);
     page.drawText(value, {
       x: marginX + contentWidth - valueWidth,
       y: totalsY,
       size: valueSize,
       font: valueFont,
-      color: palette.heading,
+      color: isDiscount ? rgb(0.75, 0.22, 0.17) : palette.heading,
     });
     totalsY -= 24;
   });
@@ -6925,8 +6935,22 @@ function buildOrderTotalsHtml(order = {}) {
   const shippingRaw = Number(order.shippingCost ?? order.shipping?.courierPrice ?? 0);
   const shippingCost = Number.isFinite(shippingRaw) && shippingRaw >= 0 ? shippingRaw : 0;
 
+  const discountAmountRaw = Number(order.discount?.amount ?? 0);
+  const discountAmount = Number.isFinite(discountAmountRaw) && discountAmountRaw > 0 ? discountAmountRaw : 0;
+  const discountType = (order.discount?.type || "none").toString().trim().toLowerCase();
+  const discountValue = Number(order.discount?.value ?? 0);
+  const discountLabel = discountType === "percent" && Number.isFinite(discountValue)
+    ? `Discount (${discountValue}%)`
+    : "Discount";
+
   const totalRaw = Number(order.totalPrice);
   const total = Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : subtotal + shippingCost;
+
+  const discountRow = discountAmount > 0 ? `
+        <tr>
+          <td style="padding:0 0 8px;color:${EMAIL_BRAND.muted};">${escapeHtml(discountLabel)}</td>
+          <td style="padding:0 0 8px;text-align:right;color:#c0392b;">-${escapeHtml(formatCurrency(discountAmount))}</td>
+        </tr>` : "";
 
   return `
     <div style="padding:12px 16px;border-radius:14px;background:rgba(245,234,215,0.6);margin:16px 0;">
@@ -6940,6 +6964,7 @@ function buildOrderTotalsHtml(order = {}) {
           <td style="padding:0 0 8px;color:${EMAIL_BRAND.muted};">Shipping</td>
           <td style="padding:0 0 8px;text-align:right;">${escapeHtml(formatCurrency(shippingCost))}</td>
         </tr>
+        ${discountRow}
         <tr>
           <td style="padding-top:8px;border-top:1px solid ${EMAIL_BRAND.border};"><strong>Total</strong></td>
           <td style="padding-top:8px;border-top:1px solid ${EMAIL_BRAND.border};text-align:right;"><strong>${escapeHtml(
@@ -18201,7 +18226,17 @@ exports.createAdminEftOrder = onCall(async (request) => {
     totalPrice,
     containsGiftCards,
     requiresFreshFlowerDeliveryContact,
+    data: normalizedData,
   } = normalizedPayload;
+  const rawDiscount = normalizedData?.discount && typeof normalizedData.discount === "object"
+    ? normalizedData.discount
+    : null;
+  const discountType = (rawDiscount?.type || "none").toString().trim().toLowerCase();
+  const discountValue = Number.isFinite(Number(rawDiscount?.value)) ? Number(rawDiscount.value) : 0;
+  const discountAmount = Number.isFinite(Number(rawDiscount?.amount)) ? Math.max(0, Number(rawDiscount.amount)) : 0;
+  const discount = discountType !== "none" && discountAmount > 0
+    ? { type: discountType, value: discountValue, amount: discountAmount }
+    : null;
   if (containsGiftCards) {
     throw new HttpsError(
       "failed-precondition",
@@ -18236,6 +18271,7 @@ exports.createAdminEftOrder = onCall(async (request) => {
     shipping: shipping || null,
     shippingAddress: shippingAddress || null,
     totalPrice,
+    discount: discount || null,
     status: "pending-payment-approval",
     paymentStatus: "awaiting-approval",
     paymentMethod: "eft",
@@ -18269,6 +18305,7 @@ exports.createAdminEftOrder = onCall(async (request) => {
       shipping: shipping || null,
       shippingAddress: shippingAddress || null,
       totalPrice,
+      discount: discount || null,
       status: orderPayload.status,
       paymentStatus: orderPayload.paymentStatus,
       paymentMethod: orderPayload.paymentMethod,
@@ -18612,6 +18649,45 @@ exports.adminUpdateOrderDeliveryDetails = onCall(async (request) => {
     paymentAdjustmentRequired,
     paymentAdjustmentDelta,
   };
+});
+
+exports.adminUpdateOrderCustomer = onCall(async (request) => {
+  await assertAdminRequest(request);
+  const payload = request.data || {};
+  const orderId = (payload.orderId || "").toString().trim();
+  if (!orderId) {
+    throw new HttpsError("invalid-argument", "Order ID is required.");
+  }
+
+  const fullName = trimToLength((payload.fullName || "").toString().trim(), 200);
+  const email = trimToLength((payload.email || "").toString().trim().toLowerCase(), 200);
+  const phone = trimToLength((payload.phone || "").toString().trim(), 80);
+
+  if (!fullName) throw new HttpsError("invalid-argument", "Customer name is required.");
+  if (!email) throw new HttpsError("invalid-argument", "Customer email is required.");
+  if (!phone) throw new HttpsError("invalid-argument", "Customer phone is required.");
+
+  const orderRef = db.doc(`orders/${orderId}`);
+  const orderSnap = await orderRef.get();
+  if (!orderSnap.exists) throw new HttpsError("not-found", "Order not found.");
+  const order = orderSnap.data() || {};
+
+  const updatedCustomer = {
+    ...(order.customer && typeof order.customer === "object" ? order.customer : {}),
+    fullName,
+    email,
+    phone,
+  };
+
+  await orderRef.set({ customer: updatedCustomer, updatedAt: FIELD_VALUE.serverTimestamp() }, { merge: true });
+
+  await upsertCustomerProfileOrder({
+    customerUid: normalizeCustomerUid(order.customerUid),
+    orderId,
+    order: { ...order, customer: updatedCustomer },
+  });
+
+  return { ok: true, orderId };
 });
 
 exports.adminSendOrderDeliveryUpdateEmail = onCall(async (request) => {

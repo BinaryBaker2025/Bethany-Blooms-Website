@@ -20194,9 +20194,19 @@ export function AdminOrdersView() {
   const [eftReviewLoading, setEftReviewLoading] = useState(false);
   const [paymentProofUrl, setPaymentProofUrl] = useState("");
   const [paymentProofUrlLoading, setPaymentProofUrlLoading] = useState(false);
+  const [editCustomerOpen, setEditCustomerOpen] = useState(false);
+  const [editCustomerForm, setEditCustomerForm] = useState({ fullName: "", email: "", phone: "" });
+  const [editCustomerSaving, setEditCustomerSaving] = useState(false);
+  const [editCustomerError, setEditCustomerError] = useState(null);
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
   const [createOrderSaving, setCreateOrderSaving] = useState(false);
   const [createOrderError, setCreateOrderError] = useState(null);
+  const [variantPickerProduct, setVariantPickerProduct] = useState(null);
+  const [variantPickerSelectedId, setVariantPickerSelectedId] = useState("");
+  const [createOrderCustomerSearch, setCreateOrderCustomerSearch] = useState("");
+  const [createOrderCustomerDropdownOpen, setCreateOrderCustomerDropdownOpen] = useState(false);
+  const [createOrderDiscountType, setCreateOrderDiscountType] = useState("none");
+  const [createOrderDiscountValue, setCreateOrderDiscountValue] = useState("");
   const [createOrderProductSearch, setCreateOrderProductSearch] = useState("");
   const [createOrderFilters, setCreateOrderFilters] = useState(() => ({
     ...CREATE_ORDER_FILTER_DEFAULTS,
@@ -20256,6 +20266,8 @@ export function AdminOrdersView() {
   useEffect(() => {
     if (selectedOrderId) {
       setActiveOrderDetailTab(ORDER_DETAIL_TABS[0].id);
+      setEditCustomerOpen(false);
+      setEditCustomerError(null);
     }
   }, [selectedOrderId]);
 
@@ -20715,6 +20727,10 @@ export function AdminOrdersView() {
     resetCreateOrderFilters();
     setCreateOrderVariantSelections({});
     setCreateOrderError(null);
+    setCreateOrderDiscountType("none");
+    setCreateOrderDiscountValue("");
+    setCreateOrderCustomerSearch("");
+    setCreateOrderCustomerDropdownOpen(false);
   };
 
   const handleCreateOrderCustomerChange = (field) => (event) => {
@@ -21081,12 +21097,12 @@ export function AdminOrdersView() {
       ? "No products match this search."
       : "No products available in your catalog.";
 
-  const handleAddCatalogProductToOrder = (product) => {
+  const handleAddCatalogProductToOrder = (product, explicitVariantId = null) => {
     const variants = Array.isArray(product.variants) ? product.variants : [];
-    const selectedVariantId = createOrderVariantSelections[product.id] || "";
+    const resolvedVariantId = explicitVariantId ?? (createOrderVariantSelections[product.id] || "");
 
     const selectedVariant =
-      variants.find((variant) => variant.id === selectedVariantId) ||
+      variants.find((variant) => variant.id === resolvedVariantId) ||
       (variants.length === 1 ? variants[0] : null);
 
     if (variants.length > 1 && !selectedVariant) {
@@ -21177,6 +21193,22 @@ export function AdminOrdersView() {
     setCreateOrderError(null);
   };
 
+  const handleOpenVariantPicker = (product) => {
+    setVariantPickerProduct(product);
+    setVariantPickerSelectedId("");
+  };
+
+  const handleCloseVariantPicker = () => {
+    setVariantPickerProduct(null);
+    setVariantPickerSelectedId("");
+  };
+
+  const handleConfirmVariantPicker = () => {
+    if (!variantPickerProduct) return;
+    handleAddCatalogProductToOrder(variantPickerProduct, variantPickerSelectedId);
+    handleCloseVariantPicker();
+  };
+
   const handleCreateOrderCartQuantityChange = (itemKey, value) => {
     const nextQuantity = Math.max(1, Number.parseInt(value, 10) || 1);
     setCreateOrderForm((prev) => ({
@@ -21248,13 +21280,78 @@ export function AdminOrdersView() {
       Number.isFinite(createOrderShippingCost) && createOrderShippingCost >= 0
         ? createOrderShippingCost
         : 0;
+    const beforeDiscount = subtotal + shippingCost;
+    const rawDiscountValue = parseNumber(createOrderDiscountValue, 0);
+    let discountAmount = 0;
+    let discountPercent = null;
+    if (createOrderDiscountType === "amount") {
+      discountAmount = Math.min(beforeDiscount, Math.max(0, rawDiscountValue));
+    }
+    if (createOrderDiscountType === "percent") {
+      const safePercent = Math.min(100, Math.max(0, rawDiscountValue));
+      discountPercent = safePercent;
+      discountAmount = beforeDiscount * (safePercent / 100);
+    }
+    const totalPrice = Math.max(0, beforeDiscount - discountAmount);
     return {
       validItems,
       subtotal,
       shippingCost,
-      totalPrice: subtotal + shippingCost,
+      discountAmount,
+      discountPercent,
+      totalPrice,
     };
-  }, [createOrderForm.items, createOrderShippingCost]);
+  }, [createOrderForm.items, createOrderShippingCost, createOrderDiscountType, createOrderDiscountValue]);
+
+  const existingCustomerResults = useMemo(() => {
+    const term = createOrderCustomerSearch.trim().toLowerCase();
+    if (term.length < 2) return [];
+    const seen = new Set();
+    const results = [];
+    for (const order of (orders || [])) {
+      const c = order.customer;
+      if (!c?.email) continue;
+      const key = c.email.toLowerCase().trim();
+      if (seen.has(key)) continue;
+      const name = (c.fullName || "").toLowerCase();
+      const email = key;
+      const phone = (c.phone || "").toLowerCase();
+      if (!name.includes(term) && !email.includes(term) && !phone.includes(term)) continue;
+      seen.add(key);
+      results.push({
+        fullName: (c.fullName || "").trim(),
+        email: c.email.trim(),
+        phone: (c.phone || "").trim(),
+        shippingAddress: order.shippingAddress && typeof order.shippingAddress === "object"
+          ? {
+              street: (order.shippingAddress.street || "").trim(),
+              suburb: (order.shippingAddress.suburb || "").trim(),
+              city: (order.shippingAddress.city || "").trim(),
+              province: (order.shippingAddress.province || "").trim(),
+              postalCode: (order.shippingAddress.postalCode || "").trim(),
+            }
+          : null,
+      });
+      if (results.length >= 8) break;
+    }
+    return results;
+  }, [orders, createOrderCustomerSearch]);
+
+  const handleApplyExistingCustomer = (entry) => {
+    setCreateOrderForm((prev) => ({
+      ...prev,
+      customer: {
+        fullName: entry.fullName,
+        email: entry.email,
+        phone: entry.phone,
+      },
+      shippingAddress: entry.shippingAddress
+        ? { ...entry.shippingAddress }
+        : prev.shippingAddress,
+    }));
+    setCreateOrderCustomerSearch("");
+    setCreateOrderCustomerDropdownOpen(false);
+  };
 
   const handleCreateAdminOrder = async () => {
     if (!functionsInstance) return;
@@ -21332,6 +21429,15 @@ export function AdminOrdersView() {
         functionsInstance,
         "createAdminEftOrder",
       );
+      const discountPayload = createOrderDiscountType !== "none" && createOrderPricing.discountAmount > 0
+        ? {
+            type: createOrderDiscountType,
+            value: createOrderDiscountType === "percent"
+              ? (createOrderPricing.discountPercent ?? 0)
+              : createOrderPricing.discountAmount,
+            amount: createOrderPricing.discountAmount,
+          }
+        : { type: "none", value: 0, amount: 0 };
       const result = await createAdminEftOrder({
         customer,
         items: createOrderPricing.validItems.map((item) => ({
@@ -21350,6 +21456,7 @@ export function AdminOrdersView() {
         subtotal: createOrderPricing.subtotal,
         shippingCost: createOrderPricing.shippingCost,
         totalPrice: createOrderPricing.totalPrice,
+        discount: discountPayload,
         shipping: {
           courierId: createOrderSelectedCourier.id,
           courierName: createOrderSelectedCourier.name,
@@ -21384,6 +21491,39 @@ export function AdminOrdersView() {
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handleOpenEditCustomer = (order) => {
+    setEditCustomerForm({
+      fullName: order.customer?.fullName || "",
+      email: order.customer?.email || "",
+      phone: order.customer?.phone || "",
+    });
+    setEditCustomerError(null);
+    setEditCustomerOpen(true);
+  };
+
+  const handleSaveCustomer = async () => {
+    if (!functionsInstance || !selectedOrder?.id) return;
+    const fullName = editCustomerForm.fullName.trim();
+    const email = editCustomerForm.email.trim();
+    const phone = editCustomerForm.phone.trim();
+    if (!fullName || !email || !phone) {
+      setEditCustomerError("Name, email, and phone are all required.");
+      return;
+    }
+    setEditCustomerSaving(true);
+    setEditCustomerError(null);
+    try {
+      const fn = httpsCallable(functionsInstance, "adminUpdateOrderCustomer");
+      await fn({ orderId: selectedOrder.id, fullName, email, phone });
+      setEditCustomerOpen(false);
+      setStatusMessage("Customer details updated.");
+    } catch (err) {
+      setEditCustomerError(err.message || "Unable to update customer details.");
+    } finally {
+      setEditCustomerSaving(false);
+    }
   };
 
   const handleSaveDelivery = async () => {
@@ -22581,6 +22721,55 @@ export function AdminOrdersView() {
                 Who this order is for and where it should be delivered.
               </p>
             </div>
+
+            <div className="admin-order-create-customer-search">
+              <label className="admin-order-create-customer-search__label">
+                Search existing customer
+              </label>
+              <div className="admin-order-create-customer-search__wrap">
+                <input
+                  className="input"
+                  type="text"
+                  placeholder="Type name, email or phone…"
+                  value={createOrderCustomerSearch}
+                  autoComplete="off"
+                  disabled={createOrderSaving}
+                  onChange={(e) => {
+                    setCreateOrderCustomerSearch(e.target.value);
+                    setCreateOrderCustomerDropdownOpen(true);
+                  }}
+                  onFocus={() => setCreateOrderCustomerDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setCreateOrderCustomerDropdownOpen(false), 180)}
+                />
+                {createOrderCustomerDropdownOpen && existingCustomerResults.length > 0 && (
+                  <ul className="admin-order-create-customer-search__dropdown">
+                    {existingCustomerResults.map((entry) => (
+                      <li key={entry.email}>
+                        <button
+                          type="button"
+                          className="admin-order-create-customer-search__option"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handleApplyExistingCustomer(entry)}
+                        >
+                          <span className="admin-order-create-customer-search__name">
+                            {entry.fullName || entry.email}
+                          </span>
+                          <span className="admin-order-create-customer-search__meta">
+                            {entry.email}{entry.phone ? ` · ${entry.phone}` : ""}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {createOrderCustomerDropdownOpen && createOrderCustomerSearch.trim().length >= 2 && existingCustomerResults.length === 0 && (
+                  <div className="admin-order-create-customer-search__empty">
+                    No existing customers found
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="admin-order-create-grid">
               <label>
                 Full Name
@@ -22860,137 +23049,68 @@ export function AdminOrdersView() {
               {!inventoryLoading && filteredCreateOrderProducts.length > 0 && (
                 <div className="pos-grid admin-order-create-products">
                   {filteredCreateOrderProducts.map((product) => {
-                    const selection =
-                      createOrderVariantSelections[product.id] || "";
-                    const variants = Array.isArray(product.variants)
-                      ? product.variants
-                      : [];
-                    const selectedVariant =
-                      variants.find((variant) => variant.id === selection) ||
-                      (variants.length === 1 ? variants[0] : null);
-                    const unitPrice = Number.isFinite(selectedVariant?.price)
-                      ? selectedVariant.price
-                      : product.numericPrice;
-                    const priceLabel = Number.isFinite(unitPrice)
-                      ? formatPriceLabel(unitPrice)
+                    const variants = Array.isArray(product.variants) ? product.variants : [];
+                    const hasVariants = variants.length > 1;
+                    const isOutOfStock = product.stockStatus?.state === "out";
+                    const priceLabel = Number.isFinite(product.numericPrice)
+                      ? formatPriceLabel(product.numericPrice)
                       : "Price on request";
-                    const requiresVariant = variants.length > 1;
-                    const missingVariant = requiresVariant && !selection;
-                    const activeStockStatus =
-                      requiresVariant && selectedVariant
-                        ? selectedVariant.stockStatus
-                        : product.stockStatus;
-                    const isOutOfStock = activeStockStatus?.state === "out";
-                    const addDisabled = isOutOfStock || missingVariant;
-                    let disabledHint = null;
-                    if (isOutOfStock) disabledHint = "Out of stock";
-                    else if (missingVariant)
-                      disabledHint = "Select a variant first";
-                    const cardClassName = addDisabled
-                      ? "pos-item-card admin-order-create-product-card admin-order-create-product-card--disabled"
-                      : "pos-item-card admin-order-create-product-card admin-order-create-product-card--interactive";
-                    const isInteractiveCardTarget = (target) =>
-                      !!target &&
-                      typeof target.closest === "function" &&
-                      Boolean(
-                        target.closest(
-                          "button, input, select, textarea, label, a",
-                        ),
-                      );
                     return (
                       <article
-                        className={cardClassName}
+                        className={`pos-item-card admin-order-create-product-card ${isOutOfStock ? "admin-order-create-product-card--disabled" : "admin-order-create-product-card--interactive"}`}
                         key={product.id}
-                        onClick={(event) => {
-                          if (
-                            addDisabled ||
-                            isInteractiveCardTarget(event.target)
-                          )
-                            return;
-                          handleAddCatalogProductToOrder(product);
+                        onClick={() => {
+                          if (isOutOfStock) return;
+                          if (hasVariants) handleOpenVariantPicker(product);
+                          else handleAddCatalogProductToOrder(product);
                         }}
                         onKeyDown={(event) => {
-                          if (
-                            addDisabled ||
-                            isInteractiveCardTarget(event.target)
-                          )
-                            return;
+                          if (isOutOfStock) return;
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            handleAddCatalogProductToOrder(product);
+                            if (hasVariants) handleOpenVariantPicker(product);
+                            else handleAddCatalogProductToOrder(product);
                           }
                         }}
-                        role={addDisabled ? undefined : "button"}
-                        tabIndex={addDisabled ? undefined : 0}
-                        aria-disabled={addDisabled ? "true" : undefined}
-                        aria-label={
-                          addDisabled
-                            ? undefined
-                            : `Add ${product.name} to order`
-                        }
+                        role={isOutOfStock ? undefined : "button"}
+                        tabIndex={isOutOfStock ? undefined : 0}
+                        aria-disabled={isOutOfStock ? "true" : undefined}
+                        aria-label={isOutOfStock ? undefined : `Add ${product.name} to order`}
                       >
                         <div className="admin-order-create-product-info">
                           <div className="admin-order-create-product-heading">
                             <h4>{product.name}</h4>
-                            {activeStockStatus && (
-                              <span
-                                className={`badge badge--stock-${activeStockStatus.state}`}
-                              >
-                                {activeStockStatus.label}
+                            {product.stockStatus && (
+                              <span className={`badge badge--stock-${product.stockStatus.state}`}>
+                                {product.stockStatus.label}
                               </span>
                             )}
                           </div>
-                          <p className="admin-order-create-product-price">
-                            {priceLabel}
-                          </p>
+                          <p className="admin-order-create-product-price">{priceLabel}</p>
                           {product.sku && (
-                            <p className="admin-order-create-product-sku">
-                              SKU: {product.sku}
-                            </p>
+                            <p className="admin-order-create-product-sku">SKU: {product.sku}</p>
                           )}
-                          {variants.length > 0 && (
-                            <label className="modal__meta pos-item-card__field">
-                              Variant
-                              <select
-                                className="input"
-                                value={selection}
-                                onClick={(event) => event.stopPropagation()}
-                                onChange={(event) =>
-                                  setCreateOrderVariantSelections((prev) => ({
-                                    ...prev,
-                                    [product.id]: event.target.value,
-                                  }))
-                                }
-                              >
-                                <option value="">Select variant</option>
-                                {variants.map((variant) => (
-                                  <option key={variant.id} value={variant.id}>
-                                    {variant.label}
-                                    {Number.isFinite(variant.price)
-                                      ? ` - ${formatPriceLabel(variant.price)}`
-                                      : ""}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
+                          {hasVariants && (
+                            <p className="admin-order-create-product-variants-hint modal__meta">
+                              {variants.length} variants
+                            </p>
                           )}
                         </div>
                         <div className="admin-order-create-product-actions">
                           <button
                             className="btn btn--secondary"
                             type="button"
-                            disabled={addDisabled}
+                            disabled={isOutOfStock}
                             onClick={(event) => {
                               event.stopPropagation();
-                              handleAddCatalogProductToOrder(product);
+                              if (hasVariants) handleOpenVariantPicker(product);
+                              else handleAddCatalogProductToOrder(product);
                             }}
                           >
-                            Add
+                            {hasVariants ? "Add…" : "Add"}
                           </button>
-                          {disabledHint && (
-                            <p className="modal__meta admin-order-create-product-hint">
-                              {disabledHint}
-                            </p>
+                          {isOutOfStock && (
+                            <p className="modal__meta admin-order-create-product-hint">Out of stock</p>
                           )}
                         </div>
                       </article>
@@ -23097,6 +23217,42 @@ export function AdminOrdersView() {
                 )}
               </div>
 
+              <div className="admin-order-create__discount">
+                <label className="modal__meta" style={{ display: "block", marginBottom: 6 }}>
+                  Discount type
+                  <select
+                    className="input"
+                    value={createOrderDiscountType}
+                    onChange={(e) => {
+                      setCreateOrderDiscountType(e.target.value);
+                      setCreateOrderDiscountValue("");
+                    }}
+                    disabled={createOrderSaving}
+                    style={{ marginTop: 4 }}
+                  >
+                    <option value="none">No discount</option>
+                    <option value="amount">Fixed amount (R)</option>
+                    <option value="percent">Percentage (%)</option>
+                  </select>
+                </label>
+                {createOrderDiscountType !== "none" && (
+                  <label className="modal__meta" style={{ display: "block", marginBottom: 6 }}>
+                    {createOrderDiscountType === "amount" ? "Discount amount (R)" : "Discount percent (%)"}
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step={createOrderDiscountType === "amount" ? "0.01" : "1"}
+                      max={createOrderDiscountType === "percent" ? "100" : undefined}
+                      value={createOrderDiscountValue}
+                      onChange={(e) => setCreateOrderDiscountValue(e.target.value)}
+                      disabled={createOrderSaving}
+                      style={{ marginTop: 4 }}
+                    />
+                  </label>
+                )}
+              </div>
+
               <div className="admin-order-create__totals">
                 <p className="modal__meta admin-order-create-total-row">
                   <span>Courier</span>
@@ -23120,6 +23276,19 @@ export function AdminOrdersView() {
                       : "Select a courier"}
                   </strong>
                 </p>
+                {createOrderPricing.discountAmount > 0 && (
+                  <p className="modal__meta admin-order-create-total-row">
+                    <span>
+                      Discount
+                      {createOrderDiscountType === "percent" && createOrderPricing.discountPercent != null
+                        ? ` (${createOrderPricing.discountPercent}%)`
+                        : ""}
+                    </span>
+                    <strong style={{ color: "#c0392b" }}>
+                      -{formatPriceLabel(createOrderPricing.discountAmount)}
+                    </strong>
+                  </p>
+                )}
                 <p className="modal__meta admin-order-create-total-row admin-order-create-total-row--final">
                   <span>Total</span>
                   <strong>
@@ -23160,6 +23329,71 @@ export function AdminOrdersView() {
           </div>
         </div>
       </div>
+
+      {variantPickerProduct && (
+        <div
+          className="modal variant-picker-modal is-active"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Choose variant for ${variantPickerProduct.name}`}
+          onClick={(e) => { if (e.target === e.currentTarget) handleCloseVariantPicker(); }}
+        >
+          <div className="modal__content variant-picker-modal__content">
+            <button
+              className="modal__close"
+              type="button"
+              aria-label="Close"
+              onClick={handleCloseVariantPicker}
+            >
+              &times;
+            </button>
+            <h3 className="modal__title">{variantPickerProduct.name}</h3>
+            <p className="modal__meta variant-picker-modal__lead">
+              Choose a variant to add to the order.
+            </p>
+            <div className="variant-picker-modal__options">
+              {(Array.isArray(variantPickerProduct.variants) ? variantPickerProduct.variants : []).map((variant) => {
+                const isSelected = variantPickerSelectedId === variant.id;
+                const isOut = variant.stockStatus?.state === "out";
+                return (
+                  <button
+                    key={variant.id}
+                    type="button"
+                    disabled={isOut}
+                    className={`variant-picker-modal__option${isSelected ? " is-selected" : ""}${isOut ? " is-out" : ""}`}
+                    onClick={() => setVariantPickerSelectedId(variant.id)}
+                  >
+                    <span className="variant-picker-modal__option-label">{variant.label}</span>
+                    {Number.isFinite(variant.price) && (
+                      <span className="variant-picker-modal__option-price">{formatPriceLabel(variant.price)}</span>
+                    )}
+                    {isOut && (
+                      <span className="variant-picker-modal__option-stock">Out of stock</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="modal__actions variant-picker-modal__actions">
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={handleCloseVariantPicker}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                disabled={!variantPickerSelectedId}
+                onClick={handleConfirmVariantPicker}
+              >
+                Add to order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div
         className={`modal order-detail-modal ${selectedOrder ? "is-active" : ""}`}
@@ -23589,14 +23823,86 @@ export function AdminOrdersView() {
               >
                 <div className="admin-order-detail__section-grid admin-order-detail__section-grid--two">
                   <section className="admin-order-detail__section-card">
-                    <h4>Customer details</h4>
-                    <p>{selectedOrder.customer?.fullName || "-"}</p>
-                    <p className="modal__meta">
-                      {selectedOrder.customer?.email || "-"}
-                    </p>
-                    <p className="modal__meta">
-                      {selectedOrder.customer?.phone || "-"}
-                    </p>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <h4 style={{ margin: 0 }}>Customer details</h4>
+                      {!editCustomerOpen && (
+                        <button
+                          className="btn btn--secondary btn--small"
+                          type="button"
+                          onClick={() => handleOpenEditCustomer(selectedOrder)}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                    {editCustomerOpen ? (
+                      <div>
+                        <label className="modal__meta" style={{ display: "block", marginBottom: 6 }}>
+                          Full name
+                          <input
+                            className="input"
+                            type="text"
+                            value={editCustomerForm.fullName}
+                            onChange={(e) => setEditCustomerForm((prev) => ({ ...prev, fullName: e.target.value }))}
+                            disabled={editCustomerSaving}
+                            style={{ marginTop: 4, display: "block", width: "100%" }}
+                          />
+                        </label>
+                        <label className="modal__meta" style={{ display: "block", marginBottom: 6 }}>
+                          Email
+                          <input
+                            className="input"
+                            type="email"
+                            value={editCustomerForm.email}
+                            onChange={(e) => setEditCustomerForm((prev) => ({ ...prev, email: e.target.value }))}
+                            disabled={editCustomerSaving}
+                            style={{ marginTop: 4, display: "block", width: "100%" }}
+                          />
+                        </label>
+                        <label className="modal__meta" style={{ display: "block", marginBottom: 8 }}>
+                          Phone
+                          <input
+                            className="input"
+                            type="tel"
+                            value={editCustomerForm.phone}
+                            onChange={(e) => setEditCustomerForm((prev) => ({ ...prev, phone: e.target.value }))}
+                            disabled={editCustomerSaving}
+                            style={{ marginTop: 4, display: "block", width: "100%" }}
+                          />
+                        </label>
+                        {editCustomerError && (
+                          <p className="admin-panel__error" style={{ marginBottom: 8 }}>{editCustomerError}</p>
+                        )}
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            className="btn btn--primary btn--small"
+                            type="button"
+                            disabled={editCustomerSaving}
+                            onClick={handleSaveCustomer}
+                          >
+                            {editCustomerSaving ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            className="btn btn--secondary btn--small"
+                            type="button"
+                            disabled={editCustomerSaving}
+                            onClick={() => setEditCustomerOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p>{selectedOrder.customer?.fullName || "-"}</p>
+                        <p className="modal__meta">
+                          {selectedOrder.customer?.email || "-"}
+                        </p>
+                        <p className="modal__meta">
+                          {selectedOrder.customer?.phone || "-"}
+                        </p>
+                      </>
+                    )}
                   </section>
                   <section className="admin-order-detail__section-card">
                     <h4>Address on order</h4>
