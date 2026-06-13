@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import "./AdminPosPage.css";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc,
   collection,
@@ -22,7 +23,10 @@ import { useAdminData } from "../../context/AdminDataContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useFirestoreCollection } from "../../hooks/useFirestoreCollection.js";
 import { usePageMetadata } from "../../hooks/usePageMetadata.js";
-import { getFirebaseFunctions } from "../../lib/firebase.js";
+import { usePrinter } from "../../hooks/usePrinter.js";
+import { buildBillHtml } from "../../lib/escpos.js";
+import { getFirebaseFunctions, getFirebaseStorage } from "../../lib/firebase.js";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import {
   formatPosSaleStatusLabel,
   getPosSaleDateKey,
@@ -42,7 +46,7 @@ const POS_TABS = [
   {
     id: "all-items",
     label: "All items",
-    description: "Search across products, POS-only items, and services.",
+    description: "Everything available at the POS.",
   },
   {
     id: "products",
@@ -50,9 +54,9 @@ const POS_TABS = [
     description: "Retail products and inventory items.",
   },
   {
-    id: "pos-products",
-    label: "POS-only",
-    description: "Studio-only add-ons, snacks, and extras.",
+    id: "pos-only",
+    label: "POS items",
+    description: "Studio-only drinks, food, and add-ons.",
   },
   {
     id: "services",
@@ -86,6 +90,7 @@ const INITIAL_POS_PRODUCT = {
   quantity: "1",
   forceOutOfStock: false,
   status: "active",
+  imageUrl: "",
 };
 
 const DEFAULT_CUSTOMER = {
@@ -95,9 +100,8 @@ const DEFAULT_CUSTOMER = {
 };
 
 const POS_STEP_ORDER = 1;
-const POS_STEP_CUSTOMER = 2;
-const POS_STEP_PAYMENT = 3;
-const POS_STEP_CONFIRM = 4;
+const POS_STEP_PAYMENT = 2;
+const POS_STEP_CONFIRM = 3;
 const WORKSHOP_BOOKINGS_COLLECTION = "bookings";
 const WORKSHOP_BOOKING_EMAIL_AUDIT_COLLECTION = "workshopBookingEmailAudit";
 const CUT_FLOWER_BOOKINGS_COLLECTION = "cutFlowerBookings";
@@ -611,18 +615,36 @@ function AdminPosPage() {
   const { items: posProducts } = useFirestoreCollection("posProducts", {
     orderByField: "createdAt",
     orderDirection: "desc",
+    enabled: inventoryEnabled,
+    db,
   });
   const { items: posSales } = useFirestoreCollection("posSales", {
     orderByField: "createdAt",
     orderDirection: "desc",
+    enabled: inventoryEnabled,
+    db,
   });
   const { items: adminPosSettings, status: adminPosSettingsStatus } = useFirestoreCollection(
     "adminPosSettings",
     {
       orderByField: null,
       orderDirection: null,
+      enabled: inventoryEnabled,
+      db,
     },
   );
+  const { items: allPosTabs } = useFirestoreCollection("posTabs", {
+    orderByField: "openedAt",
+    orderDirection: "desc",
+    enabled: inventoryEnabled,
+    db,
+  });
+
+  const { items: posTableConfigItems } = useFirestoreCollection("posTableConfig", {
+    enabled: inventoryEnabled,
+    db,
+    orderByField: null, // single config doc — has no createdAt, orderBy would exclude it
+  });
 
   const functionsInstance = useMemo(() => {
     try {
@@ -631,6 +653,8 @@ function AdminPosPage() {
       return null;
     }
   }, []);
+
+  const { status: printerStatus, connect: connectPrinter, print: printViaUsb, printBill: printBillViaUsb } = usePrinter();
 
   const [activeTab, setActiveTab] = useState(POS_TABS[0].id);
   const [searchTerm, setSearchTerm] = useState("");
@@ -657,10 +681,21 @@ function AdminPosPage() {
   const [giftCardLookupError, setGiftCardLookupError] = useState(null);
   const [recentSalesOpen, setRecentSalesOpen] = useState(false);
   const [stepOneAttemptedNext, setStepOneAttemptedNext] = useState(false);
-  const [emailBlurred, setEmailBlurred] = useState(false);
   const [voidSaleTarget, setVoidSaleTarget] = useState(null);
 
+  const [activePosTableNumber, setActivePosTableNumber] = useState(null);
+  const [activePosTabId, setActivePosTabId] = useState(null);
+  const [tablePickerOpen, setTablePickerOpen] = useState(false);
+  const [posTabSaving, setPosTabSaving] = useState(false);
+  const [posTableCount, setPosTableCount] = useState(10);
+  const [posTableNames, setPosTableNames] = useState({});
+  const [tableNameEditMode, setTableNameEditMode] = useState(false);
+  const [pendingTableNames, setPendingTableNames] = useState({});
+  const [tableConfigSaving, setTableConfigSaving] = useState(false);
+
   const [posProductForm, setPosProductForm] = useState(INITIAL_POS_PRODUCT);
+  const [posProductImageFile, setPosProductImageFile] = useState(null);
+  const [posProductImagePreview, setPosProductImagePreview] = useState("");
   const [posProductSaving, setPosProductSaving] = useState(false);
   const [posProductError, setPosProductError] = useState(null);
   const [editingPosProductId, setEditingPosProductId] = useState(null);
@@ -1034,6 +1069,7 @@ function AdminPosPage() {
     const term = searchTerm.trim().toLowerCase();
     return normalizedWorkshopBookings.filter((booking) => {
       if (booking.completed) return false;
+      if (booking.checkedIn) return false;
       if (bookingDateFilter && booking.dateKey !== bookingDateFilter) return false;
       if (!term) return true;
       const haystack = [
@@ -1055,6 +1091,7 @@ function AdminPosPage() {
     const term = searchTerm.trim().toLowerCase();
     return normalizedCutFlowerBookings.filter((booking) => {
       if (booking.completed) return false;
+      if (booking.checkedIn) return false;
       if (bookingDateFilter && booking.dateKey !== bookingDateFilter) return false;
       if (!term) return true;
       const haystack = [
@@ -1069,6 +1106,20 @@ function AdminPosPage() {
       return haystack.includes(term);
     });
   }, [bookingDateFilter, normalizedCutFlowerBookings, searchTerm]);
+
+  const openPosTabs = useMemo(
+    () => (allPosTabs || []).filter((t) => t.status === "open"),
+    [allPosTabs],
+  );
+
+  useEffect(() => {
+    const config = (posTableConfigItems || [])[0];
+    if (!config) return;
+    if (config.tableCount) setPosTableCount(config.tableCount);
+    if (config.tableNames && typeof config.tableNames === "object") {
+      setPosTableNames(config.tableNames);
+    }
+  }, [posTableConfigItems]);
 
   const normalizedClasses = useMemo(() => {
     return (cutFlowerClasses || [])
@@ -1469,7 +1520,7 @@ function AdminPosPage() {
         id: "pos-products",
         label: "POS-only",
         description: "Studio extras, drinks, packaging, and add-ons.",
-        departmentId: "pos-products",
+        departmentId: "pos-only",
         items: previewMode ? catalogSearchPosProducts.slice(0, 8) : catalogSearchPosProducts,
       },
       {
@@ -1529,27 +1580,26 @@ function AdminPosPage() {
     return sections.filter((section) => activeServiceType === "all" || activeServiceType === section.id);
   }, [activeServiceType, filteredClasses, filteredEvents, filteredWorkshops]);
 
-  const departmentCounts = useMemo(
-    () => ({
+  const departmentCounts = useMemo(() => {
+    return {
       "all-items": sellableCatalogEntries.length,
       products: normalizedProducts.length,
-      "pos-products": normalizedPosProducts.length,
+      "pos-only": normalizedPosProducts.length,
       services: liveWorkshops.length + normalizedClasses.length + normalizedEvents.length,
       bookings:
-        normalizedWorkshopBookings.filter((booking) => !booking.completed).length +
-        normalizedCutFlowerBookings.filter((booking) => !booking.completed).length,
-    }),
-    [
-      liveWorkshops.length,
-      normalizedClasses.length,
-      normalizedCutFlowerBookings,
-      normalizedEvents.length,
-      normalizedPosProducts.length,
-      normalizedProducts.length,
-      normalizedWorkshopBookings,
-      sellableCatalogEntries.length,
-    ],
-  );
+        normalizedWorkshopBookings.filter((b) => !b.completed).length +
+        normalizedCutFlowerBookings.filter((b) => !b.completed).length,
+    };
+  }, [
+    liveWorkshops.length,
+    normalizedClasses.length,
+    normalizedCutFlowerBookings,
+    normalizedEvents.length,
+    normalizedPosProducts.length,
+    normalizedProducts.length,
+    normalizedWorkshopBookings,
+    sellableCatalogEntries.length,
+  ]);
 
   const activeCount = useMemo(() => {
     if (activeTab === "all-items") {
@@ -1563,7 +1613,7 @@ function AdminPosPage() {
       );
     }
     if (activeTab === "products") return filteredProducts.length;
-    if (activeTab === "pos-products") return filteredPosProducts.length;
+    if (activeTab === "pos-only") return filteredPosProducts.length;
     if (activeTab === "services") {
       return serviceSections.reduce((sum, section) => sum + section.items.length, 0);
     }
@@ -1980,13 +2030,9 @@ function AdminPosPage() {
     [stockIssues],
   );
 
-  const emailValue = customer.email.trim();
-  const emailRequired = sendEmailReceipt;
-  const emailValid = !emailRequired || isValidEmailAddress(emailValue);
   const fullyCoveredByGiftCard = pricing.amountDue <= 0 && giftCardMatches.length > 0;
   const resolvedPaymentMethod = fullyCoveredByGiftCard ? "gift-card" : paymentMethod;
   const stepOneValid = cartItems.length > 0 && stockIssues.length === 0;
-  const stepTwoValid = !emailRequired || (Boolean(emailValue) && emailValid);
   const stepThreeValid =
     fullyCoveredByGiftCard ||
     (Boolean(paymentMethod) &&
@@ -1996,12 +2042,11 @@ function AdminPosPage() {
   const completedSteps = useMemo(() => {
     const next = new Set();
     if (currentStep > POS_STEP_ORDER && stepOneValid) next.add(POS_STEP_ORDER);
-    if (currentStep > POS_STEP_CUSTOMER && stepOneValid && stepTwoValid) next.add(POS_STEP_CUSTOMER);
-    if (currentStep > POS_STEP_PAYMENT && stepOneValid && stepTwoValid && stepThreeValid) {
+    if (currentStep > POS_STEP_PAYMENT && stepOneValid && stepThreeValid) {
       next.add(POS_STEP_PAYMENT);
     }
     return next;
-  }, [currentStep, stepOneValid, stepThreeValid, stepTwoValid]);
+  }, [currentStep, stepOneValid, stepThreeValid]);
 
   const stepThreeError = useMemo(() => {
     if (fullyCoveredByGiftCard) return "";
@@ -2616,12 +2661,19 @@ function AdminPosPage() {
   };
 
   const handleRemoveCartItem = (key) => {
-    setCartItems((prev) =>
-      prev.filter((item) => {
-        if (item.key !== key) return true;
-        return isGiftCardLinkedLineItem(item);
-      }),
-    );
+    const next = cartItems.filter((item) => {
+      if (item.key !== key) return true;
+      return isGiftCardLinkedLineItem(item);
+    });
+    setCartItems(next);
+    if (activePosTabId && db) {
+      updateDoc(doc(db, "posTabs", activePosTabId), {
+        items: next,
+        updatedAt: serverTimestamp(),
+      }).catch((err) => {
+        console.warn("Failed to persist item removal to tab:", err);
+      });
+    }
   };
 
   const handleCartQuantityChange = (key, value) => {
@@ -2675,11 +2727,16 @@ function AdminPosPage() {
         booking.frame,
         booking.framePreference,
       );
+      const safeCount = Math.max(1, Number.parseInt(attendeeCount, 10) || 1);
+      const existingFrameSelections = Array.isArray(booking.attendeeFrameSelections)
+        ? booking.attendeeFrameSelections.map((s) => (typeof s === "string" ? s : s?.optionId || ""))
+        : [];
       return {
         date: booking.dateKey || "",
-        attendeeCount: Math.max(1, Number.parseInt(attendeeCount, 10) || 1),
+        attendeeCount: safeCount,
         sessionId: matchedSession?.id || "",
         optionId: matchedOption?.id || "",
+        attendeeFrameSelections: normalizeAttendeeOptions(safeCount, existingFrameSelections, matchedOption?.id || ""),
       };
     }
     const attendeeSelections = Array.isArray(booking.attendeeSelections)
@@ -2730,6 +2787,23 @@ function AdminPosPage() {
           next.date = session.date;
         }
       }
+      if (type === "workshop" && field === "attendeeCount") {
+        next.attendeeFrameSelections = normalizeAttendeeOptions(
+          value,
+          current.attendeeFrameSelections || [],
+          current.optionId || "",
+        );
+      }
+      if (type === "workshop" && field === "attendeeFrameIndex") {
+        const { index, optionId } = value;
+        const selections = Array.isArray(current.attendeeFrameSelections) ? [...current.attendeeFrameSelections] : [];
+        selections[index] = optionId;
+        next.attendeeFrameSelections = normalizeAttendeeOptions(
+          current.attendeeCount,
+          selections,
+          current.optionId || "",
+        );
+      }
       if (type === "cut-flower" && field === "attendeeCount") {
         next.attendeeOptions = normalizeAttendeeOptions(value, current.attendeeOptions, current.optionId);
       }
@@ -2779,22 +2853,40 @@ function AdminPosPage() {
             booking.frame,
             booking.framePreference,
           ) || null;
-        if (workshop?.options?.length > 0 && !selectedOption) {
-          setBookingError("Select the frame size before saving this booking.");
-          return;
-        }
         const attendeeCount = getWorkshopBookingAttendeeCount(booking, editState.attendeeCount);
+        const frameSelections = editState.attendeeFrameSelections || [];
+        if (workshop?.options?.length > 0) {
+          const missingCount = Array.from({ length: attendeeCount }, (_, i) => frameSelections[i] || "").filter((id) => !id).length;
+          if (missingCount > 0) {
+            setBookingError(`Select a frame size for all ${attendeeCount} attendee${attendeeCount !== 1 ? "s" : ""}.`);
+            return;
+          }
+        }
+        const primaryOption = workshop?.options?.find((o) => o.id === (frameSelections[0] || editState.optionId)) || selectedOption;
         const perAttendeePrice = getWorkshopBookingUnitPrice({
           booking,
-          option: selectedOption,
+          option: primaryOption,
           workshop,
           attendeeCount,
         });
-        const totalPrice = getWorkshopBookingTotalPrice({
-          booking,
-          option: selectedOption,
-          workshop,
-          attendeeCount,
+        const totalFromSelections = workshop?.options?.length > 0 && frameSelections.length > 0
+          ? frameSelections.slice(0, attendeeCount).reduce((sum, optionId) => {
+              const option = workshop.options.find((o) => o.id === optionId);
+              const price = Number(option?.price);
+              return Number.isFinite(price) ? sum + price : sum;
+            }, 0)
+          : null;
+        const totalPrice = totalFromSelections > 0
+          ? totalFromSelections
+          : getWorkshopBookingTotalPrice({ booking, option: primaryOption, workshop, attendeeCount });
+        const attendeeFrameSelectionsSave = frameSelections.slice(0, attendeeCount).map((optionId, index) => {
+          const option = workshop?.options?.find((o) => o.id === optionId) || null;
+          return {
+            attendee: index + 1,
+            optionId: option?.id || optionId || null,
+            optionLabel: option?.label || null,
+            price: option?.price ?? null,
+          };
         });
         await updateDoc(doc(db, collectionName, booking.id), {
           sessionDate: editState.date,
@@ -2807,14 +2899,12 @@ function AdminPosPage() {
             selectedSession?.timeRangeLabel || booking.sessionTimeRange || booking.sessionLabel || null,
           sessionId: selectedSession?.id || booking.sessionId || null,
           attendeeCount,
-          frame:
-            selectedOption?.label || booking.optionLabel || booking.frame || "Workshop",
-          framePreference:
-            selectedOption?.id || booking.optionId || booking.optionValue || booking.framePreference || null,
-          optionLabel: selectedOption?.label || booking.optionLabel || null,
-          optionValue: selectedOption?.id || booking.optionValue || null,
-          totalPrice:
-            Number.isFinite(totalPrice) && totalPrice > 0 ? totalPrice : booking.totalPrice ?? null,
+          attendeeFrameSelections: attendeeFrameSelectionsSave,
+          frame: primaryOption?.label || booking.optionLabel || booking.frame || "Workshop",
+          framePreference: primaryOption?.id || booking.optionId || booking.optionValue || booking.framePreference || null,
+          optionLabel: primaryOption?.label || booking.optionLabel || null,
+          optionValue: primaryOption?.id || booking.optionValue || null,
+          totalPrice: Number.isFinite(totalPrice) && totalPrice > 0 ? totalPrice : booking.totalPrice ?? null,
           price:
             Number.isFinite(perAttendeePrice) && perAttendeePrice > 0
               ? perAttendeePrice
@@ -2882,28 +2972,40 @@ function AdminPosPage() {
           booking.frame,
           booking.framePreference,
         ) || null;
-      if (workshop?.options?.length > 0 && !selectedWorkshopOption) {
-        setBookingError("Select the frame size before adding this booking to the cart.");
-        return;
+      const cartFrameSelections = editState.attendeeFrameSelections || [];
+      if (workshop?.options?.length > 0) {
+        const missing = Array.from({ length: attendeeCount }, (_, i) => cartFrameSelections[i] || "").some((id) => !id);
+        if (missing) {
+          setBookingError("Select a frame size for each attendee before adding to the cart.");
+          return;
+        }
       }
+      selectedWorkshopOption = workshop?.options?.find((o) => o.id === (cartFrameSelections[0] || editState.optionId)) || selectedWorkshopOption;
       perAttendeePrice = getWorkshopBookingUnitPrice({
         booking,
         option: selectedWorkshopOption,
         workshop,
         attendeeCount,
       });
-      const bookingTotal = getWorkshopBookingTotalPrice({
-        booking,
-        option: selectedWorkshopOption,
-        workshop,
-        attendeeCount,
-      });
-      if (Number.isFinite(bookingTotal) && bookingTotal > 0) {
-        priceValue = bookingTotal;
+      const totalFromCartSelections = workshop?.options?.length > 0 && cartFrameSelections.length > 0
+        ? cartFrameSelections.slice(0, attendeeCount).reduce((sum, optionId) => {
+            const option = workshop?.options?.find((o) => o.id === optionId);
+            const price = Number(option?.price);
+            return Number.isFinite(price) ? sum + price : sum;
+          }, 0)
+        : null;
+      if (totalFromCartSelections > 0) {
+        priceValue = totalFromCartSelections;
         quantityValue = 1;
-      } else if (Number.isFinite(perAttendeePrice) && perAttendeePrice > 0) {
-        priceValue = perAttendeePrice * attendeeCount;
-        quantityValue = 1;
+      } else {
+        const bookingTotal = getWorkshopBookingTotalPrice({ booking, option: selectedWorkshopOption, workshop, attendeeCount });
+        if (Number.isFinite(bookingTotal) && bookingTotal > 0) {
+          priceValue = bookingTotal;
+          quantityValue = 1;
+        } else if (Number.isFinite(perAttendeePrice) && perAttendeePrice > 0) {
+          priceValue = perAttendeePrice * attendeeCount;
+          quantityValue = 1;
+        }
       }
       bookingLabelName =
         (booking.name || booking.customerName || booking.email || booking.workshopTitle || "Guest")
@@ -3020,6 +3122,13 @@ function AdminPosPage() {
         perAttendeePrice: type === "workshop" ? perAttendeePrice : null,
         totalPrice: type === "workshop" ? priceValue : null,
         attendeeOptions: type === "cut-flower" ? editState.attendeeOptions || [] : null,
+        attendeeFrameSelections: type === "workshop"
+          ? (editState.attendeeFrameSelections || []).slice(0, attendeeCount).map((optionId, index) => {
+              const workshop = workshopLookup.get(booking.workshopId);
+              const option = workshop?.options?.find((o) => o.id === optionId) || null;
+              return { attendee: index + 1, optionId: option?.id || optionId || null, optionLabel: option?.label || null, price: option?.price ?? null };
+            })
+          : null,
         originalStatus: booking.status || null,
         originalBookingStatus:
           type === "workshop"
@@ -3035,6 +3144,27 @@ function AdminPosPage() {
       },
     });
     setActiveBookingEditor(null);
+  };
+
+  const handleCheckIn = async (booking, type) => {
+    if (!db || !inventoryEnabled) {
+      setBookingError("You do not have permission to check in bookings.");
+      return;
+    }
+    const collectionName =
+      type === "workshop"
+        ? getWorkshopBookingSourceCollection(booking)
+        : CUT_FLOWER_BOOKINGS_COLLECTION;
+    try {
+      await updateDoc(doc(db, collectionName, booking.id), {
+        checkedIn: true,
+        checkedInAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setActiveBookingEditor(null);
+    } catch (error) {
+      setBookingError(error.message || "Unable to check in.");
+    }
   };
 
   const resetCheckout = () => {
@@ -3059,6 +3189,157 @@ function AdminPosPage() {
     setStepOneAttemptedNext(false);
     setEmailBlurred(false);
     setActiveBookingEditor(null);
+    setActivePosTableNumber(null);
+    setActivePosTabId(null);
+  };
+
+  const handleSelectTable = async (tableNum) => {
+    if (!db || !inventoryEnabled) return;
+    const existingTab = openPosTabs.find((t) => t.tableNumber === tableNum);
+    if (existingTab) {
+      setActivePosTableNumber(tableNum);
+      setActivePosTabId(existingTab.id);
+      const savedItems = Array.isArray(existingTab.items) ? existingTab.items : [];
+      setCartItems(savedItems);
+      if (existingTab.customerName || existingTab.customerEmail) {
+        setCustomer((prev) => ({
+          ...prev,
+          name: existingTab.customerName || prev.name,
+          email: existingTab.customerEmail || prev.email,
+        }));
+      }
+    } else {
+      setActivePosTableNumber(tableNum);
+      setActivePosTabId(null);
+      setCartItems([]);
+    }
+    setTablePickerOpen(false);
+  };
+
+  const handleHoldTab = async () => {
+    if (!db || !inventoryEnabled || activePosTableNumber == null) return;
+    setPosTabSaving(true);
+    try {
+      const tabData = {
+        tableNumber: activePosTableNumber,
+        status: "open",
+        items: cartItems,
+        customerName: customer.name || "",
+        customerEmail: customer.email || "",
+        updatedAt: serverTimestamp(),
+      };
+      if (activePosTabId) {
+        await updateDoc(doc(db, "posTabs", activePosTabId), tabData);
+      } else {
+        const newRef = await addDoc(collection(db, "posTabs"), {
+          ...tabData,
+          openedAt: serverTimestamp(),
+        });
+        setActivePosTabId(newRef.id);
+      }
+      setCartItems([]);
+      setActivePosTableNumber(null);
+      setActivePosTabId(null);
+      showToast(`Tab held for table ${activePosTableNumber}`, "success");
+    } catch (error) {
+      showToast(error.message || "Unable to hold tab.", "error");
+    } finally {
+      setPosTabSaving(false);
+    }
+  };
+
+  const handlePrintBill = async () => {
+    if (cartItems.length === 0) return;
+    const tableLabel =
+      activePosTableNumber != null
+        ? posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`
+        : null;
+    if (printerStatus === "connected") {
+      try {
+        await printBillViaUsb(cartItems, pricing.cartSubtotal, tableLabel, formatCurrency);
+      } catch (err) {
+        showToast(err.message || "Print failed.", "error");
+      }
+    } else {
+      const html = buildBillHtml(cartItems, pricing.cartSubtotal, tableLabel, formatCurrency);
+      const win = window.open("", "_blank", "width=420,height=600");
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+      }
+    }
+  };
+
+  const handleCloseTableTab = () => {
+    setActivePosTableNumber(null);
+    setActivePosTabId(null);
+  };
+
+  const saveTableConfig = async (names, count) => {
+    await setDoc(
+      doc(db, "posTableConfig", "main"),
+      { tableCount: count, tableNames: names, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+  };
+
+  // Auto-save a single name when the user clicks away from the input
+  const handleTableNameBlur = async (num) => {
+    if (!db) return;
+    const raw = pendingTableNames[num];
+    if (raw === undefined) return; // field was never touched
+    const trimmed = raw.trim();
+    const current = posTableNames[num] || "";
+    if (trimmed === current) {
+      setPendingTableNames((prev) => { const n = { ...prev }; delete n[num]; return n; });
+      return;
+    }
+    const updatedNames = { ...posTableNames };
+    if (trimmed) {
+      updatedNames[num] = trimmed;
+    } else {
+      delete updatedNames[num];
+    }
+    setPosTableNames(updatedNames);
+    setPendingTableNames((prev) => { const n = { ...prev }; delete n[num]; return n; });
+    try {
+      await saveTableConfig(updatedNames, posTableCount);
+    } catch (error) {
+      showToast(error.message || "Unable to save table name.", "error");
+    }
+  };
+
+  const handleSaveTableNames = async () => {
+    if (!db || !inventoryEnabled) return;
+    setTableConfigSaving(true);
+    try {
+      const merged = { ...posTableNames, ...pendingTableNames };
+      const cleaned = Object.fromEntries(
+        Object.entries(merged).filter(([, v]) => typeof v === "string" && v.trim().length > 0),
+      );
+      await saveTableConfig(cleaned, posTableCount);
+      setPosTableNames(cleaned);
+      setPendingTableNames({});
+      setTableNameEditMode(false);
+      showToast("Table names saved.", "success");
+    } catch (error) {
+      showToast(error.message || "Unable to save table names.", "error");
+    } finally {
+      setTableConfigSaving(false);
+    }
+  };
+
+  const handleTableCountChange = async (delta) => {
+    if (!db || !inventoryEnabled) return;
+    const next = Math.max(1, Math.min(50, posTableCount + delta));
+    if (next === posTableCount) return;
+    setPosTableCount(next);
+    try {
+      await saveTableConfig(posTableNames, next);
+    } catch (error) {
+      showToast(error.message || "Unable to save table count.", "error");
+      setPosTableCount(posTableCount); // revert on failure
+    }
   };
 
   const handleVoidCompleted = () => {
@@ -3073,7 +3354,7 @@ function AdminPosPage() {
     }
   };
 
-  const goToCustomerStep = () => {
+  const goToPaymentStep = () => {
     setStepOneAttemptedNext(true);
     if (!stepOneValid) {
       if (cartItems.length === 0) {
@@ -3083,16 +3364,7 @@ function AdminPosPage() {
       }
       return;
     }
-    showToast(`${cartItems.length} item${cartItems.length !== 1 ? "s" : ""} in cart — add customer details`, "info");
-    setCurrentStep(POS_STEP_CUSTOMER);
-  };
-
-  const goToPaymentStep = () => {
-    if (!stepTwoValid) {
-      showToast("A valid email address is required to send the receipt", "error");
-      return;
-    }
-    showToast("Customer info saved — select payment method", "info");
+    showToast("Order ready — select payment method", "info");
     setCurrentStep(POS_STEP_PAYMENT);
   };
 
@@ -3131,6 +3403,7 @@ function AdminPosPage() {
       quantity: quantityValue === null ? 0 : quantityValue,
       forceOutOfStock: Boolean(posProductForm.forceOutOfStock),
       status: posProductForm.status || "active",
+      imageUrl: posProductImageFile ? "" : (posProductForm.imageUrl || ""),
       updatedAt: serverTimestamp(),
     };
 
@@ -3138,15 +3411,30 @@ function AdminPosPage() {
     setPosProductError(null);
 
     try {
-      if (editingPosProductId) {
-        await updateDoc(doc(db, "posProducts", editingPosProductId), payload);
+      let docId = editingPosProductId;
+      if (docId) {
+        await updateDoc(doc(db, "posProducts", docId), payload);
       } else {
-        await addDoc(collection(db, "posProducts"), {
+        const newDocRef = await addDoc(collection(db, "posProducts"), {
           ...payload,
           createdAt: serverTimestamp(),
         });
+        docId = newDocRef.id;
+      }
+      if (posProductImageFile) {
+        try {
+          const storage = getFirebaseStorage();
+          const imageRef = storageRef(storage, `posProducts/${docId}`);
+          await uploadBytes(imageRef, posProductImageFile);
+          const downloadUrl = await getDownloadURL(imageRef);
+          await updateDoc(doc(db, "posProducts", docId), { imageUrl: downloadUrl });
+        } catch (uploadError) {
+          setPosProductError(`Product saved but image upload failed: ${uploadError.message || "unknown error"}`);
+        }
       }
       setPosProductForm(INITIAL_POS_PRODUCT);
+      setPosProductImageFile(null);
+      setPosProductImagePreview("");
       setPosProductCategorySelection("");
       setEditingPosProductId(null);
     } catch (error) {
@@ -3167,7 +3455,10 @@ function AdminPosPage() {
         product.quantity === undefined || product.quantity === null ? "" : String(product.quantity),
       forceOutOfStock: Boolean(product.forceOutOfStock),
       status: product.status || "active",
+      imageUrl: product.imageUrl || "",
     });
+    setPosProductImageFile(null);
+    setPosProductImagePreview(product.imageUrl || "");
     setPosProductCategorySelection(
       resolvePosProductCategorySelection(categoryValue, posProductCategoryChoices),
     );
@@ -3186,6 +3477,8 @@ function AdminPosPage() {
     setPosItemsOpen(false);
     setEditingPosProductId(null);
     setPosProductForm(INITIAL_POS_PRODUCT);
+    setPosProductImageFile(null);
+    setPosProductImagePreview("");
     setPosProductCategorySelection("");
     setPosProductError(null);
   };
@@ -3722,6 +4015,9 @@ function AdminPosPage() {
             if (Number.isFinite(perAttendeePrice) && perAttendeePrice > 0) {
               updatePayload.price = perAttendeePrice;
             }
+            if (Array.isArray(item.metadata?.attendeeFrameSelections) && item.metadata.attendeeFrameSelections.length > 0) {
+              updatePayload.attendeeFrameSelections = item.metadata.attendeeFrameSelections;
+            }
           }
           return updateDoc(doc(db, collectionName, item.sourceId), updatePayload);
         });
@@ -3756,6 +4052,19 @@ function AdminPosPage() {
         }
       }
 
+      if (activePosTabId && db) {
+        try {
+          await updateDoc(doc(db, "posTabs", activePosTabId), {
+            status: "closed",
+            closedAt: serverTimestamp(),
+            saleId: saleRef.id,
+            updatedAt: serverTimestamp(),
+          });
+        } catch {
+          // non-critical — tab stays in Firestore but sale is complete
+        }
+      }
+
       setReceiptData({
         id: saleRef.id,
         receiptNumber,
@@ -3782,13 +4091,6 @@ function AdminPosPage() {
     }
   };
 
-  const customerEmailError = !emailRequired
-    ? ""
-    : !emailValue
-      ? "Valid email required to send receipt"
-      : emailBlurred && !emailValid
-        ? "Valid email required to send receipt"
-        : "";
   const disableStepNavigation = checkoutStatus === "saving" || checkoutStatus === "success";
   const todayDateKey = formatDateKey(new Date());
 
@@ -3846,98 +4148,160 @@ function AdminPosPage() {
             receiptData={receiptData}
             formatCurrency={formatCurrency}
             emailReceiptRequested={sendEmailReceipt}
-            onPrint={() => window.print()}
+            printerStatus={printerStatus}
+            onConnectPrinter={async () => {
+              try {
+                await connectPrinter();
+              } catch (err) {
+                showToast(err.message || "Could not connect to printer.", "error");
+              }
+            }}
+            onPrint={async () => {
+              if (printerStatus === "connected") {
+                try {
+                  await printViaUsb(receiptData, formatCurrency);
+                } catch (err) {
+                  showToast(err.message || "Print failed.", "error");
+                  window.print();
+                }
+              } else {
+                window.print();
+              }
+            }}
             onNewSale={resetCheckout}
           />
 
           <section className="pos-receipt">
-            <header className="pos-receipt__header">
+            {/* Print-only shop header */}
+            <div className="pos-receipt__shop-header pos-print-only">
+              <p className="pos-receipt__shop-name">Bethany Blooms</p>
+              <p className="pos-receipt__shop-tagline">bethanyblooms.co.za</p>
+            </div>
+
+            {/* On-screen header */}
+            <header className="pos-receipt__header pos-print-hide">
               <div>
                 <h3>Receipt {receiptData.receiptNumber}</h3>
                 <p className="modal__meta">{receiptData.createdAt.toLocaleString("en-ZA")}</p>
               </div>
             </header>
-            <div className="pos-receipt__body">
-              <div className="pos-receipt__section">
-                <p>
-                  <strong>Customer:</strong> {receiptData.customer.name || "Walk-in"}
-                </p>
-                {receiptData.customer.email && (
-                  <p>
-                    <strong>Email:</strong> {receiptData.customer.email}
-                  </p>
-                )}
-                {receiptData.customer.phone && (
-                  <p>
-                    <strong>Phone:</strong> {receiptData.customer.phone}
-                  </p>
-                )}
-                <p>
-                  <strong>Payment:</strong> {receiptData.paymentMethod}
-                </p>
-                {receiptData.paymentMethod === "cash" && receiptData.cashReceived !== null && (
-                  <>
-                    <p>
-                      <strong>Cash received:</strong> {formatCurrency(receiptData.cashReceived)}
-                    </p>
-                    <p>
-                      <strong>Change due:</strong> {formatCurrency(receiptData.changeDue || 0)}
-                    </p>
-                  </>
-                )}
-                {Array.isArray(receiptData.giftCardMatches) &&
-                  receiptData.giftCardMatches.length > 0 && (
-                    <p>
-                      <strong>Gift card matches:</strong> {receiptData.giftCardMatches.length}
-                    </p>
-                  )}
-                {Number(receiptData.giftCardApplied || 0) > 0 && (
-                  <p>
-                    <strong>Gift cards applied:</strong> -
-                    {formatCurrency(receiptData.giftCardApplied)}
-                  </p>
-                )}
+
+            {/* Print-only receipt meta */}
+            <div className="pos-receipt__print-meta pos-print-only">
+              <div className="pos-receipt__row">
+                <span>Receipt</span>
+                <span>{receiptData.receiptNumber}</span>
               </div>
-              {Array.isArray(receiptData.giftCardMatches) &&
-                receiptData.giftCardMatches.length > 0 && (
-                  <div className="pos-receipt__section">
-                    <ul>
-                      {receiptData.giftCardMatches.map((match, index) => {
-                        const statusLabel = (match.status || "unknown")
-                          .toString()
-                          .trim()
-                          .toLowerCase()
-                          .replace(/_/g, " ");
-                        return (
-                          <li key={`${match.code}-${index}`}>
-                            {match.code} - {statusLabel}
-                            {match.isExpired ? " (expired)" : ""}
-                            {match.isActive ? " (active)" : ""}
-                          </li>
-                        );
-                      })}
-                    </ul>
+              <div className="pos-receipt__row">
+                <span>Date</span>
+                <span>{receiptData.createdAt.toLocaleString("en-ZA")}</span>
+              </div>
+            </div>
+
+            <div className="pos-receipt__body">
+              {/* Customer & payment */}
+              <div className="pos-receipt__section">
+                <div className="pos-receipt__row">
+                  <span>Customer</span>
+                  <span>{receiptData.customer.name || "Walk-in"}</span>
+                </div>
+                {receiptData.customer.email && (
+                  <div className="pos-receipt__row">
+                    <span>Email</span>
+                    <span>{receiptData.customer.email}</span>
                   </div>
                 )}
-              <div className="pos-receipt__section">
-                <ul>
-                  {receiptData.items.map((item, index) => (
-                    <li key={`${item.id}-${index}`}>
-                      {item.name} x{item.quantity} - {formatCurrency(item.price * item.quantity)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="pos-receipt__section pos-receipt__totals">
-                {receiptData.discount?.amount > 0 && (
-                  <p>
-                    <strong>Discount:</strong> -{formatCurrency(receiptData.discount.amount)}
-                  </p>
+                {receiptData.customer.phone && (
+                  <div className="pos-receipt__row">
+                    <span>Phone</span>
+                    <span>{receiptData.customer.phone}</span>
+                  </div>
                 )}
-                <p>
-                  <strong>Amount due:</strong> {formatCurrency(receiptData.total)}
-                </p>
+                <div className="pos-receipt__row">
+                  <span>Payment</span>
+                  <span style={{textTransform: "capitalize"}}>{receiptData.paymentMethod}</span>
+                </div>
+                {receiptData.paymentMethod === "cash" && receiptData.cashReceived !== null && (
+                  <>
+                    <div className="pos-receipt__row">
+                      <span>Cash received</span>
+                      <span>{formatCurrency(receiptData.cashReceived)}</span>
+                    </div>
+                    <div className="pos-receipt__row">
+                      <span>Change due</span>
+                      <span>{formatCurrency(receiptData.changeDue || 0)}</span>
+                    </div>
+                  </>
+                )}
               </div>
+
+              {/* Line items */}
+              <div className="pos-receipt__section pos-receipt__items-section">
+                <p className="pos-receipt__section-label">Items</p>
+                {receiptData.items.map((item, index) => (
+                  <div key={`${item.id}-${index}`} className="pos-receipt__item">
+                    <div className="pos-receipt__item-name">
+                      {item.name}
+                      {item.metadata?.variantLabel && (
+                        <span className="pos-receipt__item-sub"> — {item.metadata.variantLabel}</span>
+                      )}
+                      {item.metadata?.sessionLabel && (
+                        <span className="pos-receipt__item-sub"> ({item.metadata.sessionLabel})</span>
+                      )}
+                    </div>
+                    <div className="pos-receipt__item-qty-price">
+                      <span className="pos-receipt__item-qty">{item.quantity} × {formatCurrency(item.price)}</span>
+                      <span className="pos-receipt__item-total">{formatCurrency(item.price * item.quantity)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Gift cards redeemed */}
+              {Array.isArray(receiptData.giftCardMatches) && receiptData.giftCardMatches.length > 0 && (
+                <div className="pos-receipt__section">
+                  <p className="pos-receipt__section-label">Gift Cards Redeemed</p>
+                  {receiptData.giftCardMatches.map((match, index) => (
+                    <div key={`${match.code}-${index}`} className="pos-receipt__row pos-receipt__row--small">
+                      <span>{match.code}</span>
+                      <span style={{textTransform: "capitalize"}}>
+                        {(match.status || "unknown").replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Totals */}
+              <div className="pos-receipt__section pos-receipt__totals">
+                {receiptData.subtotal !== receiptData.total && (
+                  <div className="pos-receipt__row">
+                    <span>Subtotal</span>
+                    <span>{formatCurrency(receiptData.subtotal)}</span>
+                  </div>
+                )}
+                {receiptData.discount?.amount > 0 && (
+                  <div className="pos-receipt__row">
+                    <span>Discount</span>
+                    <span>−{formatCurrency(receiptData.discount.amount)}</span>
+                  </div>
+                )}
+                {Number(receiptData.giftCardApplied || 0) > 0 && (
+                  <div className="pos-receipt__row">
+                    <span>Gift card applied</span>
+                    <span>−{formatCurrency(receiptData.giftCardApplied)}</span>
+                  </div>
+                )}
+                <div className="pos-receipt__row pos-receipt__row--total">
+                  <span>Total</span>
+                  <strong>{formatCurrency(receiptData.total)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Print-only footer */}
+            <div className="pos-receipt__print-footer pos-print-only">
+              <p>Thank you for shopping at Bethany Blooms!</p>
             </div>
           </section>
         </>
@@ -4018,6 +4382,7 @@ function AdminPosPage() {
                 handleBookingEditChange={handleBookingEditChange}
                 handleSaveBookingChanges={handleSaveBookingChanges}
                 handleAddBookingToCart={handleAddBookingToCart}
+                onCheckIn={handleCheckIn}
                 bookingSavingId={bookingSavingId}
                 bookingError={bookingError}
                 workshopLookup={workshopLookup}
@@ -4028,14 +4393,11 @@ function AdminPosPage() {
                 setEventSelections={setEventSelections}
                 serviceSections={serviceSections}
                 formatCurrency={formatCurrency}
-                topSellerEntries={visibleTopSellerEntries}
-                topSellersLabel={`Top sellers · Last ${TOP_SELLERS_LOOKBACK_DAYS} days`}
                 onAddProduct={handleAddProductItem}
                 onAddPosProduct={handleAddPosProductItem}
                 onAddWorkshop={handleAddWorkshopItem}
                 onAddClass={handleAddClassItem}
                 onAddEvent={handleAddEventItem}
-                onAddTopSeller={handleAddTopSellerItem}
               />
               {cartItems.length > 0 && (
                 <div className="pos-touch-cart-peek" aria-live="polite">
@@ -4058,8 +4420,60 @@ function AdminPosPage() {
               </div>
 
               <div data-mobile-panel="cart" className={posMobilePanel === "cart" ? "is-active" : ""}>
+
               <PosCartPanel
-                title="Current order"
+                title={activePosTableNumber != null ? `Table ${activePosTableNumber}` : "Current order"}
+                headerContent={
+                  <div className="pos-table-bar">
+                    <div className="pos-table-bar__icon" aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="7" width="16" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+                        <line x1="7" y1="7" x2="7" y2="4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                        <line x1="13" y1="7" x2="13" y2="4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                        <line x1="7" y1="13" x2="7" y2="16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                        <line x1="13" y1="13" x2="13" y2="16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </div>
+                    {activePosTableNumber != null ? (
+                      <div className="pos-table-bar__content">
+                        <div className="pos-table-bar__info">
+                          <span className="pos-table-bar__name">
+                            {posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`}
+                          </span>
+                          {activePosTabId && (
+                            <span className="pos-table-bar__badge">Open tab</span>
+                          )}
+                        </div>
+                        <div className="pos-table-bar__actions">
+                          <button
+                            className="pos-table-bar__switch"
+                            type="button"
+                            onClick={() => setTablePickerOpen(true)}
+                          >
+                            Switch
+                          </button>
+                          <button
+                            className="pos-table-bar__clear"
+                            type="button"
+                            onClick={handleCloseTableTab}
+                            aria-label="Clear table assignment"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        className="pos-table-bar__assign"
+                        type="button"
+                        onClick={() => setTablePickerOpen(true)}
+                      >
+                        <span>Select a table</span>
+                        <span className="pos-table-bar__arrow" aria-hidden="true">&#8250;</span>
+                      </button>
+                    )}
+                  </div>
+                }
                 cartItems={cartItems}
                 subtotal={pricing.cartSubtotal}
                 formatCurrency={formatCurrency}
@@ -4077,15 +4491,46 @@ function AdminPosPage() {
                         Resolve all stock warnings before continuing.
                       </div>
                     )}
+                    {activePosTableNumber != null && cartItems.length > 0 && (
+                      <button
+                        className="btn pos-hold-tab-btn"
+                        type="button"
+                        disabled={posTabSaving}
+                        onClick={handleHoldTab}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style={{flexShrink:0}}>
+                          <rect x="2" y="1" width="4" height="14" rx="1.5"/>
+                          <rect x="10" y="1" width="4" height="14" rx="1.5"/>
+                        </svg>
+                        {posTabSaving
+                          ? "Saving…"
+                          : `Park order — ${posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`}`}
+                      </button>
+                    )}
+                    {cartItems.length > 0 && (
+                      <button
+                        className="btn btn--secondary pos-print-bill-btn"
+                        type="button"
+                        disabled={printerStatus === "printing"}
+                        onClick={handlePrintBill}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}>
+                          <polyline points="6 9 6 2 18 2 18 9"/>
+                          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                          <rect x="6" y="14" width="12" height="8"/>
+                        </svg>
+                        {printerStatus === "printing" ? "Printing…" : "Print Bill"}
+                      </button>
+                    )}
                     <button
                       className={`btn btn--primary pos-wizard__next-button ${
                         !stepOneValid ? "is-disabled" : ""
                       }`}
                       type="button"
-                      onClick={goToCustomerStep}
+                      onClick={goToPaymentStep}
                       aria-disabled={!stepOneValid}
                     >
-                      Next: Customer Details &rarr;
+                      Next: Payment &rarr;
                     </button>
                   </div>
                 }
@@ -4093,93 +4538,6 @@ function AdminPosPage() {
               </div>
             </section>
             </>
-          )}
-
-          {currentStep === POS_STEP_CUSTOMER && (
-            <section className="pos-wizard__narrow">
-              <div className="pos-wizard__card pos-customer-card">
-                <div className="pos-wizard__section-header">
-                  <div>
-                    <h3>Customer &amp; Notes</h3>
-                    <p className="modal__meta">Keep this short unless the customer wants a receipt emailed.</p>
-                  </div>
-                </div>
-
-                <div className="pos-customer-card__fields">
-                  <label className="modal__meta pos-customer-card__field">
-                    Customer name
-                    <input
-                      className="input"
-                      type="text"
-                      value={customer.name}
-                      onChange={updateCustomerField("name")}
-                    />
-                  </label>
-
-                  <label className="admin-checkbox pos-customer-card__checkbox">
-                    <input
-                      type="checkbox"
-                      checked={sendEmailReceipt}
-                      onChange={(event) => {
-                        setSendEmailReceipt(event.target.checked);
-                        if (!event.target.checked) {
-                          setEmailBlurred(false);
-                        }
-                      }}
-                    />
-                    Email receipt to customer
-                  </label>
-
-                  {sendEmailReceipt && (
-                    <p className="modal__meta">
-                      Receipt will be sent after payment is confirmed
-                    </p>
-                  )}
-
-                  <label className="modal__meta pos-customer-card__field">
-                    Customer email
-                    <input
-                      className={`input ${customerEmailError ? "pos-input--error" : ""}`}
-                      type="email"
-                      value={customer.email}
-                      onChange={updateCustomerField("email")}
-                      onBlur={() => setEmailBlurred(true)}
-                    />
-                    {customerEmailError && (
-                      <span className="pos-inline-error">{customerEmailError}</span>
-                    )}
-                  </label>
-
-                  <label className="modal__meta pos-customer-card__field">
-                    Order notes
-                    <textarea
-                      className="input"
-                      rows="4"
-                      value={notes}
-                      onChange={(event) => setNotes(event.target.value)}
-                    />
-                  </label>
-                </div>
-
-                <div className="pos-wizard__actions">
-                  <button
-                    className="btn btn--secondary"
-                    type="button"
-                    onClick={() => setCurrentStep(POS_STEP_ORDER)}
-                  >
-                    &larr; Back
-                  </button>
-                  <button
-                    className="btn btn--primary"
-                    type="button"
-                    onClick={goToPaymentStep}
-                    disabled={!stepTwoValid}
-                  >
-                    Next: Payment &rarr;
-                  </button>
-                </div>
-              </div>
-            </section>
           )}
 
           {currentStep === POS_STEP_PAYMENT && (
@@ -4213,7 +4571,7 @@ function AdminPosPage() {
                 onCashReceivedChange={setCashReceived}
                 cashStats={cashStats}
                 paymentError={stepThreeError}
-                onBack={() => setCurrentStep(POS_STEP_CUSTOMER)}
+                onBack={() => setCurrentStep(POS_STEP_ORDER)}
                 onNext={goToConfirmStep}
                 nextDisabled={!stepThreeValid}
               />
@@ -4339,6 +4697,154 @@ function AdminPosPage() {
         onVoided={handleVoidCompleted}
       />
 
+      {tablePickerOpen && (
+        <div
+          className="modal is-active admin-modal pos-table-picker-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Select a table"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setTablePickerOpen(false);
+              setTableNameEditMode(false);
+              setPendingTableNames({});
+            }
+          }}
+        >
+          <div className="modal__content pos-table-picker">
+
+            <div className="pos-table-picker__header">
+              <div>
+                <h2 className="pos-table-picker__title">Tables</h2>
+                <p className="pos-table-picker__subtitle">
+                  {tableNameEditMode ? "Type a name for each table, then save." : "Tap a table to open or recall its order."}
+                </p>
+              </div>
+              <button
+                className="pos-table-picker__close"
+                type="button"
+                aria-label="Close"
+                onClick={() => {
+                  setTablePickerOpen(false);
+                  setTableNameEditMode(false);
+                  setPendingTableNames({});
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="pos-table-picker__legend">
+              <span className="pos-table-legend pos-table-legend--free">Free</span>
+              <span className="pos-table-legend pos-table-legend--occupied">Open tab</span>
+              <span className="pos-table-legend pos-table-legend--active">This order</span>
+            </div>
+
+            <div className="pos-table-picker__grid">
+              {Array.from({ length: posTableCount }, (_, i) => {
+                const num = i + 1;
+                const existingTab = openPosTabs.find((t) => t.tableNumber === num);
+                const isActive = activePosTableNumber === num;
+                const isOccupied = Boolean(existingTab) && !isActive;
+                const customName = posTableNames[num];
+                const runningTotal = isOccupied
+                  ? (existingTab.items || []).reduce(
+                      (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
+                      0,
+                    )
+                  : 0;
+                return (
+                  <button
+                    key={num}
+                    type="button"
+                    className={`pos-table-cell${isActive ? " is-active" : ""}${isOccupied ? " is-occupied" : ""}`}
+                    onClick={() => { if (!tableNameEditMode) handleSelectTable(num); }}
+                  >
+                    {tableNameEditMode ? (
+                      <input
+                        className="pos-table-cell__name-input"
+                        type="text"
+                        placeholder={`Table ${num}`}
+                        value={pendingTableNames[num] ?? (posTableNames[num] || "")}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) =>
+                          setPendingTableNames((prev) => ({ ...prev, [num]: e.target.value }))
+                        }
+                        onBlur={() => handleTableNameBlur(num)}
+                      />
+                    ) : (
+                      <span className="pos-table-cell__name">
+                        {customName || num}
+                      </span>
+                    )}
+                    {customName && !tableNameEditMode && (
+                      <span className="pos-table-cell__num">#{num}</span>
+                    )}
+                    <span className={`pos-table-cell__status${isOccupied ? " is-tab" : isActive ? " is-current" : ""}`}>
+                      {isActive ? "Current" : isOccupied ? formatCurrency(runningTotal) : "Free"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pos-table-picker__footer">
+              <div className="pos-table-picker__count-control">
+                <button
+                  className="pos-table-picker__count-btn"
+                  type="button"
+                  aria-label="Remove table"
+                  disabled={posTableCount <= 1 || tableConfigSaving}
+                  onClick={() => handleTableCountChange(-1)}
+                >
+                  −
+                </button>
+                <span className="pos-table-picker__count-value">
+                  {posTableCount} {posTableCount === 1 ? "table" : "tables"}
+                </span>
+                <button
+                  className="pos-table-picker__count-btn"
+                  type="button"
+                  aria-label="Add table"
+                  disabled={posTableCount >= 50 || tableConfigSaving}
+                  onClick={() => handleTableCountChange(1)}
+                >
+                  +
+                </button>
+              </div>
+              {tableNameEditMode ? (
+                <div className="pos-table-picker__name-actions">
+                  <button
+                    className="pos-table-picker__cancel-btn"
+                    type="button"
+                    onClick={() => { setTableNameEditMode(false); setPendingTableNames({}); }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="pos-table-picker__save-btn"
+                    type="button"
+                    disabled={tableConfigSaving}
+                    onClick={handleSaveTableNames}
+                  >
+                    {tableConfigSaving ? "Saving…" : "Save names"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="pos-table-picker__edit-names-btn"
+                  type="button"
+                  onClick={() => { setTableNameEditMode(true); setPendingTableNames({}); }}
+                >
+                  Edit names
+                </button>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {posVariantPickerProduct && (
         <div
           className="modal variant-picker-modal is-active"
@@ -4412,176 +4918,139 @@ function AdminPosPage() {
             <button className="modal__close" type="button" onClick={closePosItemsModal} aria-label="Close">
               &times;
             </button>
-            <h3 className="modal__title" id="pos-items-title">
-              POS-only Products
-            </h3>
-            <p className="modal__meta">Add items sold only at the studio (cool drinks, add-ons, etc).</p>
-            <div className="admin-panel__content pos-products__content">
-              <form className="admin-form" onSubmit={handleSavePosProduct}>
-                <input
-                  className="input"
-                  placeholder="POS product name"
-                  value={posProductForm.name}
-                  onChange={(event) =>
-                    setPosProductForm((prev) => ({
-                      ...prev,
-                      name: event.target.value,
-                    }))
-                  }
-                  required
-                />
-                <select
-                  className="input"
-                  value={posProductCategorySelection}
-                  onChange={(event) => {
-                    const selectedValue = event.target.value;
-                    setPosProductCategorySelection(selectedValue);
-                    if (!selectedValue) {
-                      setPosProductForm((prev) => ({
-                        ...prev,
-                        category: "",
-                      }));
-                      return;
-                    }
-                    if (selectedValue === POS_PRODUCT_CUSTOM_CATEGORY_VALUE) {
-                      setPosProductForm((prev) => {
-                        const hasExistingMatch = posProductCategoryChoices.some(
-                          (category) =>
-                            category.name.toLowerCase() ===
-                            (prev.category || "").toString().trim().toLowerCase(),
-                        );
-                        return {
-                          ...prev,
-                          category: hasExistingMatch ? "" : prev.category,
-                        };
-                      });
-                      return;
-                    }
-                    const selectedCategory = posProductCategoryChoices.find(
-                      (category) => category.id === selectedValue,
-                    );
-                    setPosProductForm((prev) => ({
-                      ...prev,
-                      category: selectedCategory?.name || "",
-                    }));
-                  }}
-                >
-                  <option value="">No category</option>
-                  {posProductCategoryChoices.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                  <option value={POS_PRODUCT_CUSTOM_CATEGORY_VALUE}>Type a new category</option>
-                </select>
-                {posProductCategorySelection === POS_PRODUCT_CUSTOM_CATEGORY_VALUE && (
-                  <input
-                    className="input"
-                    placeholder="New category name"
-                    value={posProductForm.category}
-                    onChange={(event) =>
-                      setPosProductForm((prev) => ({
-                        ...prev,
-                        category: event.target.value,
-                      }))
-                    }
-                  />
-                )}
-                <input
-                  className="input"
-                  placeholder="Price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={posProductForm.price}
-                  onChange={(event) =>
-                    setPosProductForm((prev) => ({
-                      ...prev,
-                      price: event.target.value,
-                    }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  placeholder="Quantity"
-                  type="number"
-                  min="0"
-                  value={posProductForm.quantity}
-                  onChange={(event) =>
-                    setPosProductForm((prev) => ({
-                      ...prev,
-                      quantity: event.target.value,
-                    }))
-                  }
-                />
-                <label className="admin-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={posProductForm.forceOutOfStock}
-                    onChange={(event) =>
-                      setPosProductForm((prev) => ({
-                        ...prev,
-                        forceOutOfStock: event.target.checked,
-                      }))
-                    }
-                  />
-                  Mark as out of stock
-                </label>
-                <div className="admin-form__actions">
-                  <button className="btn btn--primary" type="submit" disabled={posProductSaving}>
-                    {editingPosProductId ? "Update POS Product" : "Add POS Product"}
-                  </button>
-                  {editingPosProductId && (
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      onClick={() => {
-                        setEditingPosProductId(null);
-                        setPosProductForm(INITIAL_POS_PRODUCT);
-                        setPosProductCategorySelection("");
-                      }}
-                    >
-                      Cancel
-                    </button>
+
+            <div className="pos-items-modal__layout">
+
+              {/* LEFT: product list */}
+              <div className="pos-items-modal__list-col">
+                <div className="pos-items-modal__col-header">
+                  <h3 className="modal__title" id="pos-items-title">POS Products</h3>
+                  <span className="pos-items-modal__count">{normalizedPosProducts.length} item{normalizedPosProducts.length !== 1 ? "s" : ""}</span>
+                </div>
+                <div className="pos-items-modal__list">
+                  {normalizedPosProducts.length === 0 ? (
+                    <p className="empty-state">No products yet. Add one using the form.</p>
+                  ) : (
+                    normalizedPosProducts.map((product) => (
+                      <div
+                        className={`pos-items-modal__row${editingPosProductId === product.id ? " is-editing" : ""}`}
+                        key={product.id}
+                      >
+                        <div className="pos-items-modal__row-thumb">
+                          {product.imageUrl
+                            ? <img src={product.imageUrl} alt={product.name} />
+                            : <span>{(product.name || "?").charAt(0).toUpperCase()}</span>
+                          }
+                        </div>
+                        <div className="pos-items-modal__row-info">
+                          <strong>{product.name}</strong>
+                          <p className="modal__meta">{product.categoryName || "No category"} · {product.displayPrice}</p>
+                        </div>
+                        <div className="pos-items-modal__row-actions">
+                          <button className="pos-items-modal__row-btn pos-items-modal__row-btn--edit" type="button" onClick={() => handleEditPosProduct(product)} title="Edit">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          </button>
+                          <button className="pos-items-modal__row-btn pos-items-modal__row-btn--delete" type="button" onClick={() => handleDeletePosProduct(product.id)} title="Delete">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
-                {posProductError && <p className="admin-panel__error">{posProductError}</p>}
-              </form>
-
-              <div className="admin-panel__list">
-                {normalizedPosProducts.length === 0 ? (
-                  <p className="empty-state">No POS-only products yet.</p>
-                ) : (
-                  normalizedPosProducts.map((product) => (
-                    <div className="admin-category-card" key={product.id}>
-                      <div>
-                        <strong>{product.name}</strong>
-                        <p className="modal__meta">
-                          Category: {product.categoryName || "No category"}
-                        </p>
-                        <p className="modal__meta">{product.displayPrice}</p>
-                      </div>
-                      <div className="admin-panel__header-actions">
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          onClick={() => handleEditPosProduct(product)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          onClick={() => handleDeletePosProduct(product.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
               </div>
+
+              {/* RIGHT: form */}
+              <div className="pos-items-modal__form-col">
+                <div className="pos-items-modal__col-header">
+                  <h4 className="pos-items-modal__form-heading">{editingPosProductId ? "Edit product" : "New product"}</h4>
+                </div>
+                <form className="pos-items-modal__form" onSubmit={handleSavePosProduct}>
+
+                  {/* Image zone */}
+                  <label className="pos-items-image-zone">
+                    {(posProductImagePreview || posProductForm.imageUrl) ? (
+                      <img src={posProductImagePreview || posProductForm.imageUrl} alt="Preview" className="pos-items-image-zone__img" />
+                    ) : (
+                      <div className="pos-items-image-zone__empty">
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                        <span>Click to upload image</span>
+                        <small>JPG, PNG, WEBP</small>
+                      </div>
+                    )}
+                    <input type="file" accept="image/*" style={{display:"none"}} onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      setPosProductImageFile(file);
+                      setPosProductImagePreview(URL.createObjectURL(file));
+                    }} />
+                  </label>
+                  {(posProductImagePreview || posProductForm.imageUrl) && (
+                    <button type="button" className="btn btn--ghost pos-items-image-zone__remove" onClick={() => {
+                      setPosProductImageFile(null);
+                      setPosProductImagePreview("");
+                      setPosProductForm((prev) => ({ ...prev, imageUrl: "" }));
+                    }}>Remove image</button>
+                  )}
+
+                  <input className="input" placeholder="Product name" value={posProductForm.name}
+                    onChange={(event) => setPosProductForm((prev) => ({ ...prev, name: event.target.value }))} required />
+
+                  <select className="input" value={posProductCategorySelection}
+                    onChange={(event) => {
+                      const selectedValue = event.target.value;
+                      setPosProductCategorySelection(selectedValue);
+                      if (!selectedValue) { setPosProductForm((prev) => ({ ...prev, category: "" })); return; }
+                      if (selectedValue === POS_PRODUCT_CUSTOM_CATEGORY_VALUE) {
+                        setPosProductForm((prev) => {
+                          const hasExistingMatch = posProductCategoryChoices.some((category) => category.name.toLowerCase() === (prev.category || "").toString().trim().toLowerCase());
+                          return { ...prev, category: hasExistingMatch ? "" : prev.category };
+                        });
+                        return;
+                      }
+                      const selectedCategory = posProductCategoryChoices.find((category) => category.id === selectedValue);
+                      setPosProductForm((prev) => ({ ...prev, category: selectedCategory?.name || "" }));
+                    }}>
+                    <option value="">No category</option>
+                    {posProductCategoryChoices.map((category) => (<option key={category.id} value={category.id}>{category.name}</option>))}
+                    <option value={POS_PRODUCT_CUSTOM_CATEGORY_VALUE}>Type a new category...</option>
+                  </select>
+                  {posProductCategorySelection === POS_PRODUCT_CUSTOM_CATEGORY_VALUE && (
+                    <input className="input" placeholder="New category name" value={posProductForm.category}
+                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, category: event.target.value }))} />
+                  )}
+
+                  <div className="pos-items-modal__form-row">
+                    <input className="input" placeholder="Price" type="number" min="0" step="0.01" value={posProductForm.price}
+                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, price: event.target.value }))} required />
+                    <input className="input" placeholder="Qty" type="number" min="0" value={posProductForm.quantity}
+                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, quantity: event.target.value }))} />
+                  </div>
+
+                  <label className="admin-checkbox">
+                    <input type="checkbox" checked={posProductForm.forceOutOfStock}
+                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, forceOutOfStock: event.target.checked }))} />
+                    Mark as out of stock
+                  </label>
+
+                  <div className="admin-form__actions">
+                    <button className="btn btn--primary" type="submit" disabled={posProductSaving}>
+                      {posProductSaving ? "Saving..." : editingPosProductId ? "Update product" : "Add product"}
+                    </button>
+                    {editingPosProductId && (
+                      <button className="btn btn--secondary" type="button" onClick={() => {
+                        setEditingPosProductId(null);
+                        setPosProductForm(INITIAL_POS_PRODUCT);
+                        setPosProductImageFile(null);
+                        setPosProductImagePreview("");
+                        setPosProductCategorySelection("");
+                      }}>Cancel</button>
+                    )}
+                  </div>
+                  {posProductError && <p className="admin-panel__error">{posProductError}</p>}
+                </form>
+              </div>
+
             </div>
           </div>
         </div>
@@ -5912,116 +6381,132 @@ function AdminPosPage() {
             <button className="modal__close" type="button" onClick={closePosItemsModal} aria-label="Close">
               &times;
             </button>
-            <h3 className="modal__title" id="pos-items-title">
-              POS-only Products
-            </h3>
-            <p className="modal__meta">Add items sold only at the studio (cool drinks, add-ons, etc).</p>
-            <div className="admin-panel__content pos-products__content">
-              <form className="admin-form" onSubmit={handleSavePosProduct}>
-                <input
-                  className="input"
-                  placeholder="POS product name"
-                  value={posProductForm.name}
-                  onChange={(event) =>
-                    setPosProductForm((prev) => ({
-                      ...prev,
-                      name: event.target.value,
-                    }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  placeholder="Price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={posProductForm.price}
-                  onChange={(event) =>
-                    setPosProductForm((prev) => ({
-                      ...prev,
-                      price: event.target.value,
-                    }))
-                  }
-                  required
-                />
-                <input
-                  className="input"
-                  placeholder="Quantity"
-                  type="number"
-                  min="0"
-                  value={posProductForm.quantity}
-                  onChange={(event) =>
-                    setPosProductForm((prev) => ({
-                      ...prev,
-                      quantity: event.target.value,
-                    }))
-                  }
-                />
-                <label className="admin-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={posProductForm.forceOutOfStock}
-                    onChange={(event) =>
-                      setPosProductForm((prev) => ({
-                        ...prev,
-                        forceOutOfStock: event.target.checked,
-                      }))
-                    }
-                  />
-                  Mark as out of stock
-                </label>
-                <div className="admin-form__actions">
-                  <button className="btn btn--primary" type="submit" disabled={posProductSaving}>
-                    {editingPosProductId ? "Update POS Product" : "Add POS Product"}
-                  </button>
-                  {editingPosProductId && (
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      onClick={() => {
-                        setEditingPosProductId(null);
-                        setPosProductForm(INITIAL_POS_PRODUCT);
-                        setPosProductCategorySelection("");
-                      }}
-                    >
-                      Cancel
-                    </button>
+
+            <div className="pos-items-modal__layout">
+
+              <div className="pos-items-modal__list-col">
+                <div className="pos-items-modal__col-header">
+                  <h3 className="modal__title" id="pos-items-title">POS Products</h3>
+                  <span className="pos-items-modal__count">{normalizedPosProducts.length} item{normalizedPosProducts.length !== 1 ? "s" : ""}</span>
+                </div>
+                <div className="pos-items-modal__list">
+                  {normalizedPosProducts.length === 0 ? (
+                    <p className="empty-state">No products yet. Add one using the form.</p>
+                  ) : (
+                    normalizedPosProducts.map((product) => (
+                      <div
+                        className={`pos-items-modal__row${editingPosProductId === product.id ? " is-editing" : ""}`}
+                        key={product.id}
+                      >
+                        <div className="pos-items-modal__row-thumb">
+                          {product.imageUrl
+                            ? <img src={product.imageUrl} alt={product.name} />
+                            : <span>{(product.name || "?").charAt(0).toUpperCase()}</span>
+                          }
+                        </div>
+                        <div className="pos-items-modal__row-info">
+                          <strong>{product.name}</strong>
+                          <p className="modal__meta">{product.categoryName || "No category"} · {product.displayPrice}</p>
+                        </div>
+                        <div className="pos-items-modal__row-actions">
+                          <button className="btn btn--secondary btn--small" type="button" onClick={() => handleEditPosProduct(product)}>Edit</button>
+                          <button className="btn btn--ghost btn--small" type="button" onClick={() => handleDeletePosProduct(product.id)}>Delete</button>
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
-                {posProductError && <p className="admin-panel__error">{posProductError}</p>}
-              </form>
-
-              <div className="admin-panel__list">
-                {normalizedPosProducts.length === 0 ? (
-                  <p className="empty-state">No POS-only products yet.</p>
-                ) : (
-                  normalizedPosProducts.map((product) => (
-                    <div className="admin-category-card" key={product.id}>
-                      <div>
-                        <strong>{product.name}</strong>
-                        <p className="modal__meta">{product.displayPrice}</p>
-                      </div>
-                      <div className="admin-panel__header-actions">
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          onClick={() => handleEditPosProduct(product)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          onClick={() => handleDeletePosProduct(product.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
               </div>
+
+              <div className="pos-items-modal__form-col">
+                <div className="pos-items-modal__col-header">
+                  <h4 className="pos-items-modal__form-heading">{editingPosProductId ? "Edit product" : "New product"}</h4>
+                </div>
+                <form className="pos-items-modal__form" onSubmit={handleSavePosProduct}>
+
+                  <label className="pos-items-image-zone">
+                    {(posProductImagePreview || posProductForm.imageUrl) ? (
+                      <img src={posProductImagePreview || posProductForm.imageUrl} alt="Preview" className="pos-items-image-zone__img" />
+                    ) : (
+                      <div className="pos-items-image-zone__empty">
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                        <span>Click to upload image</span>
+                        <small>JPG, PNG, WEBP</small>
+                      </div>
+                    )}
+                    <input type="file" accept="image/*" style={{display:"none"}} onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      setPosProductImageFile(file);
+                      setPosProductImagePreview(URL.createObjectURL(file));
+                    }} />
+                  </label>
+                  {(posProductImagePreview || posProductForm.imageUrl) && (
+                    <button type="button" className="btn btn--ghost pos-items-image-zone__remove" onClick={() => {
+                      setPosProductImageFile(null);
+                      setPosProductImagePreview("");
+                      setPosProductForm((prev) => ({ ...prev, imageUrl: "" }));
+                    }}>Remove image</button>
+                  )}
+
+                  <input className="input" placeholder="Product name" value={posProductForm.name}
+                    onChange={(event) => setPosProductForm((prev) => ({ ...prev, name: event.target.value }))} required />
+
+                  <select className="input" value={posProductCategorySelection}
+                    onChange={(event) => {
+                      const selectedValue = event.target.value;
+                      setPosProductCategorySelection(selectedValue);
+                      if (!selectedValue) { setPosProductForm((prev) => ({ ...prev, category: "" })); return; }
+                      if (selectedValue === POS_PRODUCT_CUSTOM_CATEGORY_VALUE) {
+                        setPosProductForm((prev) => {
+                          const hasExistingMatch = posProductCategoryChoices.some((category) => category.name.toLowerCase() === (prev.category || "").toString().trim().toLowerCase());
+                          return { ...prev, category: hasExistingMatch ? "" : prev.category };
+                        });
+                        return;
+                      }
+                      const selectedCategory = posProductCategoryChoices.find((category) => category.id === selectedValue);
+                      setPosProductForm((prev) => ({ ...prev, category: selectedCategory?.name || "" }));
+                    }}>
+                    <option value="">No category</option>
+                    {posProductCategoryChoices.map((category) => (<option key={category.id} value={category.id}>{category.name}</option>))}
+                    <option value={POS_PRODUCT_CUSTOM_CATEGORY_VALUE}>Type a new category...</option>
+                  </select>
+                  {posProductCategorySelection === POS_PRODUCT_CUSTOM_CATEGORY_VALUE && (
+                    <input className="input" placeholder="New category name" value={posProductForm.category}
+                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, category: event.target.value }))} />
+                  )}
+
+                  <div className="pos-items-modal__form-row">
+                    <input className="input" placeholder="Price" type="number" min="0" step="0.01" value={posProductForm.price}
+                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, price: event.target.value }))} required />
+                    <input className="input" placeholder="Qty" type="number" min="0" value={posProductForm.quantity}
+                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, quantity: event.target.value }))} />
+                  </div>
+
+                  <label className="admin-checkbox">
+                    <input type="checkbox" checked={posProductForm.forceOutOfStock}
+                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, forceOutOfStock: event.target.checked }))} />
+                    Mark as out of stock
+                  </label>
+
+                  <div className="admin-form__actions">
+                    <button className="btn btn--primary" type="submit" disabled={posProductSaving}>
+                      {posProductSaving ? "Saving..." : editingPosProductId ? "Update product" : "Add product"}
+                    </button>
+                    {editingPosProductId && (
+                      <button className="btn btn--secondary" type="button" onClick={() => {
+                        setEditingPosProductId(null);
+                        setPosProductForm(INITIAL_POS_PRODUCT);
+                        setPosProductImageFile(null);
+                        setPosProductImagePreview("");
+                        setPosProductCategorySelection("");
+                      }}>Cancel</button>
+                    )}
+                  </div>
+                  {posProductError && <p className="admin-panel__error">{posProductError}</p>}
+                </form>
+              </div>
+
             </div>
           </div>
         </div>

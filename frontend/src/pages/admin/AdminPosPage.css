@@ -1,0 +1,1584 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   AdminPosPage.css — Complete POS design implementation
+   Light brand-color theme, horizontal tab navigation, full-height layout.
+   Palette: accent #556b2f · surface #fff · soft #fbf7ef · bg #f7f1e5
+            border #ded5c5 · text #263013 · muted #68745c
+   All rules layer on top of styles.css; use !important only where needed
+   to beat the newer bulk-styles at the bottom of that file.
+═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. PAGE SHELL ─────────────────────────────────────────────────────── */
+.pos-panel.pos-wizard {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - var(--site-header-height, 96px));
+  gap: 0;
+}
+
+/* Stepper and the build section fill remaining height */
+.pos-panel.pos-wizard > .pos-stepper {
+  flex: 0 0 auto;
+}
+
+.pos-panel.pos-wizard > .pos-warning-banner {
+  flex: 0 0 auto;
+}
+
+/* ── 2. STEP 1 BUILD AREA (two-column grid) ───────────────────────────── */
+.pos-wizard__build {
+  flex: 1 1 auto;
+  min-height: clamp(36rem, calc(100dvh - 13rem), 72rem) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+
+/* Each panel (browse / cart) fills the cell */
+.pos-wizard__build > [data-mobile-panel] {
+  overflow: hidden;
+}
+
+/* ── 3. CATALOG BROWSER: sidebar → horizontal tab strip ──────────────── */
+
+/* 3a. Layout becomes flex-column instead of the sidebar grid */
+.pos-retail-browser__layout {
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: unset !important;
+  height: 100%;
+}
+
+/* 3b. Rail = horizontal tab bar — height grows to fit all wrapped tabs */
+.pos-retail-browser__rail {
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  overflow: visible !important;
+
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start !important;
+  flex-wrap: wrap !important;
+  gap: 0.35rem !important;
+  padding: 0.6rem 1rem !important;
+
+  background: var(--pos-surface) !important;
+  border-right: none !important;
+  border-bottom: 1px solid var(--pos-border) !important;
+}
+
+/* 3c. Hide the "Departments / Point of sale" header */
+.pos-retail-browser__rail-header {
+  display: none !important;
+}
+
+/* 3d. Search block → compact pill pushed to the far right */
+.pos-retail-browser__rail-search {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: none !important;
+  border-radius: 0 !important;
+  /* DOM order is search THEN list — flip so tabs come first */
+  order: 3 !important;
+  margin-left: auto !important;
+  padding-left: 0.5rem !important;
+  border-left: 1px solid rgba(209, 191, 167, 0.55) !important;
+}
+.pos-retail-browser__rail-search-label,
+.pos-retail-browser__rail-search-copy {
+  display: none !important;
+}
+.pos-retail-browser__search-trigger {
+  min-height: 0 !important;
+  height: 2rem !important;
+  padding: 0 0.8rem !important;
+  border-radius: 999px !important;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  gap: 0.38rem !important;
+  white-space: nowrap !important;
+  justify-content: center !important;
+  border: 1px solid rgba(85, 107, 47, 0.26) !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  color: var(--pos-text) !important;
+  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s !important;
+  box-shadow: none !important;
+}
+.pos-retail-browser__search-trigger:hover,
+.pos-retail-browser__search-trigger:focus-visible {
+  border-color: rgba(85, 107, 47, 0.5) !important;
+  box-shadow: 0 4px 14px rgba(85, 107, 47, 0.12) !important;
+  transform: translateY(-1px) !important;
+  background: #fff !important;
+}
+
+/* 3e. Department list → wrapping row so all tabs are always visible */
+.pos-retail-browser__rail-list {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 0.28rem !important;
+  flex: 1 1 auto !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  order: 2 !important;
+}
+
+/* 3f. Each department button → pill tab */
+.pos-retail-browser__rail-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.38rem !important;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  white-space: nowrap !important;
+  padding: 0.38rem 0.9rem !important;
+  border-radius: 999px !important;
+  min-height: 2.25rem !important;
+  font-size: 0.82rem !important;
+  font-weight: 700 !important;
+  /* Reset grid layout from the sidebar design */
+  grid-template-columns: unset !important;
+  /* Pill default state */
+  border: 1px solid rgba(85, 107, 47, 0.14) !important;
+  background: transparent !important;
+  color: var(--pos-muted) !important;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s !important;
+}
+.pos-retail-browser__rail-button:hover,
+.pos-retail-browser__rail-button:focus-visible {
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-color: rgba(85, 107, 47, 0.34) !important;
+  color: var(--pos-text) !important;
+  outline: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.pos-retail-browser__rail-button.is-active {
+  background: var(--pos-accent) !important;
+  border-color: var(--pos-accent) !important;
+  color: #fff !important;
+  /* Remove the left-border indicator from the sidebar era */
+  box-shadow: 0 3px 10px rgba(85, 107, 47, 0.2) !important;
+}
+
+/* Description hidden in pill mode */
+.pos-retail-browser__rail-description {
+  display: none !important;
+}
+
+/* Count badge inside each tab */
+.pos-retail-browser__rail-count {
+  min-width: 1.3rem !important;
+  height: 1.3rem !important;
+  padding: 0 0.28rem !important;
+  font-size: 0.66rem !important;
+  font-weight: 800 !important;
+}
+.pos-retail-browser__rail-button:not(.is-active) .pos-retail-browser__rail-count {
+  background: rgba(85, 107, 47, 0.1) !important;
+  color: var(--pos-accent) !important;
+}
+.pos-retail-browser__rail-button.is-active .pos-retail-browser__rail-count {
+  background: rgba(255, 255, 255, 0.22) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* 3f-2. Category shortcut pills in the rail — slightly smaller, visually grouped */
+.pos-retail-browser__rail-button--category {
+  font-size: 0.75rem !important;
+  padding: 0 0.65rem !important;
+  height: 1.75rem !important;
+  opacity: 0.85;
+  border-style: dashed !important;
+}
+.pos-retail-browser__rail-button--category:hover,
+.pos-retail-browser__rail-button--category:focus-visible {
+  opacity: 1;
+  border-style: solid !important;
+}
+.pos-retail-browser__rail-button--category.is-active {
+  opacity: 1;
+  border-style: solid !important;
+}
+
+/* 3g. Workspace = remaining height below the tab strip */
+.pos-retail-browser__workspace {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  overflow: hidden;
+}
+
+/* 3h. Toolbar: hide the redundant department title, keep filters + count */
+.pos-retail-browser__toolbar {
+  padding: 0.5rem 1rem !important;
+  gap: 0.45rem !important;
+  flex: 0 0 auto !important;
+}
+/* The first <div> inside toolbar-head holds: "Browse" label, h3 name, description.
+   With tabs we can hide it — the active tab already shows the department. */
+.pos-retail-browser__toolbar-head > div:first-child {
+  display: none !important;
+}
+.pos-retail-browser__toolbar-head {
+  min-height: 1.75rem;
+}
+.pos-retail-browser__count {
+  font-size: 0.72rem !important;
+  padding: 0.22rem 0.58rem !important;
+}
+
+/* When toolbar has no filters, shrink it to near zero height */
+.pos-retail-browser__toolbar:not(:has(.pos-category-chip)):not(:has(.pos-retail-browser__filters--bookings)) {
+  padding: 0.3rem 1rem !important;
+}
+
+/* 3i. Content area scrolls */
+.pos-retail-browser__content {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(85, 107, 47, 0.2) transparent !important;
+}
+
+/* ── 4. CATEGORY FILTER CHIPS ─────────────────────────────────────────── */
+.pos-category-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 1.85rem;
+  padding: 0 0.68rem;
+  border: 1px solid rgba(85, 107, 47, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--pos-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s, border-color 0.14s, color 0.14s;
+}
+.pos-category-chip:hover {
+  background: #fff;
+  border-color: rgba(85, 107, 47, 0.36);
+  color: var(--pos-text);
+}
+.pos-category-chip.is-active {
+  background: var(--pos-accent);
+  border-color: var(--pos-accent);
+  color: #fff;
+}
+
+/* ── 5. UNIFORM CARD HEIGHT ───────────────────────────────────────────── */
+/* grid-auto-rows is set by JS (useLayoutEffect) to match the tallest card */
+
+/* ── 6. PRODUCT CARD LAYOUT ───────────────────────────────────────────── */
+.pos-retail-card {
+  min-height: 0 !important;
+  height: 100%;
+}
+
+/* Fixed-height image so every card's image area is identical */
+.pos-retail-card__image {
+  width: 100%;
+  height: 8.5rem;
+  flex: 0 0 8.5rem;
+  overflow: hidden;
+  background: #ede5d4;
+  border-bottom: 1px solid rgba(209, 191, 167, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pos-retail-card__image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  flex: none;
+  align-self: stretch;
+  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pos-retail-card:hover .pos-retail-card__image img {
+  transform: scale(1.05);
+}
+
+/* Body: pill on top, name centered — grows to fill remaining space */
+.pos-retail-card__body {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  gap: 0.35rem !important;
+  padding: 0.65rem 0.75rem !important;
+  flex: 1 1 auto !important;
+  /* no min-height: 0 — let content size determine the floor */
+}
+.pos-retail-card__body h4 {
+  font-size: 0.88rem !important;
+  font-weight: 800 !important;
+  line-height: 1.3 !important;
+  margin: 0 !important;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Department badge: centered above name */
+.pos-retail-card__department-badge {
+  position: static !important;
+  align-self: center !important;
+}
+
+/* Actions: price directly above button, stacked */
+.pos-retail-card__actions {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.5rem !important;
+  padding: 0.6rem 0.75rem 0.75rem !important;
+  margin-top: 0 !important;
+}
+.pos-retail-card__price-row {
+  padding: 0.42rem 0.6rem !important;
+  margin: 0 !important;
+}
+.pos-retail-card__price-row strong {
+  font-size: 1.1rem !important;
+}
+
+/* Letter fallback when no image is available */
+.pos-retail-card__letter {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--pos-muted);
+  opacity: 0.5;
+  user-select: none;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+/* ── 5b. POS CATEGORY PILLS ───────────────────────────────────────────── */
+.pos-category-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.65rem 0 0.25rem;
+}
+
+.pos-category-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 1.85rem;
+  padding: 0 0.85rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--pos-border);
+  background: var(--pos-surface);
+  color: var(--pos-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.13s, border-color 0.13s, color 0.13s;
+}
+
+.pos-category-pill:hover {
+  background: #f0e9db;
+  border-color: var(--pos-accent);
+  color: var(--pos-text);
+}
+
+.pos-category-pill.is-active {
+  background: var(--pos-accent);
+  border-color: var(--pos-accent);
+  color: #fff;
+}
+
+/* ── 6. PRODUCT CARD HOVER / MOTION ───────────────────────────────────── */
+.pos-retail-card {
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.pos-retail-card:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 14px 32px rgba(38, 48, 19, 0.13) !important;
+}
+.pos-retail-card:active {
+  transform: translateY(0) !important;
+}
+
+/* ── 7. CART PANEL ────────────────────────────────────────────────────── */
+/* Make the cart card a flex column so the list scrolls and footer sticks */
+.pos-wizard__build [data-mobile-panel="cart"] .pos-wizard__card {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+
+/* Cart list fills the middle and scrolls */
+.pos-wizard__build [data-mobile-panel="cart"] .pos-cart__list {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(85, 107, 47, 0.18) transparent !important;
+}
+
+/* Header & footer don't shrink */
+.pos-wizard__build [data-mobile-panel="cart"] .pos-cart-panel__header {
+  flex: 0 0 auto !important;
+}
+.pos-wizard__build [data-mobile-panel="cart"] .pos-cart-panel__footer {
+  flex: 0 0 auto !important;
+}
+
+/* Stepper ± buttons use brand color on hover */
+.pos-cart__stepper-btn:hover:not(:disabled) {
+  background: var(--pos-accent) !important;
+  color: #fff !important;
+}
+
+/* Empty state inside cart */
+.pos-wizard__build [data-mobile-panel="cart"] .empty-state {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--pos-muted);
+  font-size: 0.88rem;
+}
+
+/* ── 9. MOBILE TAB BAR (Browse / Cart toggle) ─────────────────────────── */
+.pos-panel-tab-bar {
+  background: var(--pos-surface) !important;
+  border-bottom: 1px solid var(--pos-border) !important;
+}
+.pos-panel-tab-bar__btn.is-active {
+  border-bottom-color: var(--pos-accent) !important;
+  color: var(--pos-accent) !important;
+}
+.pos-panel-tab-bar__badge {
+  background: var(--pos-accent) !important;
+}
+
+/* ── 10. STEPPER ──────────────────────────────────────────────────────── */
+.pos-stepper__list {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+.pos-stepper__item.is-current .pos-stepper__button {
+  box-shadow:
+    0 6px 22px rgba(85, 107, 47, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65) !important;
+}
+
+/* ── 11. DEPARTMENT SECTION DIVIDERS IN ALL-ITEMS VIEW ────────────────── */
+.pos-department-section__header {
+  border-bottom: 1px solid rgba(209, 191, 167, 0.35);
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.15rem;
+}
+
+/* ── 12. SERVICE CARDS ────────────────────────────────────────────────── */
+.pos-retail-card--service > .pos-retail-card__body {
+  background: rgba(249, 244, 236, 0.45);
+}
+
+/* ── 13. BOOKING EDITOR ───────────────────────────────────────────────── */
+.pos-booking-editor {
+  border-radius: 10px !important;
+}
+
+/* ── Booking: payment badge ─────────────────────────────────────────────── */
+.pos-booking-payment-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.pos-booking-payment-badge--paid {
+  background: rgba(34, 124, 58, 0.12);
+  color: #1a6b35;
+}
+.pos-booking-payment-badge--unpaid {
+  background: rgba(185, 90, 0, 0.1);
+  color: #a05000;
+}
+.pos-booking-payment-badge--lg {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.75rem;
+}
+
+/* ── Booking: header row in dialog ──────────────────────────────────────── */
+.pos-booking-dialog__header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* ── Booking: check-in button ───────────────────────────────────────────── */
+.pos-booking-checkin-btn {
+  background: #1a6b35 !important;
+  border-color: #1a6b35 !important;
+  color: #fff !important;
+}
+.pos-booking-checkin-btn:hover {
+  background: #155a2c !important;
+  border-color: #155a2c !important;
+}
+
+/* ── Booking: per-attendee frame selects ────────────────────────────────── */
+.pos-attendee-frames {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+.pos-attendee-frame-row {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+}
+.pos-attendee-frame-row__label {
+  color: var(--pos-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.pos-attendee-frames__total {
+  text-align: right;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(222, 213, 197, 0.5);
+  margin-top: 0.2rem;
+}
+
+/* ── 14. WIDE-SCREEN HEIGHT FILL ──────────────────────────────────────── */
+@media (min-width: 1280px) {
+  .pos-wizard__build {
+    min-height: calc(100dvh - var(--site-header-height, 96px) - 10.5rem) !important;
+  }
+}
+
+/* ── 15. TOUCH/MOBILE CART PEEK ───────────────────────────────────────── */
+.pos-touch-cart-peek {
+  border-top: 1px solid var(--pos-border);
+  background: var(--pos-surface);
+}
+
+/* ── 16. VARIANT SELECTION DIALOG ─────────────────────────────────────── */
+.pos-variant-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(38, 48, 19, 0.38);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.pos-variant-dialog {
+  background: var(--pos-surface);
+  border: 1px solid var(--pos-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(38, 48, 19, 0.22);
+  width: 100%;
+  max-width: 440px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 3rem);
+}
+
+.pos-variant-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.25rem 0.9rem;
+  border-bottom: 1px solid var(--pos-border);
+  flex: 0 0 auto;
+}
+
+.pos-variant-dialog__eyebrow {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--pos-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 0.2rem;
+}
+
+.pos-variant-dialog__title {
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: var(--pos-text);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.pos-variant-dialog__close {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--pos-border);
+  background: transparent;
+  color: var(--pos-muted);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.pos-variant-dialog__close:hover {
+  background: #f0e9db;
+  color: var(--pos-text);
+}
+
+.pos-variant-dialog__list {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(85, 107, 47, 0.18) transparent;
+}
+
+.pos-variant-dialog__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid rgba(222, 213, 197, 0.6);
+  transition: background 0.12s;
+}
+.pos-variant-dialog__row:last-child {
+  border-bottom: none;
+}
+.pos-variant-dialog__row:hover:not(.is-out) {
+  background: #fbf7ef;
+}
+.pos-variant-dialog__row.is-out {
+  opacity: 0.45;
+}
+
+.pos-variant-dialog__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.pos-variant-dialog__label {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--pos-text);
+  line-height: 1.2;
+}
+
+.pos-variant-dialog__price {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--pos-muted);
+}
+
+.pos-variant-dialog__add {
+  flex: 0 0 auto;
+  min-width: 4.5rem;
+  min-height: 2.25rem;
+  padding: 0 1rem !important;
+  font-size: 0.85rem !important;
+  font-weight: 800 !important;
+  border-radius: 8px !important;
+  background: var(--pos-accent) !important;
+  border-color: var(--pos-accent) !important;
+  color: #fff !important;
+  justify-content: center;
+  transition: background 0.14s, transform 0.14s !important;
+}
+.pos-variant-dialog__add:hover:not(:disabled) {
+  background: #3a4d1a !important;
+  transform: translateY(-1px) !important;
+}
+.pos-variant-dialog__add:disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+}
+
+/* ── 17. POS ITEMS MODAL — two-column layout ──────────────────────────── */
+
+/* Widen the modal to accommodate two columns */
+.pos-items-modal {
+  width: min(98vw, 80rem) !important;
+  max-width: 80rem !important;
+  max-height: 90dvh !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* Two-column grid: list left, form right — equal split so list always has room */
+.pos-items-modal__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Column shared styles */
+.pos-items-modal__list-col,
+.pos-items-modal__form-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pos-items-modal__list-col {
+  border-right: 1px solid var(--pos-border);
+}
+
+/* Column headers */
+.pos-items-modal__col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.1rem 1.25rem 0.85rem;
+  border-bottom: 1px solid rgba(222, 213, 197, 0.5);
+  flex: 0 0 auto;
+}
+
+.pos-items-modal__col-header .modal__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.pos-items-modal__form-heading {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--pos-text);
+}
+
+.pos-items-modal__count {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--pos-muted);
+  background: rgba(85, 107, 47, 0.09);
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+
+/* Scrollable list */
+.pos-items-modal__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.5rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(85, 107, 47, 0.18) transparent;
+}
+
+/* Each product row */
+.pos-items-modal__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.7rem 1.25rem;
+  border-bottom: 1px solid rgba(222, 213, 197, 0.35);
+  transition: background 0.12s;
+}
+.pos-items-modal__row:last-child { border-bottom: none; }
+.pos-items-modal__row:hover { background: #fbf7ef; }
+.pos-items-modal__row.is-editing {
+  background: rgba(85, 107, 47, 0.06);
+  border-left: 3px solid var(--pos-accent);
+}
+
+.pos-items-modal__row-thumb {
+  flex: 0 0 2.75rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ede5d4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pos-items-modal__row-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pos-items-modal__row-thumb span {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--pos-muted);
+  opacity: 0.55;
+  line-height: 1;
+}
+
+.pos-items-modal__row-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pos-items-modal__row-info strong {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--pos-text);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.pos-items-modal__row-info .modal__meta {
+  margin: 0.1rem 0 0;
+}
+
+.pos-items-modal__row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0.15rem;
+}
+
+.pos-items-modal__row-btn {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--pos-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+.pos-items-modal__row-btn:hover {
+  background: rgba(85, 107, 47, 0.1);
+  color: var(--pos-text);
+}
+.pos-items-modal__row-btn--delete:hover {
+  background: rgba(185, 28, 28, 0.08);
+  color: #b91c1c;
+}
+
+/* Right column: form */
+.pos-items-modal__form-col {
+  background: #fbf8f3;
+}
+
+/* Padding for the absolute-positioned close button */
+.pos-items-modal__form-col .pos-items-modal__col-header {
+  padding-right: 3rem;
+}
+
+.pos-items-modal__form {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1rem 1.25rem 1.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(85, 107, 47, 0.18) transparent;
+}
+
+/* Price + Qty side by side */
+.pos-items-modal__form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+/* Image upload zone */
+.pos-items-image-zone {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px dashed rgba(85, 107, 47, 0.3);
+  background: #f2ede4;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+.pos-items-image-zone:hover {
+  border-color: var(--pos-accent);
+  background: #eae3d5;
+}
+
+.pos-items-image-zone__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pos-items-image-zone__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  color: var(--pos-muted);
+}
+.pos-items-image-zone__empty span {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.pos-items-image-zone__empty small {
+  font-size: 0.72rem;
+  opacity: 0.65;
+}
+
+.pos-items-image-zone__remove {
+  font-size: 0.78rem;
+  color: var(--pos-muted);
+  padding: 0 !important;
+  margin-top: -0.2rem;
+}
+
+/* ── Mobile / tablet: single column ──────────────────────────────────── */
+@media (max-width: 760px) {
+  .pos-items-modal {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+  }
+  .pos-items-modal__layout {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .pos-items-modal__list-col {
+    border-right: none;
+    border-bottom: 1px solid var(--pos-border);
+  }
+  .pos-items-modal__form-col .pos-items-modal__col-header {
+    padding-right: 3rem;
+  }
+  /* On mobile, cap the list height so form is still reachable */
+  .pos-items-modal__list {
+    max-height: 40vh;
+  }
+}
+
+/* ── 17b. POS PRODUCT IMAGE UPLOAD (legacy, kept for fallback) ──────── */
+.pos-product-image-upload {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.pos-product-image-upload__preview {
+  width: 4rem;
+  height: 4rem;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--pos-border);
+  flex: 0 0 auto;
+}
+
+.pos-product-image-upload__label {
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.pos-product-image-upload__remove {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  color: var(--pos-muted);
+}
+
+/* ── 18. SERVICE SELECTION DIALOG (workshops / classes / events) ──────── */
+.pos-service-dialog {
+  max-width: 24rem;
+}
+
+.pos-service-dialog .pos-variant-dialog__header {
+  align-items: flex-start;
+  gap: 0;
+}
+
+.pos-service-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.pos-service-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pos-service-dialog__label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--pos-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pos-service-dialog__field .input {
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.pos-service-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(222, 213, 197, 0.6);
+  margin-top: 0.25rem;
+}
+
+.pos-service-dialog__price {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--pos-text);
+}
+
+.pos-service-dialog__add {
+  flex: 0 0 auto;
+}
+
+/* ── Table bar ─────────────────────────────────────────────────────────── */
+.pos-table-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--pos-surface);
+  border-bottom: 1px solid var(--pos-border);
+  min-height: 3rem;
+  flex-shrink: 0;
+}
+
+/* When table bar lives inside the cart panel header, strip standalone chrome */
+.pos-cart-panel__header .pos-table-bar {
+  padding: 0;
+  background: none;
+  border-bottom: none;
+  min-height: auto;
+  flex-shrink: 1;
+}
+
+.pos-table-bar__icon {
+  flex-shrink: 0;
+  color: var(--pos-muted);
+  display: flex;
+  align-items: center;
+}
+
+/* No table assigned — full-width assign button */
+.pos-table-bar__assign {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.75rem;
+  background: var(--pos-bg);
+  border: 1.5px dashed var(--pos-border);
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  color: var(--pos-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.pos-table-bar__assign:hover {
+  border-color: var(--pos-accent);
+  color: var(--pos-accent);
+  background: #f5f9f0;
+}
+
+.pos-table-bar__arrow {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* Table assigned — content row */
+.pos-table-bar__content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.pos-table-bar__info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.pos-table-bar__name {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--pos-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pos-table-bar__badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  background: #fff3e0;
+  border: 1px solid #f0a030;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #a05000;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pos-table-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.pos-table-bar__switch {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  background: none;
+  border: 1px solid var(--pos-border);
+  border-radius: 6px;
+  color: var(--pos-accent);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.pos-table-bar__switch:hover {
+  background: #f0f5e8;
+  border-color: var(--pos-accent);
+}
+
+.pos-table-bar__clear {
+  font-size: 1.125rem;
+  line-height: 1;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--pos-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.pos-table-bar__clear:hover {
+  background: #fdecea;
+  color: #c0392b;
+}
+
+/* ── Park order (hold tab) button ──────────────────────────────────────── */
+.pos-hold-tab-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  background: #fff8ec;
+  border: 1.5px solid #d4900a;
+  border-radius: 8px;
+  color: #8a5f00;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  margin-bottom: 0.5rem;
+}
+
+.pos-hold-tab-btn:hover:not(:disabled) {
+  background: #fef0cc;
+  border-color: #b07b00;
+  color: #6b4800;
+}
+
+.pos-hold-tab-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Print bill button ──────────────────────────────────────────────────── */
+.pos-print-bill-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.pos-print-bill-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Table picker modal ─────────────────────────────────────────────────── */
+.pos-table-picker-modal .modal__content {
+  max-width: none !important;
+}
+
+.pos-table-picker {
+  width: min(96vw, 52rem);
+  max-height: 88vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--pos-surface);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(38, 48, 19, 0.14);
+  overflow: hidden;
+}
+
+.pos-table-picker__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.375rem 1.5rem 1rem;
+  border-bottom: 1px solid var(--pos-border);
+}
+
+.pos-table-picker__title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--pos-text);
+  margin: 0 0 0.2rem;
+}
+
+.pos-table-picker__subtitle {
+  font-size: 0.8125rem;
+  color: var(--pos-muted);
+  margin: 0;
+}
+
+.pos-table-picker__close {
+  flex-shrink: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--pos-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.pos-table-picker__close:hover {
+  background: #f0f0ef;
+  color: var(--pos-text);
+}
+
+/* Legend */
+.pos-table-picker__legend {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.625rem 1.5rem;
+  background: var(--pos-bg);
+  border-bottom: 1px solid var(--pos-border);
+}
+
+.pos-table-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--pos-muted);
+}
+
+.pos-table-legend::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.pos-table-legend--free::before {
+  background: var(--pos-surface);
+  border: 1.5px solid var(--pos-border);
+}
+
+.pos-table-legend--occupied::before {
+  background: #fff3e0;
+  border: 1.5px solid #d4900a;
+}
+
+.pos-table-legend--active::before {
+  background: #e8f2dc;
+  border: 1.5px solid var(--pos-accent);
+}
+
+/* Grid */
+.pos-table-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Footer */
+.pos-table-picker__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1.5rem;
+  border-top: 1px solid var(--pos-border);
+  background: var(--pos-bg);
+}
+
+.pos-table-picker__count-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pos-table-picker__count-btn {
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border: 1px solid var(--pos-border);
+  border-radius: 6px;
+  background: var(--pos-surface);
+  color: var(--pos-text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.pos-table-picker__count-btn:hover:not(:disabled) {
+  background: #f0f5e8;
+  border-color: var(--pos-accent);
+}
+
+.pos-table-picker__count-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pos-table-picker__count-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--pos-text);
+  min-width: 5rem;
+  text-align: center;
+}
+
+.pos-table-picker__edit-names-btn {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.4rem 0.875rem;
+  background: none;
+  border: 1px solid var(--pos-border);
+  border-radius: 7px;
+  color: var(--pos-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.pos-table-picker__edit-names-btn:hover {
+  border-color: var(--pos-accent);
+  color: var(--pos-accent);
+}
+
+.pos-table-picker__name-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.pos-table-picker__cancel-btn {
+  font-size: 0.8125rem;
+  padding: 0.4rem 0.75rem;
+  background: none;
+  border: 1px solid var(--pos-border);
+  border-radius: 7px;
+  color: var(--pos-muted);
+  cursor: pointer;
+}
+
+.pos-table-picker__save-btn {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.4rem 0.875rem;
+  background: var(--pos-accent);
+  border: none;
+  border-radius: 7px;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.pos-table-picker__save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Table cell ─────────────────────────────────────────────────────────── */
+.pos-table-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.875rem 0.5rem 0.75rem;
+  border: 1.5px solid var(--pos-border);
+  border-radius: 10px;
+  background: var(--pos-surface);
+  cursor: pointer;
+  min-height: 5.5rem;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  text-align: center;
+}
+
+.pos-table-cell:hover:not(.is-active):not(.is-occupied) {
+  border-color: var(--pos-accent);
+  background: #f5f9f0;
+  box-shadow: 0 2px 8px rgba(85, 107, 47, 0.1);
+}
+
+.pos-table-cell.is-active {
+  border-color: var(--pos-accent);
+  background: #e8f2dc;
+  box-shadow: 0 0 0 3px rgba(85, 107, 47, 0.12);
+}
+
+.pos-table-cell.is-occupied {
+  border-color: #d4900a;
+  background: #fff8ec;
+  cursor: pointer;
+}
+
+.pos-table-cell.is-occupied:hover {
+  background: #fff3d8;
+  box-shadow: 0 2px 8px rgba(160, 80, 0, 0.1);
+}
+
+.pos-table-cell__name {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--pos-text);
+  line-height: 1;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.pos-table-cell.is-active .pos-table-cell__name {
+  color: var(--pos-accent);
+}
+
+.pos-table-cell.is-occupied .pos-table-cell__name {
+  color: #6b4200;
+}
+
+.pos-table-cell__num {
+  font-size: 0.6875rem;
+  color: var(--pos-muted);
+  line-height: 1;
+}
+
+.pos-table-cell__status {
+  font-size: 0.6875rem;
+  color: var(--pos-muted);
+  margin-top: 0.2rem;
+  line-height: 1.2;
+}
+
+.pos-table-cell__status.is-tab {
+  font-weight: 700;
+  color: #8a5f00;
+}
+
+.pos-table-cell__status.is-current {
+  font-weight: 700;
+  color: var(--pos-accent);
+}
+
+/* Name input inside cell (edit mode) */
+.pos-table-cell__name-input {
+  width: 100%;
+  text-align: center;
+  border: none;
+  border-bottom: 1.5px solid var(--pos-border);
+  border-radius: 0;
+  padding: 0.2rem 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: transparent;
+  color: var(--pos-text);
+  outline: none;
+}
+
+.pos-table-cell__name-input:focus {
+  border-bottom-color: var(--pos-accent);
+}

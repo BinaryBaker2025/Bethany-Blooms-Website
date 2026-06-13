@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
 
 function PosCatalogBrowser({
   departments,
@@ -44,6 +44,7 @@ function PosCatalogBrowser({
   handleBookingEditChange,
   handleSaveBookingChanges,
   handleAddBookingToCart,
+  onCheckIn,
   bookingSavingId,
   bookingError,
   workshopLookup,
@@ -53,34 +54,36 @@ function PosCatalogBrowser({
   setEventSelections,
   serviceSections,
   formatCurrency,
-  topSellerEntries,
-  topSellersLabel,
   onAddProduct,
   onAddPosProduct,
   onAddWorkshop,
   onAddClass,
   onAddEvent,
-  onAddTopSeller,
 }) {
   const visibleCategoryOptions =
-    activeTab === "products"
-      ? categoryOptions
-      : activeTab === "pos-products"
-        ? posCategoryOptions
-        : [];
+    activeTab === "products" ? categoryOptions : [];
   const visibleCategoryId =
-    activeTab === "products"
-      ? activeCategoryId
-      : activeTab === "pos-products"
-        ? activePosCategoryId
-        : "all";
+    activeTab === "products" ? activeCategoryId : "all";
   const handleVisibleCategoryChange =
-    activeTab === "products"
-      ? setActiveCategoryId
-      : activeTab === "pos-products"
-        ? setActivePosCategoryId
-        : null;
+    activeTab === "products" ? setActiveCategoryId : null;
   const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
+  const [variantDialog, setVariantDialog] = useState(null);
+  const [serviceDialog, setServiceDialog] = useState(null);
+  const [posCategoryPill, setPosCategoryPill] = useState("all");
+  const catalogBodyRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = catalogBodyRef.current;
+    if (!el) return;
+    const grids = el.querySelectorAll(".pos-grid--dense");
+    grids.forEach((grid) => {
+      grid.style.gridAutoRows = "";
+      const cards = [...grid.querySelectorAll(".pos-item-card")];
+      if (cards.length < 2) return;
+      const max = Math.max(...cards.map((c) => c.getBoundingClientRect().height));
+      if (max > 0) grid.style.gridAutoRows = `${max}px`;
+    });
+  });
 
   const openDepartment = (departmentId, serviceType = "all") => {
     setActiveTab(departmentId);
@@ -173,55 +176,31 @@ function PosCatalogBrowser({
     </span>
   );
 
-  const renderTopSellerSubtitle = (subtitle = "") => {
-    const text = subtitle.toString().trim();
-    if (!text) return null;
-
-    const separator = " - ";
-    const separatorIndex = text.indexOf(separator);
-    if (separatorIndex === -1) {
-      return (
-        <p className="modal__meta pos-top-seller-card__meta">
-          <span className="pos-top-seller-card__variant">{text}</span>
-        </p>
-      );
-    }
-
-    const dateText = text.slice(0, separatorIndex + separator.length).trim();
-    const variantText = text.slice(separatorIndex + separator.length).trim();
-
-    return (
-      <p className="modal__meta pos-top-seller-card__meta">
-        <span className="pos-top-seller-card__date">{dateText}</span>
-        {variantText && (
-          <>
-            {" "}
-            <span className="pos-top-seller-card__variant">
-              {variantText}
-            </span>
-          </>
-        )}
-      </p>
-    );
-  };
-
   const renderProductCard = (product, renderOptions = null) => {
     const family = getItemFamily("product");
     const onAfterAdd = renderOptions?.onAfterAdd;
-    const selection =
-      variantSelections[product.id] || product.variants[0]?.id || "";
-    const variant =
-      product.variants.find((entry) => entry.id === selection) || null;
-    const variantPrice = Number.isFinite(variant?.price)
-      ? variant.price
-      : product.numericPrice;
-    const priceLabel = Number.isFinite(variantPrice)
-      ? formatCurrency(variantPrice)
-      : product.displayPrice;
-    const canAdd =
-      product.variants.length > 0
-        ? Boolean(variant) && variant.stockStatus?.state !== "out"
-        : product.stockStatus?.state !== "out";
+    const hasVariants = product.variants.length > 0;
+    const canAdd = hasVariants
+      ? product.variants.some((v) => v.stockStatus?.state !== "out")
+      : product.stockStatus?.state !== "out";
+
+    const productThumb = Array.isArray(product.images) && product.images[0]
+      ? product.images[0]
+      : product.imageUrl || null;
+
+    let priceLabel;
+    if (hasVariants) {
+      const prices = product.variants.filter((v) => Number.isFinite(v.price)).map((v) => v.price);
+      if (prices.length > 0) {
+        const min = Math.min(...prices);
+        const max = Math.max(...prices);
+        priceLabel = min === max ? formatCurrency(min) : `${formatCurrency(min)} – ${formatCurrency(max)}`;
+      } else {
+        priceLabel = product.displayPrice;
+      }
+    } else {
+      priceLabel = Number.isFinite(product.numericPrice) ? formatCurrency(product.numericPrice) : product.displayPrice;
+    }
 
     return (
       <article
@@ -229,61 +208,32 @@ function PosCatalogBrowser({
         key={product.id}
         data-item-family={family}
       >
+        <div className="pos-retail-card__image">
+          {productThumb
+            ? <img src={productThumb} alt={product.name} loading="lazy" decoding="async" />
+            : <span className="pos-retail-card__letter" aria-hidden="true">{product.name.charAt(0).toUpperCase()}</span>
+          }
+        </div>
         <div className="pos-retail-card__body">
-          <div className="pos-retail-card__header">
-            <div className="pos-retail-card__title-block">
-              <h4>{product.name}</h4>
-              <div className="pos-retail-card__highlight-row">
-                {product.variants.length > 0 && (
-                  <span className="pos-retail-card__pill pos-retail-card__pill--variant">
-                    Variant:{" "}
-                    {variant?.label ||
-                      `${product.variants.length} ${product.variants.length === 1 ? "variant" : "variants"}`}
-                  </span>
-                )}
-              </div>
-            </div>
-            {renderFamilyBadge(family)}
-          </div>
+          {renderFamilyBadge(family)}
+          <h4>{product.name}</h4>
+        </div>
+        <div className="pos-retail-card__actions">
           <div className="pos-retail-card__price-row">
             <strong>{priceLabel}</strong>
           </div>
-          {product.variants.length > 0 && (
-            <div className="pos-retail-card__config">
-              <label className="modal__meta pos-item-card__field">
-                Change variant
-                <select
-                  className="input"
-                  value={selection}
-                  onChange={(event) =>
-                    setVariantSelections((prev) => ({
-                      ...prev,
-                      [product.id]: event.target.value,
-                    }))
-                  }
-                >
-                  {product.variants.map((variantOption) => (
-                    <option key={variantOption.id} value={variantOption.id}>
-                      {variantOption.label}
-                      {Number.isFinite(variantOption.price)
-                        ? ` - ${formatCurrency(variantOption.price)}`
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          )}
-        </div>
-        <div className="pos-retail-card__actions">
           <button
             className="btn pos-retail-card__button pos-retail-card__button--primary"
             type="button"
             data-item-family={family}
             disabled={!canAdd}
             onClick={() => {
-              onAddProduct(product, { variantId: variant?.id || null });
-              onAfterAdd?.();
+              if (hasVariants) {
+                setVariantDialog({ product, onAfterAdd });
+              } else {
+                onAddProduct(product, { variantId: null });
+                onAfterAdd?.();
+              }
             }}
           >
             Add to order
@@ -304,20 +254,20 @@ function PosCatalogBrowser({
         key={product.id}
         data-item-family={family}
       >
+        <div className="pos-retail-card__image">
+          {product.imageUrl
+            ? <img src={product.imageUrl} alt={product.name} loading="lazy" decoding="async" />
+            : <span className="pos-retail-card__letter" aria-hidden="true">{product.name.charAt(0).toUpperCase()}</span>
+          }
+        </div>
         <div className="pos-retail-card__body">
-          <div className="pos-retail-card__header">
-            <div className="pos-retail-card__title-block">
-              <h4>{product.name}</h4>
-            </div>
-            {renderFamilyBadge(family)}
-          </div>
-
+          {renderFamilyBadge(family)}
+          <h4>{product.name}</h4>
+        </div>
+        <div className="pos-retail-card__actions">
           <div className="pos-retail-card__price-row">
             <strong>{product.displayPrice}</strong>
           </div>
-        </div>
-
-        <div className="pos-retail-card__actions">
           <button
             className="btn pos-retail-card__button pos-retail-card__button--primary"
             type="button"
@@ -338,29 +288,8 @@ function PosCatalogBrowser({
   const renderWorkshopCard = (workshop, renderOptions = null) => {
     const family = getItemFamily("workshop");
     const onAfterAdd = renderOptions?.onAfterAdd;
-    const selectedSessionId =
-      workshopSelections[workshop.id] || workshop.sessions[0]?.id || "";
-    const selectedSession =
-      workshop.sessions.find((session) => session.id === selectedSessionId) ||
-      workshop.sessions[0] ||
-      null;
-    const selectedOptionId =
-      workshopOptionSelections[workshop.id] || workshop.options[0]?.id || "";
-    const selectedOption =
-      workshop.options.find((option) => option.id === selectedOptionId) ||
-      workshop.options[0] ||
-      null;
-    const optionPrice = Number.isFinite(selectedOption?.price)
-      ? selectedOption.price
-      : null;
-    const priceLabel = Number.isFinite(optionPrice)
-      ? formatCurrency(optionPrice)
-      : workshop.displayPrice;
-    const selectedSessionFull =
-      typeof selectedSession?.capacity === "number" && selectedSession.capacity <= 0;
-    const canAdd =
-      (workshop.sessions.length === 0 || (Boolean(selectedSession) && !selectedSessionFull)) &&
-      (workshop.options.length === 0 || Boolean(selectedOption));
+    const thumb = workshop.image || workshop.imageUrl || null;
+    const hasConfig = workshop.sessions.length > 0 || workshop.options.length > 0;
 
     return (
       <article
@@ -368,93 +297,37 @@ function PosCatalogBrowser({
         key={workshop.id}
         data-item-family={family}
       >
+        <div className="pos-retail-card__image">
+          {thumb
+            ? <img src={thumb} alt={workshop.title} loading="lazy" decoding="async" />
+            : <span className="pos-retail-card__letter" aria-hidden="true">{(workshop.title || "W").charAt(0).toUpperCase()}</span>
+          }
+        </div>
         <div className="pos-retail-card__body">
-          <div className="pos-retail-card__header">
-            <div className="pos-retail-card__title-block">
-              <h4>{workshop.title}</h4>
-              <div className="pos-retail-card__highlight-row">
-                <span className="pos-retail-card__pill">
-                  {selectedSession?.label || "By request"}
-                </span>
-                <span className="pos-retail-card__pill pos-retail-card__pill--variant">
-                  Frame: {selectedOption?.label || "Choose size"}
-                </span>
-              </div>
-            </div>
-            {renderFamilyBadge(family)}
-          </div>
-          <div className="pos-retail-card__price-row">
-            <strong>{priceLabel}</strong>
-          </div>
-          <div className="pos-retail-card__config">
-            {workshop.sessions.length > 0 && (
-              <label className="modal__meta pos-item-card__field">
-                Session
-                <select
-                  className="input"
-                  value={selectedSessionId}
-                  onChange={(event) =>
-                    setWorkshopSelections((prev) => ({
-                      ...prev,
-                      [workshop.id]: event.target.value,
-                    }))
-                  }
-                >
-                  {workshop.sessions.map((session) => (
-                    <option
-                      key={session.id}
-                      value={session.id}
-                      disabled={typeof session.capacity === "number" && session.capacity <= 0}
-                    >
-                      {session.label}
-                      {typeof session.capacity === "number"
-                        ? session.capacity > 0
-                          ? ` - ${session.capacity} seat${session.capacity === 1 ? "" : "s"}`
-                          : " - fully booked"
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {workshop.options.length > 0 && (
-              <label className="modal__meta pos-item-card__field">
-                Frame size
-                <select
-                  className="input"
-                  value={selectedOptionId}
-                  onChange={(event) =>
-                    setWorkshopOptionSelections((prev) => ({
-                      ...prev,
-                      [workshop.id]: event.target.value,
-                    }))
-                  }
-                >
-                  {workshop.options.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                      {Number.isFinite(option.price)
-                        ? ` - ${formatCurrency(option.price)}`
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
+          {renderFamilyBadge(family)}
+          <h4>{workshop.title}</h4>
         </div>
         <div className="pos-retail-card__actions">
+          <div className="pos-retail-card__price-row">
+            <strong>{workshop.displayPrice}</strong>
+          </div>
           <button
             className="btn pos-retail-card__button pos-retail-card__button--primary"
             type="button"
             data-item-family={family}
-            disabled={!canAdd}
             onClick={() => {
-              onAddWorkshop(workshop, {
-                sessionId: selectedSession?.id || null,
-                optionId: selectedOption?.id || null,
-              });
-              onAfterAdd?.();
+              if (hasConfig) {
+                setServiceDialog({
+                  type: "workshop",
+                  item: workshop,
+                  sessionId: workshop.sessions[0]?.id || null,
+                  optionId: workshop.options[0]?.id || null,
+                  onAfterAdd,
+                });
+              } else {
+                onAddWorkshop(workshop, { sessionId: null, optionId: null });
+                onAfterAdd?.();
+              }
             }}
           >
             Add to order
@@ -467,25 +340,8 @@ function PosCatalogBrowser({
   const renderClassCard = (classDoc, renderOptions = null) => {
     const family = getItemFamily("class");
     const onAfterAdd = renderOptions?.onAfterAdd;
-    const selectedSlotId =
-      classSelections[classDoc.id] || classDoc.slots[0]?.id || "";
-    const selectedSlot =
-      classDoc.slots.find((slot) => slot.id === selectedSlotId) ||
-      classDoc.slots[0] ||
-      null;
-    const selectedOptionId =
-      classOptionSelections[classDoc.id] || classDoc.options[0]?.id || "";
-    const selectedOption =
-      classDoc.options.find((option) => option.id === selectedOptionId) ||
-      classDoc.options[0] ||
-      null;
-    const optionPrice = Number.isFinite(selectedOption?.price)
-      ? selectedOption.price
-      : null;
-    const priceLabel = Number.isFinite(optionPrice)
-      ? formatCurrency(optionPrice)
-      : classDoc.displayPrice;
-    const canAdd = classDoc.options.length === 0 || Boolean(selectedOption);
+    const thumb = classDoc.image || classDoc.imageUrl || null;
+    const hasConfig = classDoc.slots.length > 0 || classDoc.options.length > 0;
 
     return (
       <article
@@ -493,86 +349,37 @@ function PosCatalogBrowser({
         key={classDoc.id}
         data-item-family={family}
       >
+        <div className="pos-retail-card__image">
+          {thumb
+            ? <img src={thumb} alt={classDoc.title} loading="lazy" decoding="async" />
+            : <span className="pos-retail-card__letter" aria-hidden="true">{(classDoc.title || "C").charAt(0).toUpperCase()}</span>
+          }
+        </div>
         <div className="pos-retail-card__body">
-          <div className="pos-retail-card__header">
-            <div className="pos-retail-card__title-block">
-              <h4>{classDoc.title}</h4>
-              <div className="pos-retail-card__highlight-row">
-                <span className="pos-retail-card__pill">
-                  {selectedSlot?.label || "Set time"}
-                </span>
-                {selectedOption?.label && (
-                  <span className="pos-retail-card__pill pos-retail-card__pill--variant">
-                    Option: {selectedOption.label}
-                  </span>
-                )}
-              </div>
-            </div>
-            {renderFamilyBadge(family)}
-          </div>
-          <div className="pos-retail-card__price-row">
-            <strong>{priceLabel}</strong>
-          </div>
-          <div className="pos-retail-card__config">
-            {classDoc.slots.length > 0 && (
-              <label className="modal__meta pos-item-card__field">
-                Time slot
-                <select
-                  className="input"
-                  value={selectedSlotId}
-                  onChange={(event) =>
-                    setClassSelections((prev) => ({
-                      ...prev,
-                      [classDoc.id]: event.target.value,
-                    }))
-                  }
-                >
-                  {classDoc.slots.map((slot) => (
-                    <option key={slot.id} value={slot.id}>
-                      {slot.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {classDoc.options.length > 0 && (
-              <label className="modal__meta pos-item-card__field">
-                Option
-                <select
-                  className="input"
-                  value={selectedOptionId}
-                  onChange={(event) =>
-                    setClassOptionSelections((prev) => ({
-                      ...prev,
-                      [classDoc.id]: event.target.value,
-                    }))
-                  }
-                >
-                  {classDoc.options.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                      {Number.isFinite(option.price)
-                        ? ` - ${formatCurrency(option.price)}`
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
+          {renderFamilyBadge(family)}
+          <h4>{classDoc.title}</h4>
         </div>
         <div className="pos-retail-card__actions">
+          <div className="pos-retail-card__price-row">
+            <strong>{classDoc.displayPrice}</strong>
+          </div>
           <button
             className="btn pos-retail-card__button pos-retail-card__button--primary"
             type="button"
             data-item-family={family}
-            disabled={!canAdd}
             onClick={() => {
-              onAddClass(classDoc, {
-                slotId: selectedSlot?.id || null,
-                optionId: selectedOption?.id || null,
-              });
-              onAfterAdd?.();
+              if (hasConfig) {
+                setServiceDialog({
+                  type: "class",
+                  item: classDoc,
+                  slotId: classDoc.slots[0]?.id || null,
+                  optionId: classDoc.options[0]?.id || null,
+                  onAfterAdd,
+                });
+              } else {
+                onAddClass(classDoc, { slotId: null, optionId: null });
+                onAfterAdd?.();
+              }
             }}
           >
             Add to order
@@ -585,12 +392,8 @@ function PosCatalogBrowser({
   const renderEventCard = (event, renderOptions = null) => {
     const family = getItemFamily("event");
     const onAfterAdd = renderOptions?.onAfterAdd;
-    const selectedSlotId =
-      eventSelections[event.id] || event.slots[0]?.id || "";
-    const selectedSlot =
-      event.slots.find((slot) => slot.id === selectedSlotId) ||
-      event.slots[0] ||
-      null;
+    const thumb = event.image || event.imageUrl || null;
+    const hasConfig = event.slots.length > 0;
 
     return (
       <article
@@ -598,53 +401,36 @@ function PosCatalogBrowser({
         key={event.id}
         data-item-family={family}
       >
+        <div className="pos-retail-card__image">
+          {thumb
+            ? <img src={thumb} alt={event.title} loading="lazy" decoding="async" />
+            : <span className="pos-retail-card__letter" aria-hidden="true">{(event.title || "E").charAt(0).toUpperCase()}</span>
+          }
+        </div>
         <div className="pos-retail-card__body">
-          <div className="pos-retail-card__header">
-            <div className="pos-retail-card__title-block">
-              <h4>{event.title}</h4>
-              <div className="pos-retail-card__highlight-row">
-                <span className="pos-retail-card__pill">
-                  {selectedSlot?.label || "Set time"}
-                </span>
-              </div>
-            </div>
-            {renderFamilyBadge(family)}
-          </div>
+          {renderFamilyBadge(family)}
+          <h4>{event.title}</h4>
+        </div>
+        <div className="pos-retail-card__actions">
           <div className="pos-retail-card__price-row">
             <strong>{event.displayPrice}</strong>
           </div>
-          {event.slots.length > 0 && (
-            <div className="pos-retail-card__config">
-              <label className="modal__meta pos-item-card__field">
-                Time slot
-                <select
-                  className="input"
-                  value={selectedSlotId}
-                  onChange={(eventSlot) =>
-                    setEventSelections((prev) => ({
-                      ...prev,
-                      [event.id]: eventSlot.target.value,
-                    }))
-                  }
-                >
-                  {event.slots.map((slot) => (
-                    <option key={slot.id} value={slot.id}>
-                      {slot.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          )}
-        </div>
-        <div className="pos-retail-card__actions">
           <button
             className="btn pos-retail-card__button pos-retail-card__button--primary"
             type="button"
             data-item-family={family}
             onClick={() => {
-              onAddEvent(event, { slotId: selectedSlot?.id || null });
-              onAfterAdd?.();
+              if (hasConfig) {
+                setServiceDialog({
+                  type: "event",
+                  item: event,
+                  slotId: event.slots[0]?.id || null,
+                  onAfterAdd,
+                });
+              } else {
+                onAddEvent(event, { slotId: null });
+                onAfterAdd?.();
+              }
             }}
           >
             Add to order
@@ -729,65 +515,86 @@ function PosCatalogBrowser({
         : null;
     const editorTitleId = `${editorKey}-title`;
 
+    const workshopThumb = type === "workshop" && workshop?.image ? workshop.image : null;
+    const bookingTitle = type === "workshop"
+      ? booking.name || booking.email || "Workshop booking"
+      : booking.customerName || "Cut flower booking";
+    const bookingMeta = type === "workshop"
+      ? booking.workshopTitle || "Workshop booking"
+      : booking.displayDate;
+
+    const isPaid = booking.paid === true
+      || booking.paymentStatus === "paid"
+      || booking.adminPaymentStatus === "paid";
+
+    const safeAttendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
+    const attendeeFrameSelections = editState.attendeeFrameSelections || [];
+    const allAttendeesHaveFrame = !workshopOptionRequired
+      || (attendeeFrameSelections.length >= safeAttendeeCount
+          && attendeeFrameSelections.slice(0, safeAttendeeCount).every((id) => Boolean(id)));
+
+    const totalFromAttendeeSelections = type === "workshop" && workshop?.options?.length > 0
+      ? attendeeFrameSelections.slice(0, safeAttendeeCount).reduce((sum, optionId) => {
+          const option = workshop.options.find((o) => o.id === optionId);
+          const price = Number(option?.price);
+          return Number.isFinite(price) ? sum + price : sum;
+        }, 0)
+      : null;
+
+    const effectivePriceLabel = totalFromAttendeeSelections > 0
+      ? formatCurrency(totalFromAttendeeSelections)
+      : priceLabel;
+
     return (
       <div className="pos-booking-card-shell" key={booking.id}>
         <article
           className="pos-item-card pos-item-card--booking pos-retail-card pos-retail-card--booking"
           data-item-family={family}
         >
+          <div className="pos-retail-card__image">
+            {workshopThumb
+              ? <img src={workshopThumb} alt={bookingMeta} loading="lazy" decoding="async" />
+              : <span className="pos-retail-card__letter" aria-hidden="true">{bookingTitle.charAt(0).toUpperCase()}</span>
+            }
+          </div>
           <div className="pos-item-card__body pos-item-card__body--booking pos-retail-card__body">
             <div className="pos-retail-card__header">
               <div>
-                <h4>
-                  {type === "workshop"
-                    ? booking.name || booking.email || "Workshop booking"
-                    : booking.customerName || "Cut flower booking"}
-                </h4>
-                <p className="modal__meta">
-                  {type === "workshop"
-                    ? booking.workshopTitle || "Workshop booking"
-                    : booking.displayDate}
-                </p>
+                <h4>{bookingTitle}</h4>
+                <p className="modal__meta">{bookingMeta}</p>
               </div>
               {renderFamilyBadge(family)}
             </div>
             <div className="pos-retail-card__booking-meta">
               <div className="pos-retail-card__price-row">
-                <strong>{priceLabel}</strong>
+                <strong>{effectivePriceLabel}</strong>
+                <span className={`pos-booking-payment-badge ${isPaid ? "pos-booking-payment-badge--paid" : "pos-booking-payment-badge--unpaid"}`}>
+                  {isPaid ? "Paid" : "Unpaid"}
+                </span>
               </div>
               <div className="pos-retail-card__details">
                 <div className="pos-retail-card__detail">
                   <span>Date</span>
                   <strong>{booking.displayDate}</strong>
                 </div>
-                {type === "workshop" &&
-                  (selectedWorkshopOption?.label || booking.optionLabel) && (
-                    <div className="pos-retail-card__detail">
-                      <span>Frame</span>
-                      <strong>
-                        {selectedWorkshopOption?.label || booking.optionLabel}
-                      </strong>
-                    </div>
-                  )}
-                <div className="pos-retail-card__detail">
-                  <span>Checkout</span>
-                  <strong>Marked paid</strong>
-                </div>
+                {type === "workshop" && booking.attendeeCount > 0 && (
+                  <div className="pos-retail-card__detail">
+                    <span>Attendees</span>
+                    <strong>{booking.attendeeCount}</strong>
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
           <div className="pos-item-card__actions pos-item-card__actions--booking pos-retail-card__actions">
             <button
-              className="btn pos-retail-card__button pos-retail-card__button--secondary"
+              className={`btn pos-retail-card__button pos-retail-card__button--primary${isPaid ? " pos-booking-checkin-btn" : ""}`}
               type="button"
               data-item-family={family}
-              onClick={() => {
-                setActiveBookingEditor(editorKey);
-                onAfterAction?.();
-              }}
+              onClick={() => { setActiveBookingEditor(editorKey); onAfterAction?.(); }}
             >
-              Configure booking
+              {isPaid ? "Check In" : "Pay"}
             </button>
           </div>
         </article>
@@ -814,46 +621,23 @@ function PosCatalogBrowser({
                 &times;
               </button>
               <div className="pos-booking-dialog__header">
-                <h3 className="modal__title" id={editorTitleId}>
-                  Configure booking
-                </h3>
-                <p className="modal__meta">
-                  {type === "workshop"
-                    ? booking.workshopTitle || "Workshop booking"
-                    : booking.customerName || "Cut flower booking"}
-                </p>
+                <div className="pos-booking-dialog__header-row">
+                  <div>
+                    <h3 className="modal__title" id={editorTitleId}>{bookingTitle}</h3>
+                    <p className="modal__meta">
+                      {type === "workshop"
+                        ? booking.workshopTitle || "Workshop booking"
+                        : booking.displayDate || "Cut flower booking"}
+                    </p>
+                  </div>
+                  <span className={`pos-booking-payment-badge pos-booking-payment-badge--lg ${isPaid ? "pos-booking-payment-badge--paid" : "pos-booking-payment-badge--unpaid"}`}>
+                    {isPaid ? "Paid" : "Unpaid"}
+                  </span>
+                </div>
               </div>
 
               <div className="pos-booking-editor">
                 <div className="pos-booking-editor__grid">
-                  {type === "workshop" && workshop?.options?.length > 0 && (
-                    <label className="modal__meta pos-item-card__field">
-                      Frame size
-                      <select
-                        className="input"
-                        value={editState.optionId}
-                        onChange={(event) =>
-                          handleBookingEditChange(
-                            booking,
-                            type,
-                            "optionId",
-                            event.target.value,
-                          )
-                        }
-                      >
-                        <option value="">Select option</option>
-                        {workshop.options.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.label}
-                            {Number.isFinite(option.price)
-                              ? ` - ${formatCurrency(option.price)}`
-                              : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-
                   <label className="modal__meta pos-item-card__field">
                     Attendees
                     <input
@@ -862,47 +646,63 @@ function PosCatalogBrowser({
                       min="1"
                       value={editState.attendeeCount}
                       onChange={(event) =>
-                        handleBookingEditChange(
-                          booking,
-                          type,
-                          "attendeeCount",
-                          event.target.value,
-                        )
+                        handleBookingEditChange(booking, type, "attendeeCount", event.target.value)
                       }
                     />
                   </label>
+
+                  {type === "workshop" && workshop?.options?.length > 0 && (
+                    <div className="pos-item-card__field pos-booking-editor__field--full">
+                      <span className="modal__meta">Frame size per attendee</span>
+                      <div className="pos-attendee-frames">
+                        {Array.from({ length: safeAttendeeCount }, (_, index) => {
+                          const currentOptionId = attendeeFrameSelections[index] || "";
+                          return (
+                            <label className="modal__meta pos-attendee-frame-row" key={`${booking.id}-frame-${index}`}>
+                              <span className="pos-attendee-frame-row__label">Attendee {index + 1}</span>
+                              <select
+                                className="input"
+                                value={currentOptionId}
+                                onChange={(event) =>
+                                  handleBookingEditChange(booking, type, "attendeeFrameIndex", { index, optionId: event.target.value })
+                                }
+                              >
+                                <option value="">Select frame</option>
+                                {workshop.options.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}{Number.isFinite(option.price) ? ` — ${formatCurrency(option.price)}` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          );
+                        })}
+                        {totalFromAttendeeSelections > 0 && (
+                          <p className="pos-attendee-frames__total modal__meta">
+                            Total: <strong>{formatCurrency(totalFromAttendeeSelections)}</strong>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {type === "cut-flower" && cutFlowerOptions.length > 0 && (
                     <div className="pos-item-card__field pos-booking-editor__field--full">
                       <span className="modal__meta">Attendee options</span>
                       <div className="pos-attendee-options">
                         {attendeeOptionsForRender.map((optionId, index) => (
-                          <label
-                            className="modal__meta"
-                            key={`${booking.id}-attendee-${index + 1}`}
-                          >
+                          <label className="modal__meta" key={`${booking.id}-attendee-${index + 1}`}>
                             Attendee {index + 1}
                             <select
                               className="input"
                               value={optionId}
                               onChange={(event) =>
-                                handleBookingEditChange(
-                                  booking,
-                                  type,
-                                  "attendeeOptionIndex",
-                                  {
-                                    index,
-                                    optionId: event.target.value,
-                                  },
-                                )
+                                handleBookingEditChange(booking, type, "attendeeOptionIndex", { index, optionId: event.target.value })
                               }
                             >
                               {cutFlowerOptions.map((option) => (
                                 <option key={option.id} value={option.id}>
-                                  {option.label}
-                                  {Number.isFinite(option.price)
-                                    ? ` - ${formatCurrency(option.price)}`
-                                    : ""}
+                                  {option.label}{Number.isFinite(option.price) ? ` - ${formatCurrency(option.price)}` : ""}
                                 </option>
                               ))}
                             </select>
@@ -919,22 +719,10 @@ function PosCatalogBrowser({
                       type="date"
                       value={editState.date}
                       onChange={(event) =>
-                        handleBookingEditChange(
-                          booking,
-                          type,
-                          "date",
-                          event.target.value,
-                        )
+                        handleBookingEditChange(booking, type, "date", event.target.value)
                       }
                     />
                   </label>
-
-                  {type === "workshop" && (
-                    <div className="pos-item-card__field pos-booking-editor__field--full">
-                      <span className="modal__meta">Pricing</span>
-                      <p className="modal__meta">{workshopPriceHint}</p>
-                    </div>
-                  )}
                 </div>
 
                 {bookingError && (
@@ -949,19 +737,27 @@ function PosCatalogBrowser({
                     disabled={bookingSavingId === booking.id}
                     onClick={() => handleSaveBookingChanges(booking, type)}
                   >
-                    {bookingSavingId === booking.id
-                      ? "Saving..."
-                      : "Save changes"}
+                    {bookingSavingId === booking.id ? "Saving..." : "Save changes"}
                   </button>
-                  <button
-                    className="btn pos-retail-card__button pos-retail-card__button--primary"
-                    type="button"
-                    data-item-family={family}
-                    disabled={workshopOptionRequired && !selectedWorkshopOption}
-                    onClick={() => handleAddBookingToCart(booking, type)}
-                  >
-                    Add to Order
-                  </button>
+                  {isPaid ? (
+                    <button
+                      className="btn pos-retail-card__button pos-retail-card__button--primary pos-booking-checkin-btn"
+                      type="button"
+                      onClick={() => { onCheckIn(booking, type); }}
+                    >
+                      Check In
+                    </button>
+                  ) : (
+                    <button
+                      className="btn pos-retail-card__button pos-retail-card__button--primary"
+                      type="button"
+                      data-item-family={family}
+                      disabled={!allAttendeesHaveFrame}
+                      onClick={() => handleAddBookingToCart(booking, type)}
+                    >
+                      Add to Order
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1026,9 +822,12 @@ function PosCatalogBrowser({
                 key={department.id}
                 type="button"
                 role="tab"
-                aria-selected={activeTab === department.id}
-                className={`pos-retail-browser__rail-button ${activeTab === department.id ? "is-active" : ""}`}
-                onClick={() => setActiveTab(department.id)}
+                aria-selected={activeTab === department.id && (department.id !== "pos-only" || posCategoryPill === "all")}
+                className={`pos-retail-browser__rail-button ${activeTab === department.id && (department.id !== "pos-only" || posCategoryPill === "all") ? "is-active" : ""}`}
+                onClick={() => {
+                  setActiveTab(department.id);
+                  if (department.id === "pos-only") setPosCategoryPill("all");
+                }}
               >
                 <span className="pos-retail-browser__rail-label">
                   {department.label}
@@ -1038,6 +837,24 @@ function PosCatalogBrowser({
                 </span>
                 <span className="pos-retail-browser__rail-count">
                   {departmentCounts?.[department.id] ?? 0}
+                </span>
+              </button>
+            ))}
+            {posCategoryOptions.length > 0 && posCategoryOptions.map((cat) => (
+              <button
+                key={`cat-pill-${cat.id}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "pos-only" && posCategoryPill === cat.name}
+                className={`pos-retail-browser__rail-button pos-retail-browser__rail-button--category ${activeTab === "pos-only" && posCategoryPill === cat.name ? "is-active" : ""}`}
+                onClick={() => {
+                  setActiveTab("pos-only");
+                  setPosCategoryPill(cat.name);
+                }}
+              >
+                <span className="pos-retail-browser__rail-label">{cat.name}</span>
+                <span className="pos-retail-browser__rail-count">
+                  {filteredPosProducts.filter((p) => p.categoryName === cat.name).length}
                 </span>
               </button>
             ))}
@@ -1078,7 +895,7 @@ function PosCatalogBrowser({
               </div>
             )}
 
-            {(activeTab === "products" || activeTab === "pos-products") &&
+            {activeTab === "products" &&
               visibleCategoryOptions.length > 0 &&
               handleVisibleCategoryChange && (
                 <div className="pos-retail-browser__filters">
@@ -1142,51 +959,11 @@ function PosCatalogBrowser({
             )}
           </div>
 
-          <div className="pos-catalog-browser__body pos-retail-browser__content">
+          <div className="pos-catalog-browser__body pos-retail-browser__content" ref={catalogBodyRef}>
             {inventoryLoading && (
               <p className="modal__meta">Loading inventory...</p>
             )}
 
-            {activeTab !== "bookings" && topSellerEntries.length > 0 && (
-              <section className="pos-top-sellers">
-                <div className="pos-top-sellers__header">
-                  <div>
-                    <p className="modal__meta">Quick access</p>
-                    <h4>{topSellersLabel}</h4>
-                  </div>
-                </div>
-                <div className="pos-top-sellers__list">
-                  {topSellerEntries.map((entry) => (
-                    <article
-                      className="pos-top-seller-card"
-                      key={entry.id}
-                      data-item-family={getItemFamily(entry.type)}
-                    >
-                      <div className="pos-top-seller-card__body">
-                        <div className="pos-top-seller-card__heading">
-                          {renderFamilyBadge(getItemFamily(entry.type))}
-                          <span className="pos-top-seller-card__sold">
-                            {entry.soldQuantity} sold
-                          </span>
-                        </div>
-                        <h5>{entry.title}</h5>
-                        {renderTopSellerSubtitle(entry.subtitle)}
-                        <strong>{entry.priceLabel}</strong>
-                      </div>
-                      <button
-                        className="btn pos-retail-card__button pos-retail-card__button--primary"
-                        type="button"
-                        data-item-family={getItemFamily(entry.type)}
-                        disabled={entry.isAvailable === false}
-                        onClick={() => onAddTopSeller(entry)}
-                      >
-                        Add
-                      </button>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            )}
 
             {activeTab === "all-items" && (
               <>
@@ -1285,18 +1062,23 @@ function PosCatalogBrowser({
               </>
             )}
 
-            {activeTab === "pos-products" && (
-              <>
-                {filteredPosProducts.length === 0 && !inventoryLoading && (
-                  <p className="empty-state">
-                    No POS-only items match your search or selected category.
-                  </p>
-                )}
-                <div className="pos-grid pos-grid--dense">
-                  {filteredPosProducts.map(renderPosOnlyCard)}
-                </div>
-              </>
-            )}
+            {activeTab === "pos-only" && (() => {
+              const visiblePosItems = posCategoryPill === "all"
+                ? filteredPosProducts
+                : filteredPosProducts.filter((p) => p.categoryName === posCategoryPill);
+              return (
+                <>
+                  {visiblePosItems.length === 0 && !inventoryLoading && (
+                    <p className="empty-state">
+                      No POS items match your search.
+                    </p>
+                  )}
+                  <div className="pos-grid pos-grid--dense">
+                    {visiblePosItems.map(renderPosOnlyCard)}
+                  </div>
+                </>
+              );
+            })()}
 
             {activeTab === "services" && (
               <>
@@ -1540,25 +1322,29 @@ function PosCatalogBrowser({
                 </>
               )}
 
-              {activeTab === "pos-products" && (
-                <>
-                  {visiblePosProductResults.length === 0 &&
-                    !inventoryLoading && (
+              {activeTab === "pos-only" && (() => {
+                const visiblePosResults = posCategoryPill === "all"
+                  ? visiblePosProductResults
+                  : visiblePosProductResults.filter((p) => p.categoryName === posCategoryPill);
+                return (
+                  <>
+                    {visiblePosResults.length === 0 && !inventoryLoading && (
                       <p className="empty-state">
-                        No POS-only items match this search.
+                        No POS items match this search.
                       </p>
                     )}
-                  {visiblePosProductResults.length > 0 && (
-                    <div className="pos-grid pos-grid--dense">
-                      {visiblePosProductResults.map((product) =>
-                        renderPosOnlyCard(product, {
-                          onAfterAdd: closeSearchDialog,
-                        }),
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
+                    {visiblePosResults.length > 0 && (
+                      <div className="pos-grid pos-grid--dense">
+                        {visiblePosResults.map((product) =>
+                          renderPosOnlyCard(product, {
+                            onAfterAdd: closeSearchDialog,
+                          }),
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {activeTab === "services" && (
                 <>
@@ -1641,6 +1427,181 @@ function PosCatalogBrowser({
                     )}
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {serviceDialog && (() => {
+        const { type, item, onAfterAdd: sdOnAfterAdd } = serviceDialog;
+        const sessions = type === "workshop" ? item.sessions : type === "class" ? item.slots : type === "event" ? item.slots : [];
+        const options = (type === "workshop" || type === "class") ? item.options : [];
+        const selectedSession = sessions.find((s) => s.id === serviceDialog.sessionId) || sessions[0] || null;
+        const selectedOption = options.find((o) => o.id === serviceDialog.optionId) || options[0] || null;
+        const sessionFull = typeof selectedSession?.capacity === "number" && selectedSession.capacity <= 0;
+        const optionPrice = Number.isFinite(selectedOption?.price) ? selectedOption.price : null;
+        const attendeeCount = Math.max(1, parseInt(serviceDialog.attendeeCount || "1", 10) || 1);
+        const computedPrice = Number.isFinite(optionPrice)
+          ? formatCurrency(optionPrice * (type === "workshop" ? attendeeCount : 1))
+          : item.displayPrice;
+        const canAdd = (sessions.length === 0 || (selectedSession && !sessionFull)) &&
+                       (options.length === 0 || selectedOption);
+        const eyebrow = type === "workshop" ? "Workshop" : type === "class" ? "Class" : "Event";
+
+        return (
+          <div className="pos-variant-overlay" role="presentation" onClick={() => setServiceDialog(null)}>
+            <div
+              className="pos-variant-dialog pos-service-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Book ${item.title}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="pos-variant-dialog__header">
+                <div>
+                  <p className="pos-variant-dialog__eyebrow">{eyebrow}</p>
+                  <h3 className="pos-variant-dialog__title">{item.title}</h3>
+                </div>
+                <button className="pos-variant-dialog__close" type="button" onClick={() => setServiceDialog(null)} aria-label="Close">✕</button>
+              </div>
+              <div className="pos-service-dialog__body">
+                {sessions.length > 0 && (
+                  <label className="pos-service-dialog__field">
+                    <span className="pos-service-dialog__label">{type === "workshop" ? "Session" : "Time slot"}</span>
+                    <select
+                      className="input"
+                      value={serviceDialog.sessionId || ""}
+                      onChange={(e) => setServiceDialog((prev) => ({ ...prev, sessionId: e.target.value }))}
+                    >
+                      {sessions.map((session) => (
+                        <option
+                          key={session.id}
+                          value={session.id}
+                          disabled={typeof session.capacity === "number" && session.capacity <= 0}
+                        >
+                          {session.label}
+                          {typeof session.capacity === "number"
+                            ? session.capacity > 0
+                              ? ` · ${session.capacity} seat${session.capacity === 1 ? "" : "s"} left`
+                              : " · Fully booked"
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {options.length > 0 && (
+                  <label className="pos-service-dialog__field">
+                    <span className="pos-service-dialog__label">{type === "workshop" ? "Frame size" : "Option"}</span>
+                    <select
+                      className="input"
+                      value={serviceDialog.optionId || ""}
+                      onChange={(e) => setServiceDialog((prev) => ({ ...prev, optionId: e.target.value }))}
+                    >
+                      {options.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}{Number.isFinite(option.price) ? ` · ${formatCurrency(option.price)}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {type === "workshop" && (
+                  <label className="pos-service-dialog__field">
+                    <span className="pos-service-dialog__label">Attendees</span>
+                    <input
+                      className="input"
+                      type="number"
+                      min="1"
+                      value={serviceDialog.attendeeCount || "1"}
+                      onChange={(e) => setServiceDialog((prev) => ({ ...prev, attendeeCount: e.target.value }))}
+                    />
+                  </label>
+                )}
+                <div className="pos-service-dialog__footer">
+                  <span className="pos-service-dialog__price">{computedPrice}</span>
+                  <button
+                    className="btn btn--primary pos-variant-dialog__add pos-service-dialog__add"
+                    type="button"
+                    disabled={!canAdd}
+                    onClick={() => {
+                      if (type === "workshop") {
+                        onAddWorkshop(item, { sessionId: selectedSession?.id || null, optionId: selectedOption?.id || null, attendeeCount });
+                      } else if (type === "class") {
+                        onAddClass(item, { slotId: selectedSession?.id || null, optionId: selectedOption?.id || null });
+                      } else if (type === "event") {
+                        onAddEvent(item, { slotId: selectedSession?.id || null });
+                      }
+                      sdOnAfterAdd?.();
+                      setServiceDialog(null);
+                    }}
+                  >
+                    Add to order
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {variantDialog && (
+        <div
+          className="pos-variant-overlay"
+          role="presentation"
+          onClick={() => setVariantDialog(null)}
+        >
+          <div
+            className="pos-variant-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Choose variant for ${variantDialog.product.name}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="pos-variant-dialog__header">
+              <div>
+                <p className="pos-variant-dialog__eyebrow">Choose variant</p>
+                <h3 className="pos-variant-dialog__title">{variantDialog.product.name}</h3>
+              </div>
+              <button
+                className="pos-variant-dialog__close"
+                type="button"
+                onClick={() => setVariantDialog(null)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="pos-variant-dialog__list">
+              {variantDialog.product.variants.map((variant) => {
+                const isOut = variant.stockStatus?.state === "out";
+                const price = Number.isFinite(variant.price)
+                  ? formatCurrency(variant.price)
+                  : variantDialog.product.displayPrice;
+                return (
+                  <div
+                    key={variant.id}
+                    className={`pos-variant-dialog__row${isOut ? " is-out" : ""}`}
+                  >
+                    <div className="pos-variant-dialog__info">
+                      <span className="pos-variant-dialog__label">{variant.label}</span>
+                      <span className="pos-variant-dialog__price">{price}</span>
+                    </div>
+                    <button
+                      className="btn btn--primary pos-variant-dialog__add"
+                      type="button"
+                      disabled={isOut}
+                      onClick={() => {
+                        onAddProduct(variantDialog.product, { variantId: variant.id });
+                        variantDialog.onAfterAdd?.();
+                        setVariantDialog(null);
+                      }}
+                    >
+                      {isOut ? "Out of stock" : "Add"}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

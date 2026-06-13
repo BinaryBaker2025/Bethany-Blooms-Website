@@ -443,6 +443,8 @@ export function AdminUsersView() {
   const { items: users, status, error: usersError } = useFirestoreCollection("users", {
     orderByField: null,
     orderDirection: null,
+    enabled: Boolean(db),
+    db,
   });
 
   const { items: customerProfiles, status: profileStatus, error: profilesError } = useFirestoreCollection(
@@ -450,6 +452,8 @@ export function AdminUsersView() {
     {
       orderByField: null,
       orderDirection: null,
+      enabled: Boolean(db),
+      db,
     },
   );
   const {
@@ -459,22 +463,30 @@ export function AdminUsersView() {
   } = useFirestoreCollection("subscriptionCustomerSettings", {
     orderByField: null,
     orderDirection: null,
+    enabled: Boolean(db),
+    db,
   });
   const { items: adminPosSettings } = useFirestoreCollection("adminPosSettings", {
     orderByField: null,
     orderDirection: null,
+    enabled: Boolean(db),
+    db,
   });
 
   // Fetch subscriptions for subscription status display
   const { items: subscriptions } = useFirestoreCollection("subscriptions", {
     orderByField: null,
     orderDirection: null,
+    enabled: Boolean(db),
+    db,
   });
 
   // Fetch subscription invoices for payment status
   const { items: subscriptionInvoices } = useFirestoreCollection("subscriptionInvoices", {
     orderByField: null,
     orderDirection: null,
+    enabled: Boolean(db),
+    db,
   });
 
   const [updatingId, setUpdatingId] = useState(null);

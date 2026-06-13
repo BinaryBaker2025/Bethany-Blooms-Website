@@ -92,6 +92,7 @@ const AdminWorkshopsCalendarView = lazy(() =>
 
 const AdminLayout = lazy(() => import("./pages/admin/AdminLayout.jsx"));
 const AdminPosPage = lazy(() => import("./pages/admin/AdminPosPage.jsx"));
+const PosDesign = lazy(() => import("./pages/admin/PosDesign.jsx"));
 const AdminPosCashUpPage = lazy(() => import("./pages/admin/AdminPosCashUpPage.jsx"));
 const AdminReportsPage = lazy(() => import("./pages/admin/AdminReportsPage.jsx"));
 
@@ -168,6 +169,7 @@ function App() {
                   element={<Navigate to="/admin/commerce/gift-cards/generate" replace />}
                 />
                 <Route path="pos" element={<AdminPosPage />} />
+                <Route path="pos/design" element={<PosDesign />} />
                 <Route path="pos/cash-up" element={<AdminPosCashUpPage />} />
                 <Route path="reports" element={<AdminReportsPage />} />
                 <Route path="users" element={<AdminUsersView />} />

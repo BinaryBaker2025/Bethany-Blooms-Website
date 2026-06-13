@@ -10,7 +10,9 @@
     "normalize:giftcard-stock:dry": "node scripts/normalizeGiftCardStock.js",
     "normalize:giftcard-stock:apply": "node scripts/normalizeGiftCardStock.js --apply",
     "registry:giftcards:backfill:dry": "node scripts/backfillGiftCardRegistry.js",
-    "registry:giftcards:backfill:apply": "node scripts/backfillGiftCardRegistry.js --apply"
+    "registry:giftcards:backfill:apply": "node scripts/backfillGiftCardRegistry.js --apply",
+    "seed:pos-products:dry": "node scripts/seedPosProducts.js",
+    "seed:pos-products:apply": "node scripts/seedPosProducts.js --apply"
   },
   "engines": {
     "node": "22"

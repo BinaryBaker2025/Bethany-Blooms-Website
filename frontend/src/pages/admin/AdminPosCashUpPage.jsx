@@ -403,10 +403,14 @@ function AdminPosCashUpPage() {
   const { items: posSales } = useFirestoreCollection("posSales", {
     orderByField: "createdAt",
     orderDirection: "desc",
+    enabled: inventoryEnabled,
+    db,
   });
   const { items: posCashups } = useFirestoreCollection("posCashups", {
     orderByField: "createdAt",
     orderDirection: "desc",
+    enabled: inventoryEnabled,
+    db,
   });
 
   const [selectedDate, setSelectedDate] = useState(() => toLocalDateKey(new Date()));

@@ -41,6 +41,11 @@ service firebase.storage {
       allow write: if signedIn() && (request.resource == null || isImageFile());
     }
 
+    match /posProducts/{filePath=**} {
+      allow read: if true;
+      allow write: if signedIn() && (request.resource == null || isImageFile());
+    }
+
     match /{allPaths=**} {
       allow read: if true;
       allow write: if false;

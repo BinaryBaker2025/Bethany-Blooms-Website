@@ -83,14 +83,18 @@ function AdminReportsPage() {
     description: "Comprehensive reporting for online and POS sales.",
   });
 
-  const { orders } = useAdminData();
+  const { db, inventoryEnabled, orders } = useAdminData();
   const { items: posSales } = useFirestoreCollection("posSales", {
     orderByField: "createdAt",
     orderDirection: "desc",
+    enabled: inventoryEnabled,
+    db,
   });
   const { items: siteVisits } = useFirestoreCollection("siteVisits", {
     orderByField: "createdAt",
     orderDirection: "desc",
+    enabled: inventoryEnabled,
+    db,
   });
 
   const today = new Date();

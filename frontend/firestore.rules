@@ -417,6 +417,14 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    match /posTabs/{tabId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /posTableConfig/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
     match /adminPosSettings/{userId} {
       allow get: if isSelf(userId) || isAdmin();
       allow list: if isAdmin();

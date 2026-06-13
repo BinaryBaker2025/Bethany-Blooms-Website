@@ -1,8 +1,7 @@
 const STEP_ITEMS = [
   { step: 1, label: "Build Order" },
-  { step: 2, label: "Customer & Notes" },
-  { step: 3, label: "Payment" },
-  { step: 4, label: "Confirm & Receipt" },
+  { step: 2, label: "Payment" },
+  { step: 3, label: "Confirm & Receipt" },
 ];
 
 function PosStepperHeader({ currentStep, completedSteps, onStepClick, disabled = false }) {

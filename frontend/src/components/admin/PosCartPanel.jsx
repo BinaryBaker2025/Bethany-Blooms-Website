@@ -10,6 +10,7 @@ function PosCartPanel({
   disabled = false,
   emptyMessage = "Add items to start a sale.",
   footerContent = null,
+  headerContent = null,
 }) {
   return (
     <section className="pos-wizard__card">
@@ -20,6 +21,7 @@ function PosCartPanel({
             {cartItems.length} {cartItems.length === 1 ? "line" : "lines"}
           </p>
         </div>
+        {headerContent}
       </div>
 
       {cartItems.length === 0 ? (

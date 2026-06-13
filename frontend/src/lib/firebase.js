@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
@@ -27,6 +27,9 @@ function assertConfig(config) {
 }
 
 let app;
+let authInstance = null;
+let dbInstance = null;
+let storageInstance = null;
 let functionsInstance = null;
 let functionsEmulatorConnected = false;
 
@@ -40,20 +43,29 @@ function parseBooleanEnv(value) {
 export function getFirebaseApp() {
   if (app) return app;
   assertConfig(firebaseConfig);
-  app = initializeApp(firebaseConfig);
+  app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   return app;
 }
 
 export function getFirebaseAuth() {
-  return getAuth(getFirebaseApp());
+  if (!authInstance) {
+    authInstance = getAuth(getFirebaseApp());
+  }
+  return authInstance;
 }
 
 export function getFirebaseDb() {
-  return getFirestore(getFirebaseApp());
+  if (!dbInstance) {
+    dbInstance = getFirestore(getFirebaseApp());
+  }
+  return dbInstance;
 }
 
 export function getFirebaseStorage() {
-  return getStorage(getFirebaseApp());
+  if (!storageInstance) {
+    storageInstance = getStorage(getFirebaseApp());
+  }
+  return storageInstance;
 }
 
 export function getFirebaseFunctions() {

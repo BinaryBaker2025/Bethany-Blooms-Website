@@ -26,3 +26,6 @@ dist-ssr
 *.sln
 *.sw?
 frontend/functions/.env
+
+# Claude Code agent worktrees (temporary, not for version control)
+.claude/worktrees/

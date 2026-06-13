@@ -6,9 +6,21 @@ import { getFirebaseDb } from "../lib/firebase.js";
  * Subscribe to a Firestore collection and keep local state in sync.
  * Falls back to the provided data if Firestore is unavailable or empty.
  */
-export function useFirestoreCollection(collectionName, { orderByField = "createdAt", orderDirection = "desc", fallback = [] } = {}) {
+export function useFirestoreCollection(
+  collectionName,
+  {
+    orderByField = "createdAt",
+    orderDirection = "desc",
+    fallback = [],
+    enabled = true,
+    db: providedDb = null,
+  } = {},
+) {
   const [items, setItems] = useState(() => fallback);
-  const [status, setStatus] = useState(() => (fallback.length ? "fallback" : "loading"));
+  const [status, setStatus] = useState(() => {
+    if (!enabled) return fallback.length ? "fallback" : "idle";
+    return fallback.length ? "fallback" : "loading";
+  });
   const [error, setError] = useState(null);
   const [source, setSource] = useState(() => (fallback.length ? "fallback" : null));
   const fallbackRef = useRef(fallback);
@@ -19,9 +31,18 @@ export function useFirestoreCollection(collectionName, { orderByField = "created
 
   useEffect(() => {
     let unsubscribe;
+    const fallbackData = fallbackRef.current;
+
+    if (!enabled) {
+      setItems(fallbackData);
+      setSource(fallbackData.length ? "fallback" : null);
+      setStatus(fallbackData.length ? "fallback" : "idle");
+      setError(null);
+      return undefined;
+    }
 
     try {
-      const db = getFirebaseDb();
+      const db = providedDb || getFirebaseDb();
       const baseRef = collection(db, collectionName);
       const queryRef =
         orderByField && orderDirection
@@ -61,7 +82,6 @@ export function useFirestoreCollection(collectionName, { orderByField = "created
       );
     } catch (subscriptionError) {
       console.warn(`Firestore unavailable for ${collectionName}`, subscriptionError);
-      const fallbackData = fallbackRef.current;
       setItems(fallbackData);
       setSource(fallbackData.length ? "fallback" : "error");
       setError(subscriptionError);
@@ -69,7 +89,7 @@ export function useFirestoreCollection(collectionName, { orderByField = "created
     }
 
     return () => unsubscribe?.();
-  }, [collectionName, orderByField, orderDirection]);
+  }, [collectionName, enabled, orderByField, orderDirection, providedDb]);
 
   return {
     items,

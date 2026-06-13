@@ -20557,3 +20557,34 @@ exports.sendPasswordResetEmailCustom = onCall(async (request) => {
 
   return { success: true };
 });
+
+exports.expireStalePosTabs = onSchedule(
+  {
+    schedule: "0 * * * *",
+    timeZone: "Africa/Johannesburg",
+  },
+  async () => {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const snap = await db
+      .collection("posTabs")
+      .where("status", "==", "open")
+      .where("updatedAt", "<", cutoff)
+      .get();
+
+    if (snap.empty) {
+      functions.logger.info("expireStalePosTabs: no stale tabs found");
+      return;
+    }
+
+    const batch = db.batch();
+    for (const tabDoc of snap.docs) {
+      batch.update(tabDoc.ref, {
+        status: "expired",
+        expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    functions.logger.info(`expireStalePosTabs: expired ${snap.size} stale POS tab(s)`);
+  },
+);
