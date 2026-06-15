@@ -23,10 +23,23 @@ import { useAdminData } from "../../context/AdminDataContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useFirestoreCollection } from "../../hooks/useFirestoreCollection.js";
 import { usePageMetadata } from "../../hooks/usePageMetadata.js";
-import { usePrinter } from "../../hooks/usePrinter.js";
-import { buildBillHtml } from "../../lib/escpos.js";
-import { getFirebaseFunctions, getFirebaseStorage } from "../../lib/firebase.js";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import {
+  getFirebaseFunctions,
+  getFirebaseStorage,
+} from "../../lib/firebase.js";
+import {
+  getPosPrinterBridgeUrl,
+  getPosPrinterName,
+  printBillViaBridge,
+  printReceiptViaBridge,
+  setPosPrinterBridgeUrl as persistPosPrinterBridgeUrl,
+  setPosPrinterName as persistPosPrinterName,
+} from "../../lib/posPrintBridge.js";
+import {
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from "firebase/storage";
 import {
   formatPosSaleStatusLabel,
   getPosSaleDateKey,
@@ -121,7 +134,9 @@ const clampQuantity = (value) => {
 };
 
 const getTrackedQuantity = (value = {}) =>
-  clampQuantity(value?.stock_quantity ?? value?.stockQuantity ?? value?.quantity);
+  clampQuantity(
+    value?.stock_quantity ?? value?.stockQuantity ?? value?.quantity,
+  );
 
 const getPosWorkshopSeatCount = (item = {}) =>
   Math.max(
@@ -136,18 +151,31 @@ const buildPosWorkshopSeatReservationGroups = (items = []) => {
   items
     .filter((item) => item?.type === "workshop")
     .forEach((item) => {
-      const sessionSource = (item.metadata?.sessionSource || "").toString().trim().toLowerCase();
-      const workshopId = (item.sourceId || item.metadata?.workshopId || "").toString().trim();
+      const sessionSource = (item.metadata?.sessionSource || "")
+        .toString()
+        .trim()
+        .toLowerCase();
+      const workshopId = (item.sourceId || item.metadata?.workshopId || "")
+        .toString()
+        .trim();
       const sessionId = (item.metadata?.sessionId || "").toString().trim();
-      if (!workshopId || !sessionId || sessionSource === "customer-requested") return;
+      if (!workshopId || !sessionId || sessionSource === "customer-requested")
+        return;
       if (!groups.has(workshopId)) groups.set(workshopId, new Map());
       const sessionGroups = groups.get(workshopId);
-      sessionGroups.set(sessionId, (sessionGroups.get(sessionId) || 0) + getPosWorkshopSeatCount(item));
+      sessionGroups.set(
+        sessionId,
+        (sessionGroups.get(sessionId) || 0) + getPosWorkshopSeatCount(item),
+      );
     });
   return groups;
 };
 
-const preparePosWorkshopSeatUpdates = async (transaction, db, reservationGroups) => {
+const preparePosWorkshopSeatUpdates = async (
+  transaction,
+  db,
+  reservationGroups,
+) => {
   const reads = [];
   for (const [workshopId, sessionGroups] of reservationGroups.entries()) {
     const workshopRef = doc(db, "workshops", workshopId);
@@ -161,17 +189,25 @@ const preparePosWorkshopSeatUpdates = async (transaction, db, reservationGroups)
         throw new Error("Selected workshop could not be found.");
       }
       const workshop = workshopSnap.data() || {};
-      const sessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
+      const sessions = Array.isArray(workshop.sessions)
+        ? workshop.sessions
+        : [];
       let changed = false;
       const nextSessions = sessions.map((session, index) => {
-        const sessionId = (session?.id || `session-${index}-${workshopId}`).toString().trim();
+        const sessionId = (session?.id || `session-${index}-${workshopId}`)
+          .toString()
+          .trim();
         const requestedSeats = sessionGroups.get(sessionId) || 0;
         if (!requestedSeats) return session;
         const currentCapacity = Number(session?.capacity);
         if (!Number.isFinite(currentCapacity)) return session;
         if (currentCapacity < requestedSeats) {
           const title = workshop.title || workshop.name || "Workshop";
-          const label = session?.label || session?.timeRangeLabel || session?.date || "selected session";
+          const label =
+            session?.label ||
+            session?.timeRangeLabel ||
+            session?.date ||
+            "selected session";
           throw new Error(
             `${title} ${label} only has ${Math.max(0, currentCapacity)} seat${currentCapacity === 1 ? "" : "s"} left.`,
           );
@@ -229,8 +265,14 @@ const combineDateAndTime = (dateInput, timeInput) => {
 
 const applyDateToDateTime = (dateValue, existingDate) => {
   if (!dateValue) return existingDate ?? null;
-  const [year, month, day] = dateValue.split("-").map((value) => Number.parseInt(value, 10));
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+  const [year, month, day] = dateValue
+    .split("-")
+    .map((value) => Number.parseInt(value, 10));
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
     return existingDate ?? null;
   }
   const base = existingDate ? new Date(existingDate) : new Date();
@@ -241,7 +283,8 @@ const applyDateToDateTime = (dateValue, existingDate) => {
 
 const parseDateValue = (value) => {
   if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (value instanceof Date)
+    return Number.isNaN(value.getTime()) ? null : value;
   if (typeof value?.toDate === "function") {
     try {
       const converted = value.toDate();
@@ -264,7 +307,9 @@ const parseDateValue = (value) => {
 const formatTimeValue = (value) => {
   if (!value) return "";
   if (value instanceof Date) {
-    return new Intl.DateTimeFormat("en-ZA", { timeStyle: "short" }).format(value);
+    return new Intl.DateTimeFormat("en-ZA", { timeStyle: "short" }).format(
+      value,
+    );
   }
   if (typeof value !== "string") return "";
   const [hours, minutes] = value.split(":").map(Number);
@@ -291,7 +336,13 @@ const formatTimeInput = (date) => date.toISOString().slice(11, 16);
 const resolveWorkshopSessionStart = (entry = {}) => {
   const dateValue = typeof entry?.date === "string" ? entry.date.trim() : "";
   const timeValue = typeof entry?.time === "string" ? entry.time.trim() : "";
-  const candidates = [entry?.start, entry?.startTime, entry?.startDate, entry?.datetime, entry?.dateTime];
+  const candidates = [
+    entry?.start,
+    entry?.startTime,
+    entry?.startDate,
+    entry?.datetime,
+    entry?.dateTime,
+  ];
   for (const candidate of candidates) {
     const parsed = parseDateValue(candidate);
     if (parsed) return parsed;
@@ -301,10 +352,14 @@ const resolveWorkshopSessionStart = (entry = {}) => {
 };
 
 const normalizeWorkshopMatchText = (value) =>
-  (value == null ? "" : value.toString()).trim().toLowerCase().replace(/\s+/g, " ");
+  (value == null ? "" : value.toString())
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 
 const isWorkshopEmailAuditEntry = (booking) =>
-  (booking?.recordSource || "").toString().trim().toLowerCase() === "email-audit";
+  (booking?.recordSource || "").toString().trim().toLowerCase() ===
+  "email-audit";
 
 const getWorkshopBookingSourceCollection = (booking) =>
   isWorkshopEmailAuditEntry(booking)
@@ -313,10 +368,23 @@ const getWorkshopBookingSourceCollection = (booking) =>
 
 const getWorkshopBookingMatchSignature = (booking) => {
   const workshopIdentity = booking?.workshopId || booking?.workshopTitle || "";
-  const dateIdentity = booking?.sessionDate || booking?.sessionDateLabel || booking?.scheduledDateLabel || "";
-  const timeIdentity = booking?.sessionTimeRange || booking?.sessionLabel || booking?.sessionTime || "";
+  const dateIdentity =
+    booking?.sessionDate ||
+    booking?.sessionDateLabel ||
+    booking?.scheduledDateLabel ||
+    "";
+  const timeIdentity =
+    booking?.sessionTimeRange ||
+    booking?.sessionLabel ||
+    booking?.sessionTime ||
+    "";
   const optionIdentity =
-    booking?.optionValue || booking?.optionId || booking?.optionLabel || booking?.frame || booking?.framePreference || "";
+    booking?.optionValue ||
+    booking?.optionId ||
+    booking?.optionLabel ||
+    booking?.frame ||
+    booking?.framePreference ||
+    "";
   const attendeeCount = Number.parseInt(booking?.attendeeCount, 10) || 1;
   const emailIdentity = booking?.email || "";
 
@@ -332,11 +400,17 @@ const getWorkshopBookingMatchSignature = (booking) => {
     .join("|");
 };
 
-const getWorkshopBookingAttendeeCount = (booking, attendeeCountOverride = null) => {
+const getWorkshopBookingAttendeeCount = (
+  booking,
+  attendeeCountOverride = null,
+) => {
   const parsedOverride = Number.parseInt(attendeeCountOverride, 10);
-  if (Number.isFinite(parsedOverride) && parsedOverride > 0) return parsedOverride;
+  if (Number.isFinite(parsedOverride) && parsedOverride > 0)
+    return parsedOverride;
   const parsedBookingCount = Number.parseInt(booking?.attendeeCount, 10);
-  return Number.isFinite(parsedBookingCount) && parsedBookingCount > 0 ? parsedBookingCount : 1;
+  return Number.isFinite(parsedBookingCount) && parsedBookingCount > 0
+    ? parsedBookingCount
+    : 1;
 };
 
 const parseWorkshopOptionPriceFromText = (value = "") => {
@@ -360,7 +434,9 @@ const buildWorkshopOptionMatchKeys = (value = "") => {
 };
 
 const findMatchingWorkshopOption = (options = [], ...candidates) => {
-  const candidateKeys = candidates.flatMap((candidate) => buildWorkshopOptionMatchKeys(candidate));
+  const candidateKeys = candidates.flatMap((candidate) =>
+    buildWorkshopOptionMatchKeys(candidate),
+  );
   if (candidateKeys.length === 0) return null;
   return (
     options.find((option) => {
@@ -373,32 +449,63 @@ const findMatchingWorkshopOption = (options = [], ...candidates) => {
   );
 };
 
-const getWorkshopBookingUnitPrice = ({ booking, option = null, workshop = null, attendeeCount = null }) => {
+const getWorkshopBookingUnitPrice = ({
+  booking,
+  option = null,
+  workshop = null,
+  attendeeCount = null,
+}) => {
   const optionPrice = parseNumber(option?.price, null);
   if (Number.isFinite(optionPrice) && optionPrice > 0) return optionPrice;
 
-  const storedUnitPrice = parseNumber(booking?.price ?? booking?.estimatedPerAttendee, null);
-  if (Number.isFinite(storedUnitPrice) && storedUnitPrice > 0) return storedUnitPrice;
+  const storedUnitPrice = parseNumber(
+    booking?.price ?? booking?.estimatedPerAttendee,
+    null,
+  );
+  if (Number.isFinite(storedUnitPrice) && storedUnitPrice > 0)
+    return storedUnitPrice;
 
   const parsedOptionPrice = parseWorkshopOptionPriceFromText(
     booking?.optionLabel || booking?.frame || booking?.framePreference || "",
   );
-  if (Number.isFinite(parsedOptionPrice) && parsedOptionPrice > 0) return parsedOptionPrice;
+  if (Number.isFinite(parsedOptionPrice) && parsedOptionPrice > 0)
+    return parsedOptionPrice;
 
-  const explicitTotal = parseNumber(booking?.totalPrice ?? booking?.estimatedTotal, null);
-  const resolvedAttendeeCount = getWorkshopBookingAttendeeCount(booking, attendeeCount);
-  if (Number.isFinite(explicitTotal) && explicitTotal > 0 && resolvedAttendeeCount > 0) {
+  const explicitTotal = parseNumber(
+    booking?.totalPrice ?? booking?.estimatedTotal,
+    null,
+  );
+  const resolvedAttendeeCount = getWorkshopBookingAttendeeCount(
+    booking,
+    attendeeCount,
+  );
+  if (
+    Number.isFinite(explicitTotal) &&
+    explicitTotal > 0 &&
+    resolvedAttendeeCount > 0
+  ) {
     return explicitTotal / resolvedAttendeeCount;
   }
 
-  const workshopPrice = parseNumber(workshop?.numericPrice ?? workshop?.price, null);
+  const workshopPrice = parseNumber(
+    workshop?.numericPrice ?? workshop?.price,
+    null,
+  );
   if (Number.isFinite(workshopPrice) && workshopPrice > 0) return workshopPrice;
 
   return null;
 };
 
-const getWorkshopBookingTotalPrice = ({ booking, option = null, workshop = null, attendeeCount = null }) => {
-  const resolvedAttendeeCount = getWorkshopBookingAttendeeCount(booking, attendeeCount);
+const getWorkshopBookingTotalPrice = ({
+  booking,
+  option = null,
+  workshop = null,
+  attendeeCount = null,
+}) => {
+  const resolvedAttendeeCount = getWorkshopBookingAttendeeCount(
+    booking,
+    attendeeCount,
+  );
   const unitPrice = getWorkshopBookingUnitPrice({
     booking,
     option,
@@ -408,25 +515,43 @@ const getWorkshopBookingTotalPrice = ({ booking, option = null, workshop = null,
   if (Number.isFinite(unitPrice) && unitPrice > 0) {
     return unitPrice * resolvedAttendeeCount;
   }
-  const explicitTotal = parseNumber(booking?.totalPrice ?? booking?.estimatedTotal, null);
-  return Number.isFinite(explicitTotal) && explicitTotal > 0 ? explicitTotal : null;
+  const explicitTotal = parseNumber(
+    booking?.totalPrice ?? booking?.estimatedTotal,
+    null,
+  );
+  return Number.isFinite(explicitTotal) && explicitTotal > 0
+    ? explicitTotal
+    : null;
 };
 
 const normalizeWorkshopSessions = (workshop, sessionFormatter) => {
   const now = Date.now();
-  const rawSessions = Array.isArray(workshop?.sessions) ? workshop.sessions.filter(Boolean) : [];
+  const rawSessions = Array.isArray(workshop?.sessions)
+    ? workshop.sessions.filter(Boolean)
+    : [];
   const normalizedSessions = rawSessions
     .map((session, index) => {
       const startDate = resolveWorkshopSessionStart(session);
       if (!startDate) return null;
-      const sessionId = (session?.id || `session-${index}-${workshop?.id || "workshop"}`).toString().trim();
+      const sessionId = (
+        session?.id || `session-${index}-${workshop?.id || "workshop"}`
+      )
+        .toString()
+        .trim();
       if (!sessionId) return null;
       const formatted = sessionFormatter.format(startDate);
-      const customLabel = (session?.label || session?.name || "").toString().trim();
-      const timeValue = typeof session?.time === "string" ? session.time.trim() : "";
-      const endTimeValue = typeof session?.endTime === "string" ? session.endTime.trim() : "";
+      const customLabel = (session?.label || session?.name || "")
+        .toString()
+        .trim();
+      const timeValue =
+        typeof session?.time === "string" ? session.time.trim() : "";
+      const endTimeValue =
+        typeof session?.endTime === "string" ? session.endTime.trim() : "";
       const timeRangeLabel =
-        formatTimeRange(timeValue || formatTimeInput(startDate), endTimeValue) || formatTimeValue(startDate);
+        formatTimeRange(
+          timeValue || formatTimeInput(startDate),
+          endTimeValue,
+        ) || formatTimeValue(startDate);
       const capacityNumber = Number(session?.capacity);
       const label =
         customLabel && customLabel.toLowerCase() !== formatted.toLowerCase()
@@ -436,12 +561,16 @@ const normalizeWorkshopSessions = (workshop, sessionFormatter) => {
         id: sessionId,
         label,
         formatted,
-        date: (session?.date || "").toString().trim() || formatDateInput(startDate),
+        date:
+          (session?.date || "").toString().trim() || formatDateInput(startDate),
         time: timeValue || formatTimeInput(startDate),
         timeRangeLabel,
         start: startDate.toISOString(),
         startDate,
-        capacity: Number.isFinite(capacityNumber) && capacityNumber >= 0 ? capacityNumber : null,
+        capacity:
+          Number.isFinite(capacityNumber) && capacityNumber >= 0
+            ? capacityNumber
+            : null,
         isPast: startDate.getTime() < now,
       };
     })
@@ -470,8 +599,11 @@ const normalizeWorkshopSessions = (workshop, sessionFormatter) => {
     return left.startDate.getTime() - right.startDate.getTime();
   });
 
-  const upcomingSessions = normalizedSessions.filter((session) => !session.isPast);
-  const availableSessions = upcomingSessions.length > 0 ? upcomingSessions : normalizedSessions;
+  const upcomingSessions = normalizedSessions.filter(
+    (session) => !session.isPast,
+  );
+  const availableSessions =
+    upcomingSessions.length > 0 ? upcomingSessions : normalizedSessions;
   return {
     sessions: availableSessions,
     headlineSession: availableSessions[0] || null,
@@ -482,7 +614,9 @@ const buildCartKey = ({ type, sourceId, variantId, sessionId }) =>
   [type, sourceId, variantId || "base", sessionId || "default"].join(":");
 
 const normalizeWorkshopOption = (option, index, workshopId = "") => {
-  const label = (option?.label || option?.name || option?.value || "").toString().trim();
+  const label = (option?.label || option?.name || option?.value || "")
+    .toString()
+    .trim();
   if (!label) return null;
   const id = (
     option?.id ||
@@ -501,11 +635,7 @@ const normalizeWorkshopOption = (option, index, workshopId = "") => {
 };
 
 const normalizeGiftCardCode = (value = "") =>
-  value
-    .toString()
-    .toUpperCase()
-    .replace(/\s+/g, "")
-    .trim();
+  value.toString().toUpperCase().replace(/\s+/g, "").trim();
 
 const normalizeGiftCardStatus = (value = "") =>
   (value || "").toString().trim().toLowerCase();
@@ -525,10 +655,17 @@ const normalizeCategoryValue = (value) =>
     .replace(/(^-|-$)/g, "");
 
 const resolvePosProductCategorySelection = (categoryValue, categoryChoices) => {
-  const normalizedCategory = (categoryValue || "").toString().trim().toLowerCase();
+  const normalizedCategory = (categoryValue || "")
+    .toString()
+    .trim()
+    .toLowerCase();
   if (!normalizedCategory) return "";
-  const matchedCategory = (Array.isArray(categoryChoices) ? categoryChoices : []).find(
-    (category) => (category?.name || "").toString().trim().toLowerCase() === normalizedCategory,
+  const matchedCategory = (
+    Array.isArray(categoryChoices) ? categoryChoices : []
+  ).find(
+    (category) =>
+      (category?.name || "").toString().trim().toLowerCase() ===
+      normalizedCategory,
   );
   return matchedCategory?.id || POS_PRODUCT_CUSTOM_CATEGORY_VALUE;
 };
@@ -538,17 +675,23 @@ const coerceGiftCardOptionsList = (options) => {
   if (!options || typeof options !== "object") return [];
   if (Array.isArray(options.selectedOptions)) return options.selectedOptions;
   if (Array.isArray(options.options)) return options.options;
-  return Object.values(options).filter((entry) => entry && typeof entry === "object");
+  return Object.values(options).filter(
+    (entry) => entry && typeof entry === "object",
+  );
 };
 
 const buildCatalogItemSummary = (catalogItemRef = null) => {
   if (!catalogItemRef || typeof catalogItemRef !== "object") return "";
-  return [catalogItemRef.titleSnapshot, catalogItemRef.variantLabel || catalogItemRef.optionLabel]
+  return [
+    catalogItemRef.titleSnapshot,
+    catalogItemRef.variantLabel || catalogItemRef.optionLabel,
+  ]
     .filter(Boolean)
     .join(" | ");
 };
 
-const normalizePaymentStatus = (value) => (value || "").toString().trim().toLowerCase();
+const normalizePaymentStatus = (value) =>
+  (value || "").toString().trim().toLowerCase();
 
 const resolveBookingDate = (booking, type) => {
   if (type === "cut-flower") {
@@ -593,7 +736,8 @@ const isBookingCompleted = (booking, type) => {
 function AdminPosPage() {
   usePageMetadata({
     title: "Admin - POS",
-    description: "Process in-person sales for products, workshops, events, and classes.",
+    description:
+      "Process in-person sales for products, workshops, events, and classes.",
   });
   const { user } = useAuth();
 
@@ -624,15 +768,13 @@ function AdminPosPage() {
     enabled: inventoryEnabled,
     db,
   });
-  const { items: adminPosSettings, status: adminPosSettingsStatus } = useFirestoreCollection(
-    "adminPosSettings",
-    {
+  const { items: adminPosSettings, status: adminPosSettingsStatus } =
+    useFirestoreCollection("adminPosSettings", {
       orderByField: null,
       orderDirection: null,
       enabled: inventoryEnabled,
       db,
-    },
-  );
+    });
   const { items: allPosTabs } = useFirestoreCollection("posTabs", {
     orderByField: "openedAt",
     orderDirection: "desc",
@@ -640,11 +782,23 @@ function AdminPosPage() {
     db,
   });
 
-  const { items: posTableConfigItems } = useFirestoreCollection("posTableConfig", {
-    enabled: inventoryEnabled,
-    db,
-    orderByField: null, // single config doc — has no createdAt, orderBy would exclude it
-  });
+  const { items: posTableConfigItems } = useFirestoreCollection(
+    "posTableConfig",
+    {
+      enabled: inventoryEnabled,
+      db,
+      orderByField: null, // single config doc — has no createdAt, orderBy would exclude it
+    },
+  );
+
+  const { items: posPrinterConfigItems } = useFirestoreCollection(
+    "posPrinterConfig",
+    {
+      enabled: inventoryEnabled,
+      db,
+      orderByField: null,
+    },
+  );
 
   const functionsInstance = useMemo(() => {
     try {
@@ -653,8 +807,6 @@ function AdminPosPage() {
       return null;
     }
   }, []);
-
-  const { status: printerStatus, connect: connectPrinter, print: printViaUsb, printBill: printBillViaUsb } = usePrinter();
 
   const [activeTab, setActiveTab] = useState(POS_TABS[0].id);
   const [searchTerm, setSearchTerm] = useState("");
@@ -672,6 +824,11 @@ function AdminPosPage() {
   const [checkoutStatus, setCheckoutStatus] = useState("idle");
   const [checkoutError, setCheckoutError] = useState(null);
   const [receiptData, setReceiptData] = useState(null);
+  const [printerBridgeUrl, setPrinterBridgeUrl] = useState(() =>
+    getPosPrinterBridgeUrl(),
+  );
+  const [printerName, setPrinterName] = useState(() => getPosPrinterName());
+  const [printerSettingsSaving, setPrinterSettingsSaving] = useState(false);
   const [discountType, setDiscountType] = useState("none");
   const [discountValue, setDiscountValue] = useState("");
   const [cashReceived, setCashReceived] = useState("");
@@ -703,7 +860,8 @@ function AdminPosPage() {
 
   const [variantSelections, setVariantSelections] = useState({});
   const [posVariantPickerProduct, setPosVariantPickerProduct] = useState(null);
-  const [posVariantPickerSelectedId, setPosVariantPickerSelectedId] = useState("");
+  const [posVariantPickerSelectedId, setPosVariantPickerSelectedId] =
+    useState("");
   const [workshopSelections, setWorkshopSelections] = useState({});
   const [workshopOptionSelections, setWorkshopOptionSelections] = useState({});
   const [classSelections, setClassSelections] = useState({});
@@ -711,10 +869,15 @@ function AdminPosPage() {
   const [eventSelections, setEventSelections] = useState({});
   const [activeCategoryId, setActiveCategoryId] = useState("all");
   const [activePosCategoryId, setActivePosCategoryId] = useState("all");
-  const [activeServiceType, setActiveServiceType] = useState(SERVICE_FILTERS[0].id);
-  const [posProductCategorySelection, setPosProductCategorySelection] = useState("");
+  const [activeServiceType, setActiveServiceType] = useState(
+    SERVICE_FILTERS[0].id,
+  );
+  const [posProductCategorySelection, setPosProductCategorySelection] =
+    useState("");
   const [bookingTab, setBookingTab] = useState("workshop");
-  const [bookingDateFilter, setBookingDateFilter] = useState(() => formatDateKey(new Date()));
+  const [bookingDateFilter, setBookingDateFilter] = useState(() =>
+    formatDateKey(new Date()),
+  );
   const [bookingEdits, setBookingEdits] = useState({});
   const [bookingSavingId, setBookingSavingId] = useState(null);
   const [bookingError, setBookingError] = useState(null);
@@ -737,7 +900,9 @@ function AdminPosPage() {
       setGiftCardMatches([]);
       setGiftCardLookupLoading(false);
       setGiftCardLookupError(null);
-      setCartItems((prev) => prev.filter((item) => !isGiftCardLinkedLineItem(item)));
+      setCartItems((prev) =>
+        prev.filter((item) => !isGiftCardLinkedLineItem(item)),
+      );
     }
   };
 
@@ -754,11 +919,18 @@ function AdminPosPage() {
   const handleConfirmPosVariantPicker = () => {
     if (!posVariantPickerProduct) return;
     const product = posVariantPickerProduct;
-    const variant = product.variants.find((v) => v.id === posVariantPickerSelectedId) || null;
-    const variantPrice = Number.isFinite(variant?.price) ? variant.price : product.numericPrice;
+    const variant =
+      product.variants.find((v) => v.id === posVariantPickerSelectedId) || null;
+    const variantPrice = Number.isFinite(variant?.price)
+      ? variant.price
+      : product.numericPrice;
     const finalPrice = Number.isFinite(variantPrice) ? variantPrice : 0;
     handleAddToCart({
-      key: buildCartKey({ type: "product", sourceId: product.id, variantId: variant?.id }),
+      key: buildCartKey({
+        type: "product",
+        sourceId: product.id,
+        variantId: variant?.id,
+      }),
       sourceId: product.id,
       type: "product",
       name: product.name,
@@ -776,15 +948,19 @@ function AdminPosPage() {
 
   const normalizedProducts = useMemo(() => {
     const categoryNameById = new Map(
-      (Array.isArray(productCategories) ? productCategories : []).map((category) => [
-        (category?.id || "").toString().trim(),
-        (category?.name || "").toString().trim(),
-      ]),
+      (Array.isArray(productCategories) ? productCategories : []).map(
+        (category) => [
+          (category?.id || "").toString().trim(),
+          (category?.name || "").toString().trim(),
+        ],
+      ),
     );
 
     return (products || []).map((product) => {
       const priceNumber = parseNumber(product.price, null);
-      const rawVariants = Array.isArray(product.variants) ? product.variants : [];
+      const rawVariants = Array.isArray(product.variants)
+        ? product.variants
+        : [];
       const variants = rawVariants
         .map((variant) => {
           const label = (variant.label || variant.name || "").toString().trim();
@@ -794,7 +970,10 @@ function AdminPosPage() {
             id: (variant.id || label).toString(),
             label,
             price: variantPrice,
-            quantity: variant.stock_quantity ?? variant.stockQuantity ?? variant.quantity,
+            quantity:
+              variant.stock_quantity ??
+              variant.stockQuantity ??
+              variant.quantity,
             stockStatus: getVariantStockStatus(variant, product),
           };
         })
@@ -816,7 +995,9 @@ function AdminPosPage() {
         categoryName,
         categorySlug: categoryName ? normalizeCategoryValue(categoryName) : "",
         numericPrice: priceNumber,
-        displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
+        displayPrice: Number.isFinite(priceNumber)
+          ? formatCurrency(priceNumber)
+          : "Price on request",
         variants,
         rawVariants,
         stockStatus,
@@ -832,7 +1013,8 @@ function AdminPosPage() {
         .trim();
       const stockStatus = getStockStatus({
         quantity: product.stock_quantity ?? product.quantity,
-        forceOutOfStock: product.forceOutOfStock || product.stock_status === "out_of_stock",
+        forceOutOfStock:
+          product.forceOutOfStock || product.stock_status === "out_of_stock",
         status: product.stock_status,
         isGiftCard: Boolean(product.isGiftCard || product.is_gift_card),
       });
@@ -842,7 +1024,9 @@ function AdminPosPage() {
         categoryName,
         categorySlug: categoryName ? normalizeCategoryValue(categoryName) : "",
         numericPrice: priceNumber,
-        displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
+        displayPrice: Number.isFinite(priceNumber)
+          ? formatCurrency(priceNumber)
+          : "Price on request",
         stockStatus,
       };
     });
@@ -863,17 +1047,18 @@ function AdminPosPage() {
         const priceNumber = parseNumber(workshop.price, null);
         const options = Array.isArray(workshop.options)
           ? workshop.options
-              .map((option, index) => normalizeWorkshopOption(option, index, workshop.id))
+              .map((option, index) =>
+                normalizeWorkshopOption(option, index, workshop.id),
+              )
               .filter(Boolean)
           : [];
         const optionPrices = options
           .map((option) => parseNumber(option?.price, null))
           .filter((price) => Number.isFinite(price) && price > 0);
-        const minOptionPrice = optionPrices.length > 0 ? Math.min(...optionPrices) : null;
-        const { sessions: normalizedSessions, headlineSession } = normalizeWorkshopSessions(
-          workshop,
-          sessionFormatter,
-        );
+        const minOptionPrice =
+          optionPrices.length > 0 ? Math.min(...optionPrices) : null;
+        const { sessions: normalizedSessions, headlineSession } =
+          normalizeWorkshopSessions(workshop, sessionFormatter);
         return {
           ...workshop,
           title: workshop.title || workshop.name || "Workshop",
@@ -892,8 +1077,12 @@ function AdminPosPage() {
         };
       })
       .sort((left, right) => {
-        const leftTime = left.headlineSession?.startDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
-        const rightTime = right.headlineSession?.startDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        const leftTime =
+          left.headlineSession?.startDate?.getTime?.() ??
+          Number.POSITIVE_INFINITY;
+        const rightTime =
+          right.headlineSession?.startDate?.getTime?.() ??
+          Number.POSITIVE_INFINITY;
         if (leftTime !== rightTime) return leftTime - rightTime;
         return (left.title || "").localeCompare(right.title || "", undefined, {
           sensitivity: "base",
@@ -928,7 +1117,10 @@ function AdminPosPage() {
 
   const workshopEmailAuditEntries = useMemo(
     () =>
-      (Array.isArray(workshopBookingEmailAudit) ? workshopBookingEmailAudit : []).map((entry) => ({
+      (Array.isArray(workshopBookingEmailAudit)
+        ? workshopBookingEmailAudit
+        : []
+      ).map((entry) => ({
         ...entry,
         recordSource: entry?.recordSource || "email-audit",
         name: entry?.name || entry?.fullName || entry?.email || "Guest",
@@ -942,12 +1134,21 @@ function AdminPosPage() {
       if (explicitWorkshopId && workshopLookup.has(explicitWorkshopId)) {
         return explicitWorkshopId;
       }
-      const exactWorkshopTitle = (booking?.workshopTitle || booking?.title || "").toString().trim();
-      return exactWorkshopTitle ? workshopIdByExactTitle.get(exactWorkshopTitle) || "" : "";
+      const exactWorkshopTitle = (
+        booking?.workshopTitle ||
+        booking?.title ||
+        ""
+      )
+        .toString()
+        .trim();
+      return exactWorkshopTitle
+        ? workshopIdByExactTitle.get(exactWorkshopTitle) || ""
+        : "";
     };
 
     const normalizeEntry = (booking) => {
-      const resolvedWorkshopId = resolveWorkshopIdForEntry(booking) || booking?.workshopId || "";
+      const resolvedWorkshopId =
+        resolveWorkshopIdForEntry(booking) || booking?.workshopId || "";
       const workshop = workshopLookup.get(resolvedWorkshopId);
       const sessionDate = parseDateValue(
         booking.sessionDate ||
@@ -985,17 +1186,26 @@ function AdminPosPage() {
         bookingType: "workshop",
         sessionDate,
         dateKey,
-        displayDate:
-          sessionDate
-            ? bookingDateFormatter.format(sessionDate)
-            : booking.sessionDateLabel || booking.scheduledDateLabel || "Date to be confirmed",
+        displayDate: sessionDate
+          ? bookingDateFormatter.format(sessionDate)
+          : booking.sessionDateLabel ||
+            booking.scheduledDateLabel ||
+            "Date to be confirmed",
         workshopTitle:
-          workshop?.title || booking.workshopTitle || booking.title || "Workshop",
+          workshop?.title ||
+          booking.workshopTitle ||
+          booking.title ||
+          "Workshop",
         numericPrice: priceNumber,
         totalPrice,
         attendeeCount,
-        sessionLabel: booking.sessionTimeRange || booking.sessionLabel || booking.sessionTime || "",
-        optionId: matchedOption?.id || booking.optionValue || booking.optionId || "",
+        sessionLabel:
+          booking.sessionTimeRange ||
+          booking.sessionLabel ||
+          booking.sessionTime ||
+          "",
+        optionId:
+          matchedOption?.id || booking.optionValue || booking.optionId || "",
         optionLabel:
           matchedOption?.label ||
           booking.optionLabel ||
@@ -1012,14 +1222,19 @@ function AdminPosPage() {
     (Array.isArray(bookings) ? bookings : []).forEach((booking) => {
       const matchSignature = getWorkshopBookingMatchSignature(booking);
       if (matchSignature) {
-        confirmedMatchCounts.set(matchSignature, (confirmedMatchCounts.get(matchSignature) || 0) + 1);
+        confirmedMatchCounts.set(
+          matchSignature,
+          (confirmedMatchCounts.get(matchSignature) || 0) + 1,
+        );
       }
       mergedBookings.push(normalizeEntry(booking));
     });
 
     workshopEmailAuditEntries.forEach((booking) => {
       const matchSignature = getWorkshopBookingMatchSignature(booking);
-      const matchedConfirmedCount = matchSignature ? confirmedMatchCounts.get(matchSignature) || 0 : 0;
+      const matchedConfirmedCount = matchSignature
+        ? confirmedMatchCounts.get(matchSignature) || 0
+        : 0;
       if (matchedConfirmedCount > 0) {
         confirmedMatchCounts.set(matchSignature, matchedConfirmedCount - 1);
         return;
@@ -1056,7 +1271,9 @@ function AdminPosPage() {
         bookingType: "cut-flower",
         eventDate,
         dateKey,
-        displayDate: eventDate ? bookingDateFormatter.format(eventDate) : "Date to be confirmed",
+        displayDate: eventDate
+          ? bookingDateFormatter.format(eventDate)
+          : "Date to be confirmed",
         numericPrice: priceNumber,
         attendeeCount,
         attendeeSelections,
@@ -1070,7 +1287,8 @@ function AdminPosPage() {
     return normalizedWorkshopBookings.filter((booking) => {
       if (booking.completed) return false;
       if (booking.checkedIn) return false;
-      if (bookingDateFilter && booking.dateKey !== bookingDateFilter) return false;
+      if (bookingDateFilter && booking.dateKey !== bookingDateFilter)
+        return false;
       if (!term) return true;
       const haystack = [
         booking.name,
@@ -1092,7 +1310,8 @@ function AdminPosPage() {
     return normalizedCutFlowerBookings.filter((booking) => {
       if (booking.completed) return false;
       if (booking.checkedIn) return false;
-      if (bookingDateFilter && booking.dateKey !== bookingDateFilter) return false;
+      if (bookingDateFilter && booking.dateKey !== bookingDateFilter)
+        return false;
       if (!term) return true;
       const haystack = [
         booking.customerName,
@@ -1126,10 +1345,15 @@ function AdminPosPage() {
       .map((classDoc) => {
         const priceNumber = parseNumber(classDoc.price, null);
         const eventDate = parseDateValue(classDoc.eventDate);
-        const timeSlots = Array.isArray(classDoc.timeSlots) ? classDoc.timeSlots : [];
+        const timeSlots = Array.isArray(classDoc.timeSlots)
+          ? classDoc.timeSlots
+          : [];
         const normalizedSlots = timeSlots
           .map((slot, index) => {
-            const label = slot.label?.trim() || formatTimeRange(slot.time, slot.endTime) || "Session";
+            const label =
+              slot.label?.trim() ||
+              formatTimeRange(slot.time, slot.endTime) ||
+              "Session";
             return {
               id: slot.id || `class-slot-${index}-${classDoc.id}`,
               label,
@@ -1141,11 +1365,15 @@ function AdminPosPage() {
         const options = Array.isArray(classDoc.options)
           ? classDoc.options
               .map((option, index) => {
-                const label = (option.label || option.name || "").toString().trim();
+                const label = (option.label || option.name || "")
+                  .toString()
+                  .trim();
                 if (!label) return null;
                 const price = parseNumber(option.price, null);
                 return {
-                  id: (option.id || `class-option-${index}-${classDoc.id}`).toString(),
+                  id: (
+                    option.id || `class-option-${index}-${classDoc.id}`
+                  ).toString(),
                   label,
                   price,
                 };
@@ -1156,16 +1384,22 @@ function AdminPosPage() {
           ...classDoc,
           title: classDoc.title || "Class",
           numericPrice: priceNumber,
-          displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
+          displayPrice: Number.isFinite(priceNumber)
+            ? formatCurrency(priceNumber)
+            : "Price on request",
           eventDate,
-          displayDate: eventDate ? sessionFormatter.format(eventDate) : "Date to be confirmed",
+          displayDate: eventDate
+            ? sessionFormatter.format(eventDate)
+            : "Date to be confirmed",
           slots: normalizedSlots,
           options,
         };
       })
       .sort((left, right) => {
-        const leftTime = left.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
-        const rightTime = right.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        const leftTime =
+          left.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        const rightTime =
+          right.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
         if (leftTime !== rightTime) return leftTime - rightTime;
         return (left.title || "").localeCompare(right.title || "", undefined, {
           sensitivity: "base",
@@ -1204,7 +1438,10 @@ function AdminPosPage() {
         const timeSlots = Array.isArray(event.timeSlots) ? event.timeSlots : [];
         const normalizedSlots = timeSlots
           .map((slot, index) => {
-            const label = slot.label?.trim() || formatTimeRange(slot.time, slot.endTime) || "Session";
+            const label =
+              slot.label?.trim() ||
+              formatTimeRange(slot.time, slot.endTime) ||
+              "Session";
             return {
               id: slot.id || `event-slot-${index}-${event.id}`,
               label,
@@ -1217,15 +1454,21 @@ function AdminPosPage() {
           ...event,
           title: event.title || "Event",
           numericPrice: priceNumber,
-          displayPrice: Number.isFinite(priceNumber) ? formatCurrency(priceNumber) : "Price on request",
+          displayPrice: Number.isFinite(priceNumber)
+            ? formatCurrency(priceNumber)
+            : "Price on request",
           eventDate,
-          displayDate: eventDate ? sessionFormatter.format(eventDate) : "Date to be confirmed",
+          displayDate: eventDate
+            ? sessionFormatter.format(eventDate)
+            : "Date to be confirmed",
           slots: normalizedSlots,
         };
       })
       .sort((left, right) => {
-        const leftTime = left.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
-        const rightTime = right.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        const leftTime =
+          left.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
+        const rightTime =
+          right.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY;
         if (leftTime !== rightTime) return leftTime - rightTime;
         return (left.title || "").localeCompare(right.title || "", undefined, {
           sensitivity: "base",
@@ -1250,7 +1493,10 @@ function AdminPosPage() {
 
   const activeCategory = useMemo(() => {
     if (activeCategoryId === "all") return null;
-    return categoryOptions.find((category) => category.id === activeCategoryId) ?? null;
+    return (
+      categoryOptions.find((category) => category.id === activeCategoryId) ??
+      null
+    );
   }, [activeCategoryId, categoryOptions]);
 
   const posCategoryOptions = useMemo(() => {
@@ -1287,7 +1533,11 @@ function AdminPosPage() {
 
   const activePosCategory = useMemo(() => {
     if (activePosCategoryId === "all") return null;
-    return posCategoryOptions.find((category) => category.id === activePosCategoryId) ?? null;
+    return (
+      posCategoryOptions.find(
+        (category) => category.id === activePosCategoryId,
+      ) ?? null
+    );
   }, [activePosCategoryId, posCategoryOptions]);
 
   const searchTermNormalized = searchTerm.trim().toLowerCase();
@@ -1303,7 +1553,9 @@ function AdminPosPage() {
       [
         product.name,
         product.categoryName,
-        ...(Array.isArray(product.variants) ? product.variants.map((variant) => variant.label) : []),
+        ...(Array.isArray(product.variants)
+          ? product.variants.map((variant) => variant.label)
+          : []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -1341,7 +1593,9 @@ function AdminPosPage() {
   const filteredPosProducts = useMemo(() => {
     let filtered = catalogSearchPosProducts;
     if (activePosCategory) {
-      filtered = filtered.filter((product) => product.categorySlug === activePosCategory.id);
+      filtered = filtered.filter(
+        (product) => product.categorySlug === activePosCategory.id,
+      );
     }
     return filtered;
   }, [activePosCategory, catalogSearchPosProducts]);
@@ -1352,8 +1606,14 @@ function AdminPosPage() {
       [
         workshop.title,
         workshop.location,
-        ...(Array.isArray(workshop.options) ? workshop.options.map((option) => option.label) : []),
-        ...(Array.isArray(workshop.sessions) ? workshop.sessions.map((session) => `${session.label} ${session.timeRangeLabel || ""}`) : []),
+        ...(Array.isArray(workshop.options)
+          ? workshop.options.map((option) => option.label)
+          : []),
+        ...(Array.isArray(workshop.sessions)
+          ? workshop.sessions.map(
+              (session) => `${session.label} ${session.timeRangeLabel || ""}`,
+            )
+          : []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -1369,8 +1629,12 @@ function AdminPosPage() {
         classDoc.title,
         classDoc.location,
         classDoc.displayDate,
-        ...(Array.isArray(classDoc.options) ? classDoc.options.map((option) => option.label) : []),
-        ...(Array.isArray(classDoc.slots) ? classDoc.slots.map((slot) => slot.label) : []),
+        ...(Array.isArray(classDoc.options)
+          ? classDoc.options.map((option) => option.label)
+          : []),
+        ...(Array.isArray(classDoc.slots)
+          ? classDoc.slots.map((slot) => slot.label)
+          : []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -1382,7 +1646,14 @@ function AdminPosPage() {
   const filteredEvents = useMemo(() => {
     if (!searchTermNormalized) return normalizedEvents;
     return normalizedEvents.filter((event) =>
-      [event.title, event.location, event.displayDate, ...(Array.isArray(event.slots) ? event.slots.map((slot) => slot.label) : [])]
+      [
+        event.title,
+        event.location,
+        event.displayDate,
+        ...(Array.isArray(event.slots)
+          ? event.slots.map((slot) => slot.label)
+          : []),
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -1406,7 +1677,9 @@ function AdminPosPage() {
       searchText: [
         product.name,
         product.categoryName,
-        ...(Array.isArray(product.variants) ? product.variants.map((variant) => variant.label) : []),
+        ...(Array.isArray(product.variants)
+          ? product.variants.map((variant) => variant.label)
+          : []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -1426,7 +1699,10 @@ function AdminPosPage() {
       price: product.numericPrice,
       priceLabel: product.displayPrice,
       availability: product.stockStatus?.state || "",
-      searchText: [product.name, product.categoryName].filter(Boolean).join(" ").toLowerCase(),
+      searchText: [product.name, product.categoryName]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase(),
       sortKey: `pos-products:${(product.name || "").toLowerCase()}`,
     }));
 
@@ -1445,8 +1721,14 @@ function AdminPosPage() {
       searchText: [
         workshop.title,
         workshop.location,
-        ...(Array.isArray(workshop.options) ? workshop.options.map((option) => option.label) : []),
-        ...(Array.isArray(workshop.sessions) ? workshop.sessions.map((session) => `${session.label} ${session.timeRangeLabel || ""}`) : []),
+        ...(Array.isArray(workshop.options)
+          ? workshop.options.map((option) => option.label)
+          : []),
+        ...(Array.isArray(workshop.sessions)
+          ? workshop.sessions.map(
+              (session) => `${session.label} ${session.timeRangeLabel || ""}`,
+            )
+          : []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -1470,8 +1752,12 @@ function AdminPosPage() {
         classDoc.title,
         classDoc.location,
         classDoc.displayDate,
-        ...(Array.isArray(classDoc.options) ? classDoc.options.map((option) => option.label) : []),
-        ...(Array.isArray(classDoc.slots) ? classDoc.slots.map((slot) => slot.label) : []),
+        ...(Array.isArray(classDoc.options)
+          ? classDoc.options.map((option) => option.label)
+          : []),
+        ...(Array.isArray(classDoc.slots)
+          ? classDoc.slots.map((slot) => slot.label)
+          : []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -1495,7 +1781,9 @@ function AdminPosPage() {
         event.title,
         event.location,
         event.displayDate,
-        ...(Array.isArray(event.slots) ? event.slots.map((slot) => slot.label) : []),
+        ...(Array.isArray(event.slots)
+          ? event.slots.map((slot) => slot.label)
+          : []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -1503,8 +1791,20 @@ function AdminPosPage() {
       sortKey: `services:event:${event.eventDate?.getTime?.() ?? Number.POSITIVE_INFINITY}:${(event.title || "").toLowerCase()}`,
     }));
 
-    return [...productEntries, ...posOnlyEntries, ...workshopEntries, ...classEntries, ...eventEntries];
-  }, [liveWorkshops, normalizedClasses, normalizedEvents, normalizedPosProducts, normalizedProducts]);
+    return [
+      ...productEntries,
+      ...posOnlyEntries,
+      ...workshopEntries,
+      ...classEntries,
+      ...eventEntries,
+    ];
+  }, [
+    liveWorkshops,
+    normalizedClasses,
+    normalizedEvents,
+    normalizedPosProducts,
+    normalizedProducts,
+  ]);
 
   const allItemsSections = useMemo(() => {
     const previewMode = !searchTermNormalized;
@@ -1514,14 +1814,18 @@ function AdminPosPage() {
         label: "Products",
         description: "Retail flowers, gifts, and inventory items.",
         departmentId: "products",
-        items: previewMode ? catalogSearchProducts.slice(0, 8) : catalogSearchProducts,
+        items: previewMode
+          ? catalogSearchProducts.slice(0, 8)
+          : catalogSearchProducts,
       },
       {
         id: "pos-products",
         label: "POS-only",
         description: "Studio extras, drinks, packaging, and add-ons.",
         departmentId: "pos-only",
-        items: previewMode ? catalogSearchPosProducts.slice(0, 8) : catalogSearchPosProducts,
+        items: previewMode
+          ? catalogSearchPosProducts.slice(0, 8)
+          : catalogSearchPosProducts,
       },
       {
         id: "services",
@@ -1532,7 +1836,9 @@ function AdminPosPage() {
           {
             id: "workshop",
             label: "Workshops",
-            items: previewMode ? filteredWorkshops.slice(0, 6) : filteredWorkshops,
+            items: previewMode
+              ? filteredWorkshops.slice(0, 6)
+              : filteredWorkshops,
           },
           {
             id: "class",
@@ -1577,7 +1883,10 @@ function AdminPosPage() {
         items: filteredEvents,
       },
     ];
-    return sections.filter((section) => activeServiceType === "all" || activeServiceType === section.id);
+    return sections.filter(
+      (section) =>
+        activeServiceType === "all" || activeServiceType === section.id,
+    );
   }, [activeServiceType, filteredClasses, filteredEvents, filteredWorkshops]);
 
   const departmentCounts = useMemo(() => {
@@ -1585,7 +1894,10 @@ function AdminPosPage() {
       "all-items": sellableCatalogEntries.length,
       products: normalizedProducts.length,
       "pos-only": normalizedPosProducts.length,
-      services: liveWorkshops.length + normalizedClasses.length + normalizedEvents.length,
+      services:
+        liveWorkshops.length +
+        normalizedClasses.length +
+        normalizedEvents.length,
       bookings:
         normalizedWorkshopBookings.filter((b) => !b.completed).length +
         normalizedCutFlowerBookings.filter((b) => !b.completed).length,
@@ -1615,7 +1927,10 @@ function AdminPosPage() {
     if (activeTab === "products") return filteredProducts.length;
     if (activeTab === "pos-only") return filteredPosProducts.length;
     if (activeTab === "services") {
-      return serviceSections.reduce((sum, section) => sum + section.items.length, 0);
+      return serviceSections.reduce(
+        (sum, section) => sum + section.items.length,
+        0,
+      );
     }
     if (activeTab === "bookings") {
       return bookingTab === "workshop"
@@ -1642,7 +1957,10 @@ function AdminPosPage() {
 
   const pricing = useMemo(() => {
     const cartSubtotal = cartItems.reduce(
-      (sum, item) => sum + parseNumber(item.price, 0) * Math.max(1, Number.parseInt(item.quantity, 10) || 1),
+      (sum, item) =>
+        sum +
+        parseNumber(item.price, 0) *
+          Math.max(1, Number.parseInt(item.quantity, 10) || 1),
       0,
     );
     const giftCardCoverableTotal = cartItems.reduce((sum, item) => {
@@ -1654,8 +1972,14 @@ function AdminPosPage() {
       (sum, entry) => sum + Math.max(0, parseNumber(entry?.value, 0)),
       0,
     );
-    const giftCardApplied = Math.min(giftCardCreditTotal, giftCardCoverableTotal);
-    const outOfPocketBeforeDiscount = Math.max(0, cartSubtotal - giftCardApplied);
+    const giftCardApplied = Math.min(
+      giftCardCreditTotal,
+      giftCardCoverableTotal,
+    );
+    const outOfPocketBeforeDiscount = Math.max(
+      0,
+      cartSubtotal - giftCardApplied,
+    );
     const rawDiscount = parseNumber(discountValue, 0);
     let discountAmount = 0;
     let discountPercent = null;
@@ -1711,7 +2035,9 @@ function AdminPosPage() {
         return {
           ...sale,
           createdAt,
-          dateKey: getPosSaleDateKey(sale) || (createdAt ? formatDateKey(createdAt) : ""),
+          dateKey:
+            getPosSaleDateKey(sale) ||
+            (createdAt ? formatDateKey(createdAt) : ""),
           status: normalizePosSaleStatus(sale.status),
           netTotal: getPosSaleNetTotal(sale),
         };
@@ -1733,21 +2059,33 @@ function AdminPosPage() {
 
       getNormalizedPosSaleItems(sale).forEach((item) => {
         if (item.netQuantity <= 0) return;
-        if (!["product", "pos-product", "workshop", "class", "event"].includes(item.type)) {
+        if (
+          !["product", "pos-product", "workshop", "class", "event"].includes(
+            item.type,
+          )
+        ) {
           return;
         }
 
-        const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+        const metadata =
+          item?.metadata && typeof item.metadata === "object"
+            ? item.metadata
+            : {};
         const variantIdentity =
-          (metadata.variantId || metadata.variantLabel || "").toString().trim() || "base";
+          (metadata.variantId || metadata.variantLabel || "")
+            .toString()
+            .trim() || "base";
         const optionIdentity =
-          (metadata.optionId || metadata.optionLabel || "").toString().trim() || "base";
+          (metadata.optionId || metadata.optionLabel || "").toString().trim() ||
+          "base";
         const sessionIdentity =
-          (metadata.sessionId ||
+          (
+            metadata.sessionId ||
             metadata.slotId ||
             metadata.sessionLabel ||
             metadata.sessionDate ||
-            "")
+            ""
+          )
             .toString()
             .trim() || "default";
 
@@ -1769,7 +2107,9 @@ function AdminPosPage() {
           variantLabel: (metadata.variantLabel || "").toString().trim(),
           optionId: (metadata.optionId || "").toString().trim(),
           optionLabel: (metadata.optionLabel || "").toString().trim(),
-          sessionId: (metadata.sessionId || metadata.slotId || "").toString().trim(),
+          sessionId: (metadata.sessionId || metadata.slotId || "")
+            .toString()
+            .trim(),
           sessionLabel: (metadata.sessionLabel || "").toString().trim(),
           sessionDate: (metadata.sessionDate || "").toString().trim(),
           itemName: item.name,
@@ -1783,10 +2123,14 @@ function AdminPosPage() {
     return Array.from(aggregates.values())
       .map((entry) => {
         if (entry.type === "product") {
-          const product = normalizedProducts.find((item) => item.id === entry.sourceId) || null;
+          const product =
+            normalizedProducts.find((item) => item.id === entry.sourceId) ||
+            null;
           const variant =
             product?.variants?.find(
-              (item) => item.id === entry.variantId || item.label === entry.variantLabel,
+              (item) =>
+                item.id === entry.variantId ||
+                item.label === entry.variantLabel,
             ) || null;
           const priceValue = Number.isFinite(variant?.price)
             ? variant.price
@@ -1800,7 +2144,12 @@ function AdminPosPage() {
             department: "products",
             serviceType: null,
             title: product?.name || entry.itemName || "Product",
-            subtitle: [variant?.label || entry.variantLabel, product?.categoryName].filter(Boolean).join(" · "),
+            subtitle: [
+              variant?.label || entry.variantLabel,
+              product?.categoryName,
+            ]
+              .filter(Boolean)
+              .join(" · "),
             priceLabel: Number.isFinite(priceValue)
               ? formatCurrency(priceValue)
               : product?.displayPrice || "Price on request",
@@ -1817,7 +2166,9 @@ function AdminPosPage() {
         }
 
         if (entry.type === "pos-product") {
-          const product = normalizedPosProducts.find((item) => item.id === entry.sourceId) || null;
+          const product =
+            normalizedPosProducts.find((item) => item.id === entry.sourceId) ||
+            null;
           const priceValue = Number.isFinite(product?.numericPrice)
             ? product.numericPrice
             : entry.linePrice;
@@ -1833,13 +2184,16 @@ function AdminPosPage() {
               ? formatCurrency(priceValue)
               : product?.displayPrice || "Price on request",
             soldQuantity: entry.soldQuantity,
-            isAvailable: product ? (product.stockStatus?.state || "in") !== "out" : true,
+            isAvailable: product
+              ? (product.stockStatus?.state || "in") !== "out"
+              : true,
             actionConfig: {},
           };
         }
 
         if (entry.type === "workshop") {
-          const workshop = liveWorkshops.find((item) => item.id === entry.sourceId) || null;
+          const workshop =
+            liveWorkshops.find((item) => item.id === entry.sourceId) || null;
           const option =
             findMatchingWorkshopOption(
               workshop?.options || [],
@@ -1886,14 +2240,19 @@ function AdminPosPage() {
         }
 
         if (entry.type === "class") {
-          const classDoc = normalizedClasses.find((item) => item.id === entry.sourceId) || null;
+          const classDoc =
+            normalizedClasses.find((item) => item.id === entry.sourceId) ||
+            null;
           const option =
             classDoc?.options?.find(
-              (item) => item.id === entry.optionId || item.label === entry.optionLabel,
+              (item) =>
+                item.id === entry.optionId || item.label === entry.optionLabel,
             ) || null;
           const slot =
             classDoc?.slots?.find(
-              (item) => item.id === entry.sessionId || item.label === entry.sessionLabel,
+              (item) =>
+                item.id === entry.sessionId ||
+                item.label === entry.sessionLabel,
             ) || null;
           const priceValue = Number.isFinite(option?.price)
             ? option.price
@@ -1907,7 +2266,11 @@ function AdminPosPage() {
             department: "services",
             serviceType: "class",
             title: classDoc?.title || entry.itemName || "Class",
-            subtitle: [classDoc?.displayDate || entry.sessionDate, slot?.label || entry.sessionLabel, option?.label || entry.optionLabel]
+            subtitle: [
+              classDoc?.displayDate || entry.sessionDate,
+              slot?.label || entry.sessionLabel,
+              option?.label || entry.optionLabel,
+            ]
               .filter(Boolean)
               .join(" · "),
             priceLabel: Number.isFinite(priceValue)
@@ -1922,12 +2285,16 @@ function AdminPosPage() {
           };
         }
 
-        const event = normalizedEvents.find((item) => item.id === entry.sourceId) || null;
+        const event =
+          normalizedEvents.find((item) => item.id === entry.sourceId) || null;
         const slot =
           event?.slots?.find(
-            (item) => item.id === entry.sessionId || item.label === entry.sessionLabel,
+            (item) =>
+              item.id === entry.sessionId || item.label === entry.sessionLabel,
           ) || null;
-        const priceValue = Number.isFinite(event?.numericPrice) ? event.numericPrice : entry.linePrice;
+        const priceValue = Number.isFinite(event?.numericPrice)
+          ? event.numericPrice
+          : entry.linePrice;
         return {
           id: entry.id,
           sourceId: entry.sourceId,
@@ -1935,7 +2302,10 @@ function AdminPosPage() {
           department: "services",
           serviceType: "event",
           title: event?.title || entry.itemName || "Event",
-          subtitle: [event?.displayDate || entry.sessionDate, slot?.label || entry.sessionLabel]
+          subtitle: [
+            event?.displayDate || entry.sessionDate,
+            slot?.label || entry.sessionLabel,
+          ]
             .filter(Boolean)
             .join(" · "),
           priceLabel: Number.isFinite(priceValue)
@@ -1953,7 +2323,9 @@ function AdminPosPage() {
         if (right.soldQuantity !== left.soldQuantity) {
           return right.soldQuantity - left.soldQuantity;
         }
-        return left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+        return left.title.localeCompare(right.title, undefined, {
+          sensitivity: "base",
+        });
       });
   }, [
     formatCurrency,
@@ -1972,12 +2344,15 @@ function AdminPosPage() {
     if (activeTab === "products") {
       filtered = filtered.filter((entry) => entry.department === "products");
     } else if (activeTab === "pos-products") {
-      filtered = filtered.filter((entry) => entry.department === "pos-products");
+      filtered = filtered.filter(
+        (entry) => entry.department === "pos-products",
+      );
     } else if (activeTab === "services") {
       filtered = filtered.filter(
         (entry) =>
           entry.department === "services" &&
-          (activeServiceType === "all" || entry.serviceType === activeServiceType),
+          (activeServiceType === "all" ||
+            entry.serviceType === activeServiceType),
       );
     }
 
@@ -1986,21 +2361,49 @@ function AdminPosPage() {
 
   const activePosSettings = useMemo(
     () =>
-      adminPosSettings.find((entry) => entry.uid === user?.uid || entry.id === user?.uid) || null,
+      adminPosSettings.find(
+        (entry) => entry.uid === user?.uid || entry.id === user?.uid,
+      ) || null,
     [adminPosSettings, user?.uid],
+  );
+  const activePosPrinterConfig = useMemo(
+    () =>
+      posPrinterConfigItems.find((entry) => entry.id === "main") ||
+      posPrinterConfigItems[0] ||
+      null,
+    [posPrinterConfigItems],
   );
 
   const showPinWarning =
     adminPosSettingsStatus !== "loading" && !activePosSettings?.pinConfigured;
 
+  useEffect(() => {
+    if (!activePosPrinterConfig) return;
+
+    const savedBridgeUrl = (activePosPrinterConfig.bridgeUrl || "").trim();
+    const savedPrinterName = (activePosPrinterConfig.printerName || "").trim();
+
+    if (savedBridgeUrl) {
+      setPrinterBridgeUrl(savedBridgeUrl);
+      persistPosPrinterBridgeUrl(savedBridgeUrl);
+    }
+
+    setPrinterName(savedPrinterName);
+    persistPosPrinterName(savedPrinterName);
+  }, [activePosPrinterConfig]);
+
   const stockIssues = useMemo(() => {
     return cartItems
       .map((item) => {
         if (item.type === "product") {
-          const product = normalizedProducts.find((entry) => entry.id === item.sourceId);
+          const product = normalizedProducts.find(
+            (entry) => entry.id === item.sourceId,
+          );
           const variantId = (item?.metadata?.variantId || "").toString().trim();
           if (variantId) {
-            const variant = product?.variants?.find((entry) => entry.id === variantId) || null;
+            const variant =
+              product?.variants?.find((entry) => entry.id === variantId) ||
+              null;
             const available = getTrackedQuantity(variant);
             if (available !== null && available < item.quantity) {
               return { key: item.key, available, item };
@@ -2014,7 +2417,9 @@ function AdminPosPage() {
           return null;
         }
         if (item.type === "pos-product") {
-          const product = normalizedPosProducts.find((entry) => entry.id === item.sourceId);
+          const product = normalizedPosProducts.find(
+            (entry) => entry.id === item.sourceId,
+          );
           const available = getTrackedQuantity(product);
           if (available !== null && available < item.quantity) {
             return { key: item.key, available, item };
@@ -2030,8 +2435,11 @@ function AdminPosPage() {
     [stockIssues],
   );
 
-  const fullyCoveredByGiftCard = pricing.amountDue <= 0 && giftCardMatches.length > 0;
-  const resolvedPaymentMethod = fullyCoveredByGiftCard ? "gift-card" : paymentMethod;
+  const fullyCoveredByGiftCard =
+    pricing.amountDue <= 0 && giftCardMatches.length > 0;
+  const resolvedPaymentMethod = fullyCoveredByGiftCard
+    ? "gift-card"
+    : paymentMethod;
   const stepOneValid = cartItems.length > 0 && stockIssues.length === 0;
   const stepThreeValid =
     fullyCoveredByGiftCard ||
@@ -2058,7 +2466,12 @@ function AdminPosPage() {
       return "Cash received is less than the amount due";
     }
     return "";
-  }, [cashStats.cashReceived, cashStats.isValid, fullyCoveredByGiftCard, paymentMethod]);
+  }, [
+    cashStats.cashReceived,
+    cashStats.isValid,
+    fullyCoveredByGiftCard,
+    paymentMethod,
+  ]);
 
   const updateCustomerField = (field) => (event) => {
     const value = event.target.value;
@@ -2067,7 +2480,8 @@ function AdminPosPage() {
 
   const handleGiftCardCodeLookup = async () => {
     if (!functionsInstance || !inventoryEnabled) {
-      const msg = "Gift card lookup is unavailable. Please check admin permissions.";
+      const msg =
+        "Gift card lookup is unavailable. Please check admin permissions.";
       setGiftCardLookupError(msg);
       showToast(msg, "error");
       return;
@@ -2101,15 +2515,24 @@ function AdminPosPage() {
         throw new Error("Gift card lookup returned incomplete data.");
       }
       const resolvedGiftCardCode = normalizeGiftCardCode(giftCard.code);
-      const selectedOptionsSummaryRaw = (giftCard.selectedOptionsSummary || "").toString().trim();
+      const selectedOptionsSummaryRaw = (giftCard.selectedOptionsSummary || "")
+        .toString()
+        .trim();
       const selectedOptionsSummary =
-        selectedOptionsSummaryRaw.toLowerCase() === "none" ? "" : selectedOptionsSummaryRaw;
-      const giftCardMode = (giftCard.giftCardMode || "").toString().trim().toLowerCase();
+        selectedOptionsSummaryRaw.toLowerCase() === "none"
+          ? ""
+          : selectedOptionsSummaryRaw;
+      const giftCardMode = (giftCard.giftCardMode || "")
+        .toString()
+        .trim()
+        .toLowerCase();
       const catalogItemRef =
         giftCard?.catalogItemRef && typeof giftCard.catalogItemRef === "object"
           ? giftCard.catalogItemRef
           : null;
-      const normalizedSelectedOptions = coerceGiftCardOptionsList(giftCard.selectedOptions)
+      const normalizedSelectedOptions = coerceGiftCardOptionsList(
+        giftCard.selectedOptions,
+      )
         .map((option, index) => {
           const label = (
             option?.label ||
@@ -2174,14 +2597,19 @@ function AdminPosPage() {
             amount,
             quantity,
             lineTotal: Number((amount * quantity).toFixed(2)),
-            sourceCollection: (option?.sourceCollection || "").toString().trim(),
+            sourceCollection: (option?.sourceCollection || "")
+              .toString()
+              .trim(),
             sourceKind: (option?.sourceKind || "").toString().trim(),
             sourceId: (option?.sourceId || "").toString().trim(),
             variantId: (option?.variantId || "").toString().trim(),
             variantLabel: (option?.variantLabel || "").toString().trim(),
             optionId: (option?.optionId || rawOptionId || "").toString().trim(),
             optionLabel: (option?.optionLabel || label).toString().trim(),
-            unitPriceSnapshot: parseNumber(option?.unitPriceSnapshot ?? amount, amount),
+            unitPriceSnapshot: parseNumber(
+              option?.unitPriceSnapshot ?? amount,
+              amount,
+            ),
           };
         })
         .filter(Boolean);
@@ -2192,7 +2620,10 @@ function AdminPosPage() {
         {
           giftCardId: giftCard.id,
           code: resolvedGiftCardCode,
-          status: (giftCard.status || "unknown").toString().trim().toLowerCase(),
+          status: (giftCard.status || "unknown")
+            .toString()
+            .trim()
+            .toLowerCase(),
           isExpired: Boolean(giftCard.isExpired),
           isActive: Boolean(giftCard.isActive),
           recipientName: (giftCard.recipientName || "").toString().trim(),
@@ -2219,27 +2650,48 @@ function AdminPosPage() {
           catalogItemRef,
         };
         const primaryOption = normalizedSelectedOptions[0] || null;
-        const catalogKind = (catalogItemRef?.kind || primaryOption?.sourceKind || "")
+        const catalogKind = (
+          catalogItemRef?.kind ||
+          primaryOption?.sourceKind ||
+          ""
+        )
           .toString()
           .trim()
           .toLowerCase();
 
         if (giftCardMode === "catalog-item" && catalogKind === "product") {
-          const productId =
-            (catalogItemRef?.sourceId || primaryOption?.sourceId || "").toString().trim();
-          const variantId =
-            (catalogItemRef?.variantId || primaryOption?.variantId || "").toString().trim();
-          const product = normalizedProducts.find((entry) => entry.id === productId) || null;
+          const productId = (
+            catalogItemRef?.sourceId ||
+            primaryOption?.sourceId ||
+            ""
+          )
+            .toString()
+            .trim();
+          const variantId = (
+            catalogItemRef?.variantId ||
+            primaryOption?.variantId ||
+            ""
+          )
+            .toString()
+            .trim();
+          const product =
+            normalizedProducts.find((entry) => entry.id === productId) || null;
           const variant = variantId
             ? product?.variants?.find((entry) => entry.id === variantId) || null
             : null;
           if (product && (!variantId || variant)) {
             const quantity = Math.max(
               1,
-              Number.parseInt(catalogItemRef?.quantity ?? primaryOption?.quantity, 10) || 1,
+              Number.parseInt(
+                catalogItemRef?.quantity ?? primaryOption?.quantity,
+                10,
+              ) || 1,
             );
             const unitPrice = parseNumber(
-              catalogItemRef?.unitPriceSnapshot ?? primaryOption?.amount ?? variant?.price ?? product?.numericPrice,
+              catalogItemRef?.unitPriceSnapshot ??
+                primaryOption?.amount ??
+                variant?.price ??
+                product?.numericPrice,
               0,
             );
             const lineKey = [
@@ -2260,10 +2712,13 @@ function AdminPosPage() {
                 type: "product",
                 productId: product.id,
                 variantId: variant?.id || null,
-                variantLabel: variant?.label || catalogItemRef?.variantLabel || null,
+                variantLabel:
+                  variant?.label || catalogItemRef?.variantLabel || null,
               },
             };
-            const existingIndex = next.findIndex((entry) => entry.key === lineKey);
+            const existingIndex = next.findIndex(
+              (entry) => entry.key === lineKey,
+            );
             if (existingIndex === -1) {
               next.push(productLine);
             } else {
@@ -2292,7 +2747,10 @@ function AdminPosPage() {
                 ...linkedMetadataBase,
                 giftCardOptionId: option.id,
                 optionLabel: option.label,
-                productId: option.sourceKind === "product" ? option.sourceId || null : null,
+                productId:
+                  option.sourceKind === "product"
+                    ? option.sourceId || null
+                    : null,
                 variantId: option.variantId || null,
                 variantLabel: option.variantLabel || null,
                 optionId: option.optionId || null,
@@ -2323,10 +2781,14 @@ function AdminPosPage() {
             ...linkedMetadataBase,
             giftCardOptionId: "base",
             optionLabel:
-              selectedOptionsSummary || buildCatalogItemSummary(catalogItemRef) || "Gift card redemption",
+              selectedOptionsSummary ||
+              buildCatalogItemSummary(catalogItemRef) ||
+              "Gift card redemption",
           },
         };
-        const fallbackIndex = next.findIndex((entry) => entry.key === fallbackKey);
+        const fallbackIndex = next.findIndex(
+          (entry) => entry.key === fallbackKey,
+        );
         if (fallbackIndex === -1) {
           next.push(fallbackLine);
         } else {
@@ -2366,9 +2828,16 @@ function AdminPosPage() {
         setCartItems((cartPrev) =>
           cartPrev.filter((item) => {
             if (!isGiftCardLinkedLineItem(item)) return true;
-            const linkedGiftCardId = (item?.metadata?.giftCardId || "").toString().trim();
-            const linkedGiftCardCode = normalizeGiftCardCode(item?.metadata?.giftCardCode || "");
-            return !removedGiftCardIds.has(linkedGiftCardId) && !removedCodes.has(linkedGiftCardCode);
+            const linkedGiftCardId = (item?.metadata?.giftCardId || "")
+              .toString()
+              .trim();
+            const linkedGiftCardCode = normalizeGiftCardCode(
+              item?.metadata?.giftCardCode || "",
+            );
+            return (
+              !removedGiftCardIds.has(linkedGiftCardId) &&
+              !removedCodes.has(linkedGiftCardCode)
+            );
           }),
         );
       }
@@ -2397,7 +2866,10 @@ function AdminPosPage() {
       if (existingIndex === -1) {
         return [...prev, item];
       }
-      if (isBookingCartLineItem(item) || isBookingCartLineItem(prev[existingIndex])) {
+      if (
+        isBookingCartLineItem(item) ||
+        isBookingCartLineItem(prev[existingIndex])
+      ) {
         replacedExistingBooking = true;
         const next = [...prev];
         next[existingIndex] = item;
@@ -2411,7 +2883,9 @@ function AdminPosPage() {
       return next;
     });
     showToast(
-      replacedExistingBooking ? `Updated booking: ${item.name}` : `Added: ${item.name}`,
+      replacedExistingBooking
+        ? `Updated booking: ${item.name}`
+        : `Added: ${item.name}`,
       "success",
       { label: "View cart", onClick: () => setPosMobilePanel("cart") },
     );
@@ -2419,19 +2893,27 @@ function AdminPosPage() {
 
   const handleAddProductItem = (product, overrides = {}) => {
     if (!product) return;
-    const requestedVariantId =
-      (overrides?.variantId || variantSelections[product.id] || product.variants[0]?.id || "")
-        .toString()
-        .trim();
+    const requestedVariantId = (
+      overrides?.variantId ||
+      variantSelections[product.id] ||
+      product.variants[0]?.id ||
+      ""
+    )
+      .toString()
+      .trim();
     const variant =
       product.variants.find(
-        (entry) => entry.id === requestedVariantId || entry.label === overrides?.variantLabel,
+        (entry) =>
+          entry.id === requestedVariantId ||
+          entry.label === overrides?.variantLabel,
       ) || null;
     if (product.variants.length > 0 && !variant) {
       showToast("Select a variant before adding this product.", "error");
       return;
     }
-    const variantPrice = Number.isFinite(variant?.price) ? variant.price : product.numericPrice;
+    const variantPrice = Number.isFinite(variant?.price)
+      ? variant.price
+      : product.numericPrice;
     const canAdd =
       product.variants.length > 0
         ? Boolean(variant) && variant.stockStatus?.state !== "out"
@@ -2479,19 +2961,29 @@ function AdminPosPage() {
 
   const handleAddWorkshopItem = (workshop, overrides = {}) => {
     if (!workshop) return;
-    const selectedSessionId =
-      (overrides?.sessionId || workshopSelections[workshop.id] || workshop.sessions[0]?.id || "")
-        .toString()
-        .trim();
+    const selectedSessionId = (
+      overrides?.sessionId ||
+      workshopSelections[workshop.id] ||
+      workshop.sessions[0]?.id ||
+      ""
+    )
+      .toString()
+      .trim();
     const selectedSession =
       workshop.sessions.find((session) => session.id === selectedSessionId) ||
-      workshop.sessions.find((session) => session.label === overrides?.sessionLabel) ||
+      workshop.sessions.find(
+        (session) => session.label === overrides?.sessionLabel,
+      ) ||
       workshop.sessions[0] ||
       null;
-    const selectedOptionId =
-      (overrides?.optionId || workshopOptionSelections[workshop.id] || workshop.options[0]?.id || "")
-        .toString()
-        .trim();
+    const selectedOptionId = (
+      overrides?.optionId ||
+      workshopOptionSelections[workshop.id] ||
+      workshop.options[0]?.id ||
+      ""
+    )
+      .toString()
+      .trim();
     const selectedOption =
       findMatchingWorkshopOption(
         workshop.options || [],
@@ -2502,7 +2994,9 @@ function AdminPosPage() {
       showToast("Select the frame size before adding this workshop.", "error");
       return;
     }
-    const optionPrice = Number.isFinite(selectedOption?.price) ? selectedOption.price : null;
+    const optionPrice = Number.isFinite(selectedOption?.price)
+      ? selectedOption.price
+      : null;
     const price = Number.isFinite(optionPrice)
       ? optionPrice
       : Number.isFinite(workshop.numericPrice)
@@ -2542,28 +3036,40 @@ function AdminPosPage() {
 
   const handleAddClassItem = (classDoc, overrides = {}) => {
     if (!classDoc) return;
-    const selectedSlotId =
-      (overrides?.slotId || classSelections[classDoc.id] || classDoc.slots[0]?.id || "")
-        .toString()
-        .trim();
+    const selectedSlotId = (
+      overrides?.slotId ||
+      classSelections[classDoc.id] ||
+      classDoc.slots[0]?.id ||
+      ""
+    )
+      .toString()
+      .trim();
     const selectedSlot =
       classDoc.slots.find((slot) => slot.id === selectedSlotId) ||
       classDoc.slots.find((slot) => slot.label === overrides?.sessionLabel) ||
       classDoc.slots[0] ||
       null;
-    const selectedOptionId =
-      (overrides?.optionId || classOptionSelections[classDoc.id] || classDoc.options[0]?.id || "")
-        .toString()
-        .trim();
+    const selectedOptionId = (
+      overrides?.optionId ||
+      classOptionSelections[classDoc.id] ||
+      classDoc.options[0]?.id ||
+      ""
+    )
+      .toString()
+      .trim();
     const selectedOption =
       classDoc.options.find(
-        (option) => option.id === selectedOptionId || option.label === overrides?.optionLabel,
+        (option) =>
+          option.id === selectedOptionId ||
+          option.label === overrides?.optionLabel,
       ) || null;
     if (classDoc.options.length > 0 && !selectedOption) {
       showToast("Select an option before adding this class.", "error");
       return;
     }
-    const optionPrice = Number.isFinite(selectedOption?.price) ? selectedOption.price : null;
+    const optionPrice = Number.isFinite(selectedOption?.price)
+      ? selectedOption.price
+      : null;
     const price = Number.isFinite(optionPrice)
       ? optionPrice
       : Number.isFinite(classDoc.numericPrice)
@@ -2600,16 +3106,22 @@ function AdminPosPage() {
 
   const handleAddEventItem = (event, overrides = {}) => {
     if (!event) return;
-    const selectedSlotId =
-      (overrides?.slotId || eventSelections[event.id] || event.slots[0]?.id || "")
-        .toString()
-        .trim();
+    const selectedSlotId = (
+      overrides?.slotId ||
+      eventSelections[event.id] ||
+      event.slots[0]?.id ||
+      ""
+    )
+      .toString()
+      .trim();
     const selectedSlot =
       event.slots.find((slot) => slot.id === selectedSlotId) ||
       event.slots.find((slot) => slot.label === overrides?.sessionLabel) ||
       event.slots[0] ||
       null;
-    const sessionLabel = selectedSlot?.label ? `${event.displayDate} - ${selectedSlot.label}` : event.displayDate;
+    const sessionLabel = selectedSlot?.label
+      ? `${event.displayDate} - ${selectedSlot.label}`
+      : event.displayDate;
     handleAddToCart({
       key: buildCartKey({
         type: "event",
@@ -2635,27 +3147,33 @@ function AdminPosPage() {
   const handleAddTopSellerItem = (entry) => {
     if (!entry?.id) return;
     if (entry.department === "products") {
-      const product = normalizedProducts.find((item) => item.id === entry.sourceId) || null;
+      const product =
+        normalizedProducts.find((item) => item.id === entry.sourceId) || null;
       handleAddProductItem(product, entry.actionConfig);
       return;
     }
     if (entry.department === "pos-products") {
-      const product = normalizedPosProducts.find((item) => item.id === entry.sourceId) || null;
+      const product =
+        normalizedPosProducts.find((item) => item.id === entry.sourceId) ||
+        null;
       handleAddPosProductItem(product);
       return;
     }
     if (entry.serviceType === "workshop") {
-      const workshop = liveWorkshops.find((item) => item.id === entry.sourceId) || null;
+      const workshop =
+        liveWorkshops.find((item) => item.id === entry.sourceId) || null;
       handleAddWorkshopItem(workshop, entry.actionConfig);
       return;
     }
     if (entry.serviceType === "class") {
-      const classDoc = normalizedClasses.find((item) => item.id === entry.sourceId) || null;
+      const classDoc =
+        normalizedClasses.find((item) => item.id === entry.sourceId) || null;
       handleAddClassItem(classDoc, entry.actionConfig);
       return;
     }
     if (entry.serviceType === "event") {
-      const event = normalizedEvents.find((item) => item.id === entry.sourceId) || null;
+      const event =
+        normalizedEvents.find((item) => item.id === entry.sourceId) || null;
       handleAddEventItem(event, entry.actionConfig);
     }
   };
@@ -2700,7 +3218,10 @@ function AdminPosPage() {
 
   const normalizeAttendeeOptions = (count, current = [], fallback) => {
     const safeCount = Math.max(1, Number.parseInt(count, 10) || 1);
-    const next = Array.from({ length: safeCount }, (_, index) => current[index] || fallback || "");
+    const next = Array.from(
+      { length: safeCount },
+      (_, index) => current[index] || fallback || "",
+    );
     return next;
   };
 
@@ -2728,27 +3249,40 @@ function AdminPosPage() {
         booking.framePreference,
       );
       const safeCount = Math.max(1, Number.parseInt(attendeeCount, 10) || 1);
-      const existingFrameSelections = Array.isArray(booking.attendeeFrameSelections)
-        ? booking.attendeeFrameSelections.map((s) => (typeof s === "string" ? s : s?.optionId || ""))
+      const existingFrameSelections = Array.isArray(
+        booking.attendeeFrameSelections,
+      )
+        ? booking.attendeeFrameSelections.map((s) =>
+            typeof s === "string" ? s : s?.optionId || "",
+          )
         : [];
       return {
         date: booking.dateKey || "",
         attendeeCount: safeCount,
         sessionId: matchedSession?.id || "",
         optionId: matchedOption?.id || "",
-        attendeeFrameSelections: normalizeAttendeeOptions(safeCount, existingFrameSelections, matchedOption?.id || ""),
+        attendeeFrameSelections: normalizeAttendeeOptions(
+          safeCount,
+          existingFrameSelections,
+          matchedOption?.id || "",
+        ),
       };
     }
     const attendeeSelections = Array.isArray(booking.attendeeSelections)
       ? booking.attendeeSelections
       : [];
     const fallbackOption =
-      attendeeSelections[0]?.optionValue || attendeeSelections[0]?.optionLabel || "";
+      attendeeSelections[0]?.optionValue ||
+      attendeeSelections[0]?.optionLabel ||
+      "";
     const options = cutFlowerOptions;
     const matchedOption =
       options.find((option) => option.id === booking.optionValue) ||
       options.find((option) => option.label === booking.optionLabel) ||
-      options.find((option) => option.id === fallbackOption || option.label === fallbackOption) ||
+      options.find(
+        (option) =>
+          option.id === fallbackOption || option.label === fallbackOption,
+      ) ||
       options[0] ||
       null;
     const attendeeOptions = attendeeSelections.length
@@ -2766,7 +3300,10 @@ function AdminPosPage() {
         );
     return {
       date: booking.dateKey || "",
-      attendeeCount: Math.max(1, Number.parseInt(attendeeCount, 10) || attendeeSelections.length || 1),
+      attendeeCount: Math.max(
+        1,
+        Number.parseInt(attendeeCount, 10) || attendeeSelections.length || 1,
+      ),
       sessionId: "",
       optionId: matchedOption?.id || "",
       attendeeOptions,
@@ -2796,7 +3333,9 @@ function AdminPosPage() {
       }
       if (type === "workshop" && field === "attendeeFrameIndex") {
         const { index, optionId } = value;
-        const selections = Array.isArray(current.attendeeFrameSelections) ? [...current.attendeeFrameSelections] : [];
+        const selections = Array.isArray(current.attendeeFrameSelections)
+          ? [...current.attendeeFrameSelections]
+          : [];
         selections[index] = optionId;
         next.attendeeFrameSelections = normalizeAttendeeOptions(
           current.attendeeCount,
@@ -2805,7 +3344,11 @@ function AdminPosPage() {
         );
       }
       if (type === "cut-flower" && field === "attendeeCount") {
-        next.attendeeOptions = normalizeAttendeeOptions(value, current.attendeeOptions, current.optionId);
+        next.attendeeOptions = normalizeAttendeeOptions(
+          value,
+          current.attendeeOptions,
+          current.optionId,
+        );
       }
       if (type === "cut-flower" && field === "optionId") {
         next.attendeeOptions = normalizeAttendeeOptions(
@@ -2816,9 +3359,15 @@ function AdminPosPage() {
       }
       if (type === "cut-flower" && field === "attendeeOptionIndex") {
         const { index, optionId } = value;
-        const options = Array.isArray(current.attendeeOptions) ? [...current.attendeeOptions] : [];
+        const options = Array.isArray(current.attendeeOptions)
+          ? [...current.attendeeOptions]
+          : [];
         options[index] = optionId;
-        next.attendeeOptions = normalizeAttendeeOptions(current.attendeeCount, options, current.optionId);
+        next.attendeeOptions = normalizeAttendeeOptions(
+          current.attendeeCount,
+          options,
+          current.optionId,
+        );
       }
       return { ...prev, [booking.id]: next };
     });
@@ -2853,74 +3402,126 @@ function AdminPosPage() {
             booking.frame,
             booking.framePreference,
           ) || null;
-        const attendeeCount = getWorkshopBookingAttendeeCount(booking, editState.attendeeCount);
+        const attendeeCount = getWorkshopBookingAttendeeCount(
+          booking,
+          editState.attendeeCount,
+        );
         const frameSelections = editState.attendeeFrameSelections || [];
         if (workshop?.options?.length > 0) {
-          const missingCount = Array.from({ length: attendeeCount }, (_, i) => frameSelections[i] || "").filter((id) => !id).length;
+          const missingCount = Array.from(
+            { length: attendeeCount },
+            (_, i) => frameSelections[i] || "",
+          ).filter((id) => !id).length;
           if (missingCount > 0) {
-            setBookingError(`Select a frame size for all ${attendeeCount} attendee${attendeeCount !== 1 ? "s" : ""}.`);
+            setBookingError(
+              `Select a frame size for all ${attendeeCount} attendee${attendeeCount !== 1 ? "s" : ""}.`,
+            );
             return;
           }
         }
-        const primaryOption = workshop?.options?.find((o) => o.id === (frameSelections[0] || editState.optionId)) || selectedOption;
+        const primaryOption =
+          workshop?.options?.find(
+            (o) => o.id === (frameSelections[0] || editState.optionId),
+          ) || selectedOption;
         const perAttendeePrice = getWorkshopBookingUnitPrice({
           booking,
           option: primaryOption,
           workshop,
           attendeeCount,
         });
-        const totalFromSelections = workshop?.options?.length > 0 && frameSelections.length > 0
-          ? frameSelections.slice(0, attendeeCount).reduce((sum, optionId) => {
-              const option = workshop.options.find((o) => o.id === optionId);
-              const price = Number(option?.price);
-              return Number.isFinite(price) ? sum + price : sum;
-            }, 0)
-          : null;
-        const totalPrice = totalFromSelections > 0
-          ? totalFromSelections
-          : getWorkshopBookingTotalPrice({ booking, option: primaryOption, workshop, attendeeCount });
-        const attendeeFrameSelectionsSave = frameSelections.slice(0, attendeeCount).map((optionId, index) => {
-          const option = workshop?.options?.find((o) => o.id === optionId) || null;
-          return {
-            attendee: index + 1,
-            optionId: option?.id || optionId || null,
-            optionLabel: option?.label || null,
-            price: option?.price ?? null,
-          };
-        });
+        const totalFromSelections =
+          workshop?.options?.length > 0 && frameSelections.length > 0
+            ? frameSelections
+                .slice(0, attendeeCount)
+                .reduce((sum, optionId) => {
+                  const option = workshop.options.find(
+                    (o) => o.id === optionId,
+                  );
+                  const price = Number(option?.price);
+                  return Number.isFinite(price) ? sum + price : sum;
+                }, 0)
+            : null;
+        const totalPrice =
+          totalFromSelections > 0
+            ? totalFromSelections
+            : getWorkshopBookingTotalPrice({
+                booking,
+                option: primaryOption,
+                workshop,
+                attendeeCount,
+              });
+        const attendeeFrameSelectionsSave = frameSelections
+          .slice(0, attendeeCount)
+          .map((optionId, index) => {
+            const option =
+              workshop?.options?.find((o) => o.id === optionId) || null;
+            return {
+              attendee: index + 1,
+              optionId: option?.id || optionId || null,
+              optionLabel: option?.label || null,
+              price: option?.price ?? null,
+            };
+          });
         await updateDoc(doc(db, collectionName, booking.id), {
           sessionDate: editState.date,
           sessionLabel: selectedSession?.label || booking.sessionLabel || null,
           sessionDateLabel:
-            selectedSession?.formatted || booking.sessionDateLabel || booking.scheduledDateLabel || null,
+            selectedSession?.formatted ||
+            booking.sessionDateLabel ||
+            booking.scheduledDateLabel ||
+            null,
           scheduledDateLabel:
-            selectedSession?.formatted || booking.scheduledDateLabel || booking.sessionDateLabel || null,
+            selectedSession?.formatted ||
+            booking.scheduledDateLabel ||
+            booking.sessionDateLabel ||
+            null,
           sessionTimeRange:
-            selectedSession?.timeRangeLabel || booking.sessionTimeRange || booking.sessionLabel || null,
+            selectedSession?.timeRangeLabel ||
+            booking.sessionTimeRange ||
+            booking.sessionLabel ||
+            null,
           sessionId: selectedSession?.id || booking.sessionId || null,
           attendeeCount,
           attendeeFrameSelections: attendeeFrameSelectionsSave,
-          frame: primaryOption?.label || booking.optionLabel || booking.frame || "Workshop",
-          framePreference: primaryOption?.id || booking.optionId || booking.optionValue || booking.framePreference || null,
+          frame:
+            primaryOption?.label ||
+            booking.optionLabel ||
+            booking.frame ||
+            "Workshop",
+          framePreference:
+            primaryOption?.id ||
+            booking.optionId ||
+            booking.optionValue ||
+            booking.framePreference ||
+            null,
           optionLabel: primaryOption?.label || booking.optionLabel || null,
           optionValue: primaryOption?.id || booking.optionValue || null,
-          totalPrice: Number.isFinite(totalPrice) && totalPrice > 0 ? totalPrice : booking.totalPrice ?? null,
+          totalPrice:
+            Number.isFinite(totalPrice) && totalPrice > 0
+              ? totalPrice
+              : (booking.totalPrice ?? null),
           price:
             Number.isFinite(perAttendeePrice) && perAttendeePrice > 0
               ? perAttendeePrice
-              : booking.price ?? booking.totalPrice ?? null,
+              : (booking.price ?? booking.totalPrice ?? null),
           updatedAt: serverTimestamp(),
         });
       } else {
         const selectedOption =
-          cutFlowerOptions.find((option) => option.id === editState.optionId) || null;
-        const attendeeCount = Math.max(1, Number.parseInt(editState.attendeeCount, 10) || 1);
+          cutFlowerOptions.find((option) => option.id === editState.optionId) ||
+          null;
+        const attendeeCount = Math.max(
+          1,
+          Number.parseInt(editState.attendeeCount, 10) || 1,
+        );
         const attendeeOptions = normalizeAttendeeOptions(
           attendeeCount,
           editState.attendeeOptions || [],
           editState.optionId,
         );
-        const optionLookup = new Map(cutFlowerOptions.map((option) => [option.id, option]));
+        const optionLookup = new Map(
+          cutFlowerOptions.map((option) => [option.id, option]),
+        );
         const attendeeSelections = attendeeOptions.map((optionId, index) => {
           const option = optionLookup.get(optionId);
           return {
@@ -2934,14 +3535,20 @@ function AdminPosPage() {
           const price = Number(selection.estimatedPrice);
           return Number.isFinite(price) ? sum + price : sum;
         }, 0);
-        const nextEventDate = applyDateToDateTime(editState.date, booking.eventDate);
+        const nextEventDate = applyDateToDateTime(
+          editState.date,
+          booking.eventDate,
+        );
         await updateDoc(doc(db, "cutFlowerBookings", booking.id), {
           eventDate: nextEventDate,
           attendeeCount,
           attendeeSelections,
           optionValue: selectedOption?.id || editState.optionId || null,
           optionLabel: selectedOption?.label || editState.optionId || null,
-          estimatedTotal: Number.isFinite(estimatedTotal) && estimatedTotal > 0 ? estimatedTotal : booking.estimatedTotal ?? null,
+          estimatedTotal:
+            Number.isFinite(estimatedTotal) && estimatedTotal > 0
+              ? estimatedTotal
+              : (booking.estimatedTotal ?? null),
           updatedAt: serverTimestamp(),
         });
       }
@@ -2954,8 +3561,13 @@ function AdminPosPage() {
 
   const handleAddBookingToCart = (booking, type) => {
     const editState = getBookingEditState(booking, type);
-    const attendeeCount = getWorkshopBookingAttendeeCount(booking, editState.attendeeCount);
-    let priceValue = Number.isFinite(booking.numericPrice) ? booking.numericPrice : 0;
+    const attendeeCount = getWorkshopBookingAttendeeCount(
+      booking,
+      editState.attendeeCount,
+    );
+    let priceValue = Number.isFinite(booking.numericPrice)
+      ? booking.numericPrice
+      : 0;
     let quantityValue = 1;
     let selectedWorkshopOption = null;
     let perAttendeePrice = null;
@@ -2974,31 +3586,49 @@ function AdminPosPage() {
         ) || null;
       const cartFrameSelections = editState.attendeeFrameSelections || [];
       if (workshop?.options?.length > 0) {
-        const missing = Array.from({ length: attendeeCount }, (_, i) => cartFrameSelections[i] || "").some((id) => !id);
+        const missing = Array.from(
+          { length: attendeeCount },
+          (_, i) => cartFrameSelections[i] || "",
+        ).some((id) => !id);
         if (missing) {
-          setBookingError("Select a frame size for each attendee before adding to the cart.");
+          setBookingError(
+            "Select a frame size for each attendee before adding to the cart.",
+          );
           return;
         }
       }
-      selectedWorkshopOption = workshop?.options?.find((o) => o.id === (cartFrameSelections[0] || editState.optionId)) || selectedWorkshopOption;
+      selectedWorkshopOption =
+        workshop?.options?.find(
+          (o) => o.id === (cartFrameSelections[0] || editState.optionId),
+        ) || selectedWorkshopOption;
       perAttendeePrice = getWorkshopBookingUnitPrice({
         booking,
         option: selectedWorkshopOption,
         workshop,
         attendeeCount,
       });
-      const totalFromCartSelections = workshop?.options?.length > 0 && cartFrameSelections.length > 0
-        ? cartFrameSelections.slice(0, attendeeCount).reduce((sum, optionId) => {
-            const option = workshop?.options?.find((o) => o.id === optionId);
-            const price = Number(option?.price);
-            return Number.isFinite(price) ? sum + price : sum;
-          }, 0)
-        : null;
+      const totalFromCartSelections =
+        workshop?.options?.length > 0 && cartFrameSelections.length > 0
+          ? cartFrameSelections
+              .slice(0, attendeeCount)
+              .reduce((sum, optionId) => {
+                const option = workshop?.options?.find(
+                  (o) => o.id === optionId,
+                );
+                const price = Number(option?.price);
+                return Number.isFinite(price) ? sum + price : sum;
+              }, 0)
+          : null;
       if (totalFromCartSelections > 0) {
         priceValue = totalFromCartSelections;
         quantityValue = 1;
       } else {
-        const bookingTotal = getWorkshopBookingTotalPrice({ booking, option: selectedWorkshopOption, workshop, attendeeCount });
+        const bookingTotal = getWorkshopBookingTotalPrice({
+          booking,
+          option: selectedWorkshopOption,
+          workshop,
+          attendeeCount,
+        });
         if (Number.isFinite(bookingTotal) && bookingTotal > 0) {
           priceValue = bookingTotal;
           quantityValue = 1;
@@ -3008,7 +3638,13 @@ function AdminPosPage() {
         }
       }
       bookingLabelName =
-        (booking.name || booking.customerName || booking.email || booking.workshopTitle || "Guest")
+        (
+          booking.name ||
+          booking.customerName ||
+          booking.email ||
+          booking.workshopTitle ||
+          "Guest"
+        )
           .toString()
           .trim() || "Guest";
     } else {
@@ -3026,15 +3662,17 @@ function AdminPosPage() {
         quantityValue = 1;
       } else {
         const selectedOption =
-          cutFlowerOptions.find((option) => option.id === editState.optionId) || null;
+          cutFlowerOptions.find((option) => option.id === editState.optionId) ||
+          null;
         if (Number.isFinite(selectedOption?.price)) {
           priceValue = selectedOption.price;
           quantityValue = attendeeCount;
         }
       }
       bookingLabelName =
-        (booking.customerName || booking.email || booking.name || "Cut flower").toString().trim() ||
-        "Cut flower";
+        (booking.customerName || booking.email || booking.name || "Cut flower")
+          .toString()
+          .trim() || "Cut flower";
     }
     const label =
       type === "workshop"
@@ -3044,11 +3682,14 @@ function AdminPosPage() {
       type === "workshop"
         ? workshopLookup
             .get(booking.workshopId)
-            ?.sessions?.find((session) => session.id === editState.sessionId) || null
+            ?.sessions?.find((session) => session.id === editState.sessionId) ||
+          null
         : null;
     const sessionLabel =
       type === "workshop"
-        ? selectedWorkshopSession?.label || booking.sessionLabel || booking.displayDate
+        ? selectedWorkshopSession?.label ||
+          booking.sessionLabel ||
+          booking.displayDate
         : booking.displayDate;
     const sessionDateLabel =
       type === "workshop"
@@ -3086,15 +3727,22 @@ function AdminPosPage() {
         customerEmail: booking.email || "",
         customerPhone: booking.phone || "",
         workshopId: type === "workshop" ? booking.workshopId || null : null,
-        workshopTitle: type === "workshop" ? booking.workshopTitle || "Workshop" : null,
+        workshopTitle:
+          type === "workshop" ? booking.workshopTitle || "Workshop" : null,
         sessionLabel,
         sessionDate:
           type === "workshop"
-            ? selectedWorkshopSession?.date || editState.date || booking.sessionDate || null
+            ? selectedWorkshopSession?.date ||
+              editState.date ||
+              booking.sessionDate ||
+              null
             : booking.dateKey || null,
         sessionId:
           type === "workshop"
-            ? selectedWorkshopSession?.id || editState.sessionId || booking.sessionId || null
+            ? selectedWorkshopSession?.id ||
+              editState.sessionId ||
+              booking.sessionId ||
+              null
             : null,
         sessionDateLabel: type === "workshop" ? sessionDateLabel : null,
         scheduledDateLabel: type === "workshop" ? sessionDateLabel : null,
@@ -3109,7 +3757,10 @@ function AdminPosPage() {
             : editState.optionId || null,
         optionLabel:
           type === "workshop"
-            ? selectedWorkshopOption?.label || booking.optionLabel || booking.frame || null
+            ? selectedWorkshopOption?.label ||
+              booking.optionLabel ||
+              booking.frame ||
+              null
             : null,
         framePreference:
           type === "workshop"
@@ -3121,14 +3772,24 @@ function AdminPosPage() {
             : null,
         perAttendeePrice: type === "workshop" ? perAttendeePrice : null,
         totalPrice: type === "workshop" ? priceValue : null,
-        attendeeOptions: type === "cut-flower" ? editState.attendeeOptions || [] : null,
-        attendeeFrameSelections: type === "workshop"
-          ? (editState.attendeeFrameSelections || []).slice(0, attendeeCount).map((optionId, index) => {
-              const workshop = workshopLookup.get(booking.workshopId);
-              const option = workshop?.options?.find((o) => o.id === optionId) || null;
-              return { attendee: index + 1, optionId: option?.id || optionId || null, optionLabel: option?.label || null, price: option?.price ?? null };
-            })
-          : null,
+        attendeeOptions:
+          type === "cut-flower" ? editState.attendeeOptions || [] : null,
+        attendeeFrameSelections:
+          type === "workshop"
+            ? (editState.attendeeFrameSelections || [])
+                .slice(0, attendeeCount)
+                .map((optionId, index) => {
+                  const workshop = workshopLookup.get(booking.workshopId);
+                  const option =
+                    workshop?.options?.find((o) => o.id === optionId) || null;
+                  return {
+                    attendee: index + 1,
+                    optionId: option?.id || optionId || null,
+                    optionLabel: option?.label || null,
+                    price: option?.price ?? null,
+                  };
+                })
+            : null,
         originalStatus: booking.status || null,
         originalBookingStatus:
           type === "workshop"
@@ -3137,7 +3798,8 @@ function AdminPosPage() {
         originalAdminBookingStatus:
           type === "workshop" ? booking.adminBookingStatus || null : null,
         originalPaid: booking.paid === true,
-        originalPaymentStatus: booking.paymentStatus || booking.payment_status || null,
+        originalPaymentStatus:
+          booking.paymentStatus || booking.payment_status || null,
         originalAdminPaymentStatus:
           type === "workshop" ? booking.adminPaymentStatus || null : null,
         originalPaymentMethod: booking.paymentMethod || null,
@@ -3187,10 +3849,50 @@ function AdminPosPage() {
     setCurrentStep(POS_STEP_ORDER);
     setPosMobilePanel("browse");
     setStepOneAttemptedNext(false);
-    setEmailBlurred(false);
     setActiveBookingEditor(null);
     setActivePosTableNumber(null);
     setActivePosTabId(null);
+  };
+
+  const handlePrinterBridgeUrlChange = (value) => {
+    setPrinterBridgeUrl(value);
+    persistPosPrinterBridgeUrl(value);
+  };
+
+  const handlePrinterNameChange = (value) => {
+    setPrinterName(value);
+    persistPosPrinterName(value);
+  };
+
+  const handleSavePrinterSettings = async () => {
+    if (!db || !inventoryEnabled) return;
+    const normalizedBridgeUrl = (printerBridgeUrl || "")
+      .trim()
+      .replace(/\/+$/, "");
+    const normalizedPrinterName = (printerName || "").trim();
+
+    setPrinterSettingsSaving(true);
+    try {
+      await setDoc(
+        doc(db, "posPrinterConfig", "main"),
+        {
+          bridgeUrl: normalizedBridgeUrl,
+          printerName: normalizedPrinterName,
+          updatedAt: serverTimestamp(),
+          updatedBy: user?.uid || null,
+        },
+        { merge: true },
+      );
+      setPrinterBridgeUrl(normalizedBridgeUrl);
+      setPrinterName(normalizedPrinterName);
+      persistPosPrinterBridgeUrl(normalizedBridgeUrl);
+      persistPosPrinterName(normalizedPrinterName);
+      showToast("Printer settings saved for all POS devices.", "success");
+    } catch (error) {
+      showToast(error.message || "Unable to save printer settings.", "error");
+    } finally {
+      setPrinterSettingsSaving(false);
+    }
   };
 
   const handleSelectTable = async (tableNum) => {
@@ -3199,7 +3901,9 @@ function AdminPosPage() {
     if (existingTab) {
       setActivePosTableNumber(tableNum);
       setActivePosTabId(existingTab.id);
-      const savedItems = Array.isArray(existingTab.items) ? existingTab.items : [];
+      const savedItems = Array.isArray(existingTab.items)
+        ? existingTab.items
+        : [];
       setCartItems(savedItems);
       if (existingTab.customerName || existingTab.customerEmail) {
         setCustomer((prev) => ({
@@ -3254,19 +3958,17 @@ function AdminPosPage() {
       activePosTableNumber != null
         ? posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`
         : null;
-    if (printerStatus === "connected") {
-      try {
-        await printBillViaUsb(cartItems, pricing.cartSubtotal, tableLabel, formatCurrency);
-      } catch (err) {
-        showToast(err.message || "Print failed.", "error");
-      }
-    } else {
-      const html = buildBillHtml(cartItems, pricing.cartSubtotal, tableLabel, formatCurrency);
-      const win = window.open("", "_blank", "width=420,height=600");
-      if (win) {
-        win.document.write(html);
-        win.document.close();
-      }
+    try {
+      await printBillViaBridge({
+        bridgeUrl: printerBridgeUrl,
+        printerName,
+        cartItems,
+        subtotal: pricing.cartSubtotal,
+        tableLabel,
+      });
+      showToast("Bill sent to printer.", "success");
+    } catch (err) {
+      showToast(err.message || "Could not print the bill.", "error");
     }
   };
 
@@ -3291,7 +3993,11 @@ function AdminPosPage() {
     const trimmed = raw.trim();
     const current = posTableNames[num] || "";
     if (trimmed === current) {
-      setPendingTableNames((prev) => { const n = { ...prev }; delete n[num]; return n; });
+      setPendingTableNames((prev) => {
+        const n = { ...prev };
+        delete n[num];
+        return n;
+      });
       return;
     }
     const updatedNames = { ...posTableNames };
@@ -3301,7 +4007,11 @@ function AdminPosPage() {
       delete updatedNames[num];
     }
     setPosTableNames(updatedNames);
-    setPendingTableNames((prev) => { const n = { ...prev }; delete n[num]; return n; });
+    setPendingTableNames((prev) => {
+      const n = { ...prev };
+      delete n[num];
+      return n;
+    });
     try {
       await saveTableConfig(updatedNames, posTableCount);
     } catch (error) {
@@ -3315,7 +4025,9 @@ function AdminPosPage() {
     try {
       const merged = { ...posTableNames, ...pendingTableNames };
       const cleaned = Object.fromEntries(
-        Object.entries(merged).filter(([, v]) => typeof v === "string" && v.trim().length > 0),
+        Object.entries(merged).filter(
+          ([, v]) => typeof v === "string" && v.trim().length > 0,
+        ),
       );
       await saveTableConfig(cleaned, posTableCount);
       setPosTableNames(cleaned);
@@ -3370,7 +4082,10 @@ function AdminPosPage() {
 
   const goToConfirmStep = () => {
     if (!stepThreeValid) {
-      showToast(stepThreeError || "Complete the payment details before continuing", "error");
+      showToast(
+        stepThreeError || "Complete the payment details before continuing",
+        "error",
+      );
       return;
     }
     showToast("Payment set — review and confirm the order", "info");
@@ -3403,7 +4118,7 @@ function AdminPosPage() {
       quantity: quantityValue === null ? 0 : quantityValue,
       forceOutOfStock: Boolean(posProductForm.forceOutOfStock),
       status: posProductForm.status || "active",
-      imageUrl: posProductImageFile ? "" : (posProductForm.imageUrl || ""),
+      imageUrl: posProductImageFile ? "" : posProductForm.imageUrl || "",
       updatedAt: serverTimestamp(),
     };
 
@@ -3427,9 +4142,13 @@ function AdminPosPage() {
           const imageRef = storageRef(storage, `posProducts/${docId}`);
           await uploadBytes(imageRef, posProductImageFile);
           const downloadUrl = await getDownloadURL(imageRef);
-          await updateDoc(doc(db, "posProducts", docId), { imageUrl: downloadUrl });
+          await updateDoc(doc(db, "posProducts", docId), {
+            imageUrl: downloadUrl,
+          });
         } catch (uploadError) {
-          setPosProductError(`Product saved but image upload failed: ${uploadError.message || "unknown error"}`);
+          setPosProductError(
+            `Product saved but image upload failed: ${uploadError.message || "unknown error"}`,
+          );
         }
       }
       setPosProductForm(INITIAL_POS_PRODUCT);
@@ -3450,9 +4169,13 @@ function AdminPosPage() {
     setPosProductForm({
       name: product.name || "",
       category: categoryValue,
-      price: Number.isFinite(parseNumber(product.price)) ? String(product.price) : "",
+      price: Number.isFinite(parseNumber(product.price))
+        ? String(product.price)
+        : "",
       quantity:
-        product.quantity === undefined || product.quantity === null ? "" : String(product.quantity),
+        product.quantity === undefined || product.quantity === null
+          ? ""
+          : String(product.quantity),
       forceOutOfStock: Boolean(product.forceOutOfStock),
       status: product.status || "active",
       imageUrl: product.imageUrl || "",
@@ -3460,7 +4183,10 @@ function AdminPosPage() {
     setPosProductImageFile(null);
     setPosProductImagePreview(product.imageUrl || "");
     setPosProductCategorySelection(
-      resolvePosProductCategorySelection(categoryValue, posProductCategoryChoices),
+      resolvePosProductCategorySelection(
+        categoryValue,
+        posProductCategoryChoices,
+      ),
     );
   };
 
@@ -3530,19 +4256,26 @@ function AdminPosPage() {
           value: parseNumber(entry.value, 0),
           currency: (entry.currency || "ZAR").toString().trim() || "ZAR",
           expiresAt: entry.expiresAt || null,
-          selectedOptions: Array.isArray(entry.selectedOptions) ? entry.selectedOptions : [],
-          giftCardMode: (entry.giftCardMode || "").toString().trim().toLowerCase() || null,
+          selectedOptions: Array.isArray(entry.selectedOptions)
+            ? entry.selectedOptions
+            : [],
+          giftCardMode:
+            (entry.giftCardMode || "").toString().trim().toLowerCase() || null,
           catalogItemRef:
             entry?.catalogItemRef && typeof entry.catalogItemRef === "object"
               ? entry.catalogItemRef
               : null,
-          matchedAtIso: (entry.matchedAtIso || new Date().toISOString()).toString(),
+          matchedAtIso: (
+            entry.matchedAtIso || new Date().toISOString()
+          ).toString(),
         };
       })
       .filter(Boolean);
     const hasMatchedGiftCards = normalizedGiftCardMatches.length > 0;
     const resolvedPaymentMethod =
-      pricing.amountDue <= 0 && hasMatchedGiftCards ? "gift-card" : paymentMethod;
+      pricing.amountDue <= 0 && hasMatchedGiftCards
+        ? "gift-card"
+        : paymentMethod;
 
     let confirmedChange = null;
     if (resolvedPaymentMethod === "cash" && pricing.amountDue > 0) {
@@ -3563,10 +4296,14 @@ function AdminPosPage() {
 
     const outOfStockItems = cartItems.filter((item) => {
       if (item.type === "product") {
-        const product = normalizedProducts.find((entry) => entry.id === item.sourceId);
+        const product = normalizedProducts.find(
+          (entry) => entry.id === item.sourceId,
+        );
         const variantId = (item?.metadata?.variantId || "").toString().trim();
         if (variantId) {
-          const variant = product?.variants?.find((entry) => entry.id === variantId);
+          const variant = product?.variants?.find(
+            (entry) => entry.id === variantId,
+          );
           const currentQty = getTrackedQuantity(variant);
           return currentQty !== null && currentQty < item.quantity;
         }
@@ -3574,7 +4311,9 @@ function AdminPosPage() {
         return currentQty !== null && currentQty < item.quantity;
       }
       if (item.type === "pos-product") {
-        const product = normalizedPosProducts.find((entry) => entry.id === item.sourceId);
+        const product = normalizedPosProducts.find(
+          (entry) => entry.id === item.sourceId,
+        );
         const currentQty = getTrackedQuantity(product);
         return currentQty !== null && currentQty < item.quantity;
       }
@@ -3582,7 +4321,8 @@ function AdminPosPage() {
     });
 
     if (outOfStockItems.length > 0) {
-      const msg = "Some items do not have enough stock. Please adjust quantities.";
+      const msg =
+        "Some items do not have enough stock. Please adjust quantities.";
       setCheckoutError(msg);
       showToast(msg, "error");
       return;
@@ -3598,7 +4338,7 @@ function AdminPosPage() {
       type: discountType,
       value:
         discountType === "percent"
-          ? pricing.discountPercent ?? 0
+          ? (pricing.discountPercent ?? 0)
           : discountType === "amount"
             ? pricing.discountAmount
             : 0,
@@ -3635,7 +4375,9 @@ function AdminPosPage() {
         metadata,
       };
     });
-    const saleItemByLineId = new Map(saleItems.map((item) => [item.lineId, item]));
+    const saleItemByLineId = new Map(
+      saleItems.map((item) => [item.lineId, item]),
+    );
     const salePayload = {
       receiptNumber,
       dateKey: saleDateKey,
@@ -3669,9 +4411,11 @@ function AdminPosPage() {
         lastVoidedByUid: null,
         lastVoidedByEmail: null,
       },
-      cashReceived: resolvedPaymentMethod === "cash" ? cashStats.cashReceived : null,
+      cashReceived:
+        resolvedPaymentMethod === "cash" ? cashStats.cashReceived : null,
       changeDue: resolvedPaymentMethod === "cash" ? cashStats.changeDue : null,
-      changeConfirmed: resolvedPaymentMethod === "cash" ? confirmedChange : null,
+      changeConfirmed:
+        resolvedPaymentMethod === "cash" ? confirmedChange : null,
       ...(normalizedGiftCardMatches.length > 0
         ? {
             giftCardMatches: normalizedGiftCardMatches,
@@ -3685,7 +4429,8 @@ function AdminPosPage() {
     try {
       const redeemedByUid = (user?.uid || "").toString().trim() || null;
       const redeemedByEmail = (user?.email || "").toString().trim() || null;
-      const workshopSeatReservationGroups = buildPosWorkshopSeatReservationGroups(cartItems);
+      const workshopSeatReservationGroups =
+        buildPosWorkshopSeatReservationGroups(cartItems);
       await runTransaction(db, async (transaction) => {
         const nowMs = Date.now();
         const giftCardRefs = [];
@@ -3697,16 +4442,25 @@ function AdminPosPage() {
             throw new Error(`Gift card ${match.code} could not be found.`);
           }
           const giftCardData = giftCardSnap.data() || {};
-          const giftCardStatus = normalizeGiftCardStatus(giftCardData.status || "active");
+          const giftCardStatus = normalizeGiftCardStatus(
+            giftCardData.status || "active",
+          );
           if (giftCardStatus === "archived") {
             throw new Error(`Gift card ${match.code} could not be found.`);
           }
-          if (giftCardStatus !== "active" || giftCardData?.isRedeemable === false) {
-            throw new Error(`Gift card ${match.code} is no longer active and cannot be redeemed.`);
+          if (
+            giftCardStatus !== "active" ||
+            giftCardData?.isRedeemable === false
+          ) {
+            throw new Error(
+              `Gift card ${match.code} is no longer active and cannot be redeemed.`,
+            );
           }
           const expiresAtDate = parseDateValue(giftCardData?.expiresAt);
           if (expiresAtDate && expiresAtDate.getTime() < nowMs) {
-            throw new Error(`Gift card ${match.code} has expired and cannot be redeemed.`);
+            throw new Error(
+              `Gift card ${match.code} has expired and cannot be redeemed.`,
+            );
           }
           giftCardRefs.push({ ref: giftCardRef, match });
         }
@@ -3755,63 +4509,85 @@ function AdminPosPage() {
       const stockUpdates = cartItems.reduce((map, item) => {
         if (item.type !== "product" && item.type !== "pos-product") return map;
         const variantId =
-          item.type === "product" ? (item?.metadata?.variantId || "").toString().trim() : "";
+          item.type === "product"
+            ? (item?.metadata?.variantId || "").toString().trim()
+            : "";
         const key = `${item.type}:${item.sourceId}:${variantId}`;
         map.set(key, (map.get(key) || 0) + item.quantity);
         return map;
       }, new Map());
 
-      const stockPromises = Array.from(stockUpdates.entries()).map(([key, quantity]) => {
-        const [type, sourceId, variantId = ""] = key.split(":");
-        const sourceCollection = type === "product" ? "products" : "posProducts";
-        const sourceList = type === "product" ? normalizedProducts : normalizedPosProducts;
-        const sourceItem = sourceList.find((entry) => entry.id === sourceId);
-        if (type === "product" && variantId) {
-          const rawVariants = Array.isArray(sourceItem?.rawVariants) ? sourceItem.rawVariants : [];
-          if (!rawVariants.length) return null;
-          let didChange = false;
-          const nextVariants = rawVariants.map((variant) => {
-            const resolvedVariantId = (variant?.id || variant?.label || variant?.name || "")
-              .toString()
-              .trim();
-            if (resolvedVariantId !== variantId) return variant;
-            const currentQty = getTrackedQuantity(variant);
-            if (currentQty === null) return variant;
-            const nextQty = Math.max(0, currentQty - quantity);
-            didChange = true;
-            const nextVariant = {
-              ...variant,
-              stock_quantity: nextQty,
-            };
-            if (Object.prototype.hasOwnProperty.call(variant, "stockQuantity")) {
-              nextVariant.stockQuantity = nextQty;
-            }
-            if (Object.prototype.hasOwnProperty.call(variant, "quantity")) {
-              nextVariant.quantity = nextQty;
-            }
-            return nextVariant;
-          });
-          if (!didChange) return null;
-          return updateDoc(doc(db, sourceCollection, sourceId), {
-            variants: nextVariants,
+      const stockPromises = Array.from(stockUpdates.entries()).map(
+        ([key, quantity]) => {
+          const [type, sourceId, variantId = ""] = key.split(":");
+          const sourceCollection =
+            type === "product" ? "products" : "posProducts";
+          const sourceList =
+            type === "product" ? normalizedProducts : normalizedPosProducts;
+          const sourceItem = sourceList.find((entry) => entry.id === sourceId);
+          if (type === "product" && variantId) {
+            const rawVariants = Array.isArray(sourceItem?.rawVariants)
+              ? sourceItem.rawVariants
+              : [];
+            if (!rawVariants.length) return null;
+            let didChange = false;
+            const nextVariants = rawVariants.map((variant) => {
+              const resolvedVariantId = (
+                variant?.id ||
+                variant?.label ||
+                variant?.name ||
+                ""
+              )
+                .toString()
+                .trim();
+              if (resolvedVariantId !== variantId) return variant;
+              const currentQty = getTrackedQuantity(variant);
+              if (currentQty === null) return variant;
+              const nextQty = Math.max(0, currentQty - quantity);
+              didChange = true;
+              const nextVariant = {
+                ...variant,
+                stock_quantity: nextQty,
+              };
+              if (
+                Object.prototype.hasOwnProperty.call(variant, "stockQuantity")
+              ) {
+                nextVariant.stockQuantity = nextQty;
+              }
+              if (Object.prototype.hasOwnProperty.call(variant, "quantity")) {
+                nextVariant.quantity = nextQty;
+              }
+              return nextVariant;
+            });
+            if (!didChange) return null;
+            return updateDoc(doc(db, sourceCollection, sourceId), {
+              variants: nextVariants,
+              updatedAt: serverTimestamp(),
+            });
+          }
+          const currentQty = getTrackedQuantity(sourceItem);
+          if (currentQty === null) return null;
+          const nextQty = Math.max(0, currentQty - quantity);
+          const updatePayload = {
+            stock_quantity: nextQty,
             updatedAt: serverTimestamp(),
-          });
-        }
-        const currentQty = getTrackedQuantity(sourceItem);
-        if (currentQty === null) return null;
-        const nextQty = Math.max(0, currentQty - quantity);
-        const updatePayload = {
-          stock_quantity: nextQty,
-          updatedAt: serverTimestamp(),
-        };
-        if (Object.prototype.hasOwnProperty.call(sourceItem || {}, "stockQuantity")) {
-          updatePayload.stockQuantity = nextQty;
-        }
-        if (Object.prototype.hasOwnProperty.call(sourceItem || {}, "quantity")) {
-          updatePayload.quantity = nextQty;
-        }
-        return updateDoc(doc(db, sourceCollection, sourceId), updatePayload);
-      });
+          };
+          if (
+            Object.prototype.hasOwnProperty.call(
+              sourceItem || {},
+              "stockQuantity",
+            )
+          ) {
+            updatePayload.stockQuantity = nextQty;
+          }
+          if (
+            Object.prototype.hasOwnProperty.call(sourceItem || {}, "quantity")
+          ) {
+            updatePayload.quantity = nextQty;
+          }
+          return updateDoc(doc(db, sourceCollection, sourceId), updatePayload);
+        },
+      );
 
       const bookingPromises = cartItems
         .filter((item) => item.type === "workshop")
@@ -3820,7 +4596,9 @@ function AdminPosPage() {
           const bookingRef = linkedBookingRefsByLineId.get(item.key);
           const attendeeCount = Math.max(
             1,
-            Number.parseInt(item.metadata?.attendeeCount, 10) || Number.parseInt(item.quantity, 10) || 1,
+            Number.parseInt(item.metadata?.attendeeCount, 10) ||
+              Number.parseInt(item.quantity, 10) ||
+              1,
           );
           const perAttendeePrice = parseNumber(
             item.metadata?.perAttendeePrice ??
@@ -3831,14 +4609,20 @@ function AdminPosPage() {
           );
           const totalPrice = parseNumber(
             item.metadata?.totalPrice ??
-              (Number.isFinite(Number(item.price)) ? Number(item.price) * Math.max(1, Number(item.quantity) || 1) : null),
+              (Number.isFinite(Number(item.price))
+                ? Number(item.price) * Math.max(1, Number(item.quantity) || 1)
+                : null),
             null,
           );
           const scheduledDateLabel =
-            (item.metadata?.scheduledDateLabel ||
+            (
+              item.metadata?.scheduledDateLabel ||
               item.metadata?.sessionDateLabel ||
               item.metadata?.sessionLabel ||
-              "").toString().trim() || null;
+              ""
+            )
+              .toString()
+              .trim() || null;
           const notesValue = [
             `POS sale (${resolvedPaymentMethod})`,
             notes.trim() || null,
@@ -3850,17 +4634,25 @@ function AdminPosPage() {
             name: trimmedCustomer.name || "Walk-in customer",
             email: trimmedCustomer.email,
             phone: trimmedCustomer.phone,
-            frame: item.metadata?.optionLabel || item.metadata?.framePreference || "POS",
-            framePreference: item.metadata?.framePreference || item.metadata?.optionId || null,
+            frame:
+              item.metadata?.optionLabel ||
+              item.metadata?.framePreference ||
+              "POS",
+            framePreference:
+              item.metadata?.framePreference || item.metadata?.optionId || null,
             sessionSource: item.metadata?.sessionSource || "admin-session",
             scheduledDateLabel,
             sessionDateLabel: scheduledDateLabel,
             sessionDate: item.metadata?.sessionDate || null,
             sessionLabel: item.metadata?.sessionLabel || "TBC",
-            sessionTimeRange: item.metadata?.sessionTimeRange || item.metadata?.sessionLabel || null,
+            sessionTimeRange:
+              item.metadata?.sessionTimeRange ||
+              item.metadata?.sessionLabel ||
+              null,
             sessionId: item.metadata?.sessionId || null,
             workshopId: item.sourceId,
-            workshopTitle: item.metadata?.workshopTitle || item.name || "Workshop",
+            workshopTitle:
+              item.metadata?.workshopTitle || item.name || "Workshop",
             attendeeCount,
             attendeeSelections: Array.isArray(item.metadata?.attendeeSelections)
               ? item.metadata.attendeeSelections
@@ -3935,12 +4727,18 @@ function AdminPosPage() {
         });
 
       const bookingUpdatePromises = cartItems
-        .filter((item) => item.type === "workshop-booking" || item.type === "cut-flower-booking")
+        .filter(
+          (item) =>
+            item.type === "workshop-booking" ||
+            item.type === "cut-flower-booking",
+        )
         .map((item) => {
           const isWorkshop = item.type === "workshop-booking";
           const collectionName =
             (item.metadata?.bookingCollection || "").toString().trim() ||
-            (isWorkshop ? WORKSHOP_BOOKINGS_COLLECTION : CUT_FLOWER_BOOKINGS_COLLECTION);
+            (isWorkshop
+              ? WORKSHOP_BOOKINGS_COLLECTION
+              : CUT_FLOWER_BOOKINGS_COLLECTION);
           const statusValue = isWorkshop ? "completed" : "fulfilled";
           const saleItem = saleItemByLineId.get(item.key);
           const updatePayload = {
@@ -3974,10 +4772,14 @@ function AdminPosPage() {
               null,
             );
             const scheduledDateLabel =
-              (item.metadata?.scheduledDateLabel ||
+              (
+                item.metadata?.scheduledDateLabel ||
                 item.metadata?.sessionDateLabel ||
                 item.metadata?.sessionLabel ||
-                "").toString().trim() || null;
+                ""
+              )
+                .toString()
+                .trim() || null;
             updatePayload.bookingStatus = "confirmed";
             updatePayload.adminBookingStatus = "confirmed";
             updatePayload.adminPaymentStatus = "paid";
@@ -4015,11 +4817,18 @@ function AdminPosPage() {
             if (Number.isFinite(perAttendeePrice) && perAttendeePrice > 0) {
               updatePayload.price = perAttendeePrice;
             }
-            if (Array.isArray(item.metadata?.attendeeFrameSelections) && item.metadata.attendeeFrameSelections.length > 0) {
-              updatePayload.attendeeFrameSelections = item.metadata.attendeeFrameSelections;
+            if (
+              Array.isArray(item.metadata?.attendeeFrameSelections) &&
+              item.metadata.attendeeFrameSelections.length > 0
+            ) {
+              updatePayload.attendeeFrameSelections =
+                item.metadata.attendeeFrameSelections;
             }
           }
-          return updateDoc(doc(db, collectionName, item.sourceId), updatePayload);
+          return updateDoc(
+            doc(db, collectionName, item.sourceId),
+            updatePayload,
+          );
         });
 
       await Promise.all([
@@ -4031,7 +4840,10 @@ function AdminPosPage() {
 
       if (sendEmailReceipt && functionsInstance) {
         try {
-          const sendReceipt = httpsCallable(functionsInstance, "sendPosReceipt");
+          const sendReceipt = httpsCallable(
+            functionsInstance,
+            "sendPosReceipt",
+          );
           await sendReceipt({
             receiptId: saleRef.id,
             receiptNumber,
@@ -4091,7 +4903,8 @@ function AdminPosPage() {
     }
   };
 
-  const disableStepNavigation = checkoutStatus === "saving" || checkoutStatus === "success";
+  const disableStepNavigation =
+    checkoutStatus === "saving" || checkoutStatus === "success";
   const todayDateKey = formatDateKey(new Date());
 
   return (
@@ -4099,7 +4912,9 @@ function AdminPosPage() {
       <header className="admin-panel__header pos-panel__header">
         <div>
           <h2>Point of Sale</h2>
-          <p className="modal__meta">Process in-store orders, bookings, and class sales.</p>
+          <p className="modal__meta">
+            Process in-store orders, bookings, and class sales.
+          </p>
         </div>
         <div className="pos-panel__actions">
           <button
@@ -4125,8 +4940,8 @@ function AdminPosPage() {
       {showPinWarning && (
         <div className="pos-warning-banner pos-pin-warning">
           <span>
-            &#9888; Your POS PIN is not set. You won&apos;t be able to void sales until you set
-            one in your profile.
+            &#9888; Your POS PIN is not set. You won&apos;t be able to void
+            sales until you set one in your profile.
           </span>
           <Link className="pos-pin-warning__link" to="/admin/profile">
             Set POS PIN
@@ -4139,7 +4954,9 @@ function AdminPosPage() {
           <div className="admin-spinner" aria-hidden="true" />
           <div>
             <h3>Processing sale...</h3>
-            <p className="modal__meta">Please wait while the sale is written and stock updates run.</p>
+            <p className="modal__meta">
+              Please wait while the sale is written and stock updates run.
+            </p>
           </div>
         </section>
       ) : checkoutStatus === "success" && receiptData ? (
@@ -4148,24 +4965,25 @@ function AdminPosPage() {
             receiptData={receiptData}
             formatCurrency={formatCurrency}
             emailReceiptRequested={sendEmailReceipt}
-            printerStatus={printerStatus}
-            onConnectPrinter={async () => {
-              try {
-                await connectPrinter();
-              } catch (err) {
-                showToast(err.message || "Could not connect to printer.", "error");
-              }
-            }}
+            printerBridgeUrl={printerBridgeUrl}
+            printerName={printerName}
+            onPrinterBridgeUrlChange={handlePrinterBridgeUrlChange}
+            onPrinterNameChange={handlePrinterNameChange}
+            onSavePrinterSettings={handleSavePrinterSettings}
+            printerSettingsSaving={printerSettingsSaving}
             onPrint={async () => {
-              if (printerStatus === "connected") {
-                try {
-                  await printViaUsb(receiptData, formatCurrency);
-                } catch (err) {
-                  showToast(err.message || "Print failed.", "error");
-                  window.print();
-                }
-              } else {
-                window.print();
+              try {
+                await printReceiptViaBridge({
+                  bridgeUrl: printerBridgeUrl,
+                  printerName,
+                  receiptData,
+                });
+                showToast("Receipt sent to printer.", "success");
+              } catch (err) {
+                showToast(
+                  err.message || "Could not print the receipt.",
+                  "error",
+                );
               }
             }}
             onNewSale={resetCheckout}
@@ -4182,7 +5000,9 @@ function AdminPosPage() {
             <header className="pos-receipt__header pos-print-hide">
               <div>
                 <h3>Receipt {receiptData.receiptNumber}</h3>
-                <p className="modal__meta">{receiptData.createdAt.toLocaleString("en-ZA")}</p>
+                <p className="modal__meta">
+                  {receiptData.createdAt.toLocaleString("en-ZA")}
+                </p>
               </div>
             </header>
 
@@ -4219,58 +5039,82 @@ function AdminPosPage() {
                 )}
                 <div className="pos-receipt__row">
                   <span>Payment</span>
-                  <span style={{textTransform: "capitalize"}}>{receiptData.paymentMethod}</span>
+                  <span style={{ textTransform: "capitalize" }}>
+                    {receiptData.paymentMethod}
+                  </span>
                 </div>
-                {receiptData.paymentMethod === "cash" && receiptData.cashReceived !== null && (
-                  <>
-                    <div className="pos-receipt__row">
-                      <span>Cash received</span>
-                      <span>{formatCurrency(receiptData.cashReceived)}</span>
-                    </div>
-                    <div className="pos-receipt__row">
-                      <span>Change due</span>
-                      <span>{formatCurrency(receiptData.changeDue || 0)}</span>
-                    </div>
-                  </>
-                )}
+                {receiptData.paymentMethod === "cash" &&
+                  receiptData.cashReceived !== null && (
+                    <>
+                      <div className="pos-receipt__row">
+                        <span>Cash received</span>
+                        <span>{formatCurrency(receiptData.cashReceived)}</span>
+                      </div>
+                      <div className="pos-receipt__row">
+                        <span>Change due</span>
+                        <span>
+                          {formatCurrency(receiptData.changeDue || 0)}
+                        </span>
+                      </div>
+                    </>
+                  )}
               </div>
 
               {/* Line items */}
               <div className="pos-receipt__section pos-receipt__items-section">
                 <p className="pos-receipt__section-label">Items</p>
                 {receiptData.items.map((item, index) => (
-                  <div key={`${item.id}-${index}`} className="pos-receipt__item">
+                  <div
+                    key={`${item.id}-${index}`}
+                    className="pos-receipt__item"
+                  >
                     <div className="pos-receipt__item-name">
                       {item.name}
                       {item.metadata?.variantLabel && (
-                        <span className="pos-receipt__item-sub"> — {item.metadata.variantLabel}</span>
+                        <span className="pos-receipt__item-sub">
+                          {" "}
+                          — {item.metadata.variantLabel}
+                        </span>
                       )}
                       {item.metadata?.sessionLabel && (
-                        <span className="pos-receipt__item-sub"> ({item.metadata.sessionLabel})</span>
+                        <span className="pos-receipt__item-sub">
+                          {" "}
+                          ({item.metadata.sessionLabel})
+                        </span>
                       )}
                     </div>
                     <div className="pos-receipt__item-qty-price">
-                      <span className="pos-receipt__item-qty">{item.quantity} × {formatCurrency(item.price)}</span>
-                      <span className="pos-receipt__item-total">{formatCurrency(item.price * item.quantity)}</span>
+                      <span className="pos-receipt__item-qty">
+                        {item.quantity} × {formatCurrency(item.price)}
+                      </span>
+                      <span className="pos-receipt__item-total">
+                        {formatCurrency(item.price * item.quantity)}
+                      </span>
                     </div>
                   </div>
                 ))}
               </div>
 
               {/* Gift cards redeemed */}
-              {Array.isArray(receiptData.giftCardMatches) && receiptData.giftCardMatches.length > 0 && (
-                <div className="pos-receipt__section">
-                  <p className="pos-receipt__section-label">Gift Cards Redeemed</p>
-                  {receiptData.giftCardMatches.map((match, index) => (
-                    <div key={`${match.code}-${index}`} className="pos-receipt__row pos-receipt__row--small">
-                      <span>{match.code}</span>
-                      <span style={{textTransform: "capitalize"}}>
-                        {(match.status || "unknown").replace(/_/g, " ")}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {Array.isArray(receiptData.giftCardMatches) &&
+                receiptData.giftCardMatches.length > 0 && (
+                  <div className="pos-receipt__section">
+                    <p className="pos-receipt__section-label">
+                      Gift Cards Redeemed
+                    </p>
+                    {receiptData.giftCardMatches.map((match, index) => (
+                      <div
+                        key={`${match.code}-${index}`}
+                        className="pos-receipt__row pos-receipt__row--small"
+                      >
+                        <span>{match.code}</span>
+                        <span style={{ textTransform: "capitalize" }}>
+                          {(match.status || "unknown").replace(/_/g, " ")}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
               {/* Totals */}
               <div className="pos-receipt__section pos-receipt__totals">
@@ -4310,7 +5154,11 @@ function AdminPosPage() {
           {currentStep === POS_STEP_ORDER && (
             <>
               {/* Touch-tab toggle for tablet and phone POS use */}
-              <div className="pos-panel-tab-bar" role="tablist" aria-label="POS view">
+              <div
+                className="pos-panel-tab-bar"
+                role="tablist"
+                aria-label="POS view"
+              >
                 <button
                   className={`pos-panel-tab-bar__btn ${posMobilePanel === "browse" ? "is-active" : ""}`}
                   type="button"
@@ -4329,214 +5177,358 @@ function AdminPosPage() {
                 >
                   Cart
                   {cartItems.length > 0 && (
-                    <span className="pos-panel-tab-bar__badge">{cartItems.length}</span>
+                    <span className="pos-panel-tab-bar__badge">
+                      {cartItems.length}
+                    </span>
                   )}
                 </button>
               </div>
 
-            <section className="pos-wizard__build">
-              <div data-mobile-panel="browse" className={posMobilePanel === "browse" ? "is-active" : ""}>
-              <PosCatalogBrowser
-                departments={POS_TABS}
-                departmentCounts={departmentCounts}
-                activeTab={activeTab}
-                setActiveTab={setActiveTab}
-                searchTerm={searchTerm}
-                setSearchTerm={setSearchTerm}
-                activeCount={activeCount}
-                inventoryLoading={inventoryLoading}
-                serviceFilters={SERVICE_FILTERS}
-                activeServiceType={activeServiceType}
-                setActiveServiceType={setActiveServiceType}
-                bookingTab={bookingTab}
-                setBookingTab={setBookingTab}
-                bookingDateFilter={bookingDateFilter}
-                setBookingDateFilter={setBookingDateFilter}
-                todayDateKey={todayDateKey}
-                categoryOptions={categoryOptions}
-                activeCategoryId={activeCategoryId}
-                setActiveCategoryId={setActiveCategoryId}
-                posCategoryOptions={posCategoryOptions}
-                activePosCategoryId={activePosCategoryId}
-                setActivePosCategoryId={setActivePosCategoryId}
-                allItemsSections={allItemsSections}
-                filteredProducts={filteredProducts}
-                variantSelections={variantSelections}
-                setVariantSelections={setVariantSelections}
-                filteredPosProducts={filteredPosProducts}
-                filteredWorkshops={filteredWorkshops}
-                workshopSelections={workshopSelections}
-                setWorkshopSelections={setWorkshopSelections}
-                workshopOptionSelections={workshopOptionSelections}
-                setWorkshopOptionSelections={setWorkshopOptionSelections}
-                filteredClasses={filteredClasses}
-                classSelections={classSelections}
-                setClassSelections={setClassSelections}
-                classOptionSelections={classOptionSelections}
-                setClassOptionSelections={setClassOptionSelections}
-                filteredWorkshopBookings={filteredWorkshopBookings}
-                filteredCutFlowerBookings={filteredCutFlowerBookings}
-                activeBookingEditor={activeBookingEditor}
-                setActiveBookingEditor={setActiveBookingEditor}
-                getBookingEditState={getBookingEditState}
-                handleBookingEditChange={handleBookingEditChange}
-                handleSaveBookingChanges={handleSaveBookingChanges}
-                handleAddBookingToCart={handleAddBookingToCart}
-                onCheckIn={handleCheckIn}
-                bookingSavingId={bookingSavingId}
-                bookingError={bookingError}
-                workshopLookup={workshopLookup}
-                cutFlowerOptions={cutFlowerOptions}
-                cutFlowerOptionPriceMap={cutFlowerOptionPriceMap}
-                filteredEvents={filteredEvents}
-                eventSelections={eventSelections}
-                setEventSelections={setEventSelections}
-                serviceSections={serviceSections}
-                formatCurrency={formatCurrency}
-                onAddProduct={handleAddProductItem}
-                onAddPosProduct={handleAddPosProductItem}
-                onAddWorkshop={handleAddWorkshopItem}
-                onAddClass={handleAddClassItem}
-                onAddEvent={handleAddEventItem}
-              />
-              {cartItems.length > 0 && (
-                <div className="pos-touch-cart-peek" aria-live="polite">
-                  <div className="pos-touch-cart-peek__summary">
-                    <span>Current order</span>
-                    <strong>
-                      {cartItems.length} {cartItems.length === 1 ? "line" : "lines"} ·{" "}
-                      {formatCurrency(pricing.cartSubtotal)}
-                    </strong>
-                  </div>
-                  <button
-                    className="btn btn--primary pos-touch-cart-peek__button"
-                    type="button"
-                    onClick={() => setPosMobilePanel("cart")}
-                  >
-                    Open cart
-                  </button>
-                </div>
-              )}
-              </div>
-
-              <div data-mobile-panel="cart" className={posMobilePanel === "cart" ? "is-active" : ""}>
-
-              <PosCartPanel
-                title={activePosTableNumber != null ? `Table ${activePosTableNumber}` : "Current order"}
-                headerContent={
-                  <div className="pos-table-bar">
-                    <div className="pos-table-bar__icon" aria-hidden="true">
-                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="2" y="7" width="16" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-                        <line x1="7" y1="7" x2="7" y2="4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                        <line x1="13" y1="7" x2="13" y2="4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                        <line x1="7" y1="13" x2="7" y2="16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                        <line x1="13" y1="13" x2="13" y2="16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                      </svg>
+              <section className="pos-wizard__build">
+                <div
+                  data-mobile-panel="browse"
+                  className={posMobilePanel === "browse" ? "is-active" : ""}
+                >
+                  <PosCatalogBrowser
+                    departments={POS_TABS}
+                    departmentCounts={departmentCounts}
+                    activeTab={activeTab}
+                    setActiveTab={setActiveTab}
+                    searchTerm={searchTerm}
+                    setSearchTerm={setSearchTerm}
+                    activeCount={activeCount}
+                    inventoryLoading={inventoryLoading}
+                    serviceFilters={SERVICE_FILTERS}
+                    activeServiceType={activeServiceType}
+                    setActiveServiceType={setActiveServiceType}
+                    bookingTab={bookingTab}
+                    setBookingTab={setBookingTab}
+                    bookingDateFilter={bookingDateFilter}
+                    setBookingDateFilter={setBookingDateFilter}
+                    todayDateKey={todayDateKey}
+                    categoryOptions={categoryOptions}
+                    activeCategoryId={activeCategoryId}
+                    setActiveCategoryId={setActiveCategoryId}
+                    posCategoryOptions={posCategoryOptions}
+                    activePosCategoryId={activePosCategoryId}
+                    setActivePosCategoryId={setActivePosCategoryId}
+                    allItemsSections={allItemsSections}
+                    filteredProducts={filteredProducts}
+                    variantSelections={variantSelections}
+                    setVariantSelections={setVariantSelections}
+                    filteredPosProducts={filteredPosProducts}
+                    filteredWorkshops={filteredWorkshops}
+                    workshopSelections={workshopSelections}
+                    setWorkshopSelections={setWorkshopSelections}
+                    workshopOptionSelections={workshopOptionSelections}
+                    setWorkshopOptionSelections={setWorkshopOptionSelections}
+                    filteredClasses={filteredClasses}
+                    classSelections={classSelections}
+                    setClassSelections={setClassSelections}
+                    classOptionSelections={classOptionSelections}
+                    setClassOptionSelections={setClassOptionSelections}
+                    filteredWorkshopBookings={filteredWorkshopBookings}
+                    filteredCutFlowerBookings={filteredCutFlowerBookings}
+                    activeBookingEditor={activeBookingEditor}
+                    setActiveBookingEditor={setActiveBookingEditor}
+                    getBookingEditState={getBookingEditState}
+                    handleBookingEditChange={handleBookingEditChange}
+                    handleSaveBookingChanges={handleSaveBookingChanges}
+                    handleAddBookingToCart={handleAddBookingToCart}
+                    onCheckIn={handleCheckIn}
+                    bookingSavingId={bookingSavingId}
+                    bookingError={bookingError}
+                    workshopLookup={workshopLookup}
+                    cutFlowerOptions={cutFlowerOptions}
+                    cutFlowerOptionPriceMap={cutFlowerOptionPriceMap}
+                    filteredEvents={filteredEvents}
+                    eventSelections={eventSelections}
+                    setEventSelections={setEventSelections}
+                    serviceSections={serviceSections}
+                    formatCurrency={formatCurrency}
+                    onAddProduct={handleAddProductItem}
+                    onAddPosProduct={handleAddPosProductItem}
+                    onAddWorkshop={handleAddWorkshopItem}
+                    onAddClass={handleAddClassItem}
+                    onAddEvent={handleAddEventItem}
+                  />
+                  {cartItems.length > 0 && (
+                    <div className="pos-touch-cart-peek" aria-live="polite">
+                      <div className="pos-touch-cart-peek__summary">
+                        <span>Current order</span>
+                        <strong>
+                          {cartItems.length}{" "}
+                          {cartItems.length === 1 ? "line" : "lines"} ·{" "}
+                          {formatCurrency(pricing.cartSubtotal)}
+                        </strong>
+                      </div>
+                      <button
+                        className="btn btn--primary pos-touch-cart-peek__button"
+                        type="button"
+                        onClick={() => setPosMobilePanel("cart")}
+                      >
+                        Open cart
+                      </button>
                     </div>
-                    {activePosTableNumber != null ? (
-                      <div className="pos-table-bar__content">
-                        <div className="pos-table-bar__info">
-                          <span className="pos-table-bar__name">
-                            {posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`}
-                          </span>
-                          {activePosTabId && (
-                            <span className="pos-table-bar__badge">Open tab</span>
-                          )}
+                  )}
+                </div>
+
+                <div
+                  data-mobile-panel="cart"
+                  className={posMobilePanel === "cart" ? "is-active" : ""}
+                >
+                  <PosCartPanel
+                    title={
+                      activePosTableNumber != null
+                        ? `Table ${activePosTableNumber}`
+                        : "Current order"
+                    }
+                    headerContent={
+                      <div className="pos-table-bar">
+                        <div className="pos-table-bar__icon" aria-hidden="true">
+                          <svg
+                            width="18"
+                            height="18"
+                            viewBox="0 0 20 20"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <rect
+                              x="2"
+                              y="7"
+                              width="16"
+                              height="6"
+                              rx="1.5"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                            />
+                            <line
+                              x1="7"
+                              y1="7"
+                              x2="7"
+                              y2="4"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                            />
+                            <line
+                              x1="13"
+                              y1="7"
+                              x2="13"
+                              y2="4"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                            />
+                            <line
+                              x1="7"
+                              y1="13"
+                              x2="7"
+                              y2="16"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                            />
+                            <line
+                              x1="13"
+                              y1="13"
+                              x2="13"
+                              y2="16"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                            />
+                          </svg>
                         </div>
-                        <div className="pos-table-bar__actions">
+                        {activePosTableNumber != null ? (
+                          <div className="pos-table-bar__content">
+                            <div className="pos-table-bar__info">
+                              <span className="pos-table-bar__name">
+                                {posTableNames[activePosTableNumber] ||
+                                  `Table ${activePosTableNumber}`}
+                              </span>
+                              {activePosTabId && (
+                                <span className="pos-table-bar__badge">
+                                  Open tab
+                                </span>
+                              )}
+                            </div>
+                            <div className="pos-table-bar__actions">
+                              <button
+                                className="pos-table-bar__switch"
+                                type="button"
+                                onClick={() => setTablePickerOpen(true)}
+                              >
+                                Switch
+                              </button>
+                              <button
+                                className="pos-table-bar__clear"
+                                type="button"
+                                onClick={handleCloseTableTab}
+                                aria-label="Clear table assignment"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
                           <button
-                            className="pos-table-bar__switch"
+                            className="pos-table-bar__assign"
                             type="button"
                             onClick={() => setTablePickerOpen(true)}
                           >
-                            Switch
+                            <span>Select a table</span>
+                            <span
+                              className="pos-table-bar__arrow"
+                              aria-hidden="true"
+                            >
+                              &#8250;
+                            </span>
                           </button>
-                          <button
-                            className="pos-table-bar__clear"
-                            type="button"
-                            onClick={handleCloseTableTab}
-                            aria-label="Clear table assignment"
-                          >
-                            &times;
-                          </button>
-                        </div>
+                        )}
                       </div>
-                    ) : (
-                      <button
-                        className="pos-table-bar__assign"
-                        type="button"
-                        onClick={() => setTablePickerOpen(true)}
-                      >
-                        <span>Select a table</span>
-                        <span className="pos-table-bar__arrow" aria-hidden="true">&#8250;</span>
-                      </button>
-                    )}
-                  </div>
-                }
-                cartItems={cartItems}
-                subtotal={pricing.cartSubtotal}
-                formatCurrency={formatCurrency}
-                onRemoveItem={handleRemoveCartItem}
-                onChangeQuantity={handleCartQuantityChange}
-                onAdjustQuantity={adjustCartQuantity}
-                stockIssuesByKey={stockIssuesByKey}
-                footerContent={
-                  <div className="pos-cart-panel__cta">
-                    {stepOneAttemptedNext && cartItems.length === 0 && (
-                      <p className="pos-inline-error">Add at least one item to continue.</p>
-                    )}
-                    {stockIssues.length > 0 && (
-                      <div className="pos-warning-banner">
-                        Resolve all stock warnings before continuing.
+                    }
+                    cartItems={cartItems}
+                    subtotal={pricing.cartSubtotal}
+                    formatCurrency={formatCurrency}
+                    onRemoveItem={handleRemoveCartItem}
+                    onChangeQuantity={handleCartQuantityChange}
+                    onAdjustQuantity={adjustCartQuantity}
+                    stockIssuesByKey={stockIssuesByKey}
+                    footerContent={
+                      <div className="pos-cart-panel__cta">
+                        {stepOneAttemptedNext && cartItems.length === 0 && (
+                          <p className="pos-inline-error">
+                            Add at least one item to continue.
+                          </p>
+                        )}
+                        {stockIssues.length > 0 && (
+                          <div className="pos-warning-banner">
+                            Resolve all stock warnings before continuing.
+                          </div>
+                        )}
+                        {activePosTableNumber != null &&
+                          cartItems.length > 0 && (
+                            <button
+                              className="btn pos-hold-tab-btn"
+                              type="button"
+                              disabled={posTabSaving}
+                              onClick={handleHoldTab}
+                            >
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 16 16"
+                                fill="currentColor"
+                                aria-hidden="true"
+                                style={{ flexShrink: 0 }}
+                              >
+                                <rect
+                                  x="2"
+                                  y="1"
+                                  width="4"
+                                  height="14"
+                                  rx="1.5"
+                                />
+                                <rect
+                                  x="10"
+                                  y="1"
+                                  width="4"
+                                  height="14"
+                                  rx="1.5"
+                                />
+                              </svg>
+                              {posTabSaving
+                                ? "Saving…"
+                                : `Park order — ${posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`}`}
+                            </button>
+                          )}
+                        {cartItems.length > 0 && (
+                          <>
+                            <details className="pos-cart-printer-bridge">
+                              <summary>
+                                Printer settings
+                                <span>
+                                  {printerBridgeUrl || "Not configured"}
+                                </span>
+                              </summary>
+                              <label>
+                                <span>Bridge URL</span>
+                                <input
+                                  className="input"
+                                  type="text"
+                                  value={printerBridgeUrl}
+                                  onChange={(event) =>
+                                    handlePrinterBridgeUrlChange(
+                                      event.target.value,
+                                    )
+                                  }
+                                  placeholder="http://192.168.1.100:8788"
+                                />
+                              </label>
+                              <label>
+                                <span>Printer name</span>
+                                <input
+                                  className="input"
+                                  type="text"
+                                  value={printerName}
+                                  onChange={(event) =>
+                                    handlePrinterNameChange(event.target.value)
+                                  }
+                                  placeholder="Optional for network printing"
+                                />
+                              </label>
+                              <button
+                                className="btn btn--secondary"
+                                type="button"
+                                onClick={handleSavePrinterSettings}
+                                disabled={printerSettingsSaving}
+                              >
+                                {printerSettingsSaving
+                                  ? "Saving..."
+                                  : "Save for all POS devices"}
+                              </button>
+                            </details>
+                            <button
+                              className="btn btn--secondary pos-print-bill-btn"
+                              type="button"
+                              onClick={handlePrintBill}
+                            >
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                aria-hidden="true"
+                                style={{ flexShrink: 0 }}
+                              >
+                                <polyline points="6 9 6 2 18 2 18 9" />
+                                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                                <rect x="6" y="14" width="12" height="8" />
+                              </svg>
+                              Print Bill
+                            </button>
+                          </>
+                        )}
+                        <button
+                          className={`btn btn--primary pos-wizard__next-button ${
+                            !stepOneValid ? "is-disabled" : ""
+                          }`}
+                          type="button"
+                          onClick={goToPaymentStep}
+                          aria-disabled={!stepOneValid}
+                        >
+                          Next: Payment &rarr;
+                        </button>
                       </div>
-                    )}
-                    {activePosTableNumber != null && cartItems.length > 0 && (
-                      <button
-                        className="btn pos-hold-tab-btn"
-                        type="button"
-                        disabled={posTabSaving}
-                        onClick={handleHoldTab}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style={{flexShrink:0}}>
-                          <rect x="2" y="1" width="4" height="14" rx="1.5"/>
-                          <rect x="10" y="1" width="4" height="14" rx="1.5"/>
-                        </svg>
-                        {posTabSaving
-                          ? "Saving…"
-                          : `Park order — ${posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`}`}
-                      </button>
-                    )}
-                    {cartItems.length > 0 && (
-                      <button
-                        className="btn btn--secondary pos-print-bill-btn"
-                        type="button"
-                        disabled={printerStatus === "printing"}
-                        onClick={handlePrintBill}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}>
-                          <polyline points="6 9 6 2 18 2 18 9"/>
-                          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-                          <rect x="6" y="14" width="12" height="8"/>
-                        </svg>
-                        {printerStatus === "printing" ? "Printing…" : "Print Bill"}
-                      </button>
-                    )}
-                    <button
-                      className={`btn btn--primary pos-wizard__next-button ${
-                        !stepOneValid ? "is-disabled" : ""
-                      }`}
-                      type="button"
-                      onClick={goToPaymentStep}
-                      aria-disabled={!stepOneValid}
-                    >
-                      Next: Payment &rarr;
-                    </button>
-                  </div>
-                }
-              />
-              </div>
-            </section>
+                    }
+                  />
+                </div>
+              </section>
             </>
           )}
 
@@ -4554,7 +5546,10 @@ function AdminPosPage() {
                 }}
                 onLookupGiftCard={handleGiftCardCodeLookup}
                 giftCardLookupLoading={giftCardLookupLoading}
-                canLookupGiftCard={Boolean(functionsInstance) && giftCardCodeInput.trim().length > 0}
+                canLookupGiftCard={
+                  Boolean(functionsInstance) &&
+                  giftCardCodeInput.trim().length > 0
+                }
                 giftCardLookupError={giftCardLookupError}
                 giftCardMatches={giftCardMatches}
                 onRemoveGiftCard={handleRemoveGiftCardMatch}
@@ -4596,7 +5591,11 @@ function AdminPosPage() {
               {checkoutError && (
                 <div className="pos-inline-error-card">
                   <p>{checkoutError}</p>
-                  <button className="btn btn--secondary btn--small" type="button" onClick={handleCheckout}>
+                  <button
+                    className="btn btn--secondary btn--small"
+                    type="button"
+                    onClick={handleCheckout}
+                  >
                     Try again
                   </button>
                 </div>
@@ -4629,7 +5628,8 @@ function AdminPosPage() {
               <div>
                 <h3>Recent Sales (Today)</h3>
                 <p className="modal__meta">
-                  Today&apos;s receipts can be voided here if an admin needs to correct a sale.
+                  Today&apos;s receipts can be voided here if an admin needs to
+                  correct a sale.
                 </p>
               </div>
               <button
@@ -4650,7 +5650,10 @@ function AdminPosPage() {
                 ) : (
                   <div className="pos-recent-sales__list">
                     {recentSales.map((sale) => (
-                      <article className="pos-recent-sales__item" key={sale.id || sale.receiptNumber}>
+                      <article
+                        className="pos-recent-sales__item"
+                        key={sale.id || sale.receiptNumber}
+                      >
                         <div className="pos-recent-sales__item-header">
                           <div>
                             <strong>{sale.receiptNumber || sale.id}</strong>
@@ -4663,19 +5666,25 @@ function AdminPosPage() {
                                 : "Time unavailable"}
                             </p>
                           </div>
-                          <span className={`badge ${getPosSaleStatusBadgeClass(sale.status)}`}>
+                          <span
+                            className={`badge ${getPosSaleStatusBadgeClass(sale.status)}`}
+                          >
                             {formatPosSaleStatusLabel(sale.status)}
                           </span>
                         </div>
                         <div className="pos-recent-sales__meta">
                           <span>{(sale.paymentMethod || "-").toString()}</span>
-                          <strong>{formatCurrency(getPosSaleNetTotal(sale))}</strong>
+                          <strong>
+                            {formatCurrency(getPosSaleNetTotal(sale))}
+                          </strong>
                         </div>
                         <button
                           className="btn btn--secondary btn--small"
                           type="button"
                           onClick={() => setVoidSaleTarget(sale)}
-                          disabled={!functionsInstance || checkoutStatus === "saving"}
+                          disabled={
+                            !functionsInstance || checkoutStatus === "saving"
+                          }
                         >
                           Void / Correct
                         </button>
@@ -4712,12 +5721,13 @@ function AdminPosPage() {
           }}
         >
           <div className="modal__content pos-table-picker">
-
             <div className="pos-table-picker__header">
               <div>
                 <h2 className="pos-table-picker__title">Tables</h2>
                 <p className="pos-table-picker__subtitle">
-                  {tableNameEditMode ? "Type a name for each table, then save." : "Tap a table to open or recall its order."}
+                  {tableNameEditMode
+                    ? "Type a name for each table, then save."
+                    : "Tap a table to open or recall its order."}
                 </p>
               </div>
               <button
@@ -4735,21 +5745,30 @@ function AdminPosPage() {
             </div>
 
             <div className="pos-table-picker__legend">
-              <span className="pos-table-legend pos-table-legend--free">Free</span>
-              <span className="pos-table-legend pos-table-legend--occupied">Open tab</span>
-              <span className="pos-table-legend pos-table-legend--active">This order</span>
+              <span className="pos-table-legend pos-table-legend--free">
+                Free
+              </span>
+              <span className="pos-table-legend pos-table-legend--occupied">
+                Open tab
+              </span>
+              <span className="pos-table-legend pos-table-legend--active">
+                This order
+              </span>
             </div>
 
             <div className="pos-table-picker__grid">
               {Array.from({ length: posTableCount }, (_, i) => {
                 const num = i + 1;
-                const existingTab = openPosTabs.find((t) => t.tableNumber === num);
+                const existingTab = openPosTabs.find(
+                  (t) => t.tableNumber === num,
+                );
                 const isActive = activePosTableNumber === num;
                 const isOccupied = Boolean(existingTab) && !isActive;
                 const customName = posTableNames[num];
                 const runningTotal = isOccupied
                   ? (existingTab.items || []).reduce(
-                      (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
+                      (sum, item) =>
+                        sum + (item.price || 0) * (item.quantity || 1),
                       0,
                     )
                   : 0;
@@ -4758,17 +5777,24 @@ function AdminPosPage() {
                     key={num}
                     type="button"
                     className={`pos-table-cell${isActive ? " is-active" : ""}${isOccupied ? " is-occupied" : ""}`}
-                    onClick={() => { if (!tableNameEditMode) handleSelectTable(num); }}
+                    onClick={() => {
+                      if (!tableNameEditMode) handleSelectTable(num);
+                    }}
                   >
                     {tableNameEditMode ? (
                       <input
                         className="pos-table-cell__name-input"
                         type="text"
                         placeholder={`Table ${num}`}
-                        value={pendingTableNames[num] ?? (posTableNames[num] || "")}
+                        value={
+                          pendingTableNames[num] ?? (posTableNames[num] || "")
+                        }
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) =>
-                          setPendingTableNames((prev) => ({ ...prev, [num]: e.target.value }))
+                          setPendingTableNames((prev) => ({
+                            ...prev,
+                            [num]: e.target.value,
+                          }))
                         }
                         onBlur={() => handleTableNameBlur(num)}
                       />
@@ -4780,8 +5806,14 @@ function AdminPosPage() {
                     {customName && !tableNameEditMode && (
                       <span className="pos-table-cell__num">#{num}</span>
                     )}
-                    <span className={`pos-table-cell__status${isOccupied ? " is-tab" : isActive ? " is-current" : ""}`}>
-                      {isActive ? "Current" : isOccupied ? formatCurrency(runningTotal) : "Free"}
+                    <span
+                      className={`pos-table-cell__status${isOccupied ? " is-tab" : isActive ? " is-current" : ""}`}
+                    >
+                      {isActive
+                        ? "Current"
+                        : isOccupied
+                          ? formatCurrency(runningTotal)
+                          : "Free"}
                     </span>
                   </button>
                 );
@@ -4817,7 +5849,10 @@ function AdminPosPage() {
                   <button
                     className="pos-table-picker__cancel-btn"
                     type="button"
-                    onClick={() => { setTableNameEditMode(false); setPendingTableNames({}); }}
+                    onClick={() => {
+                      setTableNameEditMode(false);
+                      setPendingTableNames({});
+                    }}
                   >
                     Cancel
                   </button>
@@ -4834,13 +5869,15 @@ function AdminPosPage() {
                 <button
                   className="pos-table-picker__edit-names-btn"
                   type="button"
-                  onClick={() => { setTableNameEditMode(true); setPendingTableNames({}); }}
+                  onClick={() => {
+                    setTableNameEditMode(true);
+                    setPendingTableNames({});
+                  }}
                 >
                   Edit names
                 </button>
               )}
             </div>
-
           </div>
         </div>
       )}
@@ -4851,7 +5888,9 @@ function AdminPosPage() {
           role="dialog"
           aria-modal="true"
           aria-label={`Choose variant for ${posVariantPickerProduct.name}`}
-          onClick={(e) => { if (e.target === e.currentTarget) handleClosePosVariantPicker(); }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) handleClosePosVariantPicker();
+          }}
         >
           <div className="modal__content variant-picker-modal__content">
             <button
@@ -4863,7 +5902,9 @@ function AdminPosPage() {
               &times;
             </button>
             <h3 className="modal__title">{posVariantPickerProduct.name}</h3>
-            <p className="modal__meta variant-picker-modal__lead">Choose a variant to add to the cart.</p>
+            <p className="modal__meta variant-picker-modal__lead">
+              Choose a variant to add to the cart.
+            </p>
             <div className="variant-picker-modal__options">
               {posVariantPickerProduct.variants.map((variant) => {
                 const isSelected = posVariantPickerSelectedId === variant.id;
@@ -4876,17 +5917,29 @@ function AdminPosPage() {
                     className={`variant-picker-modal__option${isSelected ? " is-selected" : ""}${isOut ? " is-out" : ""}`}
                     onClick={() => setPosVariantPickerSelectedId(variant.id)}
                   >
-                    <span className="variant-picker-modal__option-label">{variant.label}</span>
+                    <span className="variant-picker-modal__option-label">
+                      {variant.label}
+                    </span>
                     {Number.isFinite(variant.price) && (
-                      <span className="variant-picker-modal__option-price">{formatCurrency(variant.price)}</span>
+                      <span className="variant-picker-modal__option-price">
+                        {formatCurrency(variant.price)}
+                      </span>
                     )}
-                    {isOut && <span className="variant-picker-modal__option-stock">Out of stock</span>}
+                    {isOut && (
+                      <span className="variant-picker-modal__option-stock">
+                        Out of stock
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
             <div className="modal__actions variant-picker-modal__actions">
-              <button className="btn btn--secondary" type="button" onClick={handleClosePosVariantPicker}>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={handleClosePosVariantPicker}
+              >
                 Cancel
               </button>
               <button
@@ -4915,21 +5968,32 @@ function AdminPosPage() {
           }}
         >
           <div className="modal__content pos-items-modal">
-            <button className="modal__close" type="button" onClick={closePosItemsModal} aria-label="Close">
+            <button
+              className="modal__close"
+              type="button"
+              onClick={closePosItemsModal}
+              aria-label="Close"
+            >
               &times;
             </button>
 
             <div className="pos-items-modal__layout">
-
               {/* LEFT: product list */}
               <div className="pos-items-modal__list-col">
                 <div className="pos-items-modal__col-header">
-                  <h3 className="modal__title" id="pos-items-title">POS Products</h3>
-                  <span className="pos-items-modal__count">{normalizedPosProducts.length} item{normalizedPosProducts.length !== 1 ? "s" : ""}</span>
+                  <h3 className="modal__title" id="pos-items-title">
+                    POS Products
+                  </h3>
+                  <span className="pos-items-modal__count">
+                    {normalizedPosProducts.length} item
+                    {normalizedPosProducts.length !== 1 ? "s" : ""}
+                  </span>
                 </div>
                 <div className="pos-items-modal__list">
                   {normalizedPosProducts.length === 0 ? (
-                    <p className="empty-state">No products yet. Add one using the form.</p>
+                    <p className="empty-state">
+                      No products yet. Add one using the form.
+                    </p>
                   ) : (
                     normalizedPosProducts.map((product) => (
                       <div
@@ -4937,21 +6001,66 @@ function AdminPosPage() {
                         key={product.id}
                       >
                         <div className="pos-items-modal__row-thumb">
-                          {product.imageUrl
-                            ? <img src={product.imageUrl} alt={product.name} />
-                            : <span>{(product.name || "?").charAt(0).toUpperCase()}</span>
-                          }
+                          {product.imageUrl ? (
+                            <img src={product.imageUrl} alt={product.name} />
+                          ) : (
+                            <span>
+                              {(product.name || "?").charAt(0).toUpperCase()}
+                            </span>
+                          )}
                         </div>
                         <div className="pos-items-modal__row-info">
                           <strong>{product.name}</strong>
-                          <p className="modal__meta">{product.categoryName || "No category"} · {product.displayPrice}</p>
+                          <p className="modal__meta">
+                            {product.categoryName || "No category"} ·{" "}
+                            {product.displayPrice}
+                          </p>
                         </div>
                         <div className="pos-items-modal__row-actions">
-                          <button className="pos-items-modal__row-btn pos-items-modal__row-btn--edit" type="button" onClick={() => handleEditPosProduct(product)} title="Edit">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          <button
+                            className="pos-items-modal__row-btn pos-items-modal__row-btn--edit"
+                            type="button"
+                            onClick={() => handleEditPosProduct(product)}
+                            title="Edit"
+                          >
+                            <svg
+                              width="15"
+                              height="15"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
                           </button>
-                          <button className="pos-items-modal__row-btn pos-items-modal__row-btn--delete" type="button" onClick={() => handleDeletePosProduct(product.id)} title="Delete">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                          <button
+                            className="pos-items-modal__row-btn pos-items-modal__row-btn--delete"
+                            type="button"
+                            onClick={() => handleDeletePosProduct(product.id)}
+                            title="Delete"
+                          >
+                            <svg
+                              width="15"
+                              height="15"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                            </svg>
                           </button>
                         </div>
                       </div>
@@ -4963,94 +6072,228 @@ function AdminPosPage() {
               {/* RIGHT: form */}
               <div className="pos-items-modal__form-col">
                 <div className="pos-items-modal__col-header">
-                  <h4 className="pos-items-modal__form-heading">{editingPosProductId ? "Edit product" : "New product"}</h4>
+                  <h4 className="pos-items-modal__form-heading">
+                    {editingPosProductId ? "Edit product" : "New product"}
+                  </h4>
                 </div>
-                <form className="pos-items-modal__form" onSubmit={handleSavePosProduct}>
-
+                <form
+                  className="pos-items-modal__form"
+                  onSubmit={handleSavePosProduct}
+                >
                   {/* Image zone */}
                   <label className="pos-items-image-zone">
-                    {(posProductImagePreview || posProductForm.imageUrl) ? (
-                      <img src={posProductImagePreview || posProductForm.imageUrl} alt="Preview" className="pos-items-image-zone__img" />
+                    {posProductImagePreview || posProductForm.imageUrl ? (
+                      <img
+                        src={posProductImagePreview || posProductForm.imageUrl}
+                        alt="Preview"
+                        className="pos-items-image-zone__img"
+                      />
                     ) : (
                       <div className="pos-items-image-zone__empty">
-                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                        <svg
+                          width="26"
+                          height="26"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <rect x="3" y="3" width="18" height="18" rx="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <path d="m21 15-5-5L5 21" />
+                        </svg>
                         <span>Click to upload image</span>
                         <small>JPG, PNG, WEBP</small>
                       </div>
                     )}
-                    <input type="file" accept="image/*" style={{display:"none"}} onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (!file) return;
-                      setPosProductImageFile(file);
-                      setPosProductImagePreview(URL.createObjectURL(file));
-                    }} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: "none" }}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        setPosProductImageFile(file);
+                        setPosProductImagePreview(URL.createObjectURL(file));
+                      }}
+                    />
                   </label>
                   {(posProductImagePreview || posProductForm.imageUrl) && (
-                    <button type="button" className="btn btn--ghost pos-items-image-zone__remove" onClick={() => {
-                      setPosProductImageFile(null);
-                      setPosProductImagePreview("");
-                      setPosProductForm((prev) => ({ ...prev, imageUrl: "" }));
-                    }}>Remove image</button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost pos-items-image-zone__remove"
+                      onClick={() => {
+                        setPosProductImageFile(null);
+                        setPosProductImagePreview("");
+                        setPosProductForm((prev) => ({
+                          ...prev,
+                          imageUrl: "",
+                        }));
+                      }}
+                    >
+                      Remove image
+                    </button>
                   )}
 
-                  <input className="input" placeholder="Product name" value={posProductForm.name}
-                    onChange={(event) => setPosProductForm((prev) => ({ ...prev, name: event.target.value }))} required />
+                  <input
+                    className="input"
+                    placeholder="Product name"
+                    value={posProductForm.name}
+                    onChange={(event) =>
+                      setPosProductForm((prev) => ({
+                        ...prev,
+                        name: event.target.value,
+                      }))
+                    }
+                    required
+                  />
 
-                  <select className="input" value={posProductCategorySelection}
+                  <select
+                    className="input"
+                    value={posProductCategorySelection}
                     onChange={(event) => {
                       const selectedValue = event.target.value;
                       setPosProductCategorySelection(selectedValue);
-                      if (!selectedValue) { setPosProductForm((prev) => ({ ...prev, category: "" })); return; }
+                      if (!selectedValue) {
+                        setPosProductForm((prev) => ({
+                          ...prev,
+                          category: "",
+                        }));
+                        return;
+                      }
                       if (selectedValue === POS_PRODUCT_CUSTOM_CATEGORY_VALUE) {
                         setPosProductForm((prev) => {
-                          const hasExistingMatch = posProductCategoryChoices.some((category) => category.name.toLowerCase() === (prev.category || "").toString().trim().toLowerCase());
-                          return { ...prev, category: hasExistingMatch ? "" : prev.category };
+                          const hasExistingMatch =
+                            posProductCategoryChoices.some(
+                              (category) =>
+                                category.name.toLowerCase() ===
+                                (prev.category || "")
+                                  .toString()
+                                  .trim()
+                                  .toLowerCase(),
+                            );
+                          return {
+                            ...prev,
+                            category: hasExistingMatch ? "" : prev.category,
+                          };
                         });
                         return;
                       }
-                      const selectedCategory = posProductCategoryChoices.find((category) => category.id === selectedValue);
-                      setPosProductForm((prev) => ({ ...prev, category: selectedCategory?.name || "" }));
-                    }}>
+                      const selectedCategory = posProductCategoryChoices.find(
+                        (category) => category.id === selectedValue,
+                      );
+                      setPosProductForm((prev) => ({
+                        ...prev,
+                        category: selectedCategory?.name || "",
+                      }));
+                    }}
+                  >
                     <option value="">No category</option>
-                    {posProductCategoryChoices.map((category) => (<option key={category.id} value={category.id}>{category.name}</option>))}
-                    <option value={POS_PRODUCT_CUSTOM_CATEGORY_VALUE}>Type a new category...</option>
+                    {posProductCategoryChoices.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                    <option value={POS_PRODUCT_CUSTOM_CATEGORY_VALUE}>
+                      Type a new category...
+                    </option>
                   </select>
-                  {posProductCategorySelection === POS_PRODUCT_CUSTOM_CATEGORY_VALUE && (
-                    <input className="input" placeholder="New category name" value={posProductForm.category}
-                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, category: event.target.value }))} />
+                  {posProductCategorySelection ===
+                    POS_PRODUCT_CUSTOM_CATEGORY_VALUE && (
+                    <input
+                      className="input"
+                      placeholder="New category name"
+                      value={posProductForm.category}
+                      onChange={(event) =>
+                        setPosProductForm((prev) => ({
+                          ...prev,
+                          category: event.target.value,
+                        }))
+                      }
+                    />
                   )}
 
                   <div className="pos-items-modal__form-row">
-                    <input className="input" placeholder="Price" type="number" min="0" step="0.01" value={posProductForm.price}
-                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, price: event.target.value }))} required />
-                    <input className="input" placeholder="Qty" type="number" min="0" value={posProductForm.quantity}
-                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, quantity: event.target.value }))} />
+                    <input
+                      className="input"
+                      placeholder="Price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={posProductForm.price}
+                      onChange={(event) =>
+                        setPosProductForm((prev) => ({
+                          ...prev,
+                          price: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                    <input
+                      className="input"
+                      placeholder="Qty"
+                      type="number"
+                      min="0"
+                      value={posProductForm.quantity}
+                      onChange={(event) =>
+                        setPosProductForm((prev) => ({
+                          ...prev,
+                          quantity: event.target.value,
+                        }))
+                      }
+                    />
                   </div>
 
                   <label className="admin-checkbox">
-                    <input type="checkbox" checked={posProductForm.forceOutOfStock}
-                      onChange={(event) => setPosProductForm((prev) => ({ ...prev, forceOutOfStock: event.target.checked }))} />
+                    <input
+                      type="checkbox"
+                      checked={posProductForm.forceOutOfStock}
+                      onChange={(event) =>
+                        setPosProductForm((prev) => ({
+                          ...prev,
+                          forceOutOfStock: event.target.checked,
+                        }))
+                      }
+                    />
                     Mark as out of stock
                   </label>
 
                   <div className="admin-form__actions">
-                    <button className="btn btn--primary" type="submit" disabled={posProductSaving}>
-                      {posProductSaving ? "Saving..." : editingPosProductId ? "Update product" : "Add product"}
+                    <button
+                      className="btn btn--primary"
+                      type="submit"
+                      disabled={posProductSaving}
+                    >
+                      {posProductSaving
+                        ? "Saving..."
+                        : editingPosProductId
+                          ? "Update product"
+                          : "Add product"}
                     </button>
                     {editingPosProductId && (
-                      <button className="btn btn--secondary" type="button" onClick={() => {
-                        setEditingPosProductId(null);
-                        setPosProductForm(INITIAL_POS_PRODUCT);
-                        setPosProductImageFile(null);
-                        setPosProductImagePreview("");
-                        setPosProductCategorySelection("");
-                      }}>Cancel</button>
+                      <button
+                        className="btn btn--secondary"
+                        type="button"
+                        onClick={() => {
+                          setEditingPosProductId(null);
+                          setPosProductForm(INITIAL_POS_PRODUCT);
+                          setPosProductImageFile(null);
+                          setPosProductImagePreview("");
+                          setPosProductCategorySelection("");
+                        }}
+                      >
+                        Cancel
+                      </button>
                     )}
                   </div>
-                  {posProductError && <p className="admin-panel__error">{posProductError}</p>}
+                  {posProductError && (
+                    <p className="admin-panel__error">{posProductError}</p>
+                  )}
                 </form>
               </div>
-
             </div>
           </div>
         </div>
@@ -5060,9 +6303,16 @@ function AdminPosPage() {
       {toasts.length > 0 && (
         <div className="pos-toast-stack" aria-live="polite" aria-atomic="false">
           {toasts.map((toast) => (
-            <div key={toast.id} className={`pos-toast pos-toast--${toast.type}`}>
+            <div
+              key={toast.id}
+              className={`pos-toast pos-toast--${toast.type}`}
+            >
               <span className="pos-toast__icon" aria-hidden="true">
-                {toast.type === "success" ? "✓" : toast.type === "info" ? "→" : "✕"}
+                {toast.type === "success"
+                  ? "✓"
+                  : toast.type === "info"
+                    ? "→"
+                    : "✕"}
               </span>
               <span className="pos-toast__message">{toast.message}</span>
               {toast.action && (
@@ -6566,7 +7816,22 @@ function AdminPosPage() {
               <p className="modal__meta">{receiptData.createdAt.toLocaleString("en-ZA")}</p>
             </div>
             <div className="pos-receipt__actions pos-print-hide">
-              <button className="btn btn--secondary" type="button" onClick={() => window.print()}>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={async () => {
+                  try {
+                    await printReceiptViaBridge({
+                      bridgeUrl: printerBridgeUrl,
+                      printerName,
+                      receiptData,
+                    });
+                    showToast("Receipt sent to printer.", "success");
+                  } catch (err) {
+                    showToast(err.message || "Could not print the receipt.", "error");
+                  }
+                }}
+              >
                 Print
               </button>
               <button className="btn btn--secondary" type="button" onClick={() => setReceiptData(null)}>

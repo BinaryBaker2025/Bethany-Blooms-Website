@@ -12,9 +12,31 @@ import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "../lib/fir
 const AuthContext = createContext(null);
 const ROLE_CACHE_KEY = "bethany-blooms-auth-role-cache-v1";
 const ROLE_CACHE_LIMIT = 80;
+const ACCOUNT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BLOCKED_ACCOUNT_EMAIL_PATTERNS = [
+  /^preview-lane/i,
+  /@preview\.invalid$/i,
+  /\.invalid$/i,
+];
 
 function normalizeAuthEmail(value = "") {
   return (value || "").toString().trim().toLowerCase();
+}
+
+function isAllowedAccountEmail(value = "") {
+  const email = normalizeAuthEmail(value);
+  return (
+    email.length > 0 &&
+    email.length <= 254 &&
+    ACCOUNT_EMAIL_PATTERN.test(email) &&
+    !BLOCKED_ACCOUNT_EMAIL_PATTERNS.some((pattern) => pattern.test(email))
+  );
+}
+
+function assertAllowedAccountEmail(value = "") {
+  if (!isAllowedAccountEmail(value)) {
+    throw new Error("Use a real customer email address. Preview or test email addresses are not allowed.");
+  }
 }
 
 function normalizeRoleValue(value, fallback = "customer") {
@@ -140,6 +162,16 @@ export function AuthProvider({ children }) {
         return "guest";
       }
 
+      if (!isAllowedAccountEmail(firebaseUser.email || "")) {
+        const emailError = new Error(
+          "This account email is not allowed. Use a real customer email address.",
+        );
+        setRole("guest");
+        setRoleLoading(false);
+        setRoleError(emailError);
+        return "guest";
+      }
+
       const cachedRole = readCachedRole(firebaseUser.uid);
       const tokenRole = readRoleFromUserToken(firebaseUser);
       const fastResolvedRole = normalizeRoleValue(tokenRole || cachedRole, null);
@@ -259,6 +291,7 @@ export function AuthProvider({ children }) {
       refreshRole,
       signIn: auth
         ? async (email, password) => {
+            assertAllowedAccountEmail(email);
             const credentials = await signInWithEmailAndPassword(
               auth,
               normalizeAuthEmail(email),
@@ -291,6 +324,7 @@ export function AuthProvider({ children }) {
       signUp: auth
         ? async (email, password) => {
             const normalizedEmail = normalizeAuthEmail(email);
+            assertAllowedAccountEmail(normalizedEmail);
             const credentials = await createUserWithEmailAndPassword(
               auth,
               normalizedEmail,

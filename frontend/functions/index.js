@@ -11,7 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const cors = require("cors")({ origin: true });
 const { Resend } = require("resend");
-const { defineString } = require("firebase-functions/params");
+const { defineSecret, defineString } = require("firebase-functions/params");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 
 admin.initializeApp();
@@ -38,6 +38,7 @@ const PAYFAST_LIVE_MERCHANT_ID = defineString("PAYFAST_LIVE_MERCHANT_ID", { defa
 const PAYFAST_LIVE_MERCHANT_KEY = defineString("PAYFAST_LIVE_MERCHANT_KEY", { default: "" });
 const PAYFAST_LIVE_PASSPHRASE = defineString("PAYFAST_LIVE_PASSPHRASE", { default: "" });
 const GIFT_CARD_TOKEN_SECRET = defineString("GIFT_CARD_TOKEN_SECRET", { default: "" });
+const RECAPTCHA_SECRET_KEY = defineSecret("RECAPTCHA_SECRET_KEY");
 
 setGlobalOptions({
   maxInstances: 10,
@@ -80,6 +81,12 @@ const PENDING_COLLECTION = "pendingPayfastOrders";
 const CUSTOMER_PROFILES_COLLECTION = "customerProfiles";
 const CUSTOMER_PROFILE_ORDERS_SUBCOLLECTION = "orders";
 const MAX_CUSTOMER_PROFILE_ADDRESSES = 10;
+const ACCOUNT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BLOCKED_ACCOUNT_EMAIL_PATTERNS = Object.freeze([
+  /^preview-lane/i,
+  /@preview\.invalid$/i,
+  /\.invalid$/i,
+]);
 const SUBSCRIPTIONS_COLLECTION = "subscriptions";
 const SUBSCRIPTION_PLANS_COLLECTION = "subscriptionPlans";
 const SUBSCRIPTION_INVOICES_COLLECTION = "subscriptionInvoices";
@@ -10652,6 +10659,29 @@ function normalizeCustomerUid(value = null) {
   return normalized || null;
 }
 
+function normalizeAccountEmail(value = "") {
+  return (value || "").toString().trim().toLowerCase();
+}
+
+function isAllowedAccountEmail(value = "") {
+  const email = normalizeAccountEmail(value);
+  return (
+    email.length > 0 &&
+    email.length <= 254 &&
+    ACCOUNT_EMAIL_PATTERN.test(email) &&
+    !BLOCKED_ACCOUNT_EMAIL_PATTERNS.some((pattern) => pattern.test(email))
+  );
+}
+
+function assertAllowedAccountEmail(value = "") {
+  if (!isAllowedAccountEmail(value)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Use a real customer email address. Preview or test email addresses are not allowed.",
+    );
+  }
+}
+
 function createCustomerProfileAddressId() {
   if (typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -11135,6 +11165,63 @@ async function resolveGiftCardRequest(req) {
   };
 }
 
+exports.verifyRecaptchaToken = onCall({ secrets: [RECAPTCHA_SECRET_KEY] }, async (request) => {
+  const data = request.data && typeof request.data === "object" ? request.data : {};
+  const token = (data.token || "").toString().trim();
+  const action = (data.action || "auth").toString().trim().toLowerCase();
+
+  if (!token) {
+    throw new HttpsError("invalid-argument", "Complete the reCAPTCHA check first.");
+  }
+  if (!["signin", "signup", "admin-signin"].includes(action)) {
+    throw new HttpsError("invalid-argument", "Invalid reCAPTCHA action.");
+  }
+
+  const secret = RECAPTCHA_SECRET_KEY.value();
+  if (!secret) {
+    functions.logger.error("RECAPTCHA_SECRET_KEY is not configured.");
+    throw new HttpsError("failed-precondition", "reCAPTCHA is not configured.");
+  }
+
+  const body = new URLSearchParams();
+  body.set("secret", secret);
+  body.set("response", token);
+
+  const remoteIp = (request.rawRequest?.ip || "").toString().trim();
+  if (remoteIp) body.set("remoteip", remoteIp);
+
+  let verification;
+  try {
+    const response = await fetch("https://www.google.com/recaptcha/api/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    verification = await response.json();
+  } catch (error) {
+    functions.logger.error("reCAPTCHA verification request failed", {
+      action,
+      message: error?.message || String(error),
+    });
+    throw new HttpsError("unavailable", "Could not verify reCAPTCHA. Try again.");
+  }
+
+  if (!verification?.success) {
+    functions.logger.warn("reCAPTCHA verification failed", {
+      action,
+      hostname: verification?.hostname || "",
+      errors: verification?.["error-codes"] || [],
+    });
+    throw new HttpsError("permission-denied", "reCAPTCHA failed. Please try again.");
+  }
+
+  return {
+    ok: true,
+    action,
+    hostname: verification.hostname || "",
+  };
+});
+
 exports.createUserWithRole = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Only authenticated admins can create users.");
@@ -11190,13 +11277,14 @@ exports.createUserWithRole = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Admin role required.");
   }
 
-  const email = (data.email || "").toString().trim();
+  const email = normalizeAccountEmail(data.email || "");
   const password = (data.password || "").toString();
   const role = (data.role || "customer").toString().trim() || "customer";
 
   if (!email || !password) {
     throw new HttpsError("invalid-argument", "Email and password are required.");
   }
+  assertAllowedAccountEmail(email);
   if (password.length < 6) {
     throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
   }
@@ -11260,6 +11348,7 @@ exports.adminUpdateUserProfile = onCall(async (request) => {
 
   const userData = userSnap.data() || {};
   const storedEmail = trimToLength(userData.email || "", 160);
+  assertAllowedAccountEmail(storedEmail);
 
   const dedupedAddresses = [];
   const seenIds = new Set();

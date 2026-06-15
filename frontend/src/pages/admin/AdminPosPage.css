@@ -1582,3 +1582,84 @@
 .pos-table-cell__name-input:focus {
   border-bottom-color: var(--pos-accent);
 }
+
+.pos-printer-bridge {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding: 0.9rem;
+  border: 1px solid var(--pos-border);
+  border-radius: 8px;
+  background: #faf9f6;
+}
+
+.pos-printer-bridge summary,
+.pos-cart-printer-bridge summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pos-printer-bridge summary::-webkit-details-marker,
+.pos-cart-printer-bridge summary::-webkit-details-marker {
+  display: none;
+}
+
+.pos-printer-bridge summary > span:last-child,
+.pos-cart-printer-bridge summary > span:last-child {
+  overflow: hidden;
+  max-width: 58%;
+  color: var(--pos-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pos-printer-bridge__label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pos-accent);
+}
+
+.pos-printer-bridge__field {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--pos-muted);
+}
+
+.pos-printer-bridge__field .input {
+  width: 100%;
+}
+
+.pos-cart-printer-bridge {
+  display: grid;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--pos-border);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--pos-muted);
+  background: #faf9f6;
+}
+
+.pos-cart-printer-bridge label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.pos-cart-printer-bridge .input {
+  width: 100%;
+  min-height: 2.45rem;
+  font-size: 0.78rem;
+}

@@ -29,6 +29,23 @@ service cloud.firestore {
         && data.uid == userId;
     }
 
+    function isAllowedAccountEmail(email) {
+      return email is string
+        && email.size() > 0
+        && email.size() <= 254
+        && email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+        && !email.matches("^preview-lane.*")
+        && !email.matches(".*@preview\\.invalid$")
+        && !email.matches(".*\\.invalid$");
+    }
+
+    function validUserDoc(userId, data) {
+      return userDocHasOnlyAllowedFields(data)
+        && userDocUidMatches(userId, data)
+        && isAllowedAccountEmail(data.email)
+        && (data.role == "admin" || data.role == "customer");
+    }
+
     // Allow the very first creation of an admin profile by the signed-in user
     // when their user document does not yet exist.
     function canBootstrapAdminUser(userId) {
@@ -36,6 +53,7 @@ service cloud.firestore {
         && !exists(userDocPath(userId))
         && userDocHasOnlyAllowedFields(request.resource.data)
         && userDocUidMatches(userId, request.resource.data)
+        && isAllowedAccountEmail(request.resource.data.email)
         && request.resource.data.role == "admin"
         && request.resource.data.email == request.auth.token.email;
     }
@@ -45,7 +63,8 @@ service cloud.firestore {
         && userDocUidMatches(userId, newData)
         && (!("uid" in existingData) || existingData.uid == userId)
         && newData.role == existingData.role
-        && newData.email == existingData.email;
+        && newData.email == existingData.email
+        && isAllowedAccountEmail(newData.email);
     }
 
     function validCustomerProfile(data, userId) {
@@ -62,7 +81,7 @@ service cloud.firestore {
         ])
         && data.uid is string
         && data.uid == userId
-        && data.email is string
+        && isAllowedAccountEmail(data.email)
         && data.email == request.auth.token.email
         && (!("fullName" in data) || (data.fullName is string && data.fullName.size() <= 160))
         && (!("phone" in data) || (data.phone is string && data.phone.size() <= 40))
@@ -275,16 +294,17 @@ service cloud.firestore {
       allow get: if isSelf(userId) || isAdmin();
       allow list: if isAdmin();
 
-      allow create: if isAdmin()
+      allow create: if (isAdmin() && validUserDoc(userId, request.resource.data))
         || canBootstrapAdminUser(userId)
         || (isSelf(userId)
           && userDocHasOnlyAllowedFields(request.resource.data)
           && userDocUidMatches(userId, request.resource.data)
+          && isAllowedAccountEmail(request.resource.data.email)
           && request.resource.data.role == "customer"
           && request.resource.data.email == request.auth.token.email);
 
       allow update: if (isSelf(userId) && isValidSelfUpdate(userId, request.resource.data, resource.data))
-        || isAdmin();
+        || (isAdmin() && validUserDoc(userId, request.resource.data));
 
       allow delete: if isAdmin();
     }
@@ -422,6 +442,10 @@ service cloud.firestore {
     }
 
     match /posTableConfig/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    match /posPrinterConfig/{document=**} {
       allow read, write: if isAdmin();
     }
 

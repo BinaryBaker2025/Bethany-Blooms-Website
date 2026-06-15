@@ -2,21 +2,15 @@ function PosReceiptActions({
   receiptData,
   formatCurrency,
   emailReceiptRequested,
+  printerBridgeUrl,
+  printerName,
+  onPrinterBridgeUrlChange,
+  onPrinterNameChange,
+  onSavePrinterSettings,
+  printerSettingsSaving = false,
   onPrint,
   onNewSale,
-  printerStatus = "disconnected",
-  onConnectPrinter,
 }) {
-  const isConnected = printerStatus === "connected";
-  const isPrinting = printerStatus === "printing";
-
-  const statusDot = {
-    connected: { color: "#4caf50", label: "Printer connected" },
-    printing: { color: "#ff9800", label: "Printing…" },
-    error: { color: "#f44336", label: "Printer error" },
-    disconnected: { color: "#bbb", label: "No printer connected" },
-  }[printerStatus] ?? { color: "#bbb", label: "Unknown" };
-
   return (
     <section className="pos-wizard__card pos-success-card">
       <div className="pos-success-card__eyebrow">Sale completed</div>
@@ -40,46 +34,51 @@ function PosReceiptActions({
         </p>
       )}
 
-      {/* Printer status row */}
-      <div className="pos-printer-status">
-        <span
-          className="pos-printer-status__dot"
-          style={{ background: statusDot.color }}
-          aria-hidden="true"
-        />
-        <span className="pos-printer-status__label">{statusDot.label}</span>
-        {!isConnected && !isPrinting && (
-          <button
-            className="pos-printer-status__connect"
-            type="button"
-            onClick={onConnectPrinter}
-          >
-            Connect
-          </button>
-        )}
-        {isConnected && (
-          <button
-            className="pos-printer-status__connect"
-            type="button"
-            onClick={onConnectPrinter}
-          >
-            Change
-          </button>
-        )}
-      </div>
+      <details className="pos-printer-bridge">
+        <summary>
+          <span className="pos-printer-bridge__label">Printer settings</span>
+          <span>{printerBridgeUrl || "Not configured"}</span>
+        </summary>
+        <p className="modal__meta">
+          These settings are saved for every POS device.
+        </p>
+        <label className="pos-printer-bridge__field">
+          <span>Bridge URL</span>
+          <input
+            className="input"
+            type="text"
+            value={printerBridgeUrl}
+            onChange={(event) => onPrinterBridgeUrlChange(event.target.value)}
+            placeholder="http://127.0.0.1:8787"
+          />
+        </label>
+        <label className="pos-printer-bridge__field">
+          <span>Printer name</span>
+          <input
+            className="input"
+            type="text"
+            value={printerName}
+            onChange={(event) => onPrinterNameChange(event.target.value)}
+            placeholder="Optional if Windows default is the POS printer"
+          />
+        </label>
+        <button
+          className="btn btn--secondary"
+          type="button"
+          onClick={onSavePrinterSettings}
+          disabled={printerSettingsSaving}
+        >
+          {printerSettingsSaving ? "Saving..." : "Save for all POS devices"}
+        </button>
+      </details>
 
       <div className="pos-success-card__actions">
         <button
           className="btn btn--secondary"
           type="button"
           onClick={onPrint}
-          disabled={isPrinting}
         >
-          {isPrinting
-            ? "Printing…"
-            : isConnected
-              ? "Print Receipt (USB)"
-              : "Print Receipt"}
+          Print Receipt
         </button>
         <button className="btn btn--primary" type="button" onClick={onNewSale}>
           New Sale

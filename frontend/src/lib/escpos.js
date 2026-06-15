@@ -5,10 +5,10 @@ const LF = 0x0a;
 // Replace non-ASCII / non-printable chars with ASCII equivalents
 function encodeText(str) {
   return String(str)
-    .replace(/ | /g, " ") // narrow/non-breaking space → space
-    .replace(/[‐-―−]/g, "-") // various dashes/minus → hyphen
-    .replace(/×/g, "x") // × → x
-    .replace(/[^\x20-\x7e]/g, "?"); // anything else → ?
+    .replace(/[\u202f\u00a0]/g, " ")
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/\u00d7/g, "x")
+    .replace(/[^\x20-\x7e]/g, "?");
 }
 
 export class EscPos {
@@ -175,8 +175,9 @@ export function buildReceiptCommands(receiptData, formatCurrency) {
     .line("Thank you for shopping at")
     .bold(true).line("Bethany Blooms!").bold(false)
     .lf()
-    .feed(4)
-    .partialCut();
+    .lf()
+    .lf()
+    .feed(6);
 
   return cmd;
 }
@@ -238,29 +239,144 @@ export function buildBillCommands(cartItems, subtotal, tableLabel, formatCurrenc
     .lf()
     .divider(W)
     .align("center").lf()
-    .line("Please pay at the counter.")
+    .line("Printed receipt of order")
     .lf()
-    .feed(4)
-    .partialCut();
+    .lf()
+    .lf()
+    .feed(6);
 
   return cmd;
 }
 
 // ── Browser-print fallback: returns an HTML string for a new print window ──
-export function buildBillHtml(cartItems, subtotal, tableLabel, formatCurrency) {
-  const itemRows = cartItems
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getReceiptPrintScript() {
+  return `<script>
+    (function () {
+      window.addEventListener("load", function () {
+        requestAnimationFrame(function () {
+          setTimeout(function () { window.print(); }, 80);
+        });
+      });
+
+      window.addEventListener("afterprint", function () {
+        setTimeout(function () { window.close(); }, 150);
+      });
+    })();
+  </script>`;
+}
+
+function buildThermalHtml({ title, body, heightMm }) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<style>
+  @page { size: 80mm ${heightMm}mm; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html,
+  body {
+    width: 80mm;
+    min-height: 0;
+    background: #fff;
+  }
+  body {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 10pt;
+    line-height: 1.28;
+    color: #000;
+  }
+  .thermal-receipt {
+    width: 72mm;
+    padding: 4mm;
+    overflow: hidden;
+  }
+  .center { text-align: center; }
+  .shop-name { font-size: 13pt; font-weight: 700; letter-spacing: 0.05em; }
+  .shop-sub { font-size: 8pt; margin-top: 1mm; }
+  .divider { border: none; border-top: 1px dashed #000; margin: 3mm 0; }
+  .divider-solid { border: none; border-top: 2px solid #000; margin: 3mm 0; }
+  .label { font-size: 8pt; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding-bottom: 1mm; }
+  .date { font-size: 8pt; color: #333; margin-top: 1mm; }
+  .bill-label { font-size: 15pt; font-weight: 700; }
+  .table-label { font-size: 9pt; margin-top: 1mm; }
+  table { width: 100%; border-collapse: collapse; }
+  td { vertical-align: top; padding: 0.8mm 0; }
+  td.name { width: 64%; font-size: 9pt; font-weight: 700; overflow-wrap: anywhere; }
+  td.total { width: 36%; text-align: right; font-size: 9pt; font-weight: 700; white-space: nowrap; }
+  tr.detail-row td.detail { font-size: 8pt; font-weight: normal; padding: 0 0 1.8mm 3mm; }
+  .kv td:first-child { width: 38%; color: #000; }
+  .kv td:last-child { width: 62%; text-align: right; overflow-wrap: anywhere; }
+  .total-row td { font-size: 12pt; font-weight: 700; padding-top: 2mm; }
+  .footer { text-align: center; font-size: 9pt; margin-top: 3mm; }
+  @media print {
+    html,
+    body {
+      width: 80mm !important;
+      height: auto !important;
+      min-height: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    .thermal-receipt {
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+  }
+</style>
+</head>
+<body>
+  <main class="thermal-receipt">
+    ${body}
+  </main>
+  ${getReceiptPrintScript()}
+</body>
+</html>`;
+}
+
+export function buildReceiptHtml(receiptData, formatCurrency) {
+  const itemCount = Array.isArray(receiptData.items) ? receiptData.items.length : 0;
+  const giftCardCount = Array.isArray(receiptData.giftCardMatches)
+    ? receiptData.giftCardMatches.length
+    : 0;
+  const customerRows =
+    4 +
+    (receiptData.customer?.email ? 1 : 0) +
+    (receiptData.customer?.phone ? 1 : 0) +
+    (receiptData.paymentMethod === "cash" && receiptData.cashReceived != null ? 2 : 0);
+  const totalsRows =
+    1 +
+    (receiptData.subtotal !== receiptData.total ? 1 : 0) +
+    (receiptData.discount?.amount > 0 ? 1 : 0) +
+    (Number(receiptData.giftCardApplied || 0) > 0 ? 1 : 0);
+  const heightMm = Math.max(
+    95,
+    42 + customerRows * 5 + itemCount * 10 + giftCardCount * 6 + totalsRows * 6,
+  );
+
+  const itemRows = (receiptData.items || [])
     .map((item) => {
       const lineTotal = formatCurrency((item.price || 0) * (item.quantity || 1));
-      const unitLine = `${item.quantity} &times; ${formatCurrency(item.price || 0)}`;
+      const unitLine = `${escapeHtml(item.quantity || 1)} &times; ${escapeHtml(formatCurrency(item.price || 0))}`;
       const sub = item.metadata?.variantLabel
-        ? ` &mdash; ${item.metadata.variantLabel}`
+        ? ` - ${escapeHtml(item.metadata.variantLabel)}`
         : item.metadata?.sessionLabel
-          ? ` (${item.metadata.sessionLabel})`
+          ? ` (${escapeHtml(item.metadata.sessionLabel)})`
           : "";
       return `
         <tr>
-          <td class="name">${item.name || "Item"}${sub}</td>
-          <td class="total">${lineTotal}</td>
+          <td class="name">${escapeHtml(item.name || "Item")}${sub}</td>
+          <td class="total">${escapeHtml(lineTotal)}</td>
         </tr>
         <tr class="detail-row">
           <td colspan="2" class="detail">${unitLine}</td>
@@ -268,64 +384,141 @@ export function buildBillHtml(cartItems, subtotal, tableLabel, formatCurrency) {
     })
     .join("");
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Bill</title>
-<style>
-  @page { margin: 8mm; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 11pt;
-    color: #000;
-    width: 100%;
-  }
-  .center { text-align: center; }
-  .shop-name { font-size: 14pt; font-weight: 700; letter-spacing: 0.05em; }
-  .shop-sub { font-size: 9pt; margin-top: 1mm; }
-  .divider { border: none; border-top: 1px dashed #000; margin: 3mm 0; }
-  .divider-solid { border: none; border-top: 2px solid #000; margin: 3mm 0; }
-  .bill-label { font-size: 16pt; font-weight: 700; }
-  .table-label { font-size: 10pt; margin-top: 1mm; }
-  .date { font-size: 9pt; color: #444; margin-top: 1mm; }
-  table { width: 100%; border-collapse: collapse; margin-top: 2mm; }
-  .section-label { font-size: 8pt; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding-bottom: 1mm; }
-  td { vertical-align: top; padding: 1mm 0; }
-  td.name { width: 65%; font-size: 10pt; font-weight: 700; }
-  td.total { width: 35%; text-align: right; font-size: 10pt; font-weight: 700; }
-  tr.detail-row td.detail { font-size: 9pt; font-weight: normal; padding: 0 0 2mm 3mm; }
-  .total-row td { font-size: 13pt; font-weight: 700; padding-top: 2mm; }
-  .footer { text-align: center; font-size: 10pt; margin-top: 3mm; }
-</style>
-</head>
-<body>
-  <div class="center">
-    <p class="shop-name">BETHANY BLOOMS</p>
-    <p class="shop-sub">bethanyblooms.co.za</p>
-  </div>
-  <hr class="divider">
-  <div class="center">
-    <p class="bill-label">BILL</p>
-    ${tableLabel ? `<p class="table-label">${tableLabel}</p>` : ""}
-    <p class="date">${new Date().toLocaleString("en-ZA")}</p>
-  </div>
-  <hr class="divider">
-  <table>
-    <tr><td colspan="2" class="section-label">ITEMS</td></tr>
-    ${itemRows}
-  </table>
-  <hr class="divider-solid">
-  <table>
-    <tr class="total-row">
-      <td>TOTAL</td>
-      <td style="text-align:right">${formatCurrency(subtotal)}</td>
-    </tr>
-  </table>
-  <hr class="divider">
-  <p class="footer">Please pay at the counter.</p>
-  <script>window.onload = function(){ window.print(); window.close(); }</script>
-</body>
-</html>`;
+  const paymentLabel = receiptData.paymentMethod
+    ? receiptData.paymentMethod.charAt(0).toUpperCase() + receiptData.paymentMethod.slice(1)
+    : "Unknown";
+
+  const giftCardRows =
+    Array.isArray(receiptData.giftCardMatches) && receiptData.giftCardMatches.length > 0
+      ? `
+        <hr class="divider">
+        <p class="label">Gift Cards Redeemed</p>
+        <table class="kv">
+          ${receiptData.giftCardMatches
+            .map((match) => {
+              const status = (match.status || "unknown").toString().replace(/_/g, " ");
+              return `<tr><td>${escapeHtml(match.code)}</td><td>${escapeHtml(status)}</td></tr>`;
+            })
+            .join("")}
+        </table>`
+      : "";
+
+  const subtotalRow =
+    receiptData.subtotal !== receiptData.total
+      ? `<tr><td>Subtotal</td><td>${escapeHtml(formatCurrency(receiptData.subtotal))}</td></tr>`
+      : "";
+  const discountRow =
+    receiptData.discount?.amount > 0
+      ? `<tr><td>Discount</td><td>-${escapeHtml(formatCurrency(receiptData.discount.amount))}</td></tr>`
+      : "";
+  const giftCardAppliedRow =
+    Number(receiptData.giftCardApplied || 0) > 0
+      ? `<tr><td>Gift card</td><td>-${escapeHtml(formatCurrency(receiptData.giftCardApplied))}</td></tr>`
+      : "";
+  const cashRows =
+    receiptData.paymentMethod === "cash" && receiptData.cashReceived != null
+      ? `
+        <tr><td>Cash received</td><td>${escapeHtml(formatCurrency(receiptData.cashReceived))}</td></tr>
+        <tr><td>Change due</td><td>${escapeHtml(formatCurrency(receiptData.changeDue || 0))}</td></tr>`
+      : "";
+
+  return buildThermalHtml({
+    title: `Receipt ${receiptData.receiptNumber || ""}`.trim(),
+    heightMm,
+    body: `
+      <div class="center">
+        <p class="shop-name">BETHANY BLOOMS</p>
+        <p class="shop-sub">bethanyblooms.co.za</p>
+      </div>
+      <hr class="divider">
+      <table class="kv">
+        <tr><td>Receipt</td><td>${escapeHtml(receiptData.receiptNumber)}</td></tr>
+        <tr><td>Date</td><td>${escapeHtml(receiptData.createdAt.toLocaleString("en-ZA"))}</td></tr>
+        <tr><td>Customer</td><td>${escapeHtml(receiptData.customer?.name || "Walk-in")}</td></tr>
+        ${
+          receiptData.customer?.email
+            ? `<tr><td>Email</td><td>${escapeHtml(receiptData.customer.email)}</td></tr>`
+            : ""
+        }
+        ${
+          receiptData.customer?.phone
+            ? `<tr><td>Phone</td><td>${escapeHtml(receiptData.customer.phone)}</td></tr>`
+            : ""
+        }
+        <tr><td>Payment</td><td>${escapeHtml(paymentLabel)}</td></tr>
+        ${cashRows}
+      </table>
+      <hr class="divider">
+      <p class="label">Items</p>
+      <table>
+        ${itemRows}
+      </table>
+      ${giftCardRows}
+      <hr class="divider-solid">
+      <table class="kv">
+        ${subtotalRow}
+        ${discountRow}
+        ${giftCardAppliedRow}
+        <tr class="total-row"><td>Total</td><td>${escapeHtml(formatCurrency(receiptData.total))}</td></tr>
+      </table>
+      <hr class="divider">
+      <p class="footer">Thank you for shopping at Bethany Blooms!</p>`,
+  });
+}
+
+export function buildBillHtml(cartItems, subtotal, tableLabel, formatCurrency) {
+  const itemCount = Array.isArray(cartItems) ? cartItems.length : 0;
+  const heightMm = Math.max(100, 73 + itemCount * 10 + (tableLabel ? 6 : 0));
+
+  const itemRows = cartItems
+    .map((item) => {
+      const lineTotal = formatCurrency((item.price || 0) * (item.quantity || 1));
+      const unitLine = `${escapeHtml(item.quantity || 1)} &times; ${escapeHtml(formatCurrency(item.price || 0))}`;
+      const sub = item.metadata?.variantLabel
+        ? ` - ${escapeHtml(item.metadata.variantLabel)}`
+        : item.metadata?.sessionLabel
+          ? ` (${escapeHtml(item.metadata.sessionLabel)})`
+          : "";
+      return `
+        <tr>
+          <td class="name">${escapeHtml(item.name || "Item")}${sub}</td>
+          <td class="total">${escapeHtml(lineTotal)}</td>
+        </tr>
+        <tr class="detail-row">
+          <td colspan="2" class="detail">${unitLine}</td>
+        </tr>`;
+    })
+    .join("");
+
+  return buildThermalHtml({
+    title: "Bill",
+    heightMm,
+    body: `
+      <div class="center">
+        <p class="shop-name">BETHANY BLOOMS</p>
+        <p class="shop-sub">bethanyblooms.co.za</p>
+      </div>
+      <hr class="divider">
+      <div class="center">
+        <p class="bill-label">BILL</p>
+        ${tableLabel ? `<p class="table-label">${escapeHtml(tableLabel)}</p>` : ""}
+        <p class="date">${escapeHtml(new Date().toLocaleString("en-ZA"))}</p>
+      </div>
+      <hr class="divider">
+      <table>
+        <tr><td colspan="2" class="label">Items</td></tr>
+        ${itemRows}
+      </table>
+      <hr class="divider-solid">
+      <table>
+        <tr class="total-row">
+          <td>TOTAL</td>
+          <td style="text-align:right">${escapeHtml(formatCurrency(subtotal))}</td>
+        </tr>
+      </table>
+      <hr class="divider">
+      <p class="footer">Printed receipt of order</p>
+      <br>
+      <br>`,
+  });
 }

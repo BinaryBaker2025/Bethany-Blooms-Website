@@ -2738,6 +2738,13 @@ main {
   box-shadow: 0 20px 44px -26px rgba(85, 107, 47, 0.65);
 }
 
+.admin-auth__recaptcha {
+  display: flex;
+  justify-content: center;
+  min-height: 78px;
+  overflow: hidden;
+}
+
 .admin-auth__helper {
   margin: 0;
   text-align: center;
