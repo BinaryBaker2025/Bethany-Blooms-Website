@@ -1,5 +1,41 @@
 import { useState, useRef, useLayoutEffect } from "react";
 
+const CARD_DOUBLE_TAP_MS = 340;
+const CARD_INTERACTIVE_SELECTOR =
+  "button, a, input, select, textarea, label, [role='button']";
+
+function CartAddIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="pos-retail-card__cart-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      focusable="false"
+    >
+      <path
+        d="M6.5 6.5h14l-1.6 7.2a2 2 0 0 1-2 1.6H9.1a2 2 0 0 1-2-1.7L5.8 3.8H3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14.8 9.2v3.4M13.1 10.9h3.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.5 19.2h.1M17.2 19.2h.1"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function PosCatalogBrowser({
   departments,
   departmentCounts,
@@ -21,21 +57,9 @@ function PosCatalogBrowser({
   activeCategoryId,
   setActiveCategoryId,
   posCategoryOptions,
-  activePosCategoryId,
-  setActivePosCategoryId,
   allItemsSections,
   filteredProducts,
-  variantSelections,
-  setVariantSelections,
   filteredPosProducts,
-  workshopSelections,
-  setWorkshopSelections,
-  workshopOptionSelections,
-  setWorkshopOptionSelections,
-  classSelections,
-  setClassSelections,
-  classOptionSelections,
-  setClassOptionSelections,
   filteredWorkshopBookings,
   filteredCutFlowerBookings,
   activeBookingEditor,
@@ -50,8 +74,6 @@ function PosCatalogBrowser({
   workshopLookup,
   cutFlowerOptions,
   cutFlowerOptionPriceMap,
-  eventSelections,
-  setEventSelections,
   serviceSections,
   formatCurrency,
   onAddProduct,
@@ -59,6 +81,7 @@ function PosCatalogBrowser({
   onAddWorkshop,
   onAddClass,
   onAddEvent,
+  addFeedback,
 }) {
   const visibleCategoryOptions =
     activeTab === "products" ? categoryOptions : [];
@@ -71,6 +94,7 @@ function PosCatalogBrowser({
   const [serviceDialog, setServiceDialog] = useState(null);
   const [posCategoryPill, setPosCategoryPill] = useState("all");
   const catalogBodyRef = useRef(null);
+  const lastCardTapRef = useRef({ key: "", time: 0 });
 
   useLayoutEffect(() => {
     const el = catalogBodyRef.current;
@@ -94,6 +118,13 @@ function PosCatalogBrowser({
 
   const activeDepartment =
     departments.find((department) => department.id === activeTab) || null;
+  const activePosCategory = posCategoryOptions.find(
+    (category) => category.name === posCategoryPill,
+  );
+  const selectedCatalogFilter =
+    activeTab === "pos-only" && posCategoryPill !== "all"
+      ? `pos-category:${activePosCategory?.id || posCategoryPill}`
+      : `department:${activeTab}`;
   const isSearchActive = searchTerm.trim().length > 0;
   const previewItems = (items, limit) =>
     isSearchActive ? items : items.slice(0, limit);
@@ -132,14 +163,39 @@ function PosCatalogBrowser({
       ? "Search bookings"
       : "Search products, services, and items";
 
-  const openSearchDialog = () => {
-    setSearchTerm("");
-    setIsSearchDialogOpen(true);
-  };
-
   const closeSearchDialog = () => {
     setIsSearchDialogOpen(false);
     setSearchTerm("");
+  };
+
+  const handleCatalogFilterChange = (value) => {
+    if (value.startsWith("pos-category:")) {
+      const categoryId = value.replace("pos-category:", "");
+      const category = posCategoryOptions.find((item) => item.id === categoryId);
+      setActiveTab("pos-only");
+      setPosCategoryPill(category?.name || "all");
+      return;
+    }
+
+    const departmentId = value.replace("department:", "");
+    setActiveTab(departmentId);
+    if (departmentId === "pos-only") {
+      setPosCategoryPill("all");
+    }
+  };
+
+  const handleCardDoubleTap = (cardKey, action, event) => {
+    if (event.target?.closest?.(CARD_INTERACTIVE_SELECTOR)) return;
+
+    const now = window.performance?.now?.() || Date.now();
+    const previous = lastCardTapRef.current;
+    if (previous.key === cardKey && now - previous.time <= CARD_DOUBLE_TAP_MS) {
+      lastCardTapRef.current = { key: "", time: 0 };
+      action();
+      return;
+    }
+
+    lastCardTapRef.current = { key: cardKey, time: now };
   };
 
   const getItemFamily = (type, bookingType = "") => {
@@ -156,28 +212,16 @@ function PosCatalogBrowser({
     return "product";
   };
 
-  const getItemFamilyLabel = (family) => {
-    if (family === "product") return "Product";
-    if (family === "pos-product") return "POS-only";
-    if (family === "workshop") return "Workshop";
-    if (family === "class") return "Class";
-    if (family === "event") return "Event";
-    if (family === "workshop-booking") return "Workshop booking";
-    if (family === "cut-flower-booking") return "Cut flower booking";
-    return "Item";
-  };
-
-  const renderFamilyBadge = (family) => (
-    <span
-      className="pos-retail-card__department-badge"
-      data-item-family={family}
-    >
-      {getItemFamilyLabel(family)}
-    </span>
-  );
+  const isRecentlyAdded = (type, sourceId) =>
+    Boolean(
+      addFeedback?.sourceId &&
+        addFeedback.sourceId === sourceId &&
+        addFeedback.type === type,
+    );
 
   const renderProductCard = (product, renderOptions = null) => {
     const family = getItemFamily("product");
+    const recentlyAdded = isRecentlyAdded("product", product.id);
     const onAfterAdd = renderOptions?.onAfterAdd;
     const hasVariants = product.variants.length > 0;
     const canAdd = hasVariants
@@ -202,11 +246,27 @@ function PosCatalogBrowser({
       priceLabel = Number.isFinite(product.numericPrice) ? formatCurrency(product.numericPrice) : product.displayPrice;
     }
 
+    const addProductToOrder = () => {
+      if (!canAdd) return;
+      if (hasVariants) {
+        setVariantDialog({ product, onAfterAdd });
+      } else {
+        onAddProduct(product, { variantId: null });
+        onAfterAdd?.();
+      }
+    };
+
     return (
       <article
-        className="pos-item-card pos-retail-card"
-        key={product.id}
+        className={`pos-item-card pos-retail-card is-double-tap-enabled${
+          recentlyAdded ? " is-just-added" : ""
+        }`}
+        key={`${product.id}:${recentlyAdded ? addFeedback.id : "idle"}`}
         data-item-family={family}
+        onClick={(event) =>
+          handleCardDoubleTap(`product:${product.id}`, addProductToOrder, event)
+        }
+        title="Double-click or double-tap to add"
       >
         <div className="pos-retail-card__image">
           {productThumb
@@ -215,28 +275,25 @@ function PosCatalogBrowser({
           }
         </div>
         <div className="pos-retail-card__body">
-          {renderFamilyBadge(family)}
           <h4>{product.name}</h4>
         </div>
-        <div className="pos-retail-card__actions">
+        <div className="pos-retail-card__actions pos-retail-card__actions--compact">
           <div className="pos-retail-card__price-row">
             <strong>{priceLabel}</strong>
           </div>
           <button
-            className="btn pos-retail-card__button pos-retail-card__button--primary"
+            className="pos-retail-card__cart-button"
             type="button"
             data-item-family={family}
             disabled={!canAdd}
-            onClick={() => {
-              if (hasVariants) {
-                setVariantDialog({ product, onAfterAdd });
-              } else {
-                onAddProduct(product, { variantId: null });
-                onAfterAdd?.();
-              }
+            aria-label={`${hasVariants ? "Select options for" : "Add"} ${product.name}`}
+            title={hasVariants ? "Select options" : "Add to order"}
+            onClick={(event) => {
+              event.stopPropagation();
+              addProductToOrder();
             }}
           >
-            Add to order
+            <CartAddIcon />
           </button>
         </div>
       </article>
@@ -245,14 +302,26 @@ function PosCatalogBrowser({
 
   const renderPosOnlyCard = (product, renderOptions = null) => {
     const family = getItemFamily("pos-product");
+    const recentlyAdded = isRecentlyAdded("pos-product", product.id);
     const onAfterAdd = renderOptions?.onAfterAdd;
     const canAdd = product.stockStatus?.state !== "out";
+    const addPosProductToOrder = () => {
+      if (!canAdd) return;
+      onAddPosProduct(product);
+      onAfterAdd?.();
+    };
 
     return (
       <article
-        className="pos-item-card pos-retail-card"
-        key={product.id}
+        className={`pos-item-card pos-retail-card is-double-tap-enabled${
+          recentlyAdded ? " is-just-added" : ""
+        }`}
+        key={`${product.id}:${recentlyAdded ? addFeedback.id : "idle"}`}
         data-item-family={family}
+        onClick={(event) =>
+          handleCardDoubleTap(`pos-product:${product.id}`, addPosProductToOrder, event)
+        }
+        title="Double-click or double-tap to add"
       >
         <div className="pos-retail-card__image">
           {product.imageUrl
@@ -261,24 +330,25 @@ function PosCatalogBrowser({
           }
         </div>
         <div className="pos-retail-card__body">
-          {renderFamilyBadge(family)}
           <h4>{product.name}</h4>
         </div>
-        <div className="pos-retail-card__actions">
+        <div className="pos-retail-card__actions pos-retail-card__actions--compact">
           <div className="pos-retail-card__price-row">
             <strong>{product.displayPrice}</strong>
           </div>
           <button
-            className="btn pos-retail-card__button pos-retail-card__button--primary"
+            className="pos-retail-card__cart-button"
             type="button"
             data-item-family={family}
             disabled={!canAdd}
-            onClick={() => {
-              onAddPosProduct(product);
-              onAfterAdd?.();
+            aria-label={`Add ${product.name}`}
+            title="Add to order"
+            onClick={(event) => {
+              event.stopPropagation();
+              addPosProductToOrder();
             }}
           >
-            Add to order
+            <CartAddIcon />
           </button>
         </div>
       </article>
@@ -287,15 +357,36 @@ function PosCatalogBrowser({
 
   const renderWorkshopCard = (workshop, renderOptions = null) => {
     const family = getItemFamily("workshop");
+    const recentlyAdded = isRecentlyAdded("workshop", workshop.id);
     const onAfterAdd = renderOptions?.onAfterAdd;
     const thumb = workshop.image || workshop.imageUrl || null;
     const hasConfig = workshop.sessions.length > 0 || workshop.options.length > 0;
+    const addWorkshopToOrder = () => {
+      if (hasConfig) {
+        setServiceDialog({
+          type: "workshop",
+          item: workshop,
+          sessionId: workshop.sessions[0]?.id || null,
+          optionId: workshop.options[0]?.id || null,
+          onAfterAdd,
+        });
+      } else {
+        onAddWorkshop(workshop, { sessionId: null, optionId: null });
+        onAfterAdd?.();
+      }
+    };
 
     return (
       <article
-        className="pos-item-card pos-retail-card pos-retail-card--service"
-        key={workshop.id}
+        className={`pos-item-card pos-retail-card pos-retail-card--service is-double-tap-enabled${
+          recentlyAdded ? " is-just-added" : ""
+        }`}
+        key={`${workshop.id}:${recentlyAdded ? addFeedback.id : "idle"}`}
         data-item-family={family}
+        onClick={(event) =>
+          handleCardDoubleTap(`workshop:${workshop.id}`, addWorkshopToOrder, event)
+        }
+        title="Double-click or double-tap to add"
       >
         <div className="pos-retail-card__image">
           {thumb
@@ -304,7 +395,6 @@ function PosCatalogBrowser({
           }
         </div>
         <div className="pos-retail-card__body">
-          {renderFamilyBadge(family)}
           <h4>{workshop.title}</h4>
         </div>
         <div className="pos-retail-card__actions">
@@ -315,19 +405,9 @@ function PosCatalogBrowser({
             className="btn pos-retail-card__button pos-retail-card__button--primary"
             type="button"
             data-item-family={family}
-            onClick={() => {
-              if (hasConfig) {
-                setServiceDialog({
-                  type: "workshop",
-                  item: workshop,
-                  sessionId: workshop.sessions[0]?.id || null,
-                  optionId: workshop.options[0]?.id || null,
-                  onAfterAdd,
-                });
-              } else {
-                onAddWorkshop(workshop, { sessionId: null, optionId: null });
-                onAfterAdd?.();
-              }
+            onClick={(event) => {
+              event.stopPropagation();
+              addWorkshopToOrder();
             }}
           >
             Add to order
@@ -339,15 +419,36 @@ function PosCatalogBrowser({
 
   const renderClassCard = (classDoc, renderOptions = null) => {
     const family = getItemFamily("class");
+    const recentlyAdded = isRecentlyAdded("class", classDoc.id);
     const onAfterAdd = renderOptions?.onAfterAdd;
     const thumb = classDoc.image || classDoc.imageUrl || null;
     const hasConfig = classDoc.slots.length > 0 || classDoc.options.length > 0;
+    const addClassToOrder = () => {
+      if (hasConfig) {
+        setServiceDialog({
+          type: "class",
+          item: classDoc,
+          slotId: classDoc.slots[0]?.id || null,
+          optionId: classDoc.options[0]?.id || null,
+          onAfterAdd,
+        });
+      } else {
+        onAddClass(classDoc, { slotId: null, optionId: null });
+        onAfterAdd?.();
+      }
+    };
 
     return (
       <article
-        className="pos-item-card pos-retail-card pos-retail-card--service"
-        key={classDoc.id}
+        className={`pos-item-card pos-retail-card pos-retail-card--service is-double-tap-enabled${
+          recentlyAdded ? " is-just-added" : ""
+        }`}
+        key={`${classDoc.id}:${recentlyAdded ? addFeedback.id : "idle"}`}
         data-item-family={family}
+        onClick={(event) =>
+          handleCardDoubleTap(`class:${classDoc.id}`, addClassToOrder, event)
+        }
+        title="Double-click or double-tap to add"
       >
         <div className="pos-retail-card__image">
           {thumb
@@ -356,7 +457,6 @@ function PosCatalogBrowser({
           }
         </div>
         <div className="pos-retail-card__body">
-          {renderFamilyBadge(family)}
           <h4>{classDoc.title}</h4>
         </div>
         <div className="pos-retail-card__actions">
@@ -367,19 +467,9 @@ function PosCatalogBrowser({
             className="btn pos-retail-card__button pos-retail-card__button--primary"
             type="button"
             data-item-family={family}
-            onClick={() => {
-              if (hasConfig) {
-                setServiceDialog({
-                  type: "class",
-                  item: classDoc,
-                  slotId: classDoc.slots[0]?.id || null,
-                  optionId: classDoc.options[0]?.id || null,
-                  onAfterAdd,
-                });
-              } else {
-                onAddClass(classDoc, { slotId: null, optionId: null });
-                onAfterAdd?.();
-              }
+            onClick={(event) => {
+              event.stopPropagation();
+              addClassToOrder();
             }}
           >
             Add to order
@@ -391,15 +481,35 @@ function PosCatalogBrowser({
 
   const renderEventCard = (event, renderOptions = null) => {
     const family = getItemFamily("event");
+    const recentlyAdded = isRecentlyAdded("event", event.id);
     const onAfterAdd = renderOptions?.onAfterAdd;
     const thumb = event.image || event.imageUrl || null;
     const hasConfig = event.slots.length > 0;
+    const addEventToOrder = () => {
+      if (hasConfig) {
+        setServiceDialog({
+          type: "event",
+          item: event,
+          slotId: event.slots[0]?.id || null,
+          onAfterAdd,
+        });
+      } else {
+        onAddEvent(event, { slotId: null });
+        onAfterAdd?.();
+      }
+    };
 
     return (
       <article
-        className="pos-item-card pos-retail-card pos-retail-card--service"
-        key={event.id}
+        className={`pos-item-card pos-retail-card pos-retail-card--service is-double-tap-enabled${
+          recentlyAdded ? " is-just-added" : ""
+        }`}
+        key={`${event.id}:${recentlyAdded ? addFeedback.id : "idle"}`}
         data-item-family={family}
+        onClick={(clickEvent) =>
+          handleCardDoubleTap(`event:${event.id}`, addEventToOrder, clickEvent)
+        }
+        title="Double-click or double-tap to add"
       >
         <div className="pos-retail-card__image">
           {thumb
@@ -408,7 +518,6 @@ function PosCatalogBrowser({
           }
         </div>
         <div className="pos-retail-card__body">
-          {renderFamilyBadge(family)}
           <h4>{event.title}</h4>
         </div>
         <div className="pos-retail-card__actions">
@@ -419,18 +528,9 @@ function PosCatalogBrowser({
             className="btn pos-retail-card__button pos-retail-card__button--primary"
             type="button"
             data-item-family={family}
-            onClick={() => {
-              if (hasConfig) {
-                setServiceDialog({
-                  type: "event",
-                  item: event,
-                  slotId: event.slots[0]?.id || null,
-                  onAfterAdd,
-                });
-              } else {
-                onAddEvent(event, { slotId: null });
-                onAfterAdd?.();
-              }
+            onClick={(clickEvent) => {
+              clickEvent.stopPropagation();
+              addEventToOrder();
             }}
           >
             Add to order
@@ -503,16 +603,6 @@ function PosCatalogBrowser({
             : Number.isFinite(booking.numericPrice)
               ? formatCurrency(booking.numericPrice)
               : "Price on request";
-    const workshopPriceHint =
-      type === "workshop"
-        ? workshopOptionRequired && !selectedWorkshopOption
-          ? "Select the frame size to load the booking price."
-          : Number.isFinite(workshopTotal) && workshopTotal > 0
-            ? Number.isFinite(workshopPerAttendeePrice)
-              ? `${formatCurrency(workshopPerAttendeePrice)} per guest | ${formatCurrency(workshopTotal)} total`
-              : `Total: ${formatCurrency(workshopTotal)}`
-            : "Price on request"
-        : null;
     const editorTitleId = `${editorKey}-title`;
 
     const workshopThumb = type === "workshop" && workshop?.image ? workshop.image : null;
@@ -563,7 +653,6 @@ function PosCatalogBrowser({
                 <h4>{bookingTitle}</h4>
                 <p className="modal__meta">{bookingMeta}</p>
               </div>
-              {renderFamilyBadge(family)}
             </div>
             <div className="pos-retail-card__booking-meta">
               <div className="pos-retail-card__price-row">
@@ -783,17 +872,34 @@ function PosCatalogBrowser({
             <p className="modal__meta">Departments</p>
             <h3>Point of sale</h3>
           </div>
-          <div className="pos-retail-browser__rail-search">
-            <p className="modal__meta pos-retail-browser__rail-search-label">
-              Need something specific?
-            </p>
-            <button
-              className="btn pos-retail-browser__search-trigger"
-              type="button"
-              onClick={openSearchDialog}
-            >
+          <div className="pos-retail-browser__filterbar">
+            <label className="pos-retail-browser__select-wrap">
+              <span className="sr-only">Catalog filter</span>
+              <select
+                className="input pos-retail-browser__select"
+                value={selectedCatalogFilter}
+                onChange={(event) => handleCatalogFilterChange(event.target.value)}
+              >
+                {departments.map((department) => (
+                  <option key={department.id} value={`department:${department.id}`}>
+                    {department.label} ({departmentCounts?.[department.id] ?? 0})
+                  </option>
+                ))}
+                {posCategoryOptions.length > 0 && (
+                  <optgroup label="POS item categories">
+                    {posCategoryOptions.map((cat) => (
+                      <option key={`cat-option-${cat.id}`} value={`pos-category:${cat.id}`}>
+                        {cat.name} ({filteredPosProducts.filter((p) => p.categoryName === cat.name).length})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </label>
+            <label className="pos-retail-browser__search-field">
+              <span className="sr-only">Search POS catalog</span>
               <span
-                className="pos-retail-browser__search-trigger-icon"
+                className="pos-retail-browser__search-field-icon"
                 aria-hidden="true"
               >
                 <svg
@@ -806,58 +912,24 @@ function PosCatalogBrowser({
                   <path d="M20 20l-3.5-3.5" />
                 </svg>
               </span>
-              <span>Search</span>
-            </button>
-            <p className="modal__meta pos-retail-browser__rail-search-copy">
-              Open a quick search dialog and add the item directly from there.
-            </p>
-          </div>
-          <div
-            className="pos-retail-browser__rail-list"
-            role="tablist"
-            aria-label="POS departments"
-          >
-            {departments.map((department) => (
-              <button
-                key={department.id}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === department.id && (department.id !== "pos-only" || posCategoryPill === "all")}
-                className={`pos-retail-browser__rail-button ${activeTab === department.id && (department.id !== "pos-only" || posCategoryPill === "all") ? "is-active" : ""}`}
-                onClick={() => {
-                  setActiveTab(department.id);
-                  if (department.id === "pos-only") setPosCategoryPill("all");
-                }}
-              >
-                <span className="pos-retail-browser__rail-label">
-                  {department.label}
-                </span>
-                <span className="pos-retail-browser__rail-description">
-                  {department.description}
-                </span>
-                <span className="pos-retail-browser__rail-count">
-                  {departmentCounts?.[department.id] ?? 0}
-                </span>
-              </button>
-            ))}
-            {posCategoryOptions.length > 0 && posCategoryOptions.map((cat) => (
-              <button
-                key={`cat-pill-${cat.id}`}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "pos-only" && posCategoryPill === cat.name}
-                className={`pos-retail-browser__rail-button pos-retail-browser__rail-button--category ${activeTab === "pos-only" && posCategoryPill === cat.name ? "is-active" : ""}`}
-                onClick={() => {
-                  setActiveTab("pos-only");
-                  setPosCategoryPill(cat.name);
-                }}
-              >
-                <span className="pos-retail-browser__rail-label">{cat.name}</span>
-                <span className="pos-retail-browser__rail-count">
-                  {filteredPosProducts.filter((p) => p.categoryName === cat.name).length}
-                </span>
-              </button>
-            ))}
+              <input
+                className="input pos-retail-browser__search-input"
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder={searchDialogPlaceholder}
+              />
+              {isSearchActive && (
+                <button
+                  className="pos-retail-browser__search-clear"
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  aria-label="Clear search"
+                >
+                  &times;
+                </button>
+              )}
+            </label>
           </div>
         </aside>
 
@@ -882,16 +954,20 @@ function PosCatalogBrowser({
 
             {activeTab === "services" && (
               <div className="pos-retail-browser__filters">
-                {serviceFilters.map((filter) => (
-                  <button
-                    key={filter.id}
-                    className={`pos-category-chip ${activeServiceType === filter.id ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => setActiveServiceType(filter.id)}
+                <label className="modal__meta pos-retail-browser__subfilter">
+                  Service type
+                  <select
+                    className="input"
+                    value={activeServiceType}
+                    onChange={(event) => setActiveServiceType(event.target.value)}
                   >
-                    {filter.label}
-                  </button>
-                ))}
+                    {serviceFilters.map((filter) => (
+                      <option key={filter.id} value={filter.id}>
+                        {filter.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
             )}
 
@@ -899,23 +975,23 @@ function PosCatalogBrowser({
               visibleCategoryOptions.length > 0 &&
               handleVisibleCategoryChange && (
                 <div className="pos-retail-browser__filters">
-                  <button
-                    className={`pos-category-chip ${visibleCategoryId === "all" ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => handleVisibleCategoryChange("all")}
-                  >
-                    All categories
-                  </button>
-                  {visibleCategoryOptions.map((category) => (
-                    <button
-                      className={`pos-category-chip ${visibleCategoryId === category.id ? "is-active" : ""}`}
-                      type="button"
-                      key={category.id}
-                      onClick={() => handleVisibleCategoryChange(category.id)}
+                  <label className="modal__meta pos-retail-browser__subfilter">
+                    Product category
+                    <select
+                      className="input"
+                      value={visibleCategoryId}
+                      onChange={(event) =>
+                        handleVisibleCategoryChange(event.target.value)
+                      }
                     >
-                      {category.name}
-                    </button>
-                  ))}
+                      <option value="all">All categories</option>
+                      {visibleCategoryOptions.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               )}
 

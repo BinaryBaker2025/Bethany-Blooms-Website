@@ -9,6 +9,8 @@ function PosReceiptActions({
   onSavePrinterSettings,
   printerSettingsSaving = false,
   onPrint,
+  onPrintBarista,
+  onPrintFood,
   onNewSale,
 }) {
   return (
@@ -80,6 +82,24 @@ function PosReceiptActions({
         >
           Print Receipt
         </button>
+        {onPrintBarista && (
+          <button
+            className="btn btn--secondary"
+            type="button"
+            onClick={onPrintBarista}
+          >
+            Print Drinks
+          </button>
+        )}
+        {onPrintFood && (
+          <button
+            className="btn btn--secondary"
+            type="button"
+            onClick={onPrintFood}
+          >
+            Print Food
+          </button>
+        )}
         <button className="btn btn--primary" type="button" onClick={onNewSale}>
           New Sale
         </button>

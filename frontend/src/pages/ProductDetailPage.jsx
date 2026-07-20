@@ -23,6 +23,7 @@ import {
   getVariantStockStatus,
 } from "../lib/stockStatus.js";
 import { collectLiveBookingGiftCardOptions } from "../lib/giftCardStudio.js";
+import { buildCanonicalUrl } from "../lib/seo.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 
 const normalizeNumber = (value) => {
@@ -734,12 +735,56 @@ function ProductDetailPage() {
   const canonicalProductPath = canonicalProductSlug
     ? `/products/${encodeURIComponent(canonicalProductSlug)}`
     : "/products";
+  const productStructuredData = useMemo(() => {
+    if (!product) return null;
+
+    const schema = {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: product.title,
+      description: pageDescription,
+      url: buildCanonicalUrl(canonicalProductPath),
+      image: (product.images || []).map((imageUrl) => imageUrl.toString().trim()).filter(Boolean),
+      brand: {
+        "@type": "Brand",
+        name: "Bethany Blooms",
+      },
+    };
+
+    const sku = (product.sku || product.id || "").toString().trim();
+    if (sku) schema.sku = sku;
+    if (product.categoryLabels?.length) {
+      schema.category = product.categoryLabels.join(", ");
+    }
+    if (Number.isFinite(product.numericPrice)) {
+      schema.offers = {
+        "@type": "Offer",
+        url: buildCanonicalUrl(canonicalProductPath),
+        priceCurrency: "ZAR",
+        price: product.numericPrice.toFixed(2),
+        availability: product.isOutOfStock
+          ? "https://schema.org/OutOfStock"
+          : "https://schema.org/InStock",
+        itemCondition: "https://schema.org/NewCondition",
+        seller: {
+          "@type": "Organization",
+          name: "Bethany Blooms",
+        },
+      };
+    }
+    return schema;
+  }, [canonicalProductPath, pageDescription, product]);
 
   usePageMetadata({
     title: pageTitle,
     description: pageDescription,
     keywords: pageKeywords,
     canonicalPath: canonicalProductPath,
+    ogType: "product",
+    ogImage: product?.images?.[0] || product?.image,
+    structuredData: productStructuredData,
+    structuredDataId: "product-structured-data",
+    noIndex: productsStatus !== "loading" && !product,
   });
 
   const isLoading = productsStatus === "loading";

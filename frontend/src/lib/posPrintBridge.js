@@ -120,3 +120,14 @@ export const printBillViaBridge = ({
     withPrinterName({ cartItems, subtotal, tableLabel }, printerName),
     bridgeUrl,
   );
+
+export const printBaristaOrderViaBridge = ({
+  bridgeUrl = getDefaultBridgeUrl(),
+  printerName = "",
+  receiptData,
+}) =>
+  postToBridge(
+    "/print-barista-order",
+    withPrinterName({ receiptData }, printerName),
+    bridgeUrl,
+  );

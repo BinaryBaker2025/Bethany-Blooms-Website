@@ -2158,6 +2158,71 @@ const getWorkshopOrderItemForBooking = (order, booking) => {
   );
 };
 
+const OrderItemBookingDetails = ({ item }) => {
+  const metadata = item?.metadata || {};
+  const itemType = (metadata.type || "").toString().trim().toLowerCase();
+  if (!["workshop", "cut-flower"].includes(itemType)) return null;
+
+  const attendeeSelections = normalizeWorkshopBookingAttendeeSelections(
+    metadata.attendeeSelections,
+  );
+  const fallbackOption = metadata.optionLabel || metadata.framePreference || "";
+  const attendeeCount = Math.max(
+    1,
+    Number.parseInt(metadata.attendeeCount, 10) || attendeeSelections.length || 1,
+  );
+  const displayedSelections = attendeeSelections.length
+    ? attendeeSelections
+    : fallbackOption
+      ? Array.from({ length: attendeeCount }, (_, index) => ({
+          attendee: index + 1,
+          optionLabel: fallbackOption,
+          estimatedPrice: Number.isFinite(Number(metadata.perAttendeePrice))
+            ? Number(metadata.perAttendeePrice)
+            : null,
+        }))
+      : [];
+
+  return (
+    <>
+      {itemType === "workshop" && (
+        <>
+          <span className="modal__meta">
+            {metadata.sessionSource === "customer-requested"
+              ? `Requested date: ${metadata.sessionDayLabel || metadata.scheduledDateLabel || "Date to be confirmed"}`
+              : `Session: ${metadata.sessionDayLabel || metadata.sessionLabel || "Session"}`}
+          </span>
+          {(metadata.sessionTimeRange || metadata.sessionTime) && (
+            <span className="modal__meta">
+              {metadata.sessionSource === "customer-requested" ? "Requested time" : "Time"}: {metadata.sessionTimeRange || metadata.sessionTime}
+            </span>
+          )}
+        </>
+      )}
+      <span className="modal__meta">
+        {attendeeCount} attendee(s)
+      </span>
+      {displayedSelections.length > 0 ? (
+        displayedSelections.map((selection, index) => {
+          const price = Number(selection?.estimatedPrice);
+          return (
+            <span
+              className="modal__meta"
+              key={`order-attendee-${selection?.attendee || index + 1}-${index}`}
+            >
+              Attendee {selection?.attendee || index + 1}: {selection?.optionLabel || selection?.optionValue || fallbackOption || "Standard"}
+              {Number.isFinite(price) ? ` (${formatPriceLabel(price)})` : ""}
+            </span>
+          );
+        })
+      ) : null}
+      {metadata.notes && (
+        <span className="modal__meta">Notes: {metadata.notes}</span>
+      )}
+    </>
+  );
+};
+
 const normalizeWorkshopBookingAttendeeSelections = (selections) => {
   if (!Array.isArray(selections)) return [];
   return selections
@@ -23756,39 +23821,7 @@ export function AdminOrdersView() {
                         <span className="modal__meta">
                           {formatPriceLabel(item.price)}
                         </span>
-                        {item.metadata?.type === "workshop" && (
-                          <>
-                            <span className="modal__meta">
-                              {item.metadata?.sessionSource ===
-                              "customer-requested"
-                                ? `Requested date: ${
-                                    item.metadata?.sessionDayLabel ||
-                                    item.metadata?.scheduledDateLabel ||
-                                    "Date to be confirmed"
-                                  }`
-                                : `Session: ${
-                                    item.metadata?.sessionDayLabel ||
-                                    item.metadata?.sessionLabel ||
-                                    "Session"
-                                  }`}
-                            </span>
-                            {(item.metadata?.sessionTimeRange ||
-                              item.metadata?.sessionTime) && (
-                              <span className="modal__meta">
-                                {item.metadata?.sessionSource ===
-                                "customer-requested"
-                                  ? "Requested time"
-                                  : "Time"}
-                                :{" "}
-                                {item.metadata?.sessionTimeRange ||
-                                  item.metadata?.sessionTime}
-                              </span>
-                            )}
-                            <span className="modal__meta">
-                              {item.metadata?.attendeeCount || 1} attendee(s)
-                            </span>
-                          </>
-                        )}
+                        <OrderItemBookingDetails item={item} />
                         {item.metadata?.type === "product" &&
                           item.metadata?.variantLabel && (
                             <span className="modal__meta">
@@ -24054,39 +24087,7 @@ export function AdminOrdersView() {
                         <span className="modal__meta">
                           {formatPriceLabel(item.price)}
                         </span>
-                        {item.metadata?.type === "workshop" && (
-                          <>
-                            <span className="modal__meta">
-                              {item.metadata?.sessionSource ===
-                              "customer-requested"
-                                ? `Requested date: ${
-                                    item.metadata?.sessionDayLabel ||
-                                    item.metadata?.scheduledDateLabel ||
-                                    "Date to be confirmed"
-                                  }`
-                                : `Session: ${
-                                    item.metadata?.sessionDayLabel ||
-                                    item.metadata?.sessionLabel ||
-                                    "Session"
-                                  }`}
-                            </span>
-                            {(item.metadata?.sessionTimeRange ||
-                              item.metadata?.sessionTime) && (
-                              <span className="modal__meta">
-                                {item.metadata?.sessionSource ===
-                                "customer-requested"
-                                  ? "Requested time"
-                                  : "Time"}
-                                :{" "}
-                                {item.metadata?.sessionTimeRange ||
-                                  item.metadata?.sessionTime}
-                              </span>
-                            )}
-                            <span className="modal__meta">
-                              {item.metadata?.attendeeCount || 1} attendee(s)
-                            </span>
-                          </>
-                        )}
+                        <OrderItemBookingDetails item={item} />
                         {item.metadata?.type === "product" &&
                           item.metadata?.variantLabel && (
                             <span className="modal__meta">

@@ -9,6 +9,15 @@ const DEFAULT_SITE_NAME = "Bethany Blooms";
 const DEFAULT_OG_TYPE = "website";
 const DEFAULT_TWITTER_CARD = "summary_large_image";
 const DEFAULT_OG_IMAGE_PATH = "/bradb-favicon.png";
+const DEFAULT_KEYWORDS = [
+  "Bethany Blooms",
+  "florist Vereeniging",
+  "fresh cut flowers Vereeniging",
+  "flower delivery Vereeniging",
+  "pressed flower workshops Gauteng",
+  "pressed flower art South Africa",
+  "floral gifts South Africa",
+].join(", ");
 
 function normalizeMetaValue(value) {
   if (value === undefined || value === null) return "";
@@ -125,9 +134,9 @@ export function usePageMetadata({
     const resolvedDescription =
       normalizeMetaValue(description) ||
       getMetaContent('meta[name="description"]');
-    const resolvedKeywords = Array.isArray(keywords)
+    const resolvedKeywords = (Array.isArray(keywords)
       ? keywords.map((entry) => normalizeMetaValue(entry)).filter(Boolean).join(", ")
-      : normalizeMetaValue(keywords);
+      : normalizeMetaValue(keywords)) || DEFAULT_KEYWORDS;
     const resolvedOgTitle =
       normalizeMetaValue(ogTitle) ||
       nextTitle ||
@@ -182,6 +191,12 @@ export function usePageMetadata({
     upsertMetaByName("twitter:image", resolvedTwitterImage);
 
     upsertCanonicalLink(resolvedCanonical);
+
+    // Remove schema from the previous client-side route before installing the
+    // current route's schema. Otherwise SPA navigation leaves stale entities.
+    document
+      .querySelectorAll('script[data-seo-jsonld]')
+      .forEach((element) => element.remove());
 
     if (structuredData) {
       const payload = Array.isArray(structuredData)

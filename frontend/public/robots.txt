@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Allow: /llms.txt
+Allow: /llms-full.txt
+Disallow: /admin
+Disallow: /account
+Disallow: /payment
+Disallow: /gift-cards/
+Disallow: /cart
+Disallow: /design
+Sitemap: https://bethanyblooms.co.za/sitemap.xml
+

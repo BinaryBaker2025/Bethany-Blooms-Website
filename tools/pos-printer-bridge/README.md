@@ -183,3 +183,36 @@ py pos_printer_bridge.py --bottom-feed 12 --printer "Exact Windows Printer Name"
 ```
 
 Start with `12`. If it still tears too close to the text, try `14` or `16`. The bridge accepts values from `0` to `20`.
+
+## Daily Order Numbers
+
+POS order numbers reset every day using the shop timezone, `Africa/Johannesburg`.
+
+Examples:
+
+```text
+001
+002
+003
+```
+
+For table orders, the receipt number includes the table name so reused tables stay clear:
+
+```text
+Table 4-001
+Patio-002
+```
+
+If a barista ticket is printed before checkout, that same order number is kept and reused on the final receipt. If the table is parked, the number is saved with the held tab.
+
+## Barista Order Tickets
+
+Use **Print Barista Order** in the POS cart to print a preparation slip for the barista. It prints:
+
+- order number
+- table name when applicable
+- item names and quantities
+- variant/session details when present
+- notes for the order
+
+The barista ticket does not print prices or payment details.

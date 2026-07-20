@@ -1,5 +1,5 @@
 import "./AdminPosPage.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc,
   collection,
@@ -30,6 +30,7 @@ import {
 import {
   getPosPrinterBridgeUrl,
   getPosPrinterName,
+  printBaristaOrderViaBridge,
   printBillViaBridge,
   printReceiptViaBridge,
   setPosPrinterBridgeUrl as persistPosPrinterBridgeUrl,
@@ -654,6 +655,118 @@ const normalizeCategoryValue = (value) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 
+const PREP_PRINT_TYPES = {
+  drinks: {
+    label: "Drinks",
+    ticketTitle: "DRINK ORDER",
+    successLabel: "Drink order",
+    categories: new Set(["coffee", "drink", "drinks"]),
+    nameTokens: [
+      "americano",
+      "cappuccino",
+      "coffee",
+      "coke",
+      "drink",
+      "espresso",
+      "flat white",
+      "hot chocolate",
+      "juice",
+      "latte",
+      "mocha",
+      "soda",
+      "tea",
+      "water",
+    ],
+  },
+  food: {
+    label: "Food",
+    ticketTitle: "FOOD ORDER",
+    successLabel: "Food order",
+    categories: new Set(["food", "foods"]),
+    nameTokens: [
+      "bagel",
+      "cake",
+      "croissant",
+      "food",
+      "muffin",
+      "sandwich",
+      "scone",
+      "toast",
+      "toasted",
+      "wrap",
+    ],
+  },
+};
+
+const getPrepPrintTypeForPosProduct = (product = {}) => {
+  const categorySlug = normalizeCategoryValue(
+    product.categoryName || product.category || product.categorySlug || "",
+  );
+  if (PREP_PRINT_TYPES.drinks.categories.has(categorySlug)) return "drinks";
+  if (PREP_PRINT_TYPES.food.categories.has(categorySlug)) return "food";
+
+  const name = (product.name || "").toString().trim().toLowerCase();
+  if (
+    PREP_PRINT_TYPES.drinks.nameTokens.some((token) => name.includes(token))
+  ) {
+    return "drinks";
+  }
+  if (PREP_PRINT_TYPES.food.nameTokens.some((token) => name.includes(token))) {
+    return "food";
+  }
+  return null;
+};
+
+const getPrepPrintedQuantity = (item = {}, type) =>
+  Math.max(0, Number.parseInt(item.prepPrinted?.[type], 10) || 0);
+
+const getPrepPendingQuantity = (item = {}, type = item.prepPrintType) =>
+  Math.max(0, (Number.parseInt(item.quantity, 10) || 0) - getPrepPrintedQuantity(item, type));
+
+const getPosProductCodeParts = (product = {}) => {
+  const rawCode = (
+    product.productCode ||
+    product.product_code ||
+    product.sku ||
+    (product.name || "").toString().match(/\b[A-Z]{1,6}\d{1,8}\b/i)?.[0] ||
+    ""
+  )
+    .toString()
+    .trim();
+  const match = rawCode.match(/^([A-Za-z]+)\s*0*(\d+)$/);
+  if (!match) return null;
+  return {
+    prefix: match[1].toUpperCase(),
+    number: Number.parseInt(match[2], 10),
+    raw: rawCode.toUpperCase(),
+  };
+};
+
+const comparePosProductsByCodeThenName = (left, right) => {
+  const leftCode = getPosProductCodeParts(left);
+  const rightCode = getPosProductCodeParts(right);
+
+  if (leftCode && rightCode) {
+    const prefixCompare = leftCode.prefix.localeCompare(rightCode.prefix);
+    if (prefixCompare !== 0) return prefixCompare;
+    if (leftCode.number !== rightCode.number) {
+      return leftCode.number - rightCode.number;
+    }
+    return leftCode.raw.localeCompare(rightCode.raw, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+
+  if (leftCode) return -1;
+  if (rightCode) return 1;
+
+  return (left.name || "").localeCompare(right.name || "", undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+};
+
 const resolvePosProductCategorySelection = (categoryValue, categoryChoices) => {
   const normalizedCategory = (categoryValue || "")
     .toString()
@@ -815,15 +928,20 @@ function AdminPosPage() {
   const [cartItems, setCartItems] = useState([]);
   const [toasts, setToasts] = useState([]);
   const toastIdRef = useRef(0);
+  const [cartAddFeedback, setCartAddFeedback] = useState(null);
+  const cartAddFeedbackTimeoutRef = useRef(null);
+  const [prepPrintSelection, setPrepPrintSelection] = useState({});
   const [customer, setCustomer] = useState(DEFAULT_CUSTOMER);
   const [paymentMethod, setPaymentMethod] = useState("");
   const [notes, setNotes] = useState("");
+  const [tableLabel, setTableLabel] = useState(""); // For table bills (optional)
   const [sendEmailReceipt, setSendEmailReceipt] = useState(false);
   const [showDiscountSection, setShowDiscountSection] = useState(false);
   const [showGiftCardSection, setShowGiftCardSection] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState("idle");
   const [checkoutError, setCheckoutError] = useState(null);
   const [receiptData, setReceiptData] = useState(null);
+  const [activeOrderNumberData, setActiveOrderNumberData] = useState(null);
   const [printerBridgeUrl, setPrinterBridgeUrl] = useState(() =>
     getPosPrinterBridgeUrl(),
   );
@@ -945,6 +1063,14 @@ function AdminPosPage() {
     });
     handleClosePosVariantPicker();
   };
+
+  useEffect(() => {
+    return () => {
+      if (cartAddFeedbackTimeoutRef.current) {
+        clearTimeout(cartAddFeedbackTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const normalizedProducts = useMemo(() => {
     const categoryNameById = new Map(
@@ -1597,7 +1723,7 @@ function AdminPosPage() {
         (product) => product.categorySlug === activePosCategory.id,
       );
     }
-    return filtered;
+    return [...filtered].sort(comparePosProductsByCodeThenName);
   }, [activePosCategory, catalogSearchPosProducts]);
 
   const filteredWorkshops = useMemo(() => {
@@ -2027,6 +2153,59 @@ function AdminPosPage() {
     };
   }, [cashReceived, paymentMethod, pricing.amountDue]);
 
+  const activeOrderTableLabel = useMemo(() => {
+    if (activePosTableNumber != null) {
+      return posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`;
+    }
+    return tableLabel.trim();
+  }, [activePosTableNumber, posTableNames, tableLabel]);
+
+  const getOrCreateDailyOrderNumber = async () => {
+    const todayKey = formatDateKey(new Date());
+    if (activeOrderNumberData?.dateKey === todayKey) {
+      return activeOrderNumberData;
+    }
+
+    const getNextDailyOrderNumber = httpsCallable(
+      getFirebaseFunctions(),
+      "getNextDailyOrderNumber",
+    );
+    const result = await getNextDailyOrderNumber({});
+    const data = result.data || {};
+    const orderNumber = Number(data.orderNumber);
+    if (!Number.isFinite(orderNumber) || orderNumber < 1) {
+      throw new Error("Could not allocate a daily order number.");
+    }
+
+    const normalized = {
+      orderNumber,
+      dateKey: data.dateKey || todayKey,
+      formattedOrderNumber: (
+        data.formattedOrderNumber || String(orderNumber).padStart(3, "0")
+      )
+        .toString()
+        .trim(),
+    };
+    setActiveOrderNumberData(normalized);
+    return normalized;
+  };
+
+  const buildPosOrderReference = (
+    orderNumberData,
+    tableName = activeOrderTableLabel,
+  ) => {
+    const formattedOrderNumber = (
+      orderNumberData?.formattedOrderNumber ||
+      String(orderNumberData?.orderNumber || 1).padStart(3, "0")
+    )
+      .toString()
+      .trim();
+    const normalizedTableName = (tableName || "").toString().trim();
+    return normalizedTableName
+      ? `${normalizedTableName}-${formattedOrderNumber}`
+      : formattedOrderNumber;
+  };
+
   const recentSales = useMemo(() => {
     const todayKey = formatDateKey(new Date());
     return (posSales || [])
@@ -2434,6 +2613,17 @@ function AdminPosPage() {
     () => new Map(stockIssues.map((issue) => [issue.key, issue])),
     [stockIssues],
   );
+
+  useEffect(() => {
+    setPrepPrintSelection((prev) => {
+      const activeKeys = new Set(cartItems.map((item) => item.key));
+      const next = {};
+      Object.entries(prev).forEach(([key, selected]) => {
+        if (selected && activeKeys.has(key)) next[key] = true;
+      });
+      return next;
+    });
+  }, [cartItems]);
 
   const fullyCoveredByGiftCard =
     pricing.amountDue <= 0 && giftCardMatches.length > 0;
@@ -2859,36 +3049,64 @@ function AdminPosPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const showCartAddFeedback = (item, replacedExistingBooking = false) => {
+    if (cartAddFeedbackTimeoutRef.current) {
+      clearTimeout(cartAddFeedbackTimeoutRef.current);
+    }
+
+    const feedbackId = ++toastIdRef.current;
+    setCartAddFeedback({
+      id: feedbackId,
+      itemKey: item.key,
+      itemName: item.name,
+      replacedExistingBooking,
+      sourceId: item.sourceId || null,
+      type: item.type || item.metadata?.type || "item",
+    });
+
+    cartAddFeedbackTimeoutRef.current = setTimeout(() => {
+      setCartAddFeedback((current) =>
+        current?.id === feedbackId ? null : current,
+      );
+      cartAddFeedbackTimeoutRef.current = null;
+    }, 1250);
+  };
+
   const handleAddToCart = (item) => {
     let replacedExistingBooking = false;
+    const nowIso = new Date().toISOString();
+    const lineItem = {
+      ...item,
+      addedAt: item.addedAt || nowIso,
+      updatedAt: nowIso,
+      prepPrinted: item.prepPrinted || {},
+    };
     setCartItems((prev) => {
-      const existingIndex = prev.findIndex((entry) => entry.key === item.key);
+      const existingIndex = prev.findIndex((entry) => entry.key === lineItem.key);
       if (existingIndex === -1) {
-        return [...prev, item];
+        return [...prev, lineItem];
       }
       if (
-        isBookingCartLineItem(item) ||
+        isBookingCartLineItem(lineItem) ||
         isBookingCartLineItem(prev[existingIndex])
       ) {
         replacedExistingBooking = true;
         const next = [...prev];
-        next[existingIndex] = item;
+        next[existingIndex] = {
+          ...lineItem,
+          addedAt: prev[existingIndex].addedAt || lineItem.addedAt,
+        };
         return next;
       }
       const next = [...prev];
       next[existingIndex] = {
         ...next[existingIndex],
-        quantity: next[existingIndex].quantity + item.quantity,
+        quantity: next[existingIndex].quantity + lineItem.quantity,
+        updatedAt: nowIso,
       };
       return next;
     });
-    showToast(
-      replacedExistingBooking
-        ? `Updated booking: ${item.name}`
-        : `Added: ${item.name}`,
-      "success",
-      { label: "View cart", onClick: () => setPosMobilePanel("cart") },
-    );
+    showCartAddFeedback(lineItem, replacedExistingBooking);
   };
 
   const handleAddProductItem = (product, overrides = {}) => {
@@ -2948,6 +3166,7 @@ function AdminPosPage() {
       showToast("This POS item is currently out of stock.", "error");
       return;
     }
+    const prepPrintType = getPrepPrintTypeForPosProduct(product);
     handleAddToCart({
       key: buildCartKey({ type: "pos-product", sourceId: product.id }),
       sourceId: product.id,
@@ -2955,7 +3174,13 @@ function AdminPosPage() {
       name: product.name,
       price: Number.isFinite(product.numericPrice) ? product.numericPrice : 0,
       quantity: 1,
-      metadata: { type: "pos-product" },
+      prepPrintType,
+      metadata: {
+        type: "pos-product",
+        categoryName: product.categoryName || "",
+        categorySlug: product.categorySlug || "",
+        prepPrintType,
+      },
     });
   };
 
@@ -3833,6 +4058,7 @@ function AdminPosPage() {
     setCartItems([]);
     setCustomer(DEFAULT_CUSTOMER);
     setNotes("");
+    setTableLabel("");
     setPaymentMethod("");
     setShowDiscountSection(false);
     setShowGiftCardSection(false);
@@ -3846,6 +4072,8 @@ function AdminPosPage() {
     setCheckoutStatus("idle");
     setCheckoutError(null);
     setReceiptData(null);
+    setActiveOrderNumberData(null);
+    setPrepPrintSelection({});
     setCurrentStep(POS_STEP_ORDER);
     setPosMobilePanel("browse");
     setStepOneAttemptedNext(false);
@@ -3901,10 +4129,16 @@ function AdminPosPage() {
     if (existingTab) {
       setActivePosTableNumber(tableNum);
       setActivePosTabId(existingTab.id);
+      const restoredOrderNumberData =
+        existingTab.orderNumberData && typeof existingTab.orderNumberData === "object"
+          ? existingTab.orderNumberData
+          : null;
+      setActiveOrderNumberData(restoredOrderNumberData);
       const savedItems = Array.isArray(existingTab.items)
         ? existingTab.items
         : [];
       setCartItems(savedItems);
+      setPrepPrintSelection({});
       if (existingTab.customerName || existingTab.customerEmail) {
         setCustomer((prev) => ({
           ...prev,
@@ -3915,7 +4149,9 @@ function AdminPosPage() {
     } else {
       setActivePosTableNumber(tableNum);
       setActivePosTabId(null);
+      setActiveOrderNumberData(null);
       setCartItems([]);
+      setPrepPrintSelection({});
     }
     setTablePickerOpen(false);
   };
@@ -3928,6 +4164,7 @@ function AdminPosPage() {
         tableNumber: activePosTableNumber,
         status: "open",
         items: cartItems,
+        orderNumberData: activeOrderNumberData || null,
         customerName: customer.name || "",
         customerEmail: customer.email || "",
         updatedAt: serverTimestamp(),
@@ -3942,8 +4179,10 @@ function AdminPosPage() {
         setActivePosTabId(newRef.id);
       }
       setCartItems([]);
+      setPrepPrintSelection({});
       setActivePosTableNumber(null);
       setActivePosTabId(null);
+      setActiveOrderNumberData(null);
       showToast(`Tab held for table ${activePosTableNumber}`, "success");
     } catch (error) {
       showToast(error.message || "Unable to hold tab.", "error");
@@ -3954,17 +4193,13 @@ function AdminPosPage() {
 
   const handlePrintBill = async () => {
     if (cartItems.length === 0) return;
-    const tableLabel =
-      activePosTableNumber != null
-        ? posTableNames[activePosTableNumber] || `Table ${activePosTableNumber}`
-        : null;
     try {
       await printBillViaBridge({
         bridgeUrl: printerBridgeUrl,
         printerName,
         cartItems,
         subtotal: pricing.cartSubtotal,
-        tableLabel,
+        tableLabel: activeOrderTableLabel || null,
       });
       showToast("Bill sent to printer.", "success");
     } catch (err) {
@@ -3972,9 +4207,188 @@ function AdminPosPage() {
     }
   };
 
+  const getCartLinePrepPrintType = useCallback((item = {}) => {
+    if (item.prepPrintType) return item.prepPrintType;
+    if (item.metadata?.prepPrintType) return item.metadata.prepPrintType;
+    if (item.type !== "pos-product") return null;
+    const product =
+      normalizedPosProducts.find((entry) => entry.id === item.sourceId) || null;
+    return product ? getPrepPrintTypeForPosProduct(product) : null;
+  }, [normalizedPosProducts]);
+
+  const getPrepPrintItems = (type, sourceItems = cartItems) => {
+    const selectedKeys = new Set(
+      Object.entries(prepPrintSelection)
+        .filter(([, selected]) => selected)
+        .map(([key]) => key),
+    );
+    const selectedKeysForType = new Set(
+      (Array.isArray(sourceItems) ? sourceItems : [])
+        .filter((item) => selectedKeys.has(item.key))
+        .filter((item) => getCartLinePrepPrintType(item) === type)
+        .map((item) => item.key),
+    );
+    const hasSelectedForType = selectedKeysForType.size > 0;
+    const mode = hasSelectedForType ? "selected" : "new";
+
+    const items = (Array.isArray(sourceItems) ? sourceItems : [])
+      .filter((item) => getCartLinePrepPrintType(item) === type)
+      .filter((item) => {
+        if (hasSelectedForType) return selectedKeysForType.has(item.key);
+        return getPrepPendingQuantity(item, type) > 0;
+      })
+      .map((item) => ({
+        ...item,
+        quantity: hasSelectedForType
+          ? Math.max(1, Number.parseInt(item.quantity, 10) || 1)
+          : getPrepPendingQuantity(item, type),
+      }))
+      .filter((item) => item.quantity > 0);
+
+    return { items, mode };
+  };
+
+  const prepPrintSummary = useMemo(() => {
+    return Object.keys(PREP_PRINT_TYPES).reduce((summary, type) => {
+      const all = cartItems.filter(
+        (item) => getCartLinePrepPrintType(item) === type,
+      );
+      const selected = all.filter((item) => prepPrintSelection[item.key]);
+      const newQuantity = all.reduce(
+        (total, item) => total + getPrepPendingQuantity(item, type),
+        0,
+      );
+      summary[type] = {
+        allLineCount: all.length,
+        selectedLineCount: selected.length,
+        newQuantity,
+      };
+      return summary;
+    }, {});
+  }, [cartItems, getCartLinePrepPrintType, prepPrintSelection]);
+
+  const handleTogglePrepPrintItem = (itemKey, selected) => {
+    setPrepPrintSelection((prev) => {
+      if (selected) return { ...prev, [itemKey]: true };
+      const next = { ...prev };
+      delete next[itemKey];
+      return next;
+    });
+  };
+
+  const markPrepItemsPrinted = (type, printedItems, mode) => {
+    const printedQuantityByKey = new Map(
+      printedItems.map((item) => [
+        item.key,
+        Math.max(1, Number.parseInt(item.quantity, 10) || 1),
+      ]),
+    );
+    let nextItemsSnapshot = [];
+
+    setCartItems((prev) => {
+      const next = prev.map((item) => {
+        const printedQuantity = printedQuantityByKey.get(item.key);
+        if (!printedQuantity) return item;
+        const currentQuantity = Math.max(
+          1,
+          Number.parseInt(item.quantity, 10) || 1,
+        );
+        const currentPrinted = getPrepPrintedQuantity(item, type);
+        const nextPrinted =
+          mode === "selected"
+            ? currentQuantity
+            : Math.min(currentQuantity, currentPrinted + printedQuantity);
+        return {
+          ...item,
+          prepPrinted: {
+            ...(item.prepPrinted || {}),
+            [type]: nextPrinted,
+          },
+          lastPrepPrintedAt: new Date().toISOString(),
+        };
+      });
+      nextItemsSnapshot = next;
+      return next;
+    });
+
+    setPrepPrintSelection((prev) => {
+      const next = { ...prev };
+      printedItems.forEach((item) => {
+        delete next[item.key];
+      });
+      return next;
+    });
+
+    if (activePosTabId && db && nextItemsSnapshot.length > 0) {
+      updateDoc(doc(db, "posTabs", activePosTabId), {
+        items: nextItemsSnapshot,
+        updatedAt: serverTimestamp(),
+      }).catch((err) => {
+        console.warn("Failed to persist prep print status to tab:", err);
+      });
+    }
+  };
+
+  const handlePrintPrepOrder = async (type, sourceReceiptData = null) => {
+    const config = PREP_PRINT_TYPES[type];
+    if (!config) return;
+
+    const sourceItems = sourceReceiptData?.items || cartItems;
+    const { items: ticketItems, mode } = sourceReceiptData
+      ? {
+          items: (Array.isArray(sourceItems) ? sourceItems : []).filter(
+            (item) => getCartLinePrepPrintType(item) === type,
+          ),
+          mode: "receipt",
+        }
+      : getPrepPrintItems(type, sourceItems);
+    if (!ticketItems.length) {
+      showToast(`No ${config.label.toLowerCase()} items to print.`, "info");
+      return;
+    }
+
+    try {
+      const tableName =
+        sourceReceiptData?.tableLabel || activeOrderTableLabel || "";
+      const receiptNumber = sourceReceiptData?.receiptNumber || tableName || "POS";
+
+      await printBaristaOrderViaBridge({
+        bridgeUrl: printerBridgeUrl,
+        printerName,
+        receiptData: {
+          receiptNumber,
+          orderNumber:
+            sourceReceiptData?.formattedOrderNumber ||
+            sourceReceiptData?.orderNumber ||
+            "",
+          orderNumberDateKey: sourceReceiptData?.orderNumberDateKey || "",
+          formattedOrderNumber: sourceReceiptData?.formattedOrderNumber || "",
+          tableLabel: tableName || null,
+          isTableOrder: Boolean(tableName),
+          prepPrintType: type,
+          ticketTitle: config.ticketTitle,
+          items: ticketItems,
+          notes: sourceReceiptData?.notes || notes.trim(),
+        },
+      });
+
+      if (!sourceReceiptData) {
+        markPrepItemsPrinted(type, ticketItems, mode);
+      }
+      showToast(`${config.successLabel} sent to printer.`, "success");
+    } catch (err) {
+      showToast(
+        err.message || `Could not print ${config.label.toLowerCase()} order.`,
+        "error",
+      );
+    }
+  };
+
   const handleCloseTableTab = () => {
     setActivePosTableNumber(null);
     setActivePosTabId(null);
+    setActiveOrderNumberData(null);
+    setPrepPrintSelection({});
   };
 
   const saveTableConfig = async (names, count) => {
@@ -4331,7 +4745,23 @@ function AdminPosPage() {
     setCheckoutStatus("saving");
     setCheckoutError(null);
 
-    const receiptNumber = `POS-${Date.now().toString().slice(-6)}`;
+    // Allocate one daily order number and reuse it for any barista ticket and the final receipt.
+    let orderNumberData = null;
+    try {
+      orderNumberData = await getOrCreateDailyOrderNumber();
+    } catch (error) {
+      const msg =
+        error.message ||
+        "Unable to allocate a daily order number. Please try again.";
+      setCheckoutStatus("error");
+      setCheckoutError(msg);
+      showToast(msg, "error");
+      return;
+    }
+
+    // Format receipt number based on whether it is a table order or regular order.
+    const tableName = activeOrderTableLabel;
+    const receiptNumber = buildPosOrderReference(orderNumberData, tableName);
     const saleDateKey = formatDateKey(new Date());
     const saleRef = doc(collection(db, "posSales"));
     const discountPayload = {
@@ -4380,6 +4810,11 @@ function AdminPosPage() {
     );
     const salePayload = {
       receiptNumber,
+      orderNumber: orderNumberData.orderNumber,
+      formattedOrderNumber: orderNumberData.formattedOrderNumber,
+      orderNumberDateKey: orderNumberData.dateKey,
+      tableLabel: tableName || null,
+      isTableOrder: Boolean(tableName),
       dateKey: saleDateKey,
       status: "completed",
       createdBy: {
@@ -4880,6 +5315,9 @@ function AdminPosPage() {
       setReceiptData({
         id: saleRef.id,
         receiptNumber,
+        orderNumber: orderNumberData.orderNumber,
+        formattedOrderNumber: orderNumberData.formattedOrderNumber,
+        orderNumberDateKey: orderNumberData.dateKey,
         createdAt: new Date(),
         customer: trimmedCustomer,
         items: salePayload.items,
@@ -4892,6 +5330,9 @@ function AdminPosPage() {
         changeDue: salePayload.changeDue,
         giftCardMatches: normalizedGiftCardMatches,
         giftCardMatchedCount: normalizedGiftCardMatches.length,
+        tableLabel: tableName || null,
+        isTableOrder: Boolean(tableName),
+        notes: notes.trim(),
       });
       setCheckoutStatus("success");
       showToast(`Sale complete! Receipt #${receiptNumber}`, "success");
@@ -4910,12 +5351,18 @@ function AdminPosPage() {
   return (
     <div className="admin-panel pos-panel pos-wizard">
       <header className="admin-panel__header pos-panel__header">
-        <div>
+        <div className="pos-panel__title">
           <h2>Point of Sale</h2>
           <p className="modal__meta">
             Process in-store orders, bookings, and class sales.
           </p>
         </div>
+        <PosStepperHeader
+          currentStep={currentStep}
+          completedSteps={completedSteps}
+          onStepClick={handleStepClick}
+          disabled={disableStepNavigation}
+        />
         <div className="pos-panel__actions">
           <button
             className="btn btn--secondary"
@@ -4923,19 +5370,12 @@ function AdminPosPage() {
             onClick={openPosItemsModal}
             disabled={!inventoryEnabled || checkoutStatus === "saving"}
           >
-            Manage POS-only Items
+            Manage POS Items
           </button>
         </div>
       </header>
 
       {inventoryError && <p className="admin-panel__error">{inventoryError}</p>}
-
-      <PosStepperHeader
-        currentStep={currentStep}
-        completedSteps={completedSteps}
-        onStepClick={handleStepClick}
-        disabled={disableStepNavigation}
-      />
 
       {showPinWarning && (
         <div className="pos-warning-banner pos-pin-warning">
@@ -4986,6 +5426,12 @@ function AdminPosPage() {
                 );
               }
             }}
+            onPrintBarista={async () => {
+              await handlePrintPrepOrder("drinks", receiptData);
+            }}
+            onPrintFood={async () => {
+              await handlePrintPrepOrder("food", receiptData);
+            }}
             onNewSale={resetCheckout}
           />
 
@@ -5016,6 +5462,12 @@ function AdminPosPage() {
                 <span>Date</span>
                 <span>{receiptData.createdAt.toLocaleString("en-ZA")}</span>
               </div>
+              {receiptData.isTableOrder && receiptData.tableLabel && (
+                <div className="pos-receipt__row">
+                  <span>Table</span>
+                  <span>{receiptData.tableLabel}</span>
+                </div>
+              )}
             </div>
 
             <div className="pos-receipt__body">
@@ -5185,6 +5637,55 @@ function AdminPosPage() {
               </div>
 
               <section className="pos-wizard__build">
+                {cartAddFeedback && (
+                  <div
+                    key={cartAddFeedback.id}
+                    className={`pos-order-add-burst${
+                      cartAddFeedback.replacedExistingBooking
+                        ? " is-update"
+                        : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <span className="pos-order-add-burst__trail" />
+                    <span className="pos-order-add-burst__cart">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        focusable="false"
+                      >
+                        <path
+                          d="M6.5 6.5h14l-1.6 7.2a2 2 0 0 1-2 1.6H9.1a2 2 0 0 1-2-1.7L5.8 3.8H3"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M9.5 19.2h.1M17.2 19.2h.1"
+                          stroke="currentColor"
+                          strokeWidth="2.6"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </span>
+                    <span className="pos-order-add-burst__check">
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        focusable="false"
+                      >
+                        <path
+                          d="m5 10 3.1 3.1L15 6.5"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                  </div>
+                )}
                 <div
                   data-mobile-panel="browse"
                   className={posMobilePanel === "browse" ? "is-active" : ""}
@@ -5251,6 +5752,7 @@ function AdminPosPage() {
                     onAddWorkshop={handleAddWorkshopItem}
                     onAddClass={handleAddClassItem}
                     onAddEvent={handleAddEventItem}
+                    addFeedback={cartAddFeedback}
                   />
                   {cartItems.length > 0 && (
                     <div className="pos-touch-cart-peek" aria-live="polite">
@@ -5395,6 +5897,10 @@ function AdminPosPage() {
                     onChangeQuantity={handleCartQuantityChange}
                     onAdjustQuantity={adjustCartQuantity}
                     stockIssuesByKey={stockIssuesByKey}
+                    highlightItemKey={cartAddFeedback?.itemKey || null}
+                    highlightToken={cartAddFeedback?.id || null}
+                    prepPrintSelection={prepPrintSelection}
+                    onTogglePrepPrintItem={handleTogglePrepPrintItem}
                     footerContent={
                       <div className="pos-cart-panel__cta">
                         {stepOneAttemptedNext && cartItems.length === 0 && (
@@ -5509,11 +6015,81 @@ function AdminPosPage() {
                                 <polyline points="6 9 6 2 18 2 18 9" />
                                 <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
                                 <rect x="6" y="14" width="12" height="8" />
-                              </svg>
-                              Print Bill
-                            </button>
-                          </>
-                        )}
+                            </svg>
+                            Print Bill
+                          </button>
+                          <button
+                            className="btn btn--secondary pos-print-bill-btn"
+                            type="button"
+                            onClick={() => handlePrintPrepOrder("drinks")}
+                            disabled={
+                              !(
+                                prepPrintSummary.drinks?.selectedLineCount > 0 ||
+                                prepPrintSummary.drinks?.newQuantity > 0
+                              )
+                            }
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                              style={{ flexShrink: 0 }}
+                            >
+                              <path d="M5 8h11v5a5 5 0 0 1-5 5H10a5 5 0 0 1-5-5V8Z" />
+                              <path d="M16 9h1.5a2.5 2.5 0 0 1 0 5H16" />
+                              <path d="M7 3v2M11 3v2M15 3v2" />
+                            </svg>
+                            <span>Print Drinks</span>
+                            {prepPrintSummary.drinks?.selectedLineCount > 0 ? (
+                              <small>{prepPrintSummary.drinks.selectedLineCount} selected</small>
+                            ) : prepPrintSummary.drinks?.newQuantity > 0 ? (
+                              <small>{prepPrintSummary.drinks.newQuantity} new</small>
+                            ) : null}
+                          </button>
+                          <button
+                            className="btn btn--secondary pos-print-bill-btn"
+                            type="button"
+                            onClick={() => handlePrintPrepOrder("food")}
+                            disabled={
+                              !(
+                                prepPrintSummary.food?.selectedLineCount > 0 ||
+                                prepPrintSummary.food?.newQuantity > 0
+                              )
+                            }
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                              style={{ flexShrink: 0 }}
+                            >
+                              <path d="M4 3v7a4 4 0 0 0 4 4h1v7" />
+                              <path d="M4 7h5" />
+                              <path d="M9 3v18" />
+                              <path d="M15 3v8h2a3 3 0 0 0 3-3V3" />
+                              <path d="M17 11v10" />
+                            </svg>
+                            <span>Print Food</span>
+                            {prepPrintSummary.food?.selectedLineCount > 0 ? (
+                              <small>{prepPrintSummary.food.selectedLineCount} selected</small>
+                            ) : prepPrintSummary.food?.newQuantity > 0 ? (
+                              <small>{prepPrintSummary.food.newQuantity} new</small>
+                            ) : null}
+                          </button>
+                        </>
+                      )}
                         <button
                           className={`btn btn--primary pos-wizard__next-button ${
                             !stepOneValid ? "is-disabled" : ""
@@ -7506,6 +8082,12 @@ function AdminPosPage() {
                     placeholder="Phone"
                     value={customer.phone}
                     onChange={updateCustomerField("phone")}
+                  />
+                  <input
+                    className="input"
+                    placeholder="Table number or name (if applicable)"
+                    value={tableLabel}
+                    onChange={(event) => setTableLabel(event.target.value)}
                   />
                   <textarea
                     className="input"

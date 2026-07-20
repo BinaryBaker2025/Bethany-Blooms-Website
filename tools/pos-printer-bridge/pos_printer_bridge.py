@@ -193,6 +193,8 @@ class EscPosReceipt:
         self.bold(False)
         self.size(0)
         self.feed(resolve_bottom_feed_lines(bottom_feed_lines))
+        # Add partial cut command at the end
+        self.raw(GS + b"V\x01")
         return b"".join(self.parts)
 
 
@@ -322,6 +324,82 @@ def build_bill_bytes(payload):
     receipt.center("Printed receipt of order")
     receipt.blank(2)
     return receipt.output()
+
+
+def build_barista_order_bytes(payload):
+    payload = payload or {}
+    receipt_data = payload.get("receiptData") or payload
+    items = receipt_data.get("items") or receipt_data.get("cartItems") or []
+    order_number = receipt_data.get("orderNumber") or receipt_data.get("receiptNumber") or ""
+    is_table_order = receipt_data.get("isTableOrder", False)
+    table_label = receipt_data.get("tableLabel") or ""
+    ticket_title = (
+        receipt_data.get("ticketTitle")
+        or receipt_data.get("prepPrintTitle")
+        or ("DRINK ORDER" if receipt_data.get("prepPrintType") == "drinks" else "")
+        or ("FOOD ORDER" if receipt_data.get("prepPrintType") == "food" else "")
+        or "BARISTA ORDER"
+    )
+    
+    # Format the order label
+    if is_table_order and table_label:
+        order_label = f"TABLE: {table_label}"
+        if order_number and order_number != table_label:
+            order_label = f"{order_label}\nOrder {order_number}"
+    else:
+        order_label = f"Order #{order_number}" if order_number else "Order"
+    
+    receipt = EscPosReceipt()
+    add_brand_header(receipt, ticket_title)
+    receipt.divider()
+    
+    # Order number - large and prominent
+    receipt.align("center")
+    receipt.bold(True)
+    receipt.size(0x22)  # Double width and height
+    receipt.text(order_label)
+    receipt.size(0)
+    receipt.bold(False)
+    receipt.align("left")
+    
+    receipt.row("Time", datetime.now().strftime("%H:%M"))
+    receipt.divider()
+    
+    # Items only - no prices (only newly added items for tables)
+    if items:
+        receipt.blank()
+        receipt.bold(True)
+        receipt.text("ITEMS TO PREPARE:")
+        receipt.bold(False)
+        
+        for item in items:
+            qty = item_quantity(item)
+            receipt.text(item_label(item))
+            receipt.text(f"  Qty: {qty}")
+            
+            # Add variant or session info if available
+            metadata = item.get("metadata") or {}
+            if metadata.get("variantLabel"):
+                receipt.text(f"  Variant: {metadata['variantLabel']}")
+            if metadata.get("sessionLabel"):
+                receipt.text(f"  Session: {metadata['sessionLabel']}")
+        
+        receipt.divider()
+        receipt.center("Please prepare items")
+    else:
+        receipt.divider()
+        receipt.center("No items to prepare")
+
+    if receipt_data.get("notes"):
+        receipt.divider()
+        receipt.bold(True)
+        receipt.text("NOTES:")
+        receipt.bold(False)
+        receipt.text(str(receipt_data.get("notes")))
+    
+    receipt.blank(2)
+    return receipt.output()
+
 
 
 def get_printers():
@@ -484,6 +562,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 data = build_receipt_bytes(receipt_data)
             elif path == "/print-bill":
                 data = build_bill_bytes(payload)
+            elif path == "/print-barista-order":
+                data = build_barista_order_bytes(payload)
             elif path == "/test-print":
                 data = build_bill_bytes(
                     {

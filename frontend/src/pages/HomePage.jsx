@@ -130,6 +130,16 @@ function HomePage() {
     title: "Bethany Blooms | Cut & Pressed Flowers, Made Beautifully Simple",
     description:
       "Bethany Blooms offers fresh cut flowers, artisanal pressed flower workshops, DIY kits, and custom floral art from Vereeniging, South Africa.",
+    keywords: [
+      "Bethany Blooms",
+      "florist Vereeniging",
+      "fresh cut flowers Vereeniging",
+      "flower delivery Vereeniging",
+      "pressed flower workshops Gauteng",
+      "pressed flower art South Africa",
+      "DIY pressed flower kits",
+      "custom floral art",
+    ],
     structuredData: [localBusinessSchema, websiteSchema],
     structuredDataId: "home-business-graph",
   });

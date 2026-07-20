@@ -461,6 +461,7 @@ function AdminLayout() {
   const navigate = useNavigate();
 
   const pathName = location.pathname || "";
+  const hideAdminHeader = pathName === "/admin/pos";
 
   const pageTitle = useMemo(() => {
     if (pathName === "/admin") return "Dashboard";
@@ -774,18 +775,37 @@ function AdminLayout() {
                         <div
                           className={`adm-nav__group-head ${isGroupActive ? "is-active" : ""}`}
                         >
-                          <span
-                            className={`adm-nav__item adm-nav__item--group-link ${isGroupActive ? "is-active" : ""}`}
-                            aria-label={item.label}
-                            title={sidebarCollapsed ? item.label : undefined}
-                          >
-                            <SvgIcon
-                              d={ICONS[item.icon]}
-                              size={17}
-                              className="adm-nav__icon"
-                            />
-                            <span className="adm-nav__label">{item.label}</span>
-                          </span>
+                          {sidebarCollapsed && item.children?.[0]?.to ? (
+                            <NavLink
+                              to={item.children[0].to}
+                              className={({ isActive }) =>
+                                `adm-nav__item adm-nav__item--group-link ${isActive || hasChildMatch ? "is-active" : ""}`
+                              }
+                              onClick={handleNavClick}
+                              aria-label={item.label}
+                              title={item.label}
+                            >
+                              <SvgIcon
+                                d={ICONS[item.icon]}
+                                size={17}
+                                className="adm-nav__icon"
+                              />
+                              <span className="adm-nav__label">{item.label}</span>
+                            </NavLink>
+                          ) : (
+                            <span
+                              className={`adm-nav__item adm-nav__item--group-link ${isGroupActive ? "is-active" : ""}`}
+                              aria-label={item.label}
+                              title={sidebarCollapsed ? item.label : undefined}
+                            >
+                              <SvgIcon
+                                d={ICONS[item.icon]}
+                                size={17}
+                                className="adm-nav__icon"
+                              />
+                              <span className="adm-nav__label">{item.label}</span>
+                            </span>
+                          )}
                           <button
                             className={`adm-nav__toggle ${isOpen ? "is-open" : ""}`}
                             type="button"
@@ -906,7 +926,8 @@ function AdminLayout() {
         </nav>
 
         {/* ── Main ─────────────────────────────────────────────────────────── */}
-        <div className="adm-main">
+        <div className={`adm-main ${hideAdminHeader ? "adm-main--headerless" : ""}`}>
+          {!hideAdminHeader && (
           <header className="adm-header">
             <div className="adm-header__left">
               <button
@@ -936,6 +957,7 @@ function AdminLayout() {
               </button>
             </div>
           </header>
+          )}
 
           <main className="adm-content" id="main-content">
             <Outlet />

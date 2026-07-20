@@ -11,6 +11,10 @@ function PosCartPanel({
   emptyMessage = "Add items to start a sale.",
   footerContent = null,
   headerContent = null,
+  highlightItemKey = null,
+  highlightToken = null,
+  prepPrintSelection = {},
+  onTogglePrepPrintItem = null,
 }) {
   return (
     <section className="pos-wizard__card">
@@ -34,6 +38,15 @@ function PosCartPanel({
             const isBookingLine =
               item.type === "workshop-booking" || item.type === "cut-flower-booking";
             const isWorkshopBookingLine = item.type === "workshop-booking";
+            const prepPrintType =
+              item.prepPrintType || item.metadata?.prepPrintType || null;
+            const prepPrintedQuantity = Math.max(
+              0,
+              Number.parseInt(item.prepPrinted?.[prepPrintType], 10) || 0,
+            );
+            const prepPendingQuantity = prepPrintType
+              ? Math.max(0, (Number.parseInt(item.quantity, 10) || 0) - prepPrintedQuantity)
+              : 0;
             const attendeeCount = Math.max(
               1,
               Number.parseInt(item.metadata?.attendeeCount, 10) || 1,
@@ -41,8 +54,18 @@ function PosCartPanel({
             const perAttendeePrice = Number(item.metadata?.perAttendeePrice);
             return (
               <li
-                key={item.key}
-                className={`pos-cart__item ${stockIssue ? "is-warning" : ""}`}
+                key={`${item.key}:${
+                  highlightItemKey === item.key && highlightToken
+                    ? highlightToken
+                    : "stable"
+                }`}
+                className={`pos-cart__item ${
+                  stockIssue ? "is-warning" : ""
+                }${
+                  highlightItemKey === item.key
+                    ? " is-just-added"
+                    : ""
+                }`}
               >
                 <div className="pos-cart__row">
                   <div className="pos-cart__info">
@@ -141,6 +164,24 @@ function PosCartPanel({
                         <path d="M10 11v6M14 11v6" />
                       </svg>
                     </button>
+                  )}
+                  {prepPrintType && onTogglePrepPrintItem && (
+                    <label className="pos-cart__prep-select">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(prepPrintSelection[item.key])}
+                        onChange={(event) =>
+                          onTogglePrepPrintItem(item.key, event.target.checked)
+                        }
+                        disabled={disabled}
+                      />
+                      <span>
+                        {prepPrintType === "food" ? "Food" : "Drinks"}
+                        {prepPendingQuantity > 0
+                          ? `: ${prepPendingQuantity} new`
+                          : ": printed"}
+                      </span>
+                    </label>
                   )}
                 </div>
               </li>

@@ -461,6 +461,15 @@ function ProductsPage() {
   usePageMetadata({
     title: metaTitle,
     description: metaDescription,
+    keywords: [
+      activeCategory?.name,
+      "Bethany Blooms products",
+      "fresh flower bouquets Vereeniging",
+      "pressed flower gifts South Africa",
+      "floral keepsakes",
+      "flower gifts Gauteng",
+    ].filter(Boolean),
+    canonicalPath: "/products",
   });
 
   const hasCategoryFilter = Boolean(activeCategoryParam);

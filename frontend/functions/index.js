@@ -327,6 +327,8 @@ const SITEMAP_STATIC_PUBLIC_PATHS = Object.freeze([
   "/products",
   "/gallery",
   "/contact",
+  "/privacy-policy",
+  "/disclaimer",
   "/subscriptions/checkout",
 ]);
 const SITEMAP_CACHE_CONTROL = "public, max-age=900";
@@ -6815,6 +6817,59 @@ function buildOrderItemsHtml(items = []) {
       ) {
         metaParts.push(`Option: ${escapeHtml(item.metadata.optionLabel)}`);
       }
+      const attendeeSelections = Array.isArray(item.metadata?.attendeeSelections)
+        ? item.metadata.attendeeSelections
+            .map((selection, index) => {
+              if (!selection) return null;
+              if (typeof selection === "string") {
+                return {
+                  attendee: index + 1,
+                  optionLabel: selection,
+                  estimatedPrice: null,
+                };
+              }
+              return typeof selection === "object" ? selection : null;
+            })
+            .filter(Boolean)
+        : [];
+      const attendeeCount = Math.max(
+        1,
+        Number.parseInt(item.metadata?.attendeeCount, 10) || attendeeSelections.length || 1,
+      );
+      const sharedOptionLabel =
+        item.metadata?.optionLabel || item.metadata?.framePreference || "";
+      const displayedAttendeeSelections = attendeeSelections.length
+        ? attendeeSelections
+        : sharedOptionLabel
+          ? Array.from({ length: attendeeCount }, (_, index) => ({
+              attendee: index + 1,
+              optionLabel: sharedOptionLabel,
+              estimatedPrice: item.metadata?.perAttendeePrice,
+            }))
+          : [];
+      if (
+        (item.metadata?.type === "cut-flower" || item.metadata?.type === "workshop") &&
+        displayedAttendeeSelections.length
+      ) {
+        const attendeeRows = displayedAttendeeSelections
+          .map((selection, index) => {
+            const attendeeNumber = Number(selection?.attendee) || index + 1;
+            const optionLabel =
+              selection?.optionLabel ||
+              selection?.optionValue ||
+              item.metadata?.optionLabel ||
+              "Standard";
+            const estimatedPrice = Number(selection?.estimatedPrice);
+            const priceLabel = Number.isFinite(estimatedPrice)
+              ? ` (${formatCurrency(estimatedPrice)})`
+              : "";
+            return `<li style="margin:3px 0;"><strong>Attendee ${escapeHtml(attendeeNumber)}:</strong> ${escapeHtml(optionLabel)}${escapeHtml(priceLabel)}</li>`;
+          })
+          .join("");
+        metaParts.push(
+          `<div style="margin-top:8px;"><strong>Attendee options:</strong><ul style="margin:4px 0 0;padding-left:18px;">${attendeeRows}</ul></div>`,
+        );
+      }
       if (isGiftCardOrderItem(item)) {
         const giftCard = item.metadata?.giftCard || {};
         const recipient = (giftCard.recipientName || "").toString().trim();
@@ -6844,7 +6899,7 @@ function buildOrderItemsHtml(items = []) {
       if (preorderSendMonth) {
         metaParts.push(`Pre-order dispatch: ${escapeHtml(preorderSendMonth)}`);
       }
-      const metaLine = metaParts.length ? `<span>${metaParts.join(" - ")}</span>` : "";
+      const metaLine = metaParts.length ? `<div>${metaParts.join(" - ")}</div>` : "";
       return `<tr>
         <td style="padding:10px 0;border-bottom:1px solid ${EMAIL_BRAND.border};">
           <strong>${name}</strong> <span style="color:${EMAIL_BRAND.muted};">x${quantity}${priceLabel}</span>
@@ -9645,6 +9700,35 @@ function buildBookingData(item, customer = {}, orderId) {
     workshopTitle: item.metadata?.workshopTitle || item.name || null,
     location: item.metadata?.location || null,
     attendeeCount: Math.max(1, Number.parseInt(item.metadata?.attendeeCount, 10) || 1),
+    attendeeSelections: Array.isArray(item.metadata?.attendeeSelections)
+      ? item.metadata.attendeeSelections
+          .map((selection, index) => {
+            if (!selection) return null;
+            if (typeof selection === "string") {
+              return {
+                attendee: index + 1,
+                optionLabel: trimToLength(selection, 160),
+                optionValue: trimToLength(selection, 160),
+                estimatedPrice: null,
+              };
+            }
+            if (typeof selection !== "object") return null;
+            const estimatedPrice = Number(selection.estimatedPrice);
+            return {
+              attendee: Math.max(1, Number.parseInt(selection.attendee, 10) || index + 1),
+              optionLabel: trimToLength(
+                selection.optionLabel || selection.label || selection.optionValue || selection.value || "Standard",
+                160,
+              ),
+              optionValue: trimToLength(
+                selection.optionValue || selection.optionId || selection.value || selection.optionLabel || "",
+                160,
+              ) || null,
+              estimatedPrice: Number.isFinite(estimatedPrice) ? estimatedPrice : null,
+            };
+          })
+          .filter(Boolean)
+      : [],
     price: Number.isFinite(Number(item.metadata?.perAttendeePrice))
       ? Number(item.metadata.perAttendeePrice)
       : Number.isFinite(Number(item?.price))
@@ -11903,6 +11987,67 @@ exports.adminVoidPosSale = onCall(async (request) => {
     cashupReviewTriggered: reviewResult.reviewTriggered,
     reviewCurrentTotals: reviewResult.reviewCurrentTotals,
   };
+});
+
+// Get the next daily order number (resets each day at 00:00 SAST)
+exports.getNextDailyOrderNumber = onCall(async (request) => {
+  await assertAdminRequest(request);
+  const today = getTimeZoneDateKey(new Date(), "Africa/Johannesburg");
+  if (!today) {
+    throw new HttpsError("internal", "Unable to determine current date.");
+  }
+
+  const counterDocRef = db.collection("posDailyCounters").doc(today);
+  
+  return db.runTransaction(async (transaction) => {
+    const counterDoc = await transaction.get(counterDocRef);
+    const currentCount = (counterDoc.data()?.count || 0) + 1;
+    
+    transaction.set(counterDocRef, {
+      count: currentCount,
+      dateKey: today,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    
+    return {
+      orderNumber: currentCount,
+      dateKey: today,
+      formattedOrderNumber: String(currentCount).padStart(3, "0"),
+    };
+  });
+});
+
+// Print barista order ticket (just the items without payment info)
+exports.printBaristaOrder = onCall(async (request) => {
+  await assertAdminRequest(request);
+  const { receiptData, bridgeUrl = "", printerName = "" } = request.data || {};
+  
+  if (!receiptData || !Array.isArray(receiptData.items)) {
+    throw new HttpsError("invalid-argument", "Invalid receipt data.");
+  }
+  
+  // Call the barista print endpoint on the printer bridge
+  const targetUrl = `${(bridgeUrl || "http://127.0.0.1:8787").replace(/\/+$/, "")}/print-barista-order`;
+  
+  try {
+    const response = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        receiptData,
+        printerName: (printerName || "").trim(),
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData?.error || errorData?.message || response.statusText);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    throw new HttpsError("internal", `Barista print failed: ${error.message}`);
+  }
 });
 
 async function buildPayfastPaymentPayload(dataInput = {}) {

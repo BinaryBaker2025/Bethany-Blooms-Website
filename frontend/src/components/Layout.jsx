@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, useEffect, useRef } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useModal } from "../context/ModalContext.jsx";
 import Header from "./Header.jsx";
@@ -9,12 +9,25 @@ const BookingModal = lazy(() => import("./BookingModal.jsx"));
 
 function Layout() {
   const location = useLocation();
+  const isInitialPixelPageView = useRef(true);
   const { closeBooking, cartNotice, dismissCartNotice, isBookingOpen } = useModal();
 
   useEffect(() => {
     closeBooking();
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [location.pathname, closeBooking]);
+
+  useEffect(() => {
+    // The base document records the initial PageView. React Router navigation
+    // does not reload that document, so record subsequent virtual page views.
+    if (isInitialPixelPageView.current) {
+      isInitialPixelPageView.current = false;
+      return;
+    }
+    if (typeof window.fbq === "function") {
+      window.fbq("track", "PageView");
+    }
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (!cartNotice) return undefined;

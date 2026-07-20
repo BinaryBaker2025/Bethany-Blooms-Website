@@ -98,6 +98,7 @@ const INITIAL_BOOKING_FORM = {
   attendeeSelections: [],
   notes: "",
 };
+const WORKSHOP_BOOKING_WINDOW_DAYS = 14;
 const WORKSHOP_REQUEST_TIME_SLOTS = Object.freeze([
   {
     value: "08:00 - 11:00",
@@ -153,6 +154,29 @@ const getWorkshopRequestMinimumDate = () => {
   return tomorrow;
 };
 
+const getWorkshopRequestMaximumDate = () => {
+  const maximumDate = new Date();
+  maximumDate.setHours(0, 0, 0, 0);
+  maximumDate.setDate(maximumDate.getDate() + WORKSHOP_BOOKING_WINDOW_DAYS);
+  return maximumDate;
+};
+
+const isSessionInsideBookingWindow = (session) => {
+  const startDate =
+    session?.startDate instanceof Date &&
+    !Number.isNaN(session.startDate.getTime())
+      ? session.startDate
+      : typeof session?.start === "string"
+        ? new Date(session.start)
+        : parseDateInputValue(session?.date);
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
+    return false;
+  }
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return startDate.getTime() >= now.getTime();
+};
+
 const getWorkshopRequestDateError = (value) => {
   if (!value) return "Please choose a preferred workshop date.";
   const parsed = parseDateInputValue(value);
@@ -163,6 +187,10 @@ const getWorkshopRequestDateError = (value) => {
   }
   if (parsed.getDay() === 0) {
     return "Workshop requests are available Monday to Saturday only.";
+  }
+  const maximumDate = getWorkshopRequestMaximumDate();
+  if (parsed.getTime() > maximumDate.getTime()) {
+    return `Workshop requests can only be made up to ${WORKSHOP_BOOKING_WINDOW_DAYS} days in advance.`;
   }
   return "";
 };
@@ -250,19 +278,23 @@ function BookingModal() {
     () => (Array.isArray(workshop?.sessions) ? workshop.sessions : []),
     [workshop],
   );
-  const hasActiveSession = sessions.some(
+  const visibleSessions = useMemo(
+    () => sessions.filter(isSessionInsideBookingWindow),
+    [sessions],
+  );
+  const hasActiveSession = visibleSessions.some(
     (session) => !session.isPast && !isWorkshopSessionFull(session),
   );
   const selectedSession =
-    sessions.find((session) => session.id === selectedSessionId) ?? null;
+    visibleSessions.find((session) => session.id === selectedSessionId) ?? null;
 
   const sessionDays = useMemo(() => {
-    if (!sessions.length) return [];
+    if (!visibleSessions.length) return [];
     const dayFormatter = new Intl.DateTimeFormat("en-ZA", {
       dateStyle: "long",
     });
     const map = new Map();
-    sessions.forEach((session) => {
+    visibleSessions.forEach((session) => {
       const dateKey =
         session.date ||
         (typeof session.start === "string" ? session.start.slice(0, 10) : "");
@@ -309,10 +341,14 @@ function BookingModal() {
       return aTime - bTime;
     });
     return grouped;
-  }, [sessions]);
-  const isWorkshopRequestMode = !isCutFlower && sessionDays.length === 0;
+  }, [visibleSessions]);
+  const isWorkshopRequestMode = !isCutFlower && sessions.length === 0;
   const requestMinimumDate = useMemo(
     () => formatDateInputValue(getWorkshopRequestMinimumDate()),
+    [],
+  );
+  const requestMaximumDate = useMemo(
+    () => formatDateInputValue(getWorkshopRequestMaximumDate()),
     [],
   );
   const selectedRequestSlot =
@@ -327,6 +363,20 @@ function BookingModal() {
     isWorkshopRequestMode && requestedDate
       ? getWorkshopRequestDateError(requestedDate)
       : "";
+  const hasConfirmedWorkshopSelection =
+    !isCutFlower &&
+    !isWorkshopRequestMode &&
+    Boolean(bookingContext?.selectionConfirmed) &&
+    Boolean(bookingContext?.sessionId || bookingContext?.session?.id);
+  const hasConfirmedWorkshopOption =
+    !isCutFlower &&
+    Boolean(bookingContext?.optionConfirmed) &&
+    Boolean(
+      bookingContext?.optionValue ||
+      bookingContext?.optionId ||
+      bookingContext?.selectedOption?.value ||
+      bookingContext?.selectedOption?.id,
+    );
 
   const selectedDayData =
     sessionDays.find((day) => day.date === selectedDay) ??
@@ -645,13 +695,13 @@ function BookingModal() {
     ].filter((value) => typeof value === "string" && value.length > 0);
     const resolvedPreferredId =
       preferredSessionIds.find((sessionId) =>
-        sessions.some((session) => session.id === sessionId),
+        visibleSessions.some((session) => session.id === sessionId),
       ) ?? null;
-    const hasAnyActive = sessions.some(
+    const hasAnyActive = visibleSessions.some(
       (session) => !session.isPast && !isWorkshopSessionFull(session),
     );
     const preferredSession = resolvedPreferredId
-      ? sessions.find((session) => session.id === resolvedPreferredId)
+      ? visibleSessions.find((session) => session.id === resolvedPreferredId)
       : null;
     const normalizedPreferred =
       preferredSession &&
@@ -660,10 +710,10 @@ function BookingModal() {
         ? preferredSession
         : null;
     const fallbackSession =
-      sessions.find(
+      visibleSessions.find(
         (session) => !session.isPast && !isWorkshopSessionFull(session),
       ) ??
-      sessions[0] ??
+      visibleSessions[0] ??
       null;
 
     setFormState({
@@ -705,7 +755,7 @@ function BookingModal() {
     );
     const initialSession = normalizedPreferred ?? fallbackSession ?? null;
     setSelectedSessionId(initialSession?.id ?? null);
-    setSelectedDay(initialSession?.date ?? sessions[0]?.date ?? null);
+    setSelectedDay(initialSession?.date ?? visibleSessions[0]?.date ?? null);
     setFormStatus("idle");
     setSubmitError(null);
   }, [
@@ -713,7 +763,7 @@ function BookingModal() {
     bookingContext,
     isCutFlower,
     selectionOptions,
-    sessions,
+    visibleSessions,
     workshop,
   ]);
 
@@ -1236,7 +1286,15 @@ function BookingModal() {
                 studio for availability.
               </p>
             )}
-            {!hasActiveSession && sessions.length > 0 && (
+            {!isWorkshopRequestMode &&
+              visibleSessions.length === 0 &&
+              sessions.length > 0 && (
+                <p className="booking-summary__warning">
+                  No workshop dates are available in the next{" "}
+                  {WORKSHOP_BOOKING_WINDOW_DAYS} days.
+                </p>
+              )}
+            {!hasActiveSession && visibleSessions.length > 0 && (
               <p className="booking-summary__warning">
                 All listed sessions have passed. New dates will be added soon.
               </p>
@@ -1260,6 +1318,7 @@ function BookingModal() {
                   type="date"
                   id="requested-workshop-date"
                   min={requestMinimumDate}
+                  max={requestMaximumDate}
                   value={requestedDate}
                   onChange={(event) => {
                     setRequestedDate(event.target.value);
@@ -1267,8 +1326,8 @@ function BookingModal() {
                   }}
                 />
                 <p className="modal__meta">
-                  Available from tomorrow onward. Requests are accepted Monday
-                  to Saturday only.
+                  Available from tomorrow up to {WORKSHOP_BOOKING_WINDOW_DAYS}{" "}
+                  days ahead. Requests are accepted Monday to Saturday only.
                 </p>
                 {requestedDate && requestDateValidationMessage && (
                   <p className="form-feedback__message form-feedback__message--warning">
@@ -1308,113 +1367,121 @@ function BookingModal() {
               </div>
             </>
           )}
-          {!isWorkshopRequestMode && sessionDays.length > 0 && (
-            <div className="booking-grid__full booking-day-picker">
-              <span className="booking-picker__label">
-                {bookingCopy.daySelectorLabel}
-              </span>
-              <div className="booking-day-picker__grid">
-                {sessionDays.map((day) => {
-                  const isActive = day.date === selectedDay;
-                  const allUnavailable = day.sessions.every(
-                    (slot) => slot.isPast || isWorkshopSessionFull(slot),
-                  );
-                  const anyFutureDay = sessionDays.some((entry) =>
-                    entry.sessions.some(
-                      (slot) => !slot.isPast && !isWorkshopSessionFull(slot),
-                    ),
-                  );
-                  return (
-                    <button
-                      key={day.date}
-                      type="button"
-                      className={`booking-day-chip ${isActive ? "booking-day-chip--active" : ""} ${
-                        allUnavailable ? "booking-day-chip--disabled" : ""
-                      }`}
-                      onClick={() => setSelectedDay(day.date)}
-                      disabled={allUnavailable && anyFutureDay}
-                      aria-pressed={isActive}
-                    >
-                      <span className="booking-day-chip__label">
-                        {day.label}
-                      </span>
-                      <span className="booking-day-chip__meta">
-                        {day.sessions.length} {daySlotLabel}
-                        {day.sessions.length === 1 ? "" : "s"}
-                      </span>
-                      {allUnavailable && (
-                        <span className="booking-day-chip__meta booking-day-chip__meta--warning">
-                          {day.sessions.every((slot) =>
-                            isWorkshopSessionFull(slot),
-                          )
-                            ? "Full"
-                            : "Unavailable"}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {!isWorkshopRequestMode && selectedDaySlots.length > 0 && (
-            <div className="booking-grid__full booking-slot-picker">
-              <span className="booking-picker__label">Time Slot</span>
-              <div className="booking-slot-picker__grid">
-                {selectedDaySlots.map((slot) => {
-                  const full = isWorkshopSessionFull(slot);
-                  const disabled = full || (slot.isPast && dayHasActiveSlots);
-                  return (
-                    <button
-                      key={slot.id}
-                      type="button"
-                      className={`booking-slot-chip ${
-                        selectedSessionId === slot.id
-                          ? "booking-slot-chip--active"
-                          : ""
-                      } ${disabled ? "booking-slot-chip--disabled" : ""}`}
-                      onClick={() => setSelectedSessionId(slot.id)}
-                      disabled={disabled}
-                      aria-pressed={selectedSessionId === slot.id}
-                    >
-                      <span className="booking-slot-chip__label">
-                        {slot.timeRangeLabel || slot.formatted}
-                      </span>
-                      <span className="booking-slot-chip__meta">
-                        {typeof slot.capacity === "number"
-                          ? slot.capacity > 0
-                            ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
-                            : "Fully booked"
-                          : "Open booking"}
-                      </span>
-                      {full && (
-                        <span className="booking-slot-chip__meta booking-slot-chip__meta--warning">
-                          Full
-                        </span>
-                      )}
-                      {slot.isPast && (
-                        <span className="booking-slot-chip__meta booking-slot-chip__meta--warning">
-                          Past session
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              {selectedSession?.isPast && (
-                <p className="form-feedback__message form-feedback__message--warning">
-                  This session has already passed. Please choose another
-                  available time.
-                </p>
-              )}
-            </div>
-          )}
-          {!isWorkshopRequestMode && sessionDays.length === 0 && (
-            <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
-              Booking isn't available until new dates are scheduled.
-            </p>
-          )}
           {!isWorkshopRequestMode &&
+            !hasConfirmedWorkshopSelection &&
+            sessionDays.length > 0 && (
+              <div className="booking-grid__full booking-day-picker">
+                <span className="booking-picker__label">
+                  {bookingCopy.daySelectorLabel}
+                </span>
+                <div className="booking-day-picker__grid">
+                  {sessionDays.map((day) => {
+                    const isActive = day.date === selectedDay;
+                    const allUnavailable = day.sessions.every(
+                      (slot) => slot.isPast || isWorkshopSessionFull(slot),
+                    );
+                    const anyFutureDay = sessionDays.some((entry) =>
+                      entry.sessions.some(
+                        (slot) => !slot.isPast && !isWorkshopSessionFull(slot),
+                      ),
+                    );
+                    return (
+                      <button
+                        key={day.date}
+                        type="button"
+                        className={`booking-day-chip ${isActive ? "booking-day-chip--active" : ""} ${
+                          allUnavailable ? "booking-day-chip--disabled" : ""
+                        }`}
+                        onClick={() => setSelectedDay(day.date)}
+                        disabled={allUnavailable && anyFutureDay}
+                        aria-pressed={isActive}
+                      >
+                        <span className="booking-day-chip__label">
+                          {day.label}
+                        </span>
+                        <span className="booking-day-chip__meta">
+                          {day.sessions.length} {daySlotLabel}
+                          {day.sessions.length === 1 ? "" : "s"}
+                        </span>
+                        {allUnavailable && (
+                          <span className="booking-day-chip__meta booking-day-chip__meta--warning">
+                            {day.sessions.every((slot) =>
+                              isWorkshopSessionFull(slot),
+                            )
+                              ? "Full"
+                              : "Unavailable"}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          {!isWorkshopRequestMode &&
+            !hasConfirmedWorkshopSelection &&
+            selectedDaySlots.length > 0 && (
+              <div className="booking-grid__full booking-slot-picker">
+                <span className="booking-picker__label">Time Slot</span>
+                <div className="booking-slot-picker__grid">
+                  {selectedDaySlots.map((slot) => {
+                    const full = isWorkshopSessionFull(slot);
+                    const disabled = full || (slot.isPast && dayHasActiveSlots);
+                    return (
+                      <button
+                        key={slot.id}
+                        type="button"
+                        className={`booking-slot-chip ${
+                          selectedSessionId === slot.id
+                            ? "booking-slot-chip--active"
+                            : ""
+                        } ${disabled ? "booking-slot-chip--disabled" : ""}`}
+                        onClick={() => setSelectedSessionId(slot.id)}
+                        disabled={disabled}
+                        aria-pressed={selectedSessionId === slot.id}
+                      >
+                        <span className="booking-slot-chip__label">
+                          {slot.timeRangeLabel || slot.formatted}
+                        </span>
+                        <span className="booking-slot-chip__meta">
+                          {typeof slot.capacity === "number"
+                            ? slot.capacity > 0
+                              ? `${slot.capacity} seat${slot.capacity === 1 ? "" : "s"}`
+                              : "Fully booked"
+                            : "Open booking"}
+                        </span>
+                        {full && (
+                          <span className="booking-slot-chip__meta booking-slot-chip__meta--warning">
+                            Full
+                          </span>
+                        )}
+                        {slot.isPast && (
+                          <span className="booking-slot-chip__meta booking-slot-chip__meta--warning">
+                            Past session
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedSession?.isPast && (
+                  <p className="form-feedback__message form-feedback__message--warning">
+                    This session has already passed. Please choose another
+                    available time.
+                  </p>
+                )}
+              </div>
+            )}
+          {!isWorkshopRequestMode &&
+            !hasConfirmedWorkshopSelection &&
+            sessionDays.length === 0 && (
+              <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
+                No workshop dates are available in the next{" "}
+                {WORKSHOP_BOOKING_WINDOW_DAYS} days.
+              </p>
+            )}
+          {!isWorkshopRequestMode &&
+            !hasConfirmedWorkshopSelection &&
             sessionDays.length > 0 &&
             selectedDaySlots.length === 0 && (
               <p className="form-feedback__message form-feedback__message--warning booking-grid__full">
@@ -1499,82 +1566,84 @@ function BookingModal() {
               <p className="modal__meta">{attendeeCountLimitMessage}</p>
             )}
           </div>
-          <div className="booking-grid__full booking-attendee-options">
-            <div className="booking-attendee-options__header">
-              <span className="booking-attendee-options__title">
-                {bookingCopy.optionLabel}
-              </span>
-              {hasExtraOptions && (
-                <label className="booking-attendee-options__toggle">
-                  <input
-                    type="checkbox"
-                    checked={showExtraOptions}
-                    onChange={(event) =>
-                      setShowExtraOptions(event.target.checked)
-                    }
-                  />
-                  <span>Show extra add-ons</span>
-                </label>
+          {(isCutFlower || !hasConfirmedWorkshopOption) && (
+            <div className="booking-grid__full booking-attendee-options">
+              <div className="booking-attendee-options__header">
+                <span className="booking-attendee-options__title">
+                  {bookingCopy.optionLabel}
+                </span>
+                {hasExtraOptions && (
+                  <label className="booking-attendee-options__toggle">
+                    <input
+                      type="checkbox"
+                      checked={showExtraOptions}
+                      onChange={(event) =>
+                        setShowExtraOptions(event.target.checked)
+                      }
+                    />
+                    <span>Show extra add-ons</span>
+                  </label>
+                )}
+              </div>
+              <p className="modal__meta">
+                {isCutFlower
+                  ? "Choose the option for each person."
+                  : "Choose an option for each attendee."}
+              </p>
+              {hasExtraOptions && !showExtraOptions && (
+                <p className="modal__meta booking-attendee-options__note">
+                  Extra add-ons are hidden unless you turn them on.
+                </p>
               )}
-            </div>
-            <p className="modal__meta">
-              {isCutFlower
-                ? "Choose the option for each person."
-                : "Choose an option for each attendee."}
-            </p>
-            {hasExtraOptions && !showExtraOptions && (
-              <p className="modal__meta booking-attendee-options__note">
-                Extra add-ons are hidden unless you turn them on.
-              </p>
-            )}
-            {restrictedOptionsNote && (
-              <p className="modal__meta booking-attendee-options__note">
-                {restrictedOptionsNote}
-              </p>
-            )}
-            {hasExtraSelections && (
-              <p className="form-feedback__message form-feedback__message--warning booking-attendee-options__note">
-                Extra add-ons are estimates and may change on the day.
-              </p>
-            )}
-            <div className="booking-attendee-options__grid">
-              {normalizedAttendeeSelections.map((selection, index) => {
-                const selectedOption =
-                  selectionOptions.find(
-                    (option) => option.value === selection,
-                  ) ?? null;
-                return (
-                  <div
-                    className="booking-attendee-options__row"
-                    key={`attendee-option-${index + 1}`}
-                  >
-                    <label htmlFor={`attendee-option-${index}`}>
-                      Attendee {index + 1}
-                    </label>
-                    <div className="booking-attendee-options__control">
-                      <select
-                        className="input"
-                        id={`attendee-option-${index}`}
-                        value={selection}
-                        onChange={handleAttendeeSelectionChange(index)}
-                      >
-                        {availableSelectionOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.displayLabel ?? option.label}
-                          </option>
-                        ))}
-                      </select>
-                      {selectedOption?.isExtra && (
-                        <span className="booking-attendee-options__hint">
-                          Extra add-on pricing is an estimate.
-                        </span>
-                      )}
+              {restrictedOptionsNote && (
+                <p className="modal__meta booking-attendee-options__note">
+                  {restrictedOptionsNote}
+                </p>
+              )}
+              {hasExtraSelections && (
+                <p className="form-feedback__message form-feedback__message--warning booking-attendee-options__note">
+                  Extra add-ons are estimates and may change on the day.
+                </p>
+              )}
+              <div className="booking-attendee-options__grid">
+                {normalizedAttendeeSelections.map((selection, index) => {
+                  const selectedOption =
+                    selectionOptions.find(
+                      (option) => option.value === selection,
+                    ) ?? null;
+                  return (
+                    <div
+                      className="booking-attendee-options__row"
+                      key={`attendee-option-${index + 1}`}
+                    >
+                      <label htmlFor={`attendee-option-${index}`}>
+                        Attendee {index + 1}
+                      </label>
+                      <div className="booking-attendee-options__control">
+                        <select
+                          className="input"
+                          id={`attendee-option-${index}`}
+                          value={selection}
+                          onChange={handleAttendeeSelectionChange(index)}
+                        >
+                          {availableSelectionOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.displayLabel ?? option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedOption?.isExtra && (
+                          <span className="booking-attendee-options__hint">
+                            Extra add-on pricing is an estimate.
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
           <div className="booking-grid__full">
             <label htmlFor="guest-notes">Notes</label>
             <textarea

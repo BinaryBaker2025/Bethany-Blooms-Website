@@ -8904,6 +8904,15 @@ main {
   gap: 1.5rem;
 }
 
+.hero--editorial-split.workshop-detail-hero {
+  min-height: clamp(360px, 50vh, 520px);
+}
+
+.hero--editorial-split.workshop-detail-hero .hero__content {
+  padding-top: clamp(2.75rem, 5vw, 5.25rem);
+  padding-bottom: clamp(2.25rem, 4vw, 4rem);
+}
+
 .workshop-detail-hero .hero__media {
   display: grid;
   place-items: center;
@@ -8951,6 +8960,209 @@ main {
   font-size: 0.98rem;
   color: var(--color-text);
   line-height: 1.45;
+}
+
+.workshop-detail-hero__scroll-invitation {
+  position: relative;
+  display: inline-grid;
+  place-items: start center;
+  width: clamp(3.8rem, 7vw, 5.25rem);
+  height: clamp(5.4rem, 9vw, 6.9rem);
+  margin-top: clamp(0.15rem, 0.8vw, 0.5rem);
+  color: var(--color-sage);
+  text-decoration: none;
+  isolation: isolate;
+}
+
+.workshop-detail-hero__scroll-invitation::before {
+  content: "";
+  position: absolute;
+  top: 0.2rem;
+  bottom: 1rem;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background-image: linear-gradient(
+    to bottom,
+    rgba(85, 107, 47, 0.68) 0 22%,
+    transparent 22% 100%
+  );
+  background-size: 2px 0.75rem;
+  background-repeat: repeat-y;
+  animation: workshop-scroll-stem 1100ms linear infinite;
+}
+
+.workshop-detail-hero__scroll-invitation:focus-visible {
+  outline: 2px solid rgba(85, 107, 47, 0.42);
+  outline-offset: 0.35rem;
+  border-radius: 999px;
+}
+
+.workshop-scroll-invitation__chevron {
+  position: absolute;
+  left: 50%;
+  bottom: 0.12rem;
+  z-index: 2;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-right: 2px solid rgba(85, 107, 47, 0.68);
+  border-bottom: 2px solid rgba(85, 107, 47, 0.68);
+  transform: translateX(-50%) rotate(45deg);
+  animation: workshop-scroll-chevron 1500ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.workshop-info-trail {
+  --info-flower-x: 0px;
+  --info-flower-y: 0px;
+  --info-flower-angle: 0deg;
+  --info-trail-draw: 0;
+  --info-trail-length: 1;
+  position: absolute;
+  top: clamp(1.25rem, 3vw, 2.25rem);
+  bottom: clamp(1.25rem, 3vw, 2.25rem);
+  left: 50%;
+  width: min(88vw, 980px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 3;
+  color: var(--color-sage);
+}
+
+.workshop-info-trail__map {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
+}
+
+.workshop-info-trail__path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 1 8;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 12px 16px rgba(47, 54, 36, 0.14));
+  animation: workshop-bloom-path 3200ms linear infinite;
+}
+
+.workshop-info-trail__path--base {
+  stroke: rgba(85, 107, 47, 0.24);
+}
+
+.workshop-info-trail__path--progress {
+  stroke: rgba(85, 107, 47, 0.74);
+  stroke-width: 2.35;
+}
+
+.workshop-info-trail__reveal {
+  fill: none;
+  stroke: white;
+  stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: var(--info-trail-draw) var(--info-trail-length);
+}
+
+.workshop-info-trail__flower {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: clamp(2rem, 3.7vw, 2.7rem);
+  height: clamp(2rem, 3.7vw, 2.7rem);
+  transform: translate3d(var(--info-flower-x), var(--info-flower-y), 0) translate(-50%, -50%) rotate(var(--info-flower-angle));
+  filter: drop-shadow(0 12px 18px rgba(47, 54, 36, 0.24));
+  will-change: transform;
+  transition:
+    transform 80ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workshop-info-trail__flower svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  animation: workshop-bloom-pulse 1800ms ease-in-out infinite;
+}
+
+.workshop-info-trail__stem,
+.workshop-info-trail__leaf {
+  fill: none;
+  stroke: rgba(85, 107, 47, 0.78);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.workshop-info-trail__leaf {
+  fill: rgba(167, 199, 161, 0.7);
+  stroke-width: 1.3;
+}
+
+.workshop-bloom-trail__petal {
+  fill: rgba(227, 166, 161, 0.92);
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 0.7;
+}
+
+.workshop-bloom-trail__center {
+  fill: rgba(245, 234, 215, 0.98);
+  stroke: rgba(85, 107, 47, 0.28);
+  stroke-width: 0.9;
+}
+
+.workshop-detail-content {
+  position: relative;
+  padding-top: clamp(2.5rem, 5vw, 4.5rem);
+  scroll-margin-top: calc(var(--site-header-height, 96px) + 1rem);
+  overflow: hidden;
+}
+
+.workshop-detail-content > .section__inner {
+  position: relative;
+  z-index: 2;
+}
+
+@keyframes workshop-bloom-path {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+@keyframes workshop-bloom-pulse {
+  0%,
+  100% {
+    transform: scale(0.94) rotate(-8deg);
+  }
+  50% {
+    transform: scale(1.06) rotate(8deg);
+  }
+}
+
+@keyframes workshop-scroll-stem {
+  to {
+    background-position-y: 0.75rem;
+  }
+}
+
+@keyframes workshop-scroll-chevron {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: translateX(-50%) translateY(-0.15rem) rotate(45deg);
+  }
+  50% {
+    opacity: 0.95;
+    transform: translateX(-50%) translateY(0.35rem) rotate(45deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workshop-detail-hero__scroll-invitation::before,
+  .workshop-scroll-invitation__chevron,
+  .workshop-info-trail__path,
+  .workshop-info-trail__flower,
+  .workshop-info-trail__flower svg {
+    animation: none;
+    transition: none;
+  }
 }
 
 .workshop-booking-section {
@@ -9646,6 +9858,11 @@ main {
     display: block;
   }
 
+  .hero--editorial-split.workshop-detail-hero .hero__content {
+    padding-top: clamp(2rem, 8vw, 3rem);
+    padding-bottom: clamp(2rem, 7vw, 3rem);
+  }
+
   .workshop-detail-hero .hero__media {
     position: relative;
     left: 50%;
@@ -9671,6 +9888,35 @@ main {
     max-height: none;
     object-fit: unset !important;
   }
+
+  .workshop-info-trail {
+    left: clamp(0.35rem, 1.8vw, 0.7rem);
+    right: auto;
+    top: 1rem;
+    bottom: 1rem;
+    width: clamp(4.8rem, 16vw, 5.9rem);
+    transform: none;
+    opacity: 0.58;
+    z-index: 1;
+  }
+
+  .workshop-detail-content > .section__inner {
+    padding-left: clamp(4.45rem, 15vw, 6rem);
+  }
+
+  .workshop-detail-hero__scroll-invitation {
+    justify-self: center;
+    width: 4.1rem;
+    height: 5.55rem;
+    min-width: 48px;
+    min-height: 48px;
+    margin-top: 0.45rem;
+  }
+
+  .workshop-scroll-invitation__chevron {
+    width: 1rem;
+    height: 1rem;
+  }
 }
 
 @media (max-width: 640px) {
@@ -9678,8 +9924,67 @@ main {
     grid-template-columns: 1fr;
   }
 
+  .workshop-detail-hero .cta-group {
+    justify-content: center;
+    gap: 0.7rem;
+    margin-top: 1.1rem;
+  }
+
+  .workshop-info-trail {
+    left: 0.35rem;
+    width: 4.7rem;
+    opacity: 0.52;
+  }
+
+  .workshop-detail-hero__scroll-invitation {
+    width: 3.85rem;
+    height: 5.2rem;
+    margin-inline: auto;
+  }
+
+  .workshop-info-trail__path {
+    stroke-width: 1.55;
+    stroke-dasharray: 1 9;
+  }
+
+  .workshop-info-trail__path--progress {
+    stroke-width: 1.95;
+  }
+
+  .workshop-info-trail__flower {
+    width: 1.7rem;
+    height: 1.7rem;
+    opacity: 0.82;
+  }
+
   .session-picker {
     padding: 1.15rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .workshop-detail-hero .cta-group {
+    align-items: stretch;
+  }
+
+  .workshop-detail-hero .cta-group .btn {
+    flex: 1 1 100%;
+  }
+
+  .workshop-detail-hero__scroll-invitation {
+    width: 3.55rem;
+    height: 4.85rem;
+    margin-top: 0.35rem;
+  }
+
+  .workshop-info-trail {
+    left: 0.3rem;
+    width: 4rem;
+    opacity: 0.46;
+  }
+
+  .workshop-detail-content > .section__inner {
+    padding-left: 3.85rem;
   }
 }
 
@@ -15526,6 +15831,56 @@ main {
   margin-top: 2rem;
 }
 
+#workshop-details .workshops-carousel {
+  display: grid;
+  gap: clamp(1rem, 2vw, 1.35rem);
+  margin-top: 2rem;
+}
+
+#workshop-details .workshops-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(1rem, 2vw, 1.25rem);
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+#workshop-details .workshops-grid .cut-flower-card {
+  overflow: hidden;
+}
+
+#workshop-details .workshops-carousel__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+#workshop-details .workshops-carousel__controls .btn {
+  min-width: 118px;
+}
+
+#workshop-details .workshops-carousel__status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4rem;
+  min-height: 2.75rem;
+  border: 1px solid rgba(85, 107, 47, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+  color: rgba(47, 54, 36, 0.76);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+@media (min-width: 760px) {
+  #workshop-details .workshops-grid .cut-flower-card {
+    grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+    min-height: 300px;
+  }
+}
+
 #workshop-details .card:hover {
   outline: 2px solid rgba(85, 107, 47, 0.18);
   outline-offset: 0;
@@ -17489,6 +17844,7 @@ main {
 /* ── Design tokens ──────────────────────────────────────────────────────── */
 :root {
   --adm-sidebar-w: 240px;
+  --adm-sidebar-collapsed-w: 76px;
   --adm-header-h: 58px;
   --adm-bottom-nav-h: 64px;
 
@@ -17566,6 +17922,12 @@ main {
   border-bottom: 1px solid var(--adm-sb-border);
   flex-shrink: 0;
 }
+.adm-sidebar__brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
 .adm-sidebar__brand-logo {
   width: 34px;
   height: 34px;
@@ -17595,6 +17957,31 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 600;
+}
+.adm-sidebar__collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(183, 196, 169, 0.12);
+  background: rgba(183, 196, 169, 0.08);
+  color: var(--adm-sb-text);
+  border-radius: 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.adm-sidebar__collapse:hover,
+.adm-sidebar__collapse:focus-visible {
+  background: rgba(183, 196, 169, 0.16);
+  color: var(--adm-sb-active-text);
+}
+.adm-sidebar__collapse.is-collapsed {
+  transform: rotate(180deg);
 }
 .adm-sidebar__close {
   display: none;
@@ -17800,6 +18187,79 @@ main {
   font-weight: 600;
 }
 
+@media (min-width: 961px) {
+  .adm-shell.is-sidebar-collapsed {
+    --adm-sidebar-w: var(--adm-sidebar-collapsed-w);
+  }
+
+  .adm-sidebar.is-collapsed {
+    scrollbar-width: none;
+  }
+
+  .adm-sidebar.is-collapsed::-webkit-scrollbar {
+    display: none;
+  }
+
+  .adm-sidebar.is-collapsed .adm-sidebar__brand {
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.85rem 0.55rem;
+  }
+
+  .adm-sidebar.is-collapsed .adm-sidebar__brand-info,
+  .adm-sidebar.is-collapsed .adm-nav__section-label,
+  .adm-sidebar.is-collapsed .adm-nav__label,
+  .adm-sidebar.is-collapsed .adm-nav__toggle,
+  .adm-sidebar.is-collapsed .adm-nav__children,
+  .adm-sidebar.is-collapsed .adm-sidebar__signout-label {
+    display: none;
+  }
+
+  .adm-sidebar.is-collapsed .adm-sidebar__brand-actions {
+    justify-content: center;
+  }
+
+  .adm-sidebar.is-collapsed .adm-nav {
+    padding-top: 0.75rem;
+  }
+
+  .adm-sidebar.is-collapsed .adm-nav__section {
+    align-items: center;
+    padding: 0;
+    margin-bottom: 0.35rem;
+  }
+
+  .adm-sidebar.is-collapsed .adm-nav__item,
+  .adm-sidebar.is-collapsed .adm-nav__item--group-link {
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 12px;
+    gap: 0;
+  }
+
+  .adm-sidebar.is-collapsed .adm-nav__group-head {
+    justify-content: center;
+    width: 44px;
+    border-radius: 12px;
+  }
+
+  .adm-sidebar.is-collapsed .adm-nav__icon {
+    opacity: 0.9;
+  }
+
+  .adm-sidebar.is-collapsed .adm-sidebar__signout {
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-inline: auto;
+    padding: 0;
+    border-radius: 12px;
+  }
+}
+
 /* ── Backdrop ────────────────────────────────────────────────────────────── */
 .adm-backdrop {
   display: none;
@@ -17912,6 +18372,10 @@ main {
   flex: 1;
   padding: 1.5rem 1.5rem 2.5rem;
   min-width: 0;
+}
+
+.adm-main--headerless .adm-content {
+  padding-top: 1rem;
 }
 
 /* ── Mobile bottom nav (hidden on desktop) ───────────────────────────────── */
@@ -19085,6 +19549,9 @@ a.card p,
   .adm-sidebar.is-open {
     transform: translateX(0);
     box-shadow: 4px 0 32px rgba(10, 16, 5, 0.32);
+  }
+  .adm-sidebar__collapse {
+    display: none;
   }
   .adm-main {
     margin-left: 0;
@@ -27545,7 +28012,7 @@ td.admin-table__actions {
   display: flex !important;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 12.5rem;
+  min-height: 11rem;
   padding: 0 !important;
   overflow: hidden;
   border: 1px solid rgba(85, 107, 47, 0.22) !important;
@@ -27561,9 +28028,23 @@ td.admin-table__actions {
 
 .pos-retail-card__body {
   display: grid;
-  gap: 0.7rem;
-  padding: 0.85rem;
+  gap: 0.35rem;
+  padding: 0.58rem 0.75rem 0.5rem;
   min-width: 0;
+}
+
+.pos-retail-card__body > h4 {
+  display: -webkit-box;
+  min-height: 2.45em;
+  margin: 0;
+  overflow: hidden;
+  color: var(--pos-text);
+  font-size: 0.9rem;
+  font-weight: 850;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .pos-retail-card__header {
@@ -27675,9 +28156,72 @@ td.admin-table__actions {
 
 .pos-retail-card__actions {
   margin-top: auto;
-  padding: 0.72rem 0.85rem 0.85rem;
+  padding: 0.52rem 0.72rem 0.62rem;
   border-top: 1px solid rgba(222, 213, 197, 0.8);
   background: #f1e8d8;
+}
+
+.pos-retail-card__actions--compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pos-retail-card__actions--compact .pos-retail-card__price-row {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0.42rem 0.58rem;
+}
+
+.pos-retail-card__actions--compact .pos-retail-card__price-row strong {
+  font-size: 1.04rem;
+  overflow-wrap: anywhere;
+}
+
+.pos-retail-card__cart-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #435522;
+  border-radius: 8px;
+  background: #435522;
+  color: #fffdf7;
+  box-shadow: 0 10px 20px rgba(67, 85, 34, 0.18);
+  cursor: pointer;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.pos-retail-card__cart-button:hover:not(:disabled),
+.pos-retail-card__cart-button:focus-visible:not(:disabled) {
+  background: #2f3f17;
+  border-color: #2f3f17;
+  box-shadow: 0 14px 24px rgba(67, 85, 34, 0.24);
+  transform: translateY(-1px);
+}
+
+.pos-retail-card__cart-button:focus-visible {
+  outline: 2px solid rgba(67, 85, 34, 0.32);
+  outline-offset: 3px;
+}
+
+.pos-retail-card__cart-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.pos-retail-card__cart-icon {
+  width: 19px;
+  height: 19px;
 }
 
 .pos-retail-card__button {
@@ -28021,7 +28565,7 @@ td.admin-table__actions {
   }
 
   .pos-retail-card {
-    min-height: 14rem;
+    min-height: 11rem;
   }
 
   .pos-retail-card__body,

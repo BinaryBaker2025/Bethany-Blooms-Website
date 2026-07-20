@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
 import { useCart } from "../context/CartContext.jsx";
@@ -5,6 +6,8 @@ import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import workshopDetailImage from "../assets/photos/workshop-table-details-1.png";
+
+const WORKSHOPS_PER_PAGE = 4;
 
 function parseWorkshopDateValue(value) {
   if (!value) return null;
@@ -62,16 +65,26 @@ function getSlotRangeLabel(timeValue, startDate) {
     if (DEFAULT_TIME_RANGES[normalized]) return DEFAULT_TIME_RANGES[normalized];
   }
   if (startDate instanceof Date && !Number.isNaN(startDate.getTime())) {
-    return new Intl.DateTimeFormat("en-ZA", { hour: "2-digit", minute: "2-digit" }).format(startDate);
+    return new Intl.DateTimeFormat("en-ZA", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(startDate);
   }
-  if (typeof timeValue === "string" && timeValue.trim()) return timeValue.trim();
+  if (typeof timeValue === "string" && timeValue.trim())
+    return timeValue.trim();
   return null;
 }
 
 function resolveWorkshopSessionStart(entry = {}) {
   const dateValue = typeof entry.date === "string" ? entry.date : "";
   const timeValue = typeof entry.time === "string" ? entry.time : "";
-  const candidates = [entry.start, entry.startTime, entry.startDate, entry.datetime, entry.dateTime];
+  const candidates = [
+    entry.start,
+    entry.startTime,
+    entry.startDate,
+    entry.datetime,
+    entry.dateTime,
+  ];
   for (const candidate of candidates) {
     const parsed = parseWorkshopDateValue(candidate);
     if (parsed) return parsed;
@@ -82,7 +95,9 @@ function resolveWorkshopSessionStart(entry = {}) {
 
 function normalizeWorkshopForModal(workshop, sessionFormatter) {
   const now = Date.now();
-  const rawSessions = Array.isArray(workshop.sessions) ? workshop.sessions.filter(Boolean) : [];
+  const rawSessions = Array.isArray(workshop.sessions)
+    ? workshop.sessions.filter(Boolean)
+    : [];
   const normalizedSessions = rawSessions
     .map((entry, index) => {
       const sessionId = entry.id || `session-${index}-${workshop.id}`;
@@ -91,7 +106,8 @@ function normalizeWorkshopForModal(workshop, sessionFormatter) {
       const startDate = resolveWorkshopSessionStart(entry);
       if (!startDate) return null;
       const capacityNumber = Number(entry.capacity);
-      const customLabel = typeof entry.label === "string" ? entry.label.trim() : "";
+      const customLabel =
+        typeof entry.label === "string" ? entry.label.trim() : "";
       const formatted = customLabel || sessionFormatter.format(startDate);
       const timeRangeLabel = getSlotRangeLabel(timeValue, startDate);
       return {
@@ -103,7 +119,10 @@ function normalizeWorkshopForModal(workshop, sessionFormatter) {
         date: dateValue || formatDateInput(startDate),
         time: timeValue || formatTimeInput(startDate),
         timeRangeLabel,
-        capacity: Number.isFinite(capacityNumber) && capacityNumber >= 0 ? capacityNumber : null,
+        capacity:
+          Number.isFinite(capacityNumber) && capacityNumber >= 0
+            ? capacityNumber
+            : null,
         isPast: startDate.getTime() < now,
       };
     })
@@ -138,19 +157,37 @@ function normalizeWorkshopForModal(workshop, sessionFormatter) {
   const normalizedOptions = rawOptions
     .map((opt, index) => {
       const label = (opt?.label || "").toString().trim();
-      const priceNum = typeof opt?.price === "number" ? opt.price : Number(opt?.price);
+      const priceNum =
+        typeof opt?.price === "number" ? opt.price : Number(opt?.price);
       if (!label || !Number.isFinite(priceNum) || priceNum <= 0) return null;
-      return { id: (opt?.id || `option-${index}`).toString().trim(), label, price: priceNum };
+      return {
+        id: (opt?.id || `option-${index}`).toString().trim(),
+        label,
+        price: priceNum,
+      };
     })
     .filter(Boolean);
 
-  const priceNumber = typeof workshop.price === "number" ? workshop.price : Number(workshop.price);
+  const priceNumber =
+    typeof workshop.price === "number"
+      ? workshop.price
+      : Number(workshop.price);
   const unitPrice = Number.isFinite(priceNumber) ? priceNumber : null;
-  const headlineSession = normalizedSessions.find((s) => !s.isPast) ?? normalizedSessions[0] ?? null;
-  const scheduledDateLabel = headlineSession?.formatted || workshop.scheduledDateLabel || "By request";
-  const primarySessionId = workshop.primarySessionId || headlineSession?.id || null;
+  const headlineSession =
+    normalizedSessions.find((s) => !s.isPast) ?? normalizedSessions[0] ?? null;
+  const scheduledDateLabel =
+    headlineSession?.formatted || workshop.scheduledDateLabel || "By request";
+  const primarySessionId =
+    workshop.primarySessionId || headlineSession?.id || null;
 
-  return { ...workshop, sessions: normalizedSessions, options: normalizedOptions, unitPrice, scheduledDateLabel, primarySessionId };
+  return {
+    ...workshop,
+    sessions: normalizedSessions,
+    options: normalizedOptions,
+    unitPrice,
+    scheduledDateLabel,
+    primarySessionId,
+  };
 }
 
 function resolveWorkshopDate(workshop = {}) {
@@ -165,7 +202,10 @@ function resolveWorkshopDate(workshop = {}) {
   candidateDates.sort((left, right) => left.getTime() - right.getTime());
 
   const now = Date.now();
-  return candidateDates.find((date) => date.getTime() >= now) ?? candidateDates[candidateDates.length - 1];
+  return (
+    candidateDates.find((date) => date.getTime() >= now) ??
+    candidateDates[candidateDates.length - 1]
+  );
 }
 
 function isWorkshopFullyBooked(workshop = {}) {
@@ -174,7 +214,11 @@ function isWorkshopFullyBooked(workshop = {}) {
   const now = Date.now();
   const upcomingSessions = sessions.filter((session) => {
     const startDate = resolveWorkshopSessionStart(session);
-    return startDate instanceof Date && !Number.isNaN(startDate.getTime()) && startDate.getTime() >= now;
+    return (
+      startDate instanceof Date &&
+      !Number.isNaN(startDate.getTime()) &&
+      startDate.getTime() >= now
+    );
   });
   if (upcomingSessions.length === 0) return false;
   return upcomingSessions.every((session) => {
@@ -194,42 +238,60 @@ function buildWorkshopCardSummary(workshop = {}) {
     .find((value) => typeof value === "string" && value.trim().length > 0)
     ?.replace(/\s+/g, " ")
     .trim();
-  if (!firstFilled) return "Explore the workshop details, available dates, and booking options.";
+  if (!firstFilled)
+    return "Explore the workshop details, available dates, and booking options.";
   if (firstFilled.length <= 150) return firstFilled;
   return `${firstFilled.slice(0, 147).trimEnd()}...`;
 }
 
 function WorkshopsPage() {
   usePageMetadata({
-    title: "Bethany Blooms Workshops | Pressed Flower Experiences in Vereeniging",
+    title:
+      "Bethany Blooms Workshops | Pressed Flower Experiences in Vereeniging",
     description:
       "Reserve your seat at a Bethany Blooms pressed flower workshop. Explore dates, pricing, and what's included.",
   });
 
   const { openBooking } = useModal();
   const { items } = useCart();
+  const [workshopPageIndex, setWorkshopPageIndex] = useState(0);
 
   const eventFormatter = new Intl.DateTimeFormat("en-ZA", {
     dateStyle: "long",
     timeStyle: "short",
   });
 
-  const { items: remoteWorkshops, status } = useFirestoreCollection("workshops", {
-    orderByField: null,
-    orderDirection: null,
-  });
+  const { items: remoteWorkshops, status } = useFirestoreCollection(
+    "workshops",
+    {
+      orderByField: null,
+      orderDirection: null,
+    },
+  );
 
-  const workshops = remoteWorkshops.filter((workshop) => (workshop.status ?? "live") === "live");
+  const workshops = remoteWorkshops.filter(
+    (workshop) => (workshop.status ?? "live") === "live",
+  );
 
   const normalizedWorkshops = workshops
     .map((workshop) => {
       const parsedDate = resolveWorkshopDate(workshop);
-      const hasValidDate = parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime());
-      const rawSessions = Array.isArray(workshop.sessions) ? workshop.sessions : [];
+      const hasValidDate =
+        parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime());
+      const rawSessions = Array.isArray(workshop.sessions)
+        ? workshop.sessions
+        : [];
       const isByRequest = !hasValidDate && rawSessions.length === 0;
       const isFullyBooked = !isByRequest && isWorkshopFullyBooked(workshop);
-      const displayDate = isByRequest ? "By request" : hasValidDate ? eventFormatter.format(parsedDate) : "Date to be confirmed";
-      const priceNumber = typeof workshop.price === "number" ? workshop.price : Number(workshop.price);
+      const displayDate = isByRequest
+        ? "By request"
+        : hasValidDate
+          ? eventFormatter.format(parsedDate)
+          : "Date to be confirmed";
+      const priceNumber =
+        typeof workshop.price === "number"
+          ? workshop.price
+          : Number(workshop.price);
       const options = Array.isArray(workshop.options) ? workshop.options : [];
       const optionPrices = options
         .map((o) => {
@@ -237,7 +299,8 @@ function WorkshopsPage() {
           return Number.isFinite(p) ? p : null;
         })
         .filter((p) => p !== null);
-      const minOptionPrice = optionPrices.length > 0 ? Math.min(...optionPrices) : null;
+      const minOptionPrice =
+        optionPrices.length > 0 ? Math.min(...optionPrices) : null;
       return {
         ...workshop,
         title: workshop.title || workshop.name || "Bethany Blooms Workshop",
@@ -251,10 +314,12 @@ function WorkshopsPage() {
             ? `From R${minOptionPrice}`
             : Number.isFinite(priceNumber)
               ? `R${priceNumber}`
-              : workshop.price ?? "Pricing on request",
+              : (workshop.price ?? "Pricing on request"),
         options,
         location: workshop.location || "Vereeniging Studio",
-        sortTime: hasValidDate ? parsedDate.getTime() : Number.POSITIVE_INFINITY,
+        sortTime: hasValidDate
+          ? parsedDate.getTime()
+          : Number.POSITIVE_INFINITY,
       };
     })
     .sort((left, right) => {
@@ -266,14 +331,51 @@ function WorkshopsPage() {
       });
     });
 
-  const firstBookableWorkshop = normalizedWorkshops.find((workshop) => !workshop.isFullyBooked) ?? null;
+  const firstBookableWorkshop =
+    normalizedWorkshops.find((workshop) => !workshop.isFullyBooked) ?? null;
+  const workshopPages = useMemo(() => {
+    const pages = [];
+    for (
+      let index = 0;
+      index < normalizedWorkshops.length;
+      index += WORKSHOPS_PER_PAGE
+    ) {
+      pages.push(normalizedWorkshops.slice(index, index + WORKSHOPS_PER_PAGE));
+    }
+    return pages;
+  }, [normalizedWorkshops]);
+  const activeWorkshopPage = workshopPages[workshopPageIndex] ?? [];
+  const hasWorkshopCarousel = workshopPages.length > 1;
+
+  useEffect(() => {
+    setWorkshopPageIndex((currentPage) => {
+      if (workshopPages.length === 0) return 0;
+      return Math.min(currentPage, workshopPages.length - 1);
+    });
+  }, [workshopPages.length]);
+
+  const handlePreviousWorkshopPage = () => {
+    if (!hasWorkshopCarousel) return;
+    setWorkshopPageIndex((currentPage) =>
+      currentPage === 0 ? workshopPages.length - 1 : currentPage - 1,
+    );
+  };
+
+  const handleNextWorkshopPage = () => {
+    if (!hasWorkshopCarousel) return;
+    setWorkshopPageIndex(
+      (currentPage) => (currentPage + 1) % workshopPages.length,
+    );
+  };
 
   const handleBookWorkshop = (workshop) => {
     if (!workshop || workshop.isFullyBooked) return;
     const normalized = normalizeWorkshopForModal(workshop, eventFormatter);
-    const firstOption = normalized.options.length > 0 ? normalized.options[0] : null;
+    const firstOption =
+      normalized.options.length > 0 ? normalized.options[0] : null;
     const isByRequest = normalized.sessions.length === 0;
-    const customerSeed = items.find((item) => item.metadata?.customer)?.metadata?.customer ?? null;
+    const customerSeed =
+      items.find((item) => item.metadata?.customer)?.metadata?.customer ?? null;
     const bookingPayload = {
       type: "workshop",
       workshop: normalized,
@@ -286,7 +388,10 @@ function WorkshopsPage() {
       sessionSource: isByRequest ? "customer-requested" : "admin-session",
     };
     if (!isByRequest) {
-      const firstUpcoming = normalized.sessions.find((s) => !s.isPast) ?? normalized.sessions[0] ?? null;
+      const firstUpcoming =
+        normalized.sessions.find((s) => !s.isPast) ??
+        normalized.sessions[0] ??
+        null;
       if (firstUpcoming) {
         bookingPayload.sessionId = firstUpcoming.id;
         bookingPayload.session = firstUpcoming;
@@ -302,14 +407,22 @@ function WorkshopsPage() {
       {/* Page hero */}
       <section className="section--no-pad">
         <div className="page-hero">
-          <img className="page-hero__bg" src={workshopDetailImage} alt="" aria-hidden="true" loading="eager" decoding="async" />
+          <img
+            className="page-hero__bg"
+            src={workshopDetailImage}
+            alt=""
+            aria-hidden="true"
+            loading="eager"
+            decoding="async"
+          />
           <div className="page-hero__overlay" aria-hidden="true" />
           <div className="page-hero__content">
-            <span className="editorial-eyebrow">Pressed Flower Workshops</span>
-            <h1>Bespoke Pressed Flower Workshops</h1>
+            <span className="editorial-eyebrow">Workshops</span>
+            <h1>Signature Workshops</h1>
             <p>
-              Slow down with a day of making, guided by Bethany Blooms. Craft a framed arrangement, learn pressing
-              techniques, and share a peaceful table with fellow creatives.
+              Slow down with a day of making, guided by Bethany Blooms. Craft a
+              framed arrangement, learn pressing techniques, and share a
+              peaceful table with fellow creatives.
             </p>
             <div className="cta-group">
               {firstBookableWorkshop ? (
@@ -325,7 +438,9 @@ function WorkshopsPage() {
                   View Upcoming Dates
                 </a>
               )}
-              <a href="#workshop-details" className="btn btn--secondary">See All Dates</a>
+              <a href="#workshop-details" className="btn btn--secondary">
+                See All Dates
+              </a>
             </div>
           </div>
         </div>
@@ -338,85 +453,143 @@ function WorkshopsPage() {
             <span className="editorial-eyebrow">Upcoming</span>
             <h2>Upcoming Workshops</h2>
             <p>
-              We gather at a light-filled studio in Vereeniging, with refreshments, blooms, and framing included.
-              Explore the next available dates below, or request a private date when a workshop is marked by request.
+              We gather at a light-filled studio in Vereeniging. Explore the
+              next available dates below, or request a private date when a
+              workshop is marked by request.
             </p>
           </Reveal>
-          <div className="cards-grid workshops-grid">
-            {normalizedWorkshops.map((workshop, index) => (
-              <Reveal as="article" className="card cut-flower-card" key={workshop.id} delay={index * 120}>
-                <div className="cut-flower-card__media">
-                  <img
-                    src={workshop.image || workshopDetailImage}
-                    alt={`${workshop.title} workshop`}
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  <span className="cut-flower-card__badge">{workshop.formattedDate}</span>
-                  {workshop.isFullyBooked && (
-                    <span className="cut-flower-card__status-badge">Fully booked</span>
-                  )}
-                  {workshop.priceDisplay && (
-                    <span className="cut-flower-card__price-tag">{workshop.priceDisplay}</span>
-                  )}
-                </div>
-                <div className="cut-flower-card__body">
-                  <div className="cut-flower-card__heading">
-                    <h3 className="card__title">{workshop.title}</h3>
-                    {workshop.location && (
-                      <p className="cut-flower-card__location">{workshop.location}</p>
+          <div
+            className="workshops-carousel"
+            aria-roledescription="carousel"
+            aria-label="Upcoming workshops"
+          >
+            <div className="cards-grid workshops-grid" aria-live="polite">
+              {activeWorkshopPage.map((workshop, index) => (
+                <Reveal
+                  as="article"
+                  className="card cut-flower-card"
+                  key={workshop.id}
+                  delay={index * 120}
+                >
+                  <div className="cut-flower-card__media">
+                    <img
+                      src={workshop.image || workshopDetailImage}
+                      alt={`${workshop.title} workshop`}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <span className="cut-flower-card__badge">
+                      {workshop.formattedDate}
+                    </span>
+                    {workshop.isFullyBooked && (
+                      <span className="cut-flower-card__status-badge">
+                        Fully booked
+                      </span>
+                    )}
+                    {workshop.priceDisplay && (
+                      <span className="cut-flower-card__price-tag">
+                        {workshop.priceDisplay}
+                      </span>
                     )}
                   </div>
-                  <p className="cut-flower-card__summary">{workshop.description}</p>
-                  <div className="cut-flower-card__details">
-                    <div className="cut-flower-card__detail">
-                      <span className="cut-flower-card__detail-label">Booking</span>
-                      <span className="cut-flower-card__detail-value">
-                        {workshop.isByRequest ? "Choose your date" : "Scheduled workshop"}
-                      </span>
+                  <div className="cut-flower-card__body">
+                    <div className="cut-flower-card__heading">
+                      <h3 className="card__title">{workshop.title}</h3>
+                      {workshop.location && (
+                        <p className="cut-flower-card__location">
+                          {workshop.location}
+                        </p>
+                      )}
                     </div>
-                    <div className="cut-flower-card__detail">
-                      <span className="cut-flower-card__detail-label">Format</span>
-                      <span className="cut-flower-card__detail-value">Pressed flower workshop</span>
-                    </div>
-                    {workshop.options.length > 0 && (
+                    <p className="cut-flower-card__summary">
+                      {workshop.description}
+                    </p>
+                    <div className="cut-flower-card__details">
                       <div className="cut-flower-card__detail">
-                        <span className="cut-flower-card__detail-label">Options</span>
+                        <span className="cut-flower-card__detail-label">
+                          Booking
+                        </span>
                         <span className="cut-flower-card__detail-value">
-                          {workshop.options.length} ticket option{workshop.options.length !== 1 ? "s" : ""}
+                          {workshop.isByRequest
+                            ? "Choose your date"
+                            : "Scheduled workshop"}
                         </span>
                       </div>
-                    )}
+                      {workshop.options.length > 0 && (
+                        <div className="cut-flower-card__detail">
+                          <span className="cut-flower-card__detail-label">
+                            Options
+                          </span>
+                          <span className="cut-flower-card__detail-value">
+                            {workshop.options.length} ticket option
+                            {workshop.options.length !== 1 ? "s" : ""}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="card__actions">
+                      <Link
+                        className="btn btn--secondary"
+                        to={`/workshops/${encodeURIComponent(workshop.id)}`}
+                      >
+                        View More
+                      </Link>
+                      <button
+                        className="btn btn--primary"
+                        type="button"
+                        onClick={() => handleBookWorkshop(workshop)}
+                        disabled={workshop.isFullyBooked}
+                      >
+                        {workshop.isFullyBooked ? "Fully booked" : "Book Now"}
+                      </button>
+                    </div>
                   </div>
-                  <div className="card__actions">
-                    <Link
-                      className="btn btn--secondary"
-                      to={`/workshops/${encodeURIComponent(workshop.id)}`}
-                    >
-                      View More
-                    </Link>
-                    <button
-                      className="btn btn--primary"
-                      type="button"
-                      onClick={() => handleBookWorkshop(workshop)}
-                      disabled={workshop.isFullyBooked}
-                    >
-                      {workshop.isFullyBooked ? "Fully booked" : "Book Now"}
-                    </button>
-                  </div>
-                </div>
-              </Reveal>
-            ))}
+                </Reveal>
+              ))}
+            </div>
+            {hasWorkshopCarousel && (
+              <div
+                className="workshops-carousel__controls"
+                aria-label="Workshop carousel controls"
+              >
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={handlePreviousWorkshopPage}
+                >
+                  Previous
+                </button>
+                <span className="workshops-carousel__status">
+                  {workshopPageIndex + 1} / {workshopPages.length}
+                </span>
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  onClick={handleNextWorkshopPage}
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
           {normalizedWorkshops.length === 0 && status !== "loading" && (
-            <p className="empty-state">No workshops are scheduled right now. Please check back soon.</p>
+            <p className="empty-state">
+              No workshops are scheduled right now. Please check back soon.
+            </p>
           )}
-          {status === "loading" && <p className="empty-state">Loading workshop schedule...</p>}
+          {status === "loading" && (
+            <p className="empty-state">Loading workshop schedule...</p>
+          )}
           {status === "empty" && (
-            <p className="empty-state">No workshops are scheduled right now. Please check back soon.</p>
+            <p className="empty-state">
+              No workshops are scheduled right now. Please check back soon.
+            </p>
           )}
           {status === "error" && (
-            <p className="empty-state">We couldn't load workshops right now. Please refresh and try again.</p>
+            <p className="empty-state">
+              We couldn't load workshops right now. Please refresh and try
+              again.
+            </p>
           )}
         </div>
       </section>
@@ -432,28 +605,34 @@ function WorkshopsPage() {
             <div className="editorial-process__step">
               <h3>Guided Creative Flow</h3>
               <p>
-                Learn foundational techniques for pressing, arranging, and preserving florals while crafting a frame
-                that reflects your unique style.
+                Learn foundational techniques for pressing, arranging, and
+                preserving florals while crafting a frame that reflects your
+                unique style.
               </p>
             </div>
             <div className="editorial-process__step">
               <h3>All Materials Included</h3>
               <p>
-                We provide tools, florals, frames, and refreshments. Simply arrive, breathe deeply, and create.
+                We provide tools, florals, frames, and refreshments. Simply
+                arrive, breathe deeply, and create.
               </p>
             </div>
             <div className="editorial-process__step">
               <h3>Take-Home Keepsakes</h3>
               <p>
-                Leave with your completed framed art, a curated mini bloom pack, and a guide to keep pressing at home.
+                Leave with your completed framed art, a curated mini bloom pack,
+                and a guide to keep pressing at home.
               </p>
             </div>
             <div className="editorial-process__step">
               <h3>Upgrade with Fresh Blooms</h3>
               <p>
-                Pair your workshop with market buckets, bouquet subscriptions, or a bespoke pressed art commission.
+                Pair your workshop with market buckets, bouquet subscriptions,
+                or a bespoke pressed art commission.
               </p>
-              <Link className="btn btn--secondary" to="/products">Explore Products</Link>
+              <Link className="btn btn--secondary" to="/products">
+                Explore Products
+              </Link>
             </div>
           </Reveal>
         </div>
