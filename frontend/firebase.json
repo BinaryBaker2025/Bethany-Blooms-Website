@@ -102,7 +102,7 @@
         "destination": "/index.html"
       },
       {
-        "source": "/@(workshops|cut-flowers|events|products|cart|checkout|gallery|contact|account|subscriptions|payment|gift-cards|reset-password|privacy-policy|disclaimer|design|admin){,/**}",
+        "regex": "^/(?:workshops|cut-flowers|events|products|cart|checkout|gallery|contact|account|subscriptions|payment|gift-cards|reset-password|privacy-policy|disclaimer|design|admin)(?:/[^.]*)?$",
         "destination": "/index.html"
       }
     ]

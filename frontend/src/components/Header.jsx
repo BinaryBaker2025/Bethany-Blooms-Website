@@ -390,6 +390,18 @@ function Header() {
   return (
     <header ref={headerRef} className="site-header">
       <nav ref={navRef} className="nav" onMouseLeave={supportsHover ? handleLeave : undefined}>
+        <button
+          ref={menuToggleRef}
+          className={`menu-toggle ${menuOpen ? "is-open" : ""}`}
+          type="button"
+          onClick={handleMenuToggle}
+          aria-expanded={menuOpen ? "true" : "false"}
+          aria-controls="mobile-navigation"
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+        >
+          <span className="sr-only">Toggle navigation</span>
+          <span className="menu-toggle__icon" aria-hidden="true"></span>
+        </button>
         <NavLink ref={brandRef} to="/" className="brand" aria-label="Bethany Blooms home">
           <img
             src={logo}
@@ -577,18 +589,6 @@ function Header() {
             </svg>
             <span className="sr-only">{user ? "Account" : "Login"}</span>
           </NavLink>
-          <button
-            ref={menuToggleRef}
-            className={`menu-toggle ${menuOpen ? "is-open" : ""}`}
-            type="button"
-            onClick={handleMenuToggle}
-            aria-expanded={menuOpen ? "true" : "false"}
-            aria-controls="mobile-navigation"
-            aria-label={menuOpen ? "Close menu" : "Open menu"}
-          >
-            <span className="sr-only">Toggle navigation</span>
-            <span className="menu-toggle__icon" aria-hidden="true"></span>
-          </button>
         </div>
       </nav>
     </header>
