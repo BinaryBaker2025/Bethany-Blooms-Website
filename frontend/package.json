@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:focused": "node --test src/lib/catalogHero.test.js src/lib/buyNowCart.test.js src/lib/checkoutValidation.test.js",
+    "hero:migrate:dry": "node tools/optimize-category-heroes.mjs",
+    "hero:migrate:apply": "node tools/optimize-category-heroes.mjs --apply"
   },
   "dependencies": {
     "firebase": "^12.5.0",

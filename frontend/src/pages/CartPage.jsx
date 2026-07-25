@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useCart } from "../context/CartContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
@@ -30,6 +30,7 @@ import {
   isPreorderCartLineForMixedRules,
   PREORDER_MIXED_CART_GUIDANCE,
 } from "../lib/cartCatalogSync.js";
+import { checkoutRequiresPhone } from "../lib/checkoutValidation.js";
 
 const currency = (value) => `R${value.toFixed(2)}`;
 const CHECKOUT_REQUEST_TIMEOUT_MS = 20000;
@@ -37,12 +38,11 @@ const CHECKOUT_MAX_ATTEMPTS = 2;
 const LOCAL_FUNCTIONS_URL_PATTERN =
   /^https?:\/\/(?:127\.0\.0\.1|localhost):5001\//i;
 const PREORDER_MIXED_CART_MESSAGE = PREORDER_MIXED_CART_GUIDANCE;
-const STEP_ORDER = ["contact", "shipping", "payment", "review"];
+const STEP_ORDER = ["contact", "shipping", "payment"];
 const BASE_STEP_LABELS = {
   contact: "Contact",
   shipping: "Shipping",
   payment: "Payment",
-  review: "Review",
 };
 
 const isGiftCardCartItem = (item) =>
@@ -66,8 +66,22 @@ const normalizeCheckoutPostalCode = (value) =>
 
 function CartPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isCheckoutRoute = location.pathname === "/checkout";
+
+  useEffect(() => {
+    const pageClass = "cart-checkout-page-active";
+    document.documentElement.classList.add(pageClass);
+    document.body.classList.add(pageClass);
+
+    return () => {
+      document.documentElement.classList.remove(pageClass);
+      document.body.classList.remove(pageClass);
+    };
+  }, []);
+
   usePageMetadata({
-    title: "Your Cart | Bethany Blooms",
+    title: `${isCheckoutRoute ? "Checkout" : "Your Cart"} | Bethany Blooms`,
     description:
       "Review your Bethany Blooms items, add your details, and complete checkout.",
     noIndex: true,
@@ -111,25 +125,16 @@ function CartPage() {
   const [selectedSavedAddressId, setSelectedSavedAddressId] = useState("");
   const [selectedCourierId, setSelectedCourierId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS.PAYFAST);
-  const [payfastConsent, setPayfastConsent] = useState(false);
-  const [activeStep, setActiveStep] = useState(STEP_ORDER[0]);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderError, setOrderError] = useState(null);
   const [orderSuccess, setOrderSuccess] = useState(null);
   const [profileSaveNotice, setProfileSaveNotice] = useState(null);
   const [liveCheckoutMessage, setLiveCheckoutMessage] = useState("");
-  const [checkoutStepFlash, setCheckoutStepFlash] = useState("");
   const [mixedCartSpotlightId, setMixedCartSpotlightId] = useState("");
   const [mixedRecheckNonce, setMixedRecheckNonce] = useState(0);
 
-  const contactRef = useRef(null);
-  const shippingRef = useRef(null);
-  const paymentRef = useRef(null);
-  const reviewRef = useRef(null);
-  const checkoutAccordionRef = useRef(null);
   const stickyCheckoutRef = useRef(null);
   const summaryMessageRef = useRef(null);
-  const contactFirstFieldRef = useRef(null);
   const checkoutAbortRef = useRef(null);
   const prevOrderErrorRef = useRef(null);
 
@@ -396,6 +401,10 @@ function CartPage() {
     !cartHasPhysicalProducts &&
     !cartHasWorkshops;
   const requiresShipping = cartHasPhysicalProducts;
+  const requiresPhone = checkoutRequiresPhone({
+    requiresShipping,
+    containsWorkshops: cartHasWorkshops,
+  });
   const workshopVenueLabel = useMemo(() => {
     if (!workshopOnlyCart) return "";
     const firstWorkshopLocation = items.find(
@@ -420,7 +429,7 @@ function CartPage() {
   const isContactComplete = Boolean(
     contactDetails.fullName.trim() &&
     effectiveCheckoutEmail &&
-    contactDetails.phone.trim(),
+    (!requiresPhone || contactDetails.phone.trim()),
   );
   const postalCodeValid = /^\d{4}$/.test(shippingAddress.postalCode.trim());
   const isShippingComplete =
@@ -433,14 +442,7 @@ function CartPage() {
       postalCodeValid &&
       selectedCourierId,
     );
-  const isPaymentComplete =
-    paymentMethod === PAYMENT_METHODS.PAYFAST ? payfastConsent : true;
-  const stepCompletion = {
-    contact: isContactComplete,
-    shipping: isShippingComplete,
-    payment: isPaymentComplete,
-    review: hasItems,
-  };
+  const isPaymentComplete = Boolean(paymentMethod);
 
   const availableCouriers = useMemo(() => {
     if (!requiresShipping || !shippingAddress.province) return [];
@@ -468,36 +470,19 @@ function CartPage() {
   const itemSubtotal = totalPrice;
   const orderTotal = itemSubtotal + shippingCost;
 
-  const firstIncompleteIndex = STEP_ORDER.findIndex(
-    (step) => !stepCompletion[step],
-  );
-  const maxOpenIndex =
-    firstIncompleteIndex === -1 ? STEP_ORDER.length - 1 : firstIncompleteIndex;
-  const activeIndex = STEP_ORDER.indexOf(activeStep);
-  const nextStep = STEP_ORDER[activeIndex + 1];
   const primaryActionLabel = (() => {
     if (hasMixedPreorderCart) {
       return "Separate orders to continue";
     }
-    if (activeStep === "review") {
-      if (placingOrder) {
-        return paymentMethod === PAYMENT_METHODS.EFT
-          ? "Submitting EFT Order..."
-          : "Placing Order...";
-      }
-      return "Place Order";
+    if (placingOrder) {
+      return paymentMethod === PAYMENT_METHODS.EFT
+        ? "Placing EFT order..."
+        : "Connecting to PayFast...";
     }
-    if (activeStep === "contact" && !isContactComplete) {
-      return "Continue with checkout";
-    }
-    return `Continue to ${stepLabels[nextStep]}`;
+    return paymentMethod === PAYMENT_METHODS.EFT
+      ? "Place EFT order"
+      : "Continue to PayFast";
   })();
-
-  useEffect(() => {
-    if (activeIndex > maxOpenIndex) {
-      setActiveStep(STEP_ORDER[maxOpenIndex]);
-    }
-  }, [activeIndex, maxOpenIndex]);
 
   useEffect(() => {
     if (!items.length) return;
@@ -623,12 +608,6 @@ function CartPage() {
   }, [orderError]);
 
   useEffect(() => {
-    if (!checkoutStepFlash) return undefined;
-    const t = window.setTimeout(() => setCheckoutStepFlash(""), 2200);
-    return () => clearTimeout(t);
-  }, [checkoutStepFlash]);
-
-  useEffect(() => {
     if (!mixedRecheckNonce) return;
     requestAnimationFrame(() => {
       const firstPreorderLine = items.find(
@@ -652,12 +631,10 @@ function CartPage() {
           "Cart matches the latest catalogue. You can continue checkout.",
         );
         setMixedCartSpotlightId("");
-        checkoutAccordionRef.current?.scrollIntoView({
+        document.getElementById("checkout-form")?.scrollIntoView({
           behavior: "smooth",
           block: "start",
         });
-        setCheckoutStepFlash((prev) => prev || "contact");
-        setActiveStep("contact");
       }
     });
     // mixedRecheckNonce batches with hydrated items in the same render tick.
@@ -715,58 +692,6 @@ function CartPage() {
     setShippingAddress((prev) => ({ ...prev, [field]: value }));
   };
 
-  const scrollToStep = (step) => {
-    const refMap = {
-      contact: contactRef,
-      shipping: shippingRef,
-      payment: paymentRef,
-      review: reviewRef,
-    };
-    const target = refMap[step]?.current;
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
-
-  const openStep = (step) => {
-    const stepIndex = STEP_ORDER.indexOf(step);
-    if (!hasItems || stepIndex > maxOpenIndex) return;
-    setActiveStep(step);
-    scrollToStep(step);
-  };
-
-  const validateStep = (step) => {
-    if (!hasItems) {
-      return { ok: false, message: "Add items to start checkout." };
-    }
-    if (hasMixedPreorderCart) {
-      return { ok: false, message: PREORDER_MIXED_CART_MESSAGE };
-    }
-    if (step === "contact" && !isContactComplete) {
-      return {
-        ok: false,
-        message: "Please complete your contact details to continue.",
-      };
-    }
-    if (step === "shipping" && !isShippingComplete) {
-      return {
-        ok: false,
-        message:
-          "Please complete your delivery address and courier selection to continue.",
-      };
-    }
-    if (step === "payment" && !isPaymentComplete) {
-      return {
-        ok: false,
-        message:
-          paymentMethod === PAYMENT_METHODS.PAYFAST
-            ? "Tick the PayFast confirmation box to continue."
-            : "Please choose your payment method to continue.",
-      };
-    }
-    return { ok: true };
-  };
-
   const spotlightMixedPreorderStarter = () => {
     const preorderLine = items.find(
       (line) =>
@@ -786,40 +711,6 @@ function CartPage() {
   const handlePreorderCatalogRecheck = () => {
     hydrateProductLinesFromCatalog(productInventory);
     setMixedRecheckNonce((tick) => tick + 1);
-  };
-
-  const handlePrimaryAction = () => {
-    if (hasMixedPreorderCart) {
-      setOrderError(PREORDER_MIXED_CART_MESSAGE);
-      spotlightMixedPreorderStarter();
-      return;
-    }
-    if (activeStep === "review") {
-      handlePlaceOrder();
-      return;
-    }
-    if (activeStep === "contact" && !isContactComplete) {
-      setOrderError(null);
-      setActiveStep("contact");
-      scrollToStep("contact");
-      contactFirstFieldRef.current?.focus({ preventScroll: true });
-      return;
-    }
-    const validation = validateStep(activeStep);
-    if (!validation.ok) {
-      setOrderError(validation.message);
-      return;
-    }
-    setOrderError(null);
-    if (nextStep) {
-      setActiveStep(nextStep);
-      setCheckoutStepFlash(nextStep);
-      checkoutAccordionRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-      scrollToStep(nextStep);
-    }
   };
 
   const submitPayfastForm = (url, fields) => {
@@ -956,10 +847,7 @@ function CartPage() {
       if (!isPaymentComplete) {
         return {
           step: "payment",
-          message:
-            paymentMethod === PAYMENT_METHODS.PAYFAST
-              ? "Tick the PayFast confirmation box before checkout."
-              : "Please choose your payment method before checkout.",
+          message: "Please choose your payment method before checkout.",
         };
       }
       return null;
@@ -967,8 +855,9 @@ function CartPage() {
 
     if (incompleteStep) {
       setOrderError(incompleteStep.message);
-      setActiveStep(incompleteStep.step);
-      scrollToStep(incompleteStep.step);
+      document
+        .getElementById(`checkout-${incompleteStep.step}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
@@ -1004,9 +893,12 @@ function CartPage() {
         workshopAddressFallback,
     };
 
-    const requiredFields = requiresShipping
-      ? ["fullName", "email", "phone", "address"]
-      : ["fullName", "email", "phone"];
+    const requiredFields = [
+      "fullName",
+      "email",
+      ...(requiresPhone ? ["phone"] : []),
+      ...(requiresShipping ? ["address"] : []),
+    ];
     const missing = requiredFields.filter((field) => !customer[field]?.trim());
     if (missing.length) {
       setOrderError(
@@ -1304,10 +1196,12 @@ function CartPage() {
     <section className="section cart-page">
       <div className="section__inner">
         <div className="cart-page__header">
-          <span className="badge">Cart</span>
-          <h1>Your cart</h1>
+          <span className="badge">{isCheckoutRoute ? "Checkout" : "Cart"}</span>
+          <h1>{isCheckoutRoute ? "Checkout" : "Your cart"}</h1>
           <p className="cart-page__subtitle">
-            Review your items and complete your checkout when you are ready.
+            {isCheckoutRoute
+              ? "Complete your order in one secure step."
+              : "Review your items and complete checkout when you are ready."}
           </p>
         </div>
         <div className="cart-page__grid">
@@ -1389,8 +1283,8 @@ function CartPage() {
                 )}
                 <button
                   className="btn btn--primary"
-                  type="button"
-                  onClick={handlePrimaryAction}
+                  type="submit"
+                  form="checkout-form"
                   disabled={placingOrder || !hasItems}
                 >
                   {primaryActionLabel}
@@ -1811,12 +1705,19 @@ function CartPage() {
               </ul>
             )}
 
-            <div className="checkout-accordion" ref={checkoutAccordionRef}>
+            <form
+              id="checkout-form"
+              className="checkout-accordion checkout-form--single"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handlePlaceOrder();
+              }}
+            >
               <div className="checkout-accordion__header">
                 <h2>Checkout</h2>
                 <p className="modal__meta">
-                  Complete each step in order. The next section opens when the
-                  previous one is complete.
+                  Guest checkout is ready. Enter your details, choose delivery
+                  where required, then select payment.
                 </p>
               </div>
               {!hasItems && (
@@ -1824,58 +1725,20 @@ function CartPage() {
                   Add items to start the checkout flow.
                 </p>
               )}
-              {(activeStep === "review" ? STEP_ORDER : [activeStep]).map(
-                (step) => {
-                  const index = STEP_ORDER.indexOf(step);
-                  const isActive = activeStep === step;
-                  const isComplete = stepCompletion[step];
-                  const isLocked = !hasItems || index > maxOpenIndex;
-                  const statusLabel = isComplete
-                    ? "Complete"
-                    : isLocked
-                      ? "Locked"
-                      : "In progress";
-                  return (
-                    <section
-                      key={step}
-                      ref={
-                        step === "contact"
-                          ? contactRef
-                          : step === "shipping"
-                            ? shippingRef
-                            : step === "payment"
-                              ? paymentRef
-                              : reviewRef
-                      }
-                      className={`checkout-step ${isActive ? "is-active" : ""} ${isComplete ? "is-complete" : ""} ${
-                        isLocked ? "is-locked" : ""
-                      }${checkoutStepFlash === step ? " checkout-step--flash" : ""}`}
-                    >
-                      <button
-                        className={`checkout-step__trigger${checkoutStepFlash === step ? " checkout-step__trigger--flash" : ""}`}
-                        type="button"
-                        onClick={() => openStep(step)}
-                        aria-expanded={
-                          activeStep === "review" ? true : isActive
-                        }
-                        aria-controls={`checkout-${step}`}
-                        disabled={isLocked}
-                      >
+              {STEP_ORDER.map((step) => {
+                const index = STEP_ORDER.indexOf(step);
+                if (step === "shipping" && !requiresShipping) return null;
+                return (
+                  <section key={step} className="checkout-step checkout-step--visible">
+                    <div className="checkout-step__trigger">
                         <span className="checkout-step__index">
                           {index + 1}
                         </span>
                         <span className="checkout-step__title">
                           {stepLabels[step]}
                         </span>
-                        <span className="checkout-step__status">
-                          {statusLabel}
-                        </span>
-                      </button>
-                      <div
-                        id={`checkout-${step}`}
-                        className="checkout-step__content"
-                        hidden={activeStep !== "review" && !isActive}
-                      >
+                    </div>
+                    <div id={`checkout-${step}`} className="checkout-step__content">
                         {step === "contact" && (
                           <div className="checkout-step__fields">
                             <p className="modal__meta">
@@ -1888,8 +1751,8 @@ function CartPage() {
                               <input
                                 className="input"
                                 type="text"
+                                name="name"
                                 autoComplete="name"
-                                ref={contactFirstFieldRef}
                                 value={contactDetails.fullName}
                                 onChange={handleContactChange("fullName")}
                                 placeholder="Full name"
@@ -1901,6 +1764,7 @@ function CartPage() {
                               <input
                                 className="input"
                                 type="email"
+                                name="email"
                                 autoComplete="email"
                                 value={accountEmail || contactDetails.email}
                                 onChange={handleContactChange("email")}
@@ -1910,15 +1774,16 @@ function CartPage() {
                               />
                             </label>
                             <label>
-                              Phone
+                              Phone{requiresPhone ? "" : " (optional)"}
                               <input
                                 className="input"
                                 type="tel"
+                                name="tel"
                                 autoComplete="tel"
                                 value={contactDetails.phone}
                                 onChange={handleContactChange("phone")}
                                 placeholder="Phone number"
-                                required
+                                required={requiresPhone}
                               />
                             </label>
                           </div>
@@ -1938,6 +1803,7 @@ function CartPage() {
                                       Saved addresses
                                       <select
                                         className="input"
+                                        name="saved-address"
                                         value={selectedSavedAddressId}
                                         onChange={(event) =>
                                           setSelectedSavedAddressId(
@@ -1970,6 +1836,7 @@ function CartPage() {
                                   <input
                                     className="input"
                                     type="text"
+                                    name="street-address"
                                     autoComplete="street-address"
                                     value={shippingAddress.street}
                                     onChange={handleAddressChange("street")}
@@ -1983,6 +1850,7 @@ function CartPage() {
                                     <input
                                       className="input"
                                       type="text"
+                                      name="address-level3"
                                       autoComplete="address-level3"
                                       value={shippingAddress.suburb}
                                       onChange={handleAddressChange("suburb")}
@@ -1995,6 +1863,7 @@ function CartPage() {
                                     <input
                                       className="input"
                                       type="text"
+                                      name="address-level2"
                                       autoComplete="address-level2"
                                       value={shippingAddress.city}
                                       onChange={handleAddressChange("city")}
@@ -2006,6 +1875,7 @@ function CartPage() {
                                     Province
                                     <select
                                       className="input"
+                                      name="address-level1"
                                       autoComplete="address-level1"
                                       value={shippingAddress.province}
                                       onChange={handleAddressChange("province")}
@@ -2027,6 +1897,7 @@ function CartPage() {
                                     <input
                                       className="input"
                                       type="text"
+                                      name="postal-code"
                                       inputMode="numeric"
                                       autoComplete="postal-code"
                                       value={shippingAddress.postalCode}
@@ -2110,33 +1981,7 @@ function CartPage() {
                                   checkout.
                                 </p>
                               </>
-                            ) : (
-                              <>
-                                {workshopOnlyCart ? (
-                                  <>
-                                    <p className="modal__meta">
-                                      This booking takes place at our studio, so
-                                      no delivery address is required.
-                                    </p>
-                                    <p className="modal__meta">
-                                      Venue: {workshopVenueLabel}
-                                    </p>
-                                  </>
-                                ) : (
-                                  <>
-                                    <p className="modal__meta">
-                                      This order contains digital gift cards
-                                      only. Delivery is by email and no shipping
-                                      address is required.
-                                    </p>
-                                    <p className="modal__meta">
-                                      Gift cards will be sent to the checkout
-                                      email after successful PayFast payment.
-                                    </p>
-                                  </>
-                                )}
-                              </>
-                            )}
+                            ) : null}
                           </div>
                         )}
 
@@ -2190,7 +2035,6 @@ function CartPage() {
                                       return;
                                     }
                                     setPaymentMethod(PAYMENT_METHODS.EFT);
-                                    setPayfastConsent(false);
                                     setOrderError(null);
                                   }}
                                 />
@@ -2211,29 +2055,11 @@ function CartPage() {
                             )}
 
                             {paymentMethod === PAYMENT_METHODS.PAYFAST && (
-                              <>
-                                <p className="modal__meta">
-                                  Payments are securely processed by PayFast.
-                                  You&apos;ll be redirected to complete payment.
-                                </p>
-                                <label className="checkbox">
-                                  <input
-                                    type="checkbox"
-                                    checked={payfastConsent}
-                                    onChange={(event) =>
-                                      setPayfastConsent(event.target.checked)
-                                    }
-                                  />
-                                  <span>
-                                    I understand I will be redirected to PayFast
-                                    to complete payment.
-                                  </span>
-                                </label>
-                                <p className="modal__meta">
-                                  Supported cards and instant EFT options will
-                                  appear on the PayFast screen.
-                                </p>
-                              </>
+                              <p className="modal__meta">
+                                Payments are securely processed by PayFast.
+                                Card and instant EFT options appear after you
+                                continue.
+                              </p>
                             )}
 
                             {paymentMethod === PAYMENT_METHODS.EFT && (
@@ -2251,74 +2077,25 @@ function CartPage() {
                           </div>
                         )}
 
-                        {step === "review" && (
-                          <div className="checkout-step__fields">
-                            <p className="modal__meta">
-                              Confirm your details before placing the order.
-                              Your items are listed above.
-                            </p>
-                            <div className="checkout-review__grid">
-                              <div className="checkout-review__card">
-                                <h3>Contact</h3>
-                                <p>
-                                  {contactDetails.fullName ||
-                                    "Add contact details"}
-                                </p>
-                                <p className="modal__meta">
-                                  {accountEmail ||
-                                    contactDetails.email ||
-                                    "Email address"}
-                                  {contactDetails.phone
-                                    ? ` - ${contactDetails.phone}`
-                                    : ""}
-                                </p>
-                              </div>
-                              <div className="checkout-review__card">
-                                <h3>{stepLabels.shipping}</h3>
-                                <p>
-                                  {requiresShipping
-                                    ? formatShippingAddress(shippingAddress) ||
-                                      "Add a delivery address"
-                                    : workshopOnlyCart
-                                      ? workshopVenueLabel
-                                      : "Digital delivery by email"}
-                                </p>
-                                <p className="modal__meta">
-                                  {requiresShipping
-                                    ? selectedCourier
-                                      ? `${selectedCourier.name} - ${currency(selectedCourier.price)}`
-                                      : "Select a courier option"
-                                    : workshopOnlyCart
-                                      ? "No courier required for workshop bookings"
-                                      : "No courier required"}
-                                </p>
-                              </div>
-                              <div className="checkout-review__card">
-                                <h3>Payment</h3>
-                                <p>
-                                  {paymentMethod === PAYMENT_METHODS.EFT
-                                    ? "EFT bank transfer"
-                                    : payfastConsent
-                                      ? "PayFast redirect confirmed"
-                                      : "Confirm PayFast step"}
-                                </p>
-                                <p className="modal__meta">
-                                  {cartHasGiftCards
-                                    ? "Gift cards are PayFast only."
-                                    : paymentMethod === PAYMENT_METHODS.EFT
-                                      ? "After placing your order, we show your EFT transfer details and reference."
-                                      : "Secure checkout through PayFast."}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </section>
-                  );
-                },
+                    </div>
+                  </section>
+                );
+              })}
+              {!requiresShipping && hasItems && (
+                <p className="cart-page__notice">
+                  {workshopOnlyCart
+                    ? `No shipping address is needed. Venue: ${workshopVenueLabel}.`
+                    : "Digital gift cards are delivered by email, so no shipping address is needed."}
+                </p>
               )}
-            </div>
+              <button
+                className="btn btn--primary checkout-form__submit"
+                type="submit"
+                disabled={placingOrder || !hasItems}
+              >
+                {primaryActionLabel}
+              </button>
+            </form>
           </div>
 
         </div>

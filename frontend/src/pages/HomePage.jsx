@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
+import PriorityHeroImage from "../components/PriorityHeroImage.jsx";
 import TestimonialCarousel from "../components/TestimonialCarousel.jsx";
 import ProductCardActions from "../components/ProductCardActions.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
@@ -8,7 +9,7 @@ import {
   getProductCardStockStatus,
   getStockBadgeLabel,
 } from "../lib/stockStatus.js";
-import heroBackground from "../assets/photos/hero-cut-flowers.jpg";
+import heroBackground from "../assets/photos/hero-cut-flowers.webp";
 import homePhotoOne from "../assets/photos/workshop-frame-hand-pink.jpeg";
 import homePhotoTwo from "../assets/photos/workshop-frame-hand-neutral.jpeg";
 import homePhotoThree from "../assets/photos/workshop-flowers-trays.jpg";
@@ -252,14 +253,9 @@ function HomePage() {
     <>
       {/* 1 — Home hero: full-bleed image with gradient overlay + service cards */}
       <section className="home-hero">
-        <img
+        <PriorityHeroImage
           className="home-hero__bg-img"
           src={heroBackground}
-          alt=""
-          aria-hidden="true"
-          loading="eager"
-          decoding="async"
-          fetchpriority="high"
         />
         <div className="home-hero__overlay" aria-hidden="true" />
         <div className="home-hero__text">

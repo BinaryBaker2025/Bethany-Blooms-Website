@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
 import ProductCardActions from "../components/ProductCardActions.jsx";
 import { useCart } from "../context/CartContext.jsx";
@@ -24,6 +24,7 @@ import {
 } from "../lib/stockStatus.js";
 import { collectLiveBookingGiftCardOptions } from "../lib/giftCardStudio.js";
 import { buildCanonicalUrl } from "../lib/seo.js";
+import { getBuyNowCartConflict } from "../lib/buyNowCart.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 
 const normalizeNumber = (value) => {
@@ -233,6 +234,7 @@ const buildProductCard = (product, index = 0) => {
 
 function ProductDetailPage() {
   const { productId } = useParams();
+  const navigate = useNavigate();
   const slugParam = useMemo(() => decodeURIComponent(productId || "").toLowerCase(), [productId]);
   const { items, addItem } = useCart();
   const { notifyCart } = useModal();
@@ -817,8 +819,20 @@ function ProductDetailPage() {
     });
   };
 
-  const handleAddToCart = () => {
+  const handleAddToCart = ({ buyNow = false } = {}) => {
     if (!product) return;
+    if (buyNow) {
+      const conflict = getBuyNowCartConflict(items, {
+        incomingType: "product",
+        incomingPreorder:
+          !isGiftCardProduct && activeStockStatus?.state === "preorder",
+        incomingGiftCard: isGiftCardProduct,
+      });
+      if (conflict) {
+        notifyCart(conflict);
+        return;
+      }
+    }
     if (isGiftCardProduct) {
       if (giftCardSelectedCount <= 0) {
         notifyCart("Select at least one gift card option before adding to cart.");
@@ -885,6 +899,7 @@ function ProductDetailPage() {
         },
       });
       notifyCart("Gift card added to cart.");
+      if (buyNow) navigate("/checkout");
       setJustAdded(true);
       if (addedTimeoutRef.current) {
         clearTimeout(addedTimeoutRef.current);
@@ -944,6 +959,7 @@ function ProductDetailPage() {
       },
     });
     notifyCart("Item added to cart");
+    if (buyNow) navigate("/checkout");
     setJustAdded(true);
     if (addedTimeoutRef.current) {
       clearTimeout(addedTimeoutRef.current);
@@ -1217,19 +1233,28 @@ function ProductDetailPage() {
                       Out of stock
                     </button>
                   ) : canPurchase ? (
-                    <button
-                      className={`btn btn--primary ${justAdded ? "is-added" : ""}`}
-                      type="button"
-                      onClick={handleAddToCart}
-                    >
-                      {justAdded
-                        ? "Added!"
-                        : isGiftCardProduct
-                        ? "Add Gift Card"
-                        : activeStockStatus?.state === "preorder"
-                        ? "Preorder now"
-                        : "Add to Cart"}
-                    </button>
+                    <>
+                      <button
+                        className="btn btn--primary"
+                        type="button"
+                        onClick={() => handleAddToCart({ buyNow: true })}
+                      >
+                        Buy Now
+                      </button>
+                      <button
+                        className={`btn btn--secondary ${justAdded ? "is-added" : ""}`}
+                        type="button"
+                        onClick={() => handleAddToCart()}
+                      >
+                        {justAdded
+                          ? "Added!"
+                          : isGiftCardProduct
+                            ? "Add Gift Card"
+                            : activeStockStatus?.state === "preorder"
+                              ? "Add preorder to cart"
+                              : "Add to Cart"}
+                      </button>
+                    </>
                   ) : (
                     <Link className="btn btn--secondary" to="/contact">
                       Enquire

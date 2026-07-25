@@ -37,6 +37,11 @@ import {
   requiresFreshFlowerDeliveryContactForCategoryTokens,
 } from "../lib/freshFlowerDelivery.js";
 import {
+  CATEGORY_HERO_CACHE_CONTROL,
+  isOptimizedCategoryHeroUrl,
+  optimizeCategoryHeroSource,
+} from "../lib/categoryHeroImage.js";
+import {
   buildSelectedGiftCardOptions,
   collectLiveBookingGiftCardOptions,
   getWholeCrewSelectionValidation,
@@ -3065,8 +3070,8 @@ export function AdminProductsView() {
       setCategoryCoverPreview(categoryForm.coverImage || "");
       return;
     }
-    if (file.size > 3 * 1024 * 1024) {
-      setCategoryError("Please choose an image smaller than 3MB.");
+    if (file.size > 12 * 1024 * 1024) {
+      setCategoryError("Please choose an image smaller than 12MB.");
       event.target.value = "";
       return;
     }
@@ -3116,12 +3121,22 @@ export function AdminProductsView() {
     setIsCategoryModalOpen(true);
   };
 
-  const uploadProductMedia = async (file) => {
+  const uploadProductMedia = async (
+    file,
+    {
+      folder = "product-media",
+      cacheControl = "",
+      libraryMetadata = {},
+    } = {},
+  ) => {
     if (!storage) throw new Error("Firebase Storage is not configured.");
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "-");
-    const storagePath = `product-media/${Date.now()}-${sanitizedName}`;
+    const storagePath = `${folder}/${Date.now()}-${sanitizedName}`;
     const storageRef = ref(storage, storagePath);
-    await uploadBytes(storageRef, file, { contentType: file.type });
+    await uploadBytes(storageRef, file, {
+      contentType: file.type,
+      ...(cacheControl ? { cacheControl } : {}),
+    });
     const url = await getDownloadURL(storageRef);
     if (db) {
       try {
@@ -3131,6 +3146,8 @@ export function AdminProductsView() {
           storagePath,
           size: file.size,
           contentType: file.type,
+          ...(cacheControl ? { cacheControl } : {}),
+          ...libraryMetadata,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -4390,8 +4407,35 @@ export function AdminProductsView() {
       setCategorySaving(true);
       setCategoryError(null);
       let coverImageUrl = (categoryForm.coverImage || "").toString().trim();
-      if (categoryCoverFile) {
-        coverImageUrl = await uploadProductMedia(categoryCoverFile);
+      let coverImageMeta =
+        coverImageUrl && editingCategory?.coverImage === coverImageUrl
+          ? editingCategory.coverImageMeta || null
+          : null;
+      const coverSource =
+        categoryCoverFile ||
+        (coverImageUrl && !isOptimizedCategoryHeroUrl(coverImageUrl)
+          ? coverImageUrl
+          : null);
+      if (coverSource) {
+        const optimized = await optimizeCategoryHeroSource(coverSource, {
+          baseName: `${slug}-hero`,
+        });
+        coverImageUrl = await uploadProductMedia(optimized.file, {
+          folder: "product-media/category-heroes",
+          cacheControl: CATEGORY_HERO_CACHE_CONTROL,
+          libraryMetadata: {
+            role: "category-hero",
+            width: optimized.width,
+            height: optimized.height,
+            sourceBytes: optimized.sourceBytes,
+          },
+        });
+        coverImageMeta = {
+          width: optimized.width,
+          height: optimized.height,
+          bytes: optimized.bytes,
+          format: "webp",
+        };
       }
       const payload = {
         name,
@@ -4399,6 +4443,7 @@ export function AdminProductsView() {
         subHeading,
         productDescription,
         coverImage: coverImageUrl || "",
+        coverImageMeta: coverImageUrl ? coverImageMeta : null,
         updatedAt: serverTimestamp(),
       };
       if (isEditing) {

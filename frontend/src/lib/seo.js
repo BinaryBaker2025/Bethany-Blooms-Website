@@ -21,6 +21,7 @@ const NON_INDEXABLE_ROUTE_PATTERNS = Object.freeze([
   /^\/payment(?:\/|$)/,
   /^\/gift-cards\/[^/]+$/,
   /^\/cart$/,
+  /^\/checkout$/,
   /^\/design$/,
 ]);
 

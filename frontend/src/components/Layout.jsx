@@ -9,6 +9,10 @@ const BookingModal = lazy(() => import("./BookingModal.jsx"));
 
 function Layout() {
   const location = useLocation();
+  const hideFloatingWhatsApp =
+    location.pathname === "/cart" ||
+    location.pathname === "/checkout" ||
+    location.pathname.startsWith("/payment/");
   const isInitialPixelPageView = useRef(true);
   const { closeBooking, cartNotice, dismissCartNotice, isBookingOpen } = useModal();
 
@@ -54,8 +58,8 @@ function Layout() {
           <div className="cart-toast__content">
             <span>{cartNotice.message}</span>
             <div className="cart-toast__actions">
-              <Link className="cart-toast__link" to="/cart">
-                View cart
+              <Link className="cart-toast__link" to="/checkout">
+                Proceed to checkout
               </Link>
               <button className="cart-toast__close" type="button" onClick={dismissCartNotice} aria-label="Dismiss">
                 &times;
@@ -64,7 +68,9 @@ function Layout() {
           </div>
         </div>
       )}
-      <WhatsAppFloatingButton hasCartNotice={Boolean(cartNotice)} />
+      {!hideFloatingWhatsApp && (
+        <WhatsAppFloatingButton hasCartNotice={Boolean(cartNotice)} />
+      )}
       {isBookingOpen && (
         <Suspense fallback={null}>
           <BookingModal />

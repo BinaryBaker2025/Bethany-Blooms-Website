@@ -10526,7 +10526,11 @@ function validateOrderPayload(dataInput = {}) {
     customer.address = formattedShippingAddress;
   }
 
-  const requiredFields = ["fullName", "email", "phone"];
+  const requiredFields = [
+    "fullName",
+    "email",
+    ...(requiresShipping || containsWorkshops ? ["phone"] : []),
+  ];
   const missing = requiredFields.filter((field) => !customer[field]);
   if (missing.length) {
     throw new Error(`Missing customer information: ${missing.join(", ")}.`);

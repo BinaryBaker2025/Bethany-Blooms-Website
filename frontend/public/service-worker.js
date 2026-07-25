@@ -1,6 +1,6 @@
 /* Service Worker for Image Caching and Offline Support */
 
-const CACHE_VERSION = "bethany-blooms-v1";
+const CACHE_VERSION = "bethany-blooms-v2";
 const CACHE_NAMES = {
   images: `${CACHE_VERSION}-images`,
   static: `${CACHE_VERSION}-static`,
@@ -78,10 +78,13 @@ self.addEventListener("fetch", (event) => {
               }
               return networkResponse;
             })
-            .catch(() => {
-              // Return fallback if both cache and network fail
-              return caches.match("/");
-            });
+            .catch(
+              () =>
+                new Response("", {
+                  status: 504,
+                  statusText: "Image unavailable",
+                }),
+            );
         });
       }),
     );

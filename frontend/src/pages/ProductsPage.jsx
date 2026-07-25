@@ -1,16 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
 import ImageLoader from "../components/ImageLoader.jsx";
+import PriorityHeroImage from "../components/PriorityHeroImage.jsx";
 import ProductCardActions from "../components/ProductCardActions.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { useImageListPreloader } from "../hooks/useImageListPreloader.js";
-import { formatPreorderSendMonth, getProductPreorderSendMonth } from "../lib/preorder.js";
-import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
-import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
-import { getProductCardStockStatus, getStockBadgeLabel } from "../lib/stockStatus.js";
+import { resolveProductsPageHeroImage } from "../lib/catalogHero.js";
+import {
+  formatPreorderSendMonth,
+  getProductPreorderSendMonth,
+} from "../lib/preorder.js";
+import {
+  getProductCardStockStatus,
+  getStockBadgeLabel,
+} from "../lib/stockStatus.js";
+import allProductsHero from "../assets/photos/all-products-hero.webp";
 
 const stripHtml = (value = "") =>
   value
@@ -28,7 +35,11 @@ const normalizeCategoryToken = (value = "") =>
 
 const normalizeProductCategoryStatus = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
-  if (normalized === "live" || normalized === "draft" || normalized === "archived") {
+  if (
+    normalized === "live" ||
+    normalized === "draft" ||
+    normalized === "archived"
+  ) {
     return normalized;
   }
   return "live";
@@ -51,28 +62,19 @@ const getCatalogItemCategoryValues = (item = {}) => {
   if (item.categorySlug) values.push(item.categorySlug);
   if (item.category) values.push(item.category);
   if (item.categoryName) values.push(item.categoryName);
-  return values.map((value) => normalizeCategoryToken(value ?? "")).filter(Boolean);
+  return values
+    .map((value) => normalizeCategoryToken(value ?? ""))
+    .filter(Boolean);
 };
 
-const hasHiddenCategoryAssignment = (item = {}, hiddenCategoryKeys = new Set()) => {
+const hasHiddenCategoryAssignment = (
+  item = {},
+  hiddenCategoryKeys = new Set(),
+) => {
   if (!hiddenCategoryKeys.size) return false;
-  return getCatalogItemCategoryValues(item).some((value) => hiddenCategoryKeys.has(value));
-};
-
-const preloadedProductHeroImages = new Set();
-
-const preloadProductHeroImage = (src = "", priority = "low") => {
-  const imageUrl = (src || "").toString().trim();
-  if (!imageUrl || preloadedProductHeroImages.has(imageUrl) || typeof window === "undefined") {
-    return;
-  }
-  preloadedProductHeroImages.add(imageUrl);
-  const image = new Image();
-  image.decoding = "async";
-  if ("fetchPriority" in image) {
-    image.fetchPriority = priority;
-  }
-  image.src = imageUrl;
+  return getCatalogItemCategoryValues(item).some((value) =>
+    hiddenCategoryKeys.has(value),
+  );
 };
 
 const normalizeSubscriptionPlanStatus = (value = "") => {
@@ -85,7 +87,11 @@ const normalizeSubscriptionPlanStatus = (value = "") => {
 const normalizeSubscriptionTier = (value = "") => {
   const normalized = (value || "").toString().trim().toLowerCase();
   if (normalized === "biweekly") return "bi-weekly";
-  if (normalized === "weekly" || normalized === "bi-weekly" || normalized === "monthly") {
+  if (
+    normalized === "weekly" ||
+    normalized === "bi-weekly" ||
+    normalized === "monthly"
+  ) {
     return normalized;
   }
   return "";
@@ -109,8 +115,70 @@ function ProductsPage() {
   const { openCart } = useModal();
   const [searchParams, setSearchParams] = useSearchParams();
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterToggleRef = useRef(null);
+  const filterPanelRef = useRef(null);
 
-  const activeCategoryParam = (searchParams.get("category") || "").toString().trim();
+  const closeFilters = useCallback(() => {
+    setFiltersOpen(false);
+    window.requestAnimationFrame(() => filterToggleRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!filtersOpen) return undefined;
+
+    const mobileQuery = window.matchMedia("(max-width: 768px)");
+    const previousOverflow = document.body.style.overflow;
+    const syncScrollLock = () => {
+      document.body.style.overflow = mobileQuery.matches
+        ? "hidden"
+        : previousOverflow;
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeFilters();
+        return;
+      }
+      if (event.key !== "Tab" || !mobileQuery.matches) return;
+
+      const focusable = filterPanelRef.current?.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    syncScrollLock();
+    mobileQuery.addEventListener?.("change", syncScrollLock);
+    document.addEventListener("keydown", handleKeyDown);
+
+    const focusTimer = window.setTimeout(() => {
+      if (mobileQuery.matches) {
+        filterPanelRef.current
+          ?.querySelector(".shop-filters__panel-close")
+          ?.focus();
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      mobileQuery.removeEventListener?.("change", syncScrollLock);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [closeFilters, filtersOpen]);
+
+  const activeCategoryParam = (searchParams.get("category") || "")
+    .toString()
+    .trim();
   const searchQuery = (searchParams.get("q") || "").toString().trim();
   const sortBy = (searchParams.get("sort") || "newest").toString().trim();
   const stockFilter = (searchParams.get("stock") || "all").toString().trim();
@@ -121,7 +189,13 @@ function ProductsPage() {
   const setParam = (key, value) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (value === null || value === "" || value === "all" || value === "newest" || value === "0") {
+      if (
+        value === null ||
+        value === "" ||
+        value === "all" ||
+        value === "newest" ||
+        value === "0"
+      ) {
         next.delete(key);
       } else {
         next.set(key, value);
@@ -132,19 +206,17 @@ function ProductsPage() {
 
   const clearAllFilters = () => {
     setSearchParams({});
-    setFiltersOpen(false);
+    closeFilters();
   };
   const { items: remoteProducts, status } = useFirestoreCollection("products", {
     orderByField: "createdAt",
     orderDirection: "desc",
   });
-  const { items: remoteSubscriptionPlans, status: subscriptionPlansStatus } = useFirestoreCollection(
-    "subscriptionPlans",
-    {
+  const { items: remoteSubscriptionPlans, status: subscriptionPlansStatus } =
+    useFirestoreCollection("subscriptionPlans", {
       orderByField: "updatedAt",
       orderDirection: "desc",
-    },
-  );
+    });
   const { items: categoryItems } = useFirestoreCollection("productCategories", {
     orderByField: "name",
     orderDirection: "asc",
@@ -161,12 +233,31 @@ function ProductsPage() {
       categoryItems
         .filter((category) => !isCategoryHidden(category))
         .map((category) => {
-          const name = (category.name || category.title || category.label || category.id || "").toString().trim();
+          const name = (
+            category.name ||
+            category.title ||
+            category.label ||
+            category.id ||
+            ""
+          )
+            .toString()
+            .trim();
           if (!name) return null;
           const slug = (category.slug || category.id || name).toString().trim();
-          const coverImage =
-            (category.coverImage || category.cover_image || category.image || "").toString().trim();
-          const description = (category.description || category.short_description || category.shortDescription || "")
+          const coverImage = (
+            category.coverImage ||
+            category.cover_image ||
+            category.image ||
+            ""
+          )
+            .toString()
+            .trim();
+          const description = (
+            category.description ||
+            category.short_description ||
+            category.shortDescription ||
+            ""
+          )
             .toString()
             .trim();
           const subHeading = (
@@ -188,28 +279,19 @@ function ProductsPage() {
           )
             .toString()
             .trim();
-          return { id: category.id || slug, name, slug, coverImage, description, subHeading, productDescription };
+          return {
+            id: category.id || slug,
+            name,
+            slug,
+            coverImage,
+            description,
+            subHeading,
+            productDescription,
+          };
         })
         .filter(Boolean),
     [categoryItems],
   );
-  const categoryHeroImagesToPreload = useMemo(() => {
-    const urls = categoryOptions
-      .map((category) => {
-        const tokens = [category.id, category.slug, category.name].map(normalizeCategoryToken);
-        const isCutFlower = tokens.some(
-          (token) =>
-            token === "cut-flower" ||
-            token === "cutflower" ||
-            token.includes("cut-flower") ||
-            token.includes("cutflower"),
-        );
-        return isCutFlower ? CUT_FLOWER_PAGE_IMAGES.productsCutFlowerHero : category.coverImage;
-      })
-      .map((value) => (value || "").toString().trim())
-      .filter(Boolean);
-    return Array.from(new Set(urls));
-  }, [categoryOptions]);
   const categoryLookup = useMemo(() => {
     const map = new Map();
     categoryOptions.forEach((category) => {
@@ -237,12 +319,14 @@ function ProductsPage() {
   );
 
   const normalizedProducts = liveProducts.map((product, index) => {
-    const priceNumber = typeof product.price === "number" ? product.price : Number(product.price);
+    const priceNumber =
+      typeof product.price === "number" ? product.price : Number(product.price);
     const salePriceNumber =
       typeof product.sale_price === "number"
         ? product.sale_price
         : Number(product.sale_price ?? product.salePrice);
-    const hasSale = Number.isFinite(salePriceNumber) && salePriceNumber !== priceNumber;
+    const hasSale =
+      Number.isFinite(salePriceNumber) && salePriceNumber !== priceNumber;
     const basePrice = hasSale ? salePriceNumber : priceNumber;
     const isPurchasable = Number.isFinite(basePrice);
     const stockStatus = getProductCardStockStatus(product);
@@ -252,10 +336,14 @@ function ProductsPage() {
     const variants = Array.isArray(product.variants)
       ? product.variants
           .map((variant) => {
-            const label = (variant.label || variant.name || "").toString().trim();
+            const label = (variant.label || variant.name || "")
+              .toString()
+              .trim();
             if (!label) return null;
             const priceValue =
-              typeof variant.price === "number" ? variant.price : Number(variant.price);
+              typeof variant.price === "number"
+                ? variant.price
+                : Number(variant.price);
             return {
               id: (variant.id || label).toString(),
               label,
@@ -327,10 +415,13 @@ function ProductsPage() {
       title: product.title || product.name || "Bethany Blooms Product",
       name: product.name || product.title || "Bethany Blooms Product",
       description,
-      displayPrice: Number.isFinite(basePrice) ? `R${basePrice}` : product.price ?? "Price on request",
-      originalPrice: hasSale && Number.isFinite(priceNumber) ? `R${priceNumber}` : null,
+      displayPrice: Number.isFinite(basePrice)
+        ? `R${basePrice}`
+        : (product.price ?? "Price on request"),
+      originalPrice:
+        hasSale && Number.isFinite(priceNumber) ? `R${priceNumber}` : null,
       numericPrice: Number.isFinite(basePrice) ? basePrice : null,
-      image: images[0] || product.image || heroBackground,
+      image: images[0] || product.image || "",
       images,
       categoryLabels,
       categoryKeys: Array.from(categoryKeys),
@@ -353,13 +444,18 @@ function ProductsPage() {
     };
 
     return remoteSubscriptionPlans
-      .filter((plan) => normalizeSubscriptionPlanStatus(plan?.status || "draft") === "live")
+      .filter(
+        (plan) =>
+          normalizeSubscriptionPlanStatus(plan?.status || "draft") === "live",
+      )
       .filter((plan) => !hasHiddenCategoryAssignment(plan, hiddenCategoryKeys))
       .map((plan, index) => {
         const planId = (plan?.id || "").toString().trim();
         if (!planId) return null;
 
-        const perDeliveryAmount = normalizePriceAmount(plan?.monthlyAmount ?? plan?.monthly_amount);
+        const perDeliveryAmount = normalizePriceAmount(
+          plan?.monthlyAmount ?? plan?.monthly_amount,
+        );
         if (!perDeliveryAmount) return null;
 
         const tier = normalizeSubscriptionTier(plan?.tier);
@@ -380,8 +476,14 @@ function ProductsPage() {
           const resolved = resolvePlanCategory(value);
           if (resolved) {
             const idKey = (resolved.id || "").toString().trim().toLowerCase();
-            const slugKey = (resolved.slug || "").toString().trim().toLowerCase();
-            const nameKey = (resolved.name || "").toString().trim().toLowerCase();
+            const slugKey = (resolved.slug || "")
+              .toString()
+              .trim()
+              .toLowerCase();
+            const nameKey = (resolved.name || "")
+              .toString()
+              .trim()
+              .toLowerCase();
             if (idKey) categoryKeys.add(idKey);
             if (slugKey) categoryKeys.add(slugKey);
             if (nameKey) categoryKeys.add(nameKey);
@@ -401,14 +503,20 @@ function ProductsPage() {
           categoryLabels.push("Subscriptions");
         }
 
-        const title = (plan?.name || plan?.title || "Flower subscription").toString().trim();
+        const title = (plan?.name || plan?.title || "Flower subscription")
+          .toString()
+          .trim();
         const generatedDescription = [
           tierLabel ? `${tierLabel} delivery` : null,
           "Billed monthly based on selected Monday deliveries",
         ]
           .filter(Boolean)
           .join(" · ");
-        const description = stripHtml(plan?.description || generatedDescription || "Flower subscription plan.");
+        const description = stripHtml(
+          plan?.description ||
+            generatedDescription ||
+            "Flower subscription plan.",
+        );
 
         return {
           ...plan,
@@ -421,7 +529,7 @@ function ProductsPage() {
           displayPrice: `R${perDeliveryAmount.toFixed(2)} / delivery`,
           originalPrice: null,
           numericPrice: perDeliveryAmount,
-          image: (plan?.image || "").toString().trim() || heroBackground,
+          image: (plan?.image || "").toString().trim(),
           images: [(plan?.image || "").toString().trim()].filter(Boolean),
           categoryLabels,
           categoryKeys: Array.from(categoryKeys),
@@ -525,26 +633,51 @@ function ProductsPage() {
     }
 
     // Stock filter
-    if (stockFilter === "in") result = result.filter((p) => p.stockStatus?.state === "in");
-    else if (stockFilter === "out") result = result.filter((p) => p.stockStatus?.state === "out");
-    else if (stockFilter === "preorder") result = result.filter((p) => p.stockStatus?.state === "preorder");
+    if (stockFilter === "in")
+      result = result.filter((p) => p.stockStatus?.state === "in");
+    else if (stockFilter === "out")
+      result = result.filter((p) => p.stockStatus?.state === "out");
+    else if (stockFilter === "preorder")
+      result = result.filter((p) => p.stockStatus?.state === "preorder");
 
     // On sale
     if (onSaleOnly) result = result.filter((p) => Boolean(p.originalPrice));
 
     // Price range
-    if (priceMin !== null) result = result.filter((p) => p.numericPrice !== null && p.numericPrice >= priceMin);
-    if (priceMax !== null) result = result.filter((p) => p.numericPrice !== null && p.numericPrice <= priceMax);
+    if (priceMin !== null)
+      result = result.filter(
+        (p) => p.numericPrice !== null && p.numericPrice >= priceMin,
+      );
+    if (priceMax !== null)
+      result = result.filter(
+        (p) => p.numericPrice !== null && p.numericPrice <= priceMax,
+      );
 
     // Sort
-    if (sortBy === "price-asc") result.sort((a, b) => (a.numericPrice ?? Infinity) - (b.numericPrice ?? Infinity));
-    else if (sortBy === "price-desc") result.sort((a, b) => (b.numericPrice ?? -Infinity) - (a.numericPrice ?? -Infinity));
-    else if (sortBy === "name-az") result.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
-    else if (sortBy === "name-za") result.sort((a, b) => (b.title || "").localeCompare(a.title || ""));
+    if (sortBy === "price-asc")
+      result.sort(
+        (a, b) => (a.numericPrice ?? Infinity) - (b.numericPrice ?? Infinity),
+      );
+    else if (sortBy === "price-desc")
+      result.sort(
+        (a, b) => (b.numericPrice ?? -Infinity) - (a.numericPrice ?? -Infinity),
+      );
+    else if (sortBy === "name-az")
+      result.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+    else if (sortBy === "name-za")
+      result.sort((a, b) => (b.title || "").localeCompare(a.title || ""));
     // "newest" keeps original server order
 
     return result;
-  }, [baseProducts, searchQuery, stockFilter, onSaleOnly, priceMin, priceMax, sortBy]);
+  }, [
+    baseProducts,
+    searchQuery,
+    stockFilter,
+    onSaleOnly,
+    priceMin,
+    priceMax,
+    sortBy,
+  ]);
 
   // Extract all product images for intelligent preloading
   const displayProductImages = useMemo(() => {
@@ -562,76 +695,62 @@ function ProductsPage() {
   });
 
   const hasActiveFilters = Boolean(
-    searchQuery || activeCategoryParam || stockFilter !== "all" || onSaleOnly || priceMin || priceMax || sortBy !== "newest",
+    searchQuery ||
+    activeCategoryParam ||
+    stockFilter !== "all" ||
+    onSaleOnly ||
+    priceMin ||
+    priceMax ||
+    sortBy !== "newest",
+  );
+  const hasFilterSelections = Boolean(
+    activeCategoryParam ||
+    stockFilter !== "all" ||
+    onSaleOnly ||
+    priceMin ||
+    priceMax,
   );
 
-  const isCutFlowerCategory = useMemo(() => {
-    if (!hasCategoryFilter) return false;
-    const tokens = new Set([
-      normalizeCategoryToken(activeCategoryParam),
-      normalizeCategoryToken(activeCategory?.id),
-      normalizeCategoryToken(activeCategory?.slug),
-      normalizeCategoryToken(activeCategory?.name),
-    ].filter(Boolean));
-    return Array.from(tokens).some((token) =>
-      token === "cut-flower" ||
-      token === "cutflower" ||
-      token.includes("cut-flower") ||
-      token.includes("cutflower"),
-    );
-  }, [activeCategory?.id, activeCategory?.name, activeCategory?.slug, activeCategoryParam, hasCategoryFilter]);
-
-  const categoryCoverImage = (activeCategory?.coverImage && activeCategory.coverImage.trim()) || "";
-  const heroImage =
-    (isCutFlowerCategory ? CUT_FLOWER_PAGE_IMAGES.productsCutFlowerHero : categoryCoverImage) ||
-    displayProducts[0]?.image ||
-    normalizedProducts[0]?.image ||
-    heroBackground;
-  const heroTitle = activeCategory?.name || "Pressed Floral Products";
+  const heroImage = resolveProductsPageHeroImage({
+    category: activeCategory,
+    hasCategoryFilter,
+    allProductsImage: allProductsHero,
+  });
+  const heroTitle = activeCategory?.name || "Products";
   const heroDescription =
     activeCategory?.description ||
     "Bring the studio experience home. Explore framed pressed art, gifting collections, ready-to-style blooms, and premium DIY options handcrafted by Bethany Blooms.";
-  const collectionHeading = activeCategory?.subHeading || "The Studio Collection";
+  const collectionHeading =
+    activeCategory?.subHeading || "The Studio Collection";
   const collectionDescription =
     activeCategory?.productDescription ||
     activeCategory?.description ||
     "Discover limited releases, seasonal blooms, and bespoke keepsakes designed to celebrate meaningful moments.";
 
-  useEffect(() => {
-    preloadProductHeroImage(heroImage || heroBackground, "high");
-  }, [heroImage]);
-
-  useEffect(() => {
-    if (!categoryHeroImagesToPreload.length || typeof window === "undefined") return undefined;
-    const preloadAllCategoryHeroImages = () => {
-      categoryHeroImagesToPreload.forEach((imageUrl) => {
-        preloadProductHeroImage(imageUrl, "low");
-      });
-    };
-
-    if (typeof window.requestIdleCallback === "function") {
-      const callbackId = window.requestIdleCallback(preloadAllCategoryHeroImages, { timeout: 1500 });
-      return () => window.cancelIdleCallback?.(callbackId);
-    }
-
-    const timeoutId = window.setTimeout(preloadAllCategoryHeroImages, 250);
-    return () => window.clearTimeout(timeoutId);
-  }, [categoryHeroImagesToPreload]);
-
   return (
     <>
       {/* Page hero */}
       <section className="section--no-pad">
-        <div className="page-hero">
-          <img className="page-hero__bg" src={heroImage || heroBackground} alt="" aria-hidden="true" loading="eager" decoding="async" fetchPriority="high" />
+        <div
+          className={`page-hero${heroImage ? " page-hero--has-image" : " page-hero--neutral"}`}
+        >
+          <PriorityHeroImage className="page-hero__bg" src={heroImage} />
           <div className="page-hero__overlay" aria-hidden="true" />
           <div className="page-hero__content">
             <span className="editorial-eyebrow">Studio Collection</span>
             <h1>{heroTitle}</h1>
             <p>{heroDescription}</p>
             <div className="cta-group">
-              <a href="#product-collection" className="btn btn--secondary">Browse Collection</a>
-              <button className="btn btn--primary" type="button" onClick={openCart}>View Cart</button>
+              <a href="#product-collection" className="btn btn--secondary">
+                Browse Collection
+              </a>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={openCart}
+              >
+                View Cart
+              </button>
             </div>
           </div>
         </div>
@@ -650,6 +769,20 @@ function ProductsPage() {
             {/* Row 1: search + sort + filter toggle */}
             <div className="shop-filters__bar">
               <div className="shop-filters__search-wrap">
+                <svg
+                  className="shop-filters__search-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-3.5-3.5" />
+                </svg>
                 <input
                   className="shop-filters__search"
                   type="search"
@@ -659,7 +792,13 @@ function ProductsPage() {
                   aria-label="Search products"
                 />
                 {searchQuery && (
-                  <button className="shop-filters__search-clear" type="button" onClick={() => setParam("q", "")}>×</button>
+                  <button
+                    className="shop-filters__search-clear"
+                    type="button"
+                    onClick={() => setParam("q", "")}
+                  >
+                    ×
+                  </button>
                 )}
               </div>
               <select
@@ -675,96 +814,254 @@ function ProductsPage() {
                 <option value="name-za">Name: Z – A</option>
               </select>
               <button
-                className={`shop-filters__toggle ${filtersOpen ? "is-active" : ""}`}
+                ref={filterToggleRef}
+                className={`shop-filters__toggle ${filtersOpen ? "is-active" : ""} ${hasFilterSelections ? "has-selection" : ""}`}
                 type="button"
                 onClick={() => setFiltersOpen((v) => !v)}
                 aria-expanded={filtersOpen}
+                aria-controls="product-filter-panel"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="4" y1="6" x2="20" y2="6" />
+                  <line x1="8" y1="12" x2="16" y2="12" />
+                  <line x1="11" y1="18" x2="13" y2="18" />
+                </svg>
                 Filters
-                {hasActiveFilters && <span className="shop-filters__dot" aria-hidden="true" />}
+                {hasFilterSelections && (
+                  <span className="shop-filters__dot" aria-hidden="true" />
+                )}
               </button>
             </div>
 
             {/* Row 2: category chips */}
             {categoryOptions.length > 0 && (
-              <div className="shop-filters__chips">
-                <button
-                  className={`shop-chip ${!activeCategoryParam ? "shop-chip--active" : ""}`}
-                  type="button"
-                  onClick={() => setParam("category", "")}
-                >All</button>
-                {categoryOptions.map((cat) => (
+              <>
+                <div className="shop-filters__chips">
                   <button
-                    key={cat.id}
-                    className={`shop-chip ${activeCategoryParam === cat.slug || activeCategoryParam === cat.id ? "shop-chip--active" : ""}`}
+                    className={`shop-chip ${!activeCategoryParam ? "shop-chip--active" : ""}`}
                     type="button"
-                    onClick={() => setParam("category", cat.slug || cat.id)}
-                  >{cat.name}</button>
-                ))}
-              </div>
+                    onClick={() => setParam("category", "")}
+                  >
+                    All
+                  </button>
+                  {categoryOptions.map((cat) => (
+                    <button
+                      key={cat.id}
+                      className={`shop-chip ${activeCategoryParam === cat.slug || activeCategoryParam === cat.id ? "shop-chip--active" : ""}`}
+                      type="button"
+                      onClick={() => setParam("category", cat.slug || cat.id)}
+                    >
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+                <div className="shop-filters__category-select-wrap">
+                  <select
+                    className="shop-filters__category-select shop-filters__category-select--toolbar"
+                    value={
+                      activeCategory?.slug ||
+                      activeCategory?.id ||
+                      activeCategoryParam
+                    }
+                    onChange={(event) =>
+                      setParam("category", event.target.value)
+                    }
+                    aria-label="Product category"
+                  >
+                    <option value="">All categories</option>
+                    {categoryOptions.map((cat) => (
+                      <option key={cat.id} value={cat.slug || cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
             )}
 
             {/* Row 3: expandable extra filters */}
             {filtersOpen && (
-              <div className="shop-filters__panel">
-                <div className="shop-filters__group">
-                  <span className="shop-filters__group-label">Stock</span>
-                  {[["all","All"],["in","In stock"],["preorder","Pre-order"],["out","Out of stock"]].map(([val, label]) => (
+              <>
+                <button
+                  className="shop-filters__backdrop"
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={closeFilters}
+                />
+                <div
+                  ref={filterPanelRef}
+                  className="shop-filters__panel"
+                  id="product-filter-panel"
+                  role="region"
+                  aria-label="Product filters"
+                >
+                  <div className="shop-filters__panel-header">
+                    <div>
+                      <span className="shop-filters__panel-kicker">
+                        Refine your selection
+                      </span>
+                      <h3>Filter products</h3>
+                    </div>
                     <button
-                      key={val}
-                      className={`shop-chip ${stockFilter === val ? "shop-chip--active" : ""}`}
+                      className="shop-filters__panel-close"
                       type="button"
-                      onClick={() => setParam("stock", val)}
-                    >{label}</button>
-                  ))}
-                </div>
+                      onClick={closeFilters}
+                      aria-label="Close filters"
+                    >
+                      <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M6 6l12 12M18 6 6 18" />
+                      </svg>
+                    </button>
+                  </div>
 
-                <div className="shop-filters__group">
-                  <span className="shop-filters__group-label">Price range</span>
-                  <div className="shop-filters__price">
-                    <label className="shop-filters__price-label">
-                      From
-                      <input
-                        className="shop-filters__price-input"
-                        type="number"
-                        min="0"
-                        placeholder="R 0"
-                        value={priceMin ?? ""}
-                        onChange={(e) => setParam("min", e.target.value || null)}
-                      />
-                    </label>
-                    <span className="shop-filters__price-sep">—</span>
-                    <label className="shop-filters__price-label">
-                      To
-                      <input
-                        className="shop-filters__price-input"
-                        type="number"
-                        min="0"
-                        placeholder="Any"
-                        value={priceMax ?? ""}
-                        onChange={(e) => setParam("max", e.target.value || null)}
-                      />
-                    </label>
+                  <div className="shop-filters__panel-body">
+                    <div className="shop-filters__group shop-filters__group--categories">
+                      <span className="shop-filters__group-label">Category</span>
+                      <select
+                        className="shop-filters__category-select shop-filters__category-select--panel"
+                        value={
+                          activeCategory?.slug ||
+                          activeCategory?.id ||
+                          activeCategoryParam
+                        }
+                        onChange={(event) =>
+                          setParam("category", event.target.value)
+                        }
+                        aria-label="Filter by category"
+                      >
+                        <option value="">All categories</option>
+                        {categoryOptions.map((cat) => (
+                          <option
+                            key={cat.id}
+                            value={cat.slug || cat.id}
+                          >
+                            {cat.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="shop-filters__group">
+                      <span className="shop-filters__group-label">Stock</span>
+                      {[
+                        ["all", "All"],
+                        ["in", "In stock"],
+                        ["preorder", "Pre-order"],
+                        ["out", "Out of stock"],
+                      ].map(([val, label]) => (
+                        <button
+                          key={val}
+                          className={`shop-chip ${stockFilter === val ? "shop-chip--active" : ""}`}
+                          type="button"
+                          onClick={() => setParam("stock", val)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="shop-filters__group">
+                      <span className="shop-filters__group-label">
+                        Price range
+                      </span>
+                      <div className="shop-filters__price">
+                        <label className="shop-filters__price-label">
+                          From
+                          <input
+                            className="shop-filters__price-input"
+                            type="number"
+                            min="0"
+                            inputMode="decimal"
+                            placeholder="R 0"
+                            value={priceMin ?? ""}
+                            onChange={(e) =>
+                              setParam("min", e.target.value || null)
+                            }
+                          />
+                        </label>
+                        <span className="shop-filters__price-sep">—</span>
+                        <label className="shop-filters__price-label">
+                          To
+                          <input
+                            className="shop-filters__price-input"
+                            type="number"
+                            min="0"
+                            inputMode="decimal"
+                            placeholder="Any"
+                            value={priceMax ?? ""}
+                            onChange={(e) =>
+                              setParam("max", e.target.value || null)
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="shop-filters__group">
+                      <span className="shop-filters__group-label">Deals</span>
+                      <button
+                        className={`shop-chip ${onSaleOnly ? "shop-chip--active" : ""}`}
+                        type="button"
+                        onClick={() => setParam("sale", onSaleOnly ? null : "1")}
+                      >
+                        On sale
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="shop-filters__panel-footer">
+                    {hasActiveFilters && (
+                      <button
+                        className="shop-filters__panel-clear"
+                        type="button"
+                        onClick={() => setSearchParams({})}
+                      >
+                        Clear filters
+                      </button>
+                    )}
+                    <button
+                      className="btn btn--primary shop-filters__apply"
+                      type="button"
+                      onClick={closeFilters}
+                    >
+                      Apply Filters
+                    </button>
                   </div>
                 </div>
-
-                <div className="shop-filters__group">
-                  <span className="shop-filters__group-label">Deals</span>
-                  <button
-                    className={`shop-chip ${onSaleOnly ? "shop-chip--active" : ""}`}
-                    type="button"
-                    onClick={() => setParam("sale", onSaleOnly ? null : "1")}
-                  >On sale</button>
-                </div>
-              </div>
+              </>
             )}
 
             {/* Results count + clear */}
             <div className="shop-filters__meta">
-              <span>{displayProducts.length} {displayProducts.length === 1 ? "product" : "products"}</span>
+              <span>
+                {displayProducts.length}{" "}
+                {displayProducts.length === 1 ? "product" : "products"}
+              </span>
               {hasActiveFilters && (
-                <button className="shop-filters__clear" type="button" onClick={clearAllFilters}>
+                <button
+                  className="shop-filters__clear"
+                  type="button"
+                  onClick={clearAllFilters}
+                >
                   Clear all filters
                 </button>
               )}
@@ -774,10 +1071,16 @@ function ProductsPage() {
           <div className="kits-grid">
             {displayProducts.map((product, index) => {
               const displayPrice = product.displayPrice;
-              const categoryLabel = (product.categoryLabels?.[0] || product.category || "Product")
+              const categoryLabel = (
+                product.categoryLabels?.[0] ||
+                product.category ||
+                "Product"
+              )
                 .toString()
                 .replace(/[-_]+/g, " ");
-              const subscriptionPlanId = (product.sourcePlanId || "").toString().trim();
+              const subscriptionPlanId = (product.sourcePlanId || "")
+                .toString()
+                .trim();
               const productUrl = product.isSubscriptionPlan
                 ? `/subscriptions/checkout${subscriptionPlanId ? `?planId=${encodeURIComponent(subscriptionPlanId)}` : ""}`
                 : `/products/${encodeURIComponent(product.slug)}`;
@@ -789,8 +1092,14 @@ function ProductsPage() {
                   key={product.id}
                   delay={index * 90}
                 >
-                  <span className="product-card__category">{categoryLabel}</span>
-                  <Link className="product-card__media-link" to={productUrl} aria-label={`View more about ${product.title}`}>
+                  <span className="product-card__category">
+                    {categoryLabel}
+                  </span>
+                  <Link
+                    className="product-card__media-link"
+                    to={productUrl}
+                    aria-label={`View more about ${product.title}`}
+                  >
                     <div className="product-card__media" aria-hidden="true">
                       <ImageLoader
                         src={product.image}
@@ -800,7 +1109,9 @@ function ProductsPage() {
                         fetchPriority={index < 4 ? "high" : "low"}
                       />
                       {product.stockBadgeLabel && (
-                        <span className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}>
+                        <span
+                          className={`badge badge--stock-${product.stockStatus?.state || "in"} product-card__badge`}
+                        >
                           {product.stockBadgeLabel}
                         </span>
                       )}
@@ -811,19 +1122,31 @@ function ProductsPage() {
                       {product.title}
                     </Link>
                   </h3>
-                  <p className="product-card__description">{product.description}</p>
-                  {product.stockStatus?.state === "preorder" && product.preorderSendMonthLabel && (
-                    <p className="modal__meta">Ships from {product.preorderSendMonthLabel}</p>
-                  )}
+                  <p className="product-card__description">
+                    {product.description}
+                  </p>
+                  {product.stockStatus?.state === "preorder" &&
+                    product.preorderSendMonthLabel && (
+                      <p className="modal__meta">
+                        Ships from {product.preorderSendMonthLabel}
+                      </p>
+                    )}
                   <p className="card__price">
                     <span className="price-stack">
-                      <span className="price-stack__current">{displayPrice}</span>
+                      <span className="price-stack__current">
+                        {displayPrice}
+                      </span>
                       {product.originalPrice && (
-                        <span className="price-stack__original">{product.originalPrice}</span>
+                        <span className="price-stack__original">
+                          {product.originalPrice}
+                        </span>
                       )}
                     </span>
                   </p>
-                  <ProductCardActions product={product} productUrl={productUrl} />
+                  <ProductCardActions
+                    product={product}
+                    productUrl={productUrl}
+                  />
                 </Reveal>
               );
             })}
@@ -831,23 +1154,39 @@ function ProductsPage() {
           {displayProducts.length === 0 &&
             status !== "loading" &&
             (!hasCategoryFilter || subscriptionPlansStatus !== "loading") && (
-            <div className="empty-state">
-              <p>{hasActiveFilters ? "No products match your search or filters." : hasCategoryFilter ? "No items are available in this category right now." : "No products are available right now. Please check back soon."}</p>
-              {hasActiveFilters && (
-                <button className="btn btn--secondary" type="button" onClick={clearAllFilters}>
-                  Clear all filters
-                </button>
-              )}
-            </div>
-          )}
-          {(status === "loading" || (hasCategoryFilter && subscriptionPlansStatus === "loading")) && (
+              <div className="empty-state">
+                <p>
+                  {hasActiveFilters
+                    ? "No products match your search or filters."
+                    : hasCategoryFilter
+                      ? "No items are available in this category right now."
+                      : "No products are available right now. Please check back soon."}
+                </p>
+                {hasActiveFilters && (
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    onClick={clearAllFilters}
+                  >
+                    Clear all filters
+                  </button>
+                )}
+              </div>
+            )}
+          {(status === "loading" ||
+            (hasCategoryFilter && subscriptionPlansStatus === "loading")) && (
             <p className="empty-state">Loading products...</p>
           )}
           {status === "empty" && !hasCategoryFilter && (
-            <p className="empty-state">No products are available right now. Please check back soon.</p>
+            <p className="empty-state">
+              No products are available right now. Please check back soon.
+            </p>
           )}
-          {(status === "error" || (hasCategoryFilter && subscriptionPlansStatus === "error")) && (
-            <p className="empty-state">We couldn't load products right now. Please refresh and try again.</p>
+          {(status === "error" ||
+            (hasCategoryFilter && subscriptionPlansStatus === "error")) && (
+            <p className="empty-state">
+              We couldn't load products right now. Please refresh and try again.
+            </p>
           )}
         </div>
       </section>
@@ -862,19 +1201,31 @@ function ProductsPage() {
           <Reveal as="div" className="editorial-process">
             <div className="editorial-process__step">
               <h3>Pressed Floral Artworks</h3>
-              <p>Seasonally curated blooms preserved behind glass to honour treasured moments.</p>
+              <p>
+                Seasonally curated blooms preserved behind glass to honour
+                treasured moments.
+              </p>
             </div>
             <div className="editorial-process__step">
               <h3>Customisable Keepsakes</h3>
-              <p>From bespoke commissions to meaningful gifts, each piece is created with intention.</p>
+              <p>
+                From bespoke commissions to meaningful gifts, each piece is
+                created with intention.
+              </p>
             </div>
             <div className="editorial-process__step">
               <h3>Ready-to-Arrange Blooms</h3>
-              <p>Fresh and dried florals styled to elevate events, devotional spaces, and gifting.</p>
+              <p>
+                Fresh and dried florals styled to elevate events, devotional
+                spaces, and gifting.
+              </p>
             </div>
             <div className="editorial-process__step">
               <h3>DIY Creativity</h3>
-              <p>Beautifully curated kits with scripture reflections, guidance, and thoughtful tools.</p>
+              <p>
+                Beautifully curated kits with scripture reflections, guidance,
+                and thoughtful tools.
+              </p>
             </div>
           </Reveal>
         </div>
@@ -887,12 +1238,17 @@ function ProductsPage() {
             <span className="editorial-eyebrow">Style the Moment</span>
             <h2>From Fresh Stem to Framed Heirloom</h2>
             <p>
-              Start with a fresh arrangement, then preserve your favourite stems in a bespoke artwork or DIY creation.
-              We're here for every step — concept, styling, and keepsake.
+              Start with a fresh arrangement, then preserve your favourite stems
+              in a bespoke artwork or DIY creation. We're here for every step —
+              concept, styling, and keepsake.
             </p>
             <div className="cta-group">
-              <a className="btn btn--primary" href="/workshops">Join a Workshop</a>
-              <a className="btn btn--secondary" href="/contact">Start a Bespoke Project</a>
+              <a className="btn btn--primary" href="/workshops">
+                Join a Workshop
+              </a>
+              <a className="btn btn--secondary" href="/contact">
+                Start a Bespoke Project
+              </a>
             </div>
           </Reveal>
         </div>
