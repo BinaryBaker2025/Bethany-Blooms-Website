@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useRef } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useModal } from "../context/ModalContext.jsx";
 import Header from "./Header.jsx";
+import HeaderErrorBoundary from "./HeaderErrorBoundary.jsx";
 import Footer from "./Footer.jsx";
 import WhatsAppFloatingButton from "./WhatsAppFloatingButton.jsx";
 
@@ -46,7 +47,9 @@ function Layout() {
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <Header />
+      <HeaderErrorBoundary>
+        <Header />
+      </HeaderErrorBoundary>
       <main id="main-content" tabIndex="-1">
         <Suspense fallback={null}>
           <Outlet />

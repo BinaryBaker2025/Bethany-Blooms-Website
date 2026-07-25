@@ -1,164 +1,217 @@
-/* Service Worker for Image Caching and Offline Support */
+/* Bethany Blooms production service worker.
+ * __BUILD_VERSION__ is replaced in dist by vite.config.js on every build.
+ */
 
-const CACHE_VERSION = "bethany-blooms-v2";
+const CACHE_PREFIX = "bethany-blooms-";
+const CACHE_VERSION = "__BUILD_VERSION__";
 const CACHE_NAMES = {
-  images: `${CACHE_VERSION}-images`,
-  static: `${CACHE_VERSION}-static`,
-  pages: `${CACHE_VERSION}-pages`,
+  images: `${CACHE_PREFIX}${CACHE_VERSION}-images`,
+  assets: `${CACHE_PREFIX}${CACHE_VERSION}-assets`,
+  pages: `${CACHE_PREFIX}${CACHE_VERSION}-pages`,
 };
 
-// Files to cache on install
-const STATIC_ASSETS = [
-  "/",
-  "/index.html",
+const DEVELOPMENT_PATH_PREFIXES = [
+  "/@",
+  "/src/",
+  "/node_modules/",
 ];
 
-// Install event - cache static assets
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAMES.static).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.log("Static asset caching failed (expected for some assets):", err);
-      });
-    }),
-  );
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
-// Activate event - clean up old caches
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          const isOurCache = Object.values(CACHE_NAMES).includes(cacheName);
-          if (!isOurCache) {
-            return caches.delete(cacheName);
-          }
-        }),
-      );
-    }),
+    Promise.all([
+      caches.keys().then((cacheNames) =>
+        Promise.all(
+          cacheNames
+            .filter(
+              (cacheName) =>
+                cacheName.startsWith(CACHE_PREFIX) &&
+                !Object.values(CACHE_NAMES).includes(cacheName),
+            )
+            .map((cacheName) => caches.delete(cacheName)),
+        ),
+      ),
+      self.clients.claim(),
+    ]),
   );
-  self.clients.claim();
 });
 
-// Fetch event - implement cache strategies
 self.addEventListener("fetch", (event) => {
   const { request } = event;
+  if (request.method !== "GET") return;
+
   const url = new URL(request.url);
-
-  // Only cache GET requests
-  if (request.method !== "GET") {
+  if (url.origin !== self.location.origin) {
+    if (isImageRequest(request)) {
+      event.respondWith(cacheFirstImage(request));
+    }
     return;
   }
 
-  // Skip API calls and non-GET requests
-  if (url.pathname.includes("/api/") || url.pathname.includes("/__/")) {
+  if (
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/__/") ||
+    DEVELOPMENT_PATH_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))
+  ) {
     return;
   }
 
-  // Image caching strategy: Cache first, fallback to network
+  if (request.mode === "navigate") {
+    event.respondWith(networkFirstNavigation(request));
+    return;
+  }
+
   if (isImageRequest(request)) {
-    event.respondWith(
-      caches.open(CACHE_NAMES.images).then((cache) => {
-        return cache.match(request).then((response) => {
-          if (response) {
-            // Serve from cache immediately
-            return response;
-          }
-          // Fetch from network and cache
-          return fetch(request)
-            .then((networkResponse) => {
-              // Only cache successful responses
-              if (networkResponse && networkResponse.status === 200) {
-                const responseToCache = networkResponse.clone();
-                cache.put(request, responseToCache).catch(() => {
-                  // Silently fail if caching fails (quota exceeded, etc.)
-                });
-              }
-              return networkResponse;
-            })
-            .catch(
-              () =>
-                new Response("", {
-                  status: 504,
-                  statusText: "Image unavailable",
-                }),
-            );
-        });
-      }),
-    );
+    event.respondWith(cacheFirstImage(request));
     return;
   }
 
-  // HTML pages: Network first, fallback to cache
-  if (isPageRequest(request)) {
-    event.respondWith(
-      fetch(request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const responseToCache = networkResponse.clone();
-            caches.open(CACHE_NAMES.pages).then((cache) => {
-              cache.put(request, responseToCache).catch(() => {
-                // Silently fail
-              });
-            });
-          }
-          return networkResponse;
-        })
-        .catch(() => {
-          return caches.match(request).then((cachedResponse) => {
-            return cachedResponse || caches.match("/");
-          });
-        }),
-    );
-    return;
-  }
-
-  // Static assets: Cache first
-  if (isStaticRequest(request)) {
-    event.respondWith(
-      caches.open(CACHE_NAMES.static).then((cache) => {
-        return cache.match(request).then((response) => {
-          if (response) {
-            return response;
-          }
-          return fetch(request)
-            .then((networkResponse) => {
-              if (networkResponse && networkResponse.status === 200) {
-                const responseToCache = networkResponse.clone();
-                cache.put(request, responseToCache).catch(() => {
-                  // Silently fail
-                });
-              }
-              return networkResponse;
-            })
-            .catch(() => {
-              // Return offline fallback
-              return caches.match("/");
-            });
-        });
-      }),
-    );
+  if (isStaticAssetRequest(request)) {
+    event.respondWith(cacheFirstStaticAsset(request));
   }
 });
 
-// Helper functions to determine request type
-function isImageRequest(request) {
-  const url = new URL(request.url);
-  return /\.(jpg|jpeg|png|gif|webp|svg|avif)(\?.*)?$/i.test(url.pathname);
-}
+async function networkFirstNavigation(request) {
+  const cache = await caches.open(CACHE_NAMES.pages);
 
-function isPageRequest(request) {
-  if (request.mode !== "navigate") {
-    return false;
+  try {
+    const response = await fetch(request);
+    if (isHtmlResponse(response)) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cachedResponse = await cache.match(request);
+    if (cachedResponse && isHtmlResponse(cachedResponse)) {
+      return cachedResponse;
+    }
+
+    return new Response("Page unavailable while offline.", {
+      status: 503,
+      statusText: "Offline",
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
   }
-  const url = new URL(request.url);
-  // Cache HTML pages from our domain
-  return request.headers.get("accept")?.includes("text/html");
 }
 
-function isStaticRequest(request) {
-  const url = new URL(request.url);
-  return /\.(js|css|woff|woff2|ttf|eot)(\?.*)?$/i.test(url.pathname);
+async function cacheFirstImage(request) {
+  const cache = await caches.open(CACHE_NAMES.images);
+  const cachedResponse = await cache.match(request);
+  if (cachedResponse) return cachedResponse;
+
+  try {
+    const response = await fetch(request);
+    const contentType = response.headers.get("content-type") || "";
+    if (response.ok && contentType.toLowerCase().startsWith("image/")) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return new Response("", {
+      status: 504,
+      statusText: "Image unavailable",
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+}
+
+async function cacheFirstStaticAsset(request) {
+  const cache = await caches.open(CACHE_NAMES.assets);
+  const cachedResponse = await cache.match(request);
+  if (cachedResponse && isValidStaticAssetResponse(request, cachedResponse)) {
+    return cachedResponse;
+  }
+
+  try {
+    const response = await fetch(request);
+    if (!isValidStaticAssetResponse(request, response)) {
+      return invalidAssetResponse(request);
+    }
+
+    if (isHashedProductionAsset(request)) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return new Response("Static asset unavailable.", {
+      status: 504,
+      statusText: "Asset unavailable",
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+}
+
+function invalidAssetResponse(request) {
+  const pathname = new URL(request.url).pathname;
+  return new Response(`Static asset not found: ${pathname}`, {
+    status: 404,
+    statusText: "Not Found",
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+function isHtmlResponse(response) {
+  const contentType = response?.headers.get("content-type") || "";
+  return response?.ok && contentType.toLowerCase().includes("text/html");
+}
+
+function isImageRequest(request) {
+  const pathname = new URL(request.url).pathname;
+  return /\.(?:avif|gif|jpe?g|png|svg|webp)$/i.test(pathname);
+}
+
+function isStaticAssetRequest(request) {
+  const pathname = new URL(request.url).pathname;
+  return /\.(?:css|eot|js|json|map|mjs|otf|ttc|ttf|webmanifest|woff2?)$/i.test(
+    pathname,
+  );
+}
+
+function isHashedProductionAsset(request) {
+  const pathname = new URL(request.url).pathname;
+  return /^\/assets\/.+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/i.test(pathname);
+}
+
+function isValidStaticAssetResponse(request, response) {
+  if (!response?.ok) return false;
+
+  const pathname = new URL(request.url).pathname.toLowerCase();
+  const contentType = (
+    response.headers.get("content-type") || ""
+  ).toLowerCase();
+
+  if (contentType.includes("text/html")) return false;
+  if (/\.(?:js|mjs)$/.test(pathname)) {
+    return (
+      contentType.includes("javascript") ||
+      contentType.includes("application/ecmascript")
+    );
+  }
+  if (pathname.endsWith(".css")) return contentType.includes("text/css");
+  if (pathname.endsWith(".json") || pathname.endsWith(".map")) {
+    return contentType.includes("json");
+  }
+  if (pathname.endsWith(".webmanifest")) {
+    return contentType.includes("manifest") || contentType.includes("json");
+  }
+  if (/\.(?:eot|otf|ttc|ttf|woff2?)$/.test(pathname)) {
+    return (
+      contentType.includes("font") ||
+      contentType.includes("application/octet-stream")
+    );
+  }
+
+  return true;
 }

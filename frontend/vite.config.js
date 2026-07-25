@@ -1,10 +1,33 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, URL } from 'node:url'
+
+const serviceWorkerBuildVersion =
+  process.env.VITE_BUILD_VERSION || Date.now().toString(36)
+
+const stampServiceWorker = () => ({
+  name: 'stamp-service-worker',
+  apply: 'build',
+  async closeBundle() {
+    const serviceWorkerPath = fileURLToPath(
+      new URL('./dist/service-worker.js', import.meta.url),
+    )
+    const source = await readFile(serviceWorkerPath, 'utf8')
+    if (!source.includes('__BUILD_VERSION__')) {
+      throw new Error('Service worker build-version placeholder was not found.')
+    }
+    await writeFile(
+      serviceWorkerPath,
+      source.replaceAll('__BUILD_VERSION__', serviceWorkerBuildVersion),
+      'utf8',
+    )
+  },
+})
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), stampServiceWorker()],
   resolve: {
     alias: [
       { find: /^react$/, replacement: fileURLToPath(new URL('./node_modules/react', import.meta.url)) },
@@ -19,7 +42,6 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'react-dom/client', 'react-router', 'react-router-dom'],
-    force: true,
   },
   server: {
     headers: {

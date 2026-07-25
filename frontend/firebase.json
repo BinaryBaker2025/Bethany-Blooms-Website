@@ -64,6 +64,24 @@
             "value": "no-cache,must-revalidate"
           }
         ]
+      },
+      {
+        "source": "/@(workshops|cut-flowers|events|products|cart|checkout|gallery|contact|account|subscriptions|payment|gift-cards|reset-password|privacy-policy|disclaimer|design|admin){,/**}",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache,must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/404.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache,no-store,must-revalidate"
+          }
+        ]
       }
     ],
     "rewrites": [
@@ -80,7 +98,11 @@
         "function": "robotsTxt"
       },
       {
-        "source": "**",
+        "source": "/",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/@(workshops|cut-flowers|events|products|cart|checkout|gallery|contact|account|subscriptions|payment|gift-cards|reset-password|privacy-policy|disclaimer|design|admin){,/**}",
         "destination": "/index.html"
       }
     ]

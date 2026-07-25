@@ -548,10 +548,10 @@ function Header() {
         <div ref={actionsRef} className="nav__actions">
           <button
             ref={cartButtonRef}
-            className={`cart-button ${collapseActionsIntoMenu ? "nav__action--overflow" : ""}`}
+            className="cart-button"
             type="button"
             onClick={openCart}
-            aria-label="View cart"
+            aria-label={`Open cart, ${totalCount} ${totalCount === 1 ? "item" : "items"}`}
           >
             <span>Cart</span>
             <span className="cart-count" aria-live="polite">
