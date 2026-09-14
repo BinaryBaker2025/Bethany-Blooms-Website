@@ -18,14 +18,14 @@ import workshopGuestsSmiling from "../assets/photos/workshop-guests-smiling.jpg"
 import dahliaTuberbethanyGrown from "../assets/1776890371243-_CWP9544.jpg";
 import { CUT_FLOWER_PAGE_IMAGES } from "../lib/cutFlowerImages.js";
 import { testimonials } from "../data/testimonials.js";
-import { buildCanonicalUrl } from "../lib/seo.js";
+import { buildCanonicalUrl, SITE_SEO_KEYWORDS } from "../lib/seo.js";
 
 const FALLBACK_PRODUCTS = [
   {
     id: "fallback-kit-yellow",
     title: "Pressed Flower Kit",
     description:
-      "Create your own pressed bloom frame with curated seasonal stems.",
+      "Order your own pressed flower kit to make your own floral artwork at home.",
     price: 400,
     category: "kit",
     image: homePhotoOne,
@@ -73,6 +73,8 @@ function HomePage() {
   const localBusinessSchema = {
     "@type": "Florist",
     name: "Bethany Blooms",
+    description:
+      "Bethany Blooms is a flower farm and floral studio in Vereeniging growing and selling fresh cut flowers, flower seeds, corms, tubers, pressed flower art, and DIY flower kits.",
     url: buildCanonicalUrl("/"),
     image: [buildCanonicalUrl("/bradb-favicon.png")],
     email: "admin@bethanyblooms.co.za",
@@ -92,6 +94,16 @@ function HomePage() {
         name: "South Africa",
       },
     ],
+    knowsAbout: [
+      "Flower farming",
+      "Fresh cut flowers",
+      "Pressed flower art",
+      "Flower seeds",
+      "Flower corms",
+      "Flower tubers",
+      "Dahlia tubers",
+      "Floral workshops",
+    ],
     sameAs: [
       "https://www.instagram.com/bethany_bl.0oms?igsh=Mmp0bWZzNmlsY2dt",
       "https://www.facebook.com/share/1PnGmuhZoJ/",
@@ -109,6 +121,8 @@ function HomePage() {
       { "@type": "Offer", name: "Pressed Flower Workshops" },
       { "@type": "Offer", name: "Custom Pressed Floral Art" },
       { "@type": "Offer", name: "Floral Gifting" },
+      { "@type": "Offer", name: "Flower Seeds" },
+      { "@type": "Offer", name: "Flower Corms and Tubers" },
     ],
   };
 
@@ -131,16 +145,7 @@ function HomePage() {
     title: "Bethany Blooms | Cut & Pressed Flowers, Made Beautifully Simple",
     description:
       "Bethany Blooms offers fresh cut flowers, artisanal pressed flower workshops, DIY kits, and custom floral art from Vereeniging, South Africa.",
-    keywords: [
-      "Bethany Blooms",
-      "florist Vereeniging",
-      "fresh cut flowers Vereeniging",
-      "flower delivery Vereeniging",
-      "pressed flower workshops Gauteng",
-      "pressed flower art South Africa",
-      "DIY pressed flower kits",
-      "custom floral art",
-    ],
+    keywords: [...SITE_SEO_KEYWORDS, "custom floral art"],
     structuredData: [localBusinessSchema, websiteSchema],
     structuredDataId: "home-business-graph",
   });
