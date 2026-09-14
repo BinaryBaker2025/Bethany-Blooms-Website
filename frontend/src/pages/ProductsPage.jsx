@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
 import ImageLoader from "../components/ImageLoader.jsx";
 import PriorityHeroImage from "../components/PriorityHeroImage.jsx";
 import ProductCardActions from "../components/ProductCardActions.jsx";
 import { useModal } from "../context/ModalContext.jsx";
 import { usePageMetadata } from "../hooks/usePageMetadata.js";
+import { SITE_SEO_KEYWORDS } from "../lib/seo.js";
 import { useFirestoreCollection } from "../hooks/useFirestoreCollection.js";
 import { useImageListPreloader } from "../hooks/useImageListPreloader.js";
 import { resolveProductsPageHeroImage } from "../lib/catalogHero.js";
@@ -113,6 +114,7 @@ const normalizePriceAmount = (value = "") => {
 
 function ProductsPage() {
   const { openCart } = useModal();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterToggleRef = useRef(null);
@@ -565,17 +567,23 @@ function ProductsPage() {
   const metaDescription = activeCategory?.description
     ? activeCategory.description
     : "Shop curated cut flower bunches, pressed flower products, bespoke arrangements, and keepsakes handcrafted by Bethany Blooms.";
+  const catalogKeywords = normalizedProducts.flatMap((product) => [
+    product.title,
+    ...(product.categoryLabels || []),
+  ]);
 
   usePageMetadata({
     title: metaTitle,
     description: metaDescription,
     keywords: [
+      ...SITE_SEO_KEYWORDS,
       activeCategory?.name,
       "Bethany Blooms products",
       "fresh flower bouquets Vereeniging",
       "pressed flower gifts South Africa",
       "floral keepsakes",
       "flower gifts Gauteng",
+      ...catalogKeywords,
     ].filter(Boolean),
     canonicalPath: "/products",
   });
@@ -1084,6 +1092,11 @@ function ProductsPage() {
               const productUrl = product.isSubscriptionPlan
                 ? `/subscriptions/checkout${subscriptionPlanId ? `?planId=${encodeURIComponent(subscriptionPlanId)}` : ""}`
                 : `/products/${encodeURIComponent(product.slug)}`;
+              const productLinkState = product.isSubscriptionPlan
+                ? undefined
+                : {
+                    fromProducts: `${location.pathname}${location.search}`,
+                  };
 
               return (
                 <Reveal
@@ -1098,6 +1111,7 @@ function ProductsPage() {
                   <Link
                     className="product-card__media-link"
                     to={productUrl}
+                    state={productLinkState}
                     aria-label={`View more about ${product.title}`}
                   >
                     <div className="product-card__media" aria-hidden="true">
@@ -1118,7 +1132,11 @@ function ProductsPage() {
                     </div>
                   </Link>
                   <h3 className="card__title">
-                    <Link className="product-card__title-link" to={productUrl}>
+                    <Link
+                      className="product-card__title-link"
+                      to={productUrl}
+                      state={productLinkState}
+                    >
                       {product.title}
                     </Link>
                   </h3>

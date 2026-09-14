@@ -3,21 +3,14 @@ import { useLocation } from "react-router-dom";
 import {
   buildCanonicalUrl,
   getRobotsDirectiveForPath,
+  SITE_SEO_KEYWORDS,
 } from "../lib/seo.js";
 
 const DEFAULT_SITE_NAME = "Bethany Blooms";
 const DEFAULT_OG_TYPE = "website";
 const DEFAULT_TWITTER_CARD = "summary_large_image";
 const DEFAULT_OG_IMAGE_PATH = "/bradb-favicon.png";
-const DEFAULT_KEYWORDS = [
-  "Bethany Blooms",
-  "florist Vereeniging",
-  "fresh cut flowers Vereeniging",
-  "flower delivery Vereeniging",
-  "pressed flower workshops Gauteng",
-  "pressed flower art South Africa",
-  "floral gifts South Africa",
-].join(", ");
+const DEFAULT_KEYWORDS = SITE_SEO_KEYWORDS.join(", ");
 
 function normalizeMetaValue(value) {
   if (value === undefined || value === null) return "";

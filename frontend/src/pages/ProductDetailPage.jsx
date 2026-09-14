@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import Reveal from "../components/Reveal.jsx";
 import ProductCardActions from "../components/ProductCardActions.jsx";
 import { useCart } from "../context/CartContext.jsx";
@@ -23,7 +23,7 @@ import {
   getVariantStockStatus,
 } from "../lib/stockStatus.js";
 import { collectLiveBookingGiftCardOptions } from "../lib/giftCardStudio.js";
-import { buildCanonicalUrl } from "../lib/seo.js";
+import { buildCanonicalUrl, SITE_SEO_KEYWORDS } from "../lib/seo.js";
 import { getBuyNowCartConflict } from "../lib/buyNowCart.js";
 import heroBackground from "../assets/photos/workshop-frame-purple.jpg";
 
@@ -234,7 +234,10 @@ const buildProductCard = (product, index = 0) => {
 
 function ProductDetailPage() {
   const { productId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
+  const productsReturnPath =
+    location.state?.fromProducts || "/products";
   const slugParam = useMemo(() => decodeURIComponent(productId || "").toLowerCase(), [productId]);
   const { items, addItem } = useCart();
   const { notifyCart } = useModal();
@@ -732,7 +735,17 @@ function ProductDetailPage() {
   const pageDescription =
     stripHtml(pageDescriptionSource) ||
     "Browse the Bethany Blooms product collection and discover curated cut flower and pressed flower keepsakes.";
-  const pageKeywords = product?.metaKeywords || "";
+  const pageKeywords = [
+    ...SITE_SEO_KEYWORDS,
+    product?.metaKeywords,
+    product?.title,
+    ...(product?.categoryLabels || []),
+    "Bethany Blooms",
+    "flower farm Vereeniging",
+    "flower products South Africa",
+  ]
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .filter(Boolean);
   const canonicalProductSlug = (product?.slug || product?.id || productId || "").toString().trim();
   const canonicalProductPath = canonicalProductSlug
     ? `/products/${encodeURIComponent(canonicalProductSlug)}`
@@ -986,7 +999,7 @@ function ProductDetailPage() {
   return (
     <section className="section product-detail">
       <div className="section__inner">
-        <Link className="breadcrumb-link" to="/products">
+        <Link className="breadcrumb-link" to={productsReturnPath}>
           &lt;- Back to products
         </Link>
 
